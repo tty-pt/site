@@ -137,6 +137,16 @@ float nd_seven_gl_eval_terrain_detail(float wx, float wy,
                                       float *out_grad_x, float *out_grad_y,
                                       float *out_cavity_ao);
 
+/* Pure-C reference mirror of the 6-octave zoom-progressive & Nyquist-filtered
+ * C2 quintic gradient-noise water wave cascade in s_fs_water:
+ * Evaluates signed wave elevation and writes analytical world-space partial
+ * derivatives (out_grad_x, out_grad_y) and wave crest factor (out_crest). */
+float nd_seven_gl_eval_water_waves(float wx, float wy,
+                                   float anim_time,
+                                   float cam_dist, float pixel_footprint,
+                                   float *out_grad_x, float *out_grad_y,
+                                   float *out_crest);
+
 #ifdef __cplusplus
 }
 #endif

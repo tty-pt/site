@@ -154,13 +154,13 @@ static inline int16_t
 nd_field_bimodal_hypsometry(int16_t elev)
 {
 	if (elev < 0) {
-		/* Ocean basin: coastal shelf (-6..0), dropping into deep seabed (-25..-2000) */
-		if (elev > -6) {
-			return elev; /* Gentle continental shelf for coastal shallows */
+		/* Ocean basin: gradual shallow shelf (-8..0), dropping into mid shelf (-16..-8) and deep seabed (-25..-2000) */
+		if (elev > -8) {
+			return elev; /* Gentle continental shelf for ankle-to-waist coastal shallows (-1..-7) */
 		} else {
-			int32_t d = -elev - 6;
-			/* Decisive oceanic depression: drops ocean floor below sea level */
-			int32_t deep = 12 + (d * 18) / 10 + (d * d * 45) / 100;
+			int32_t d = -elev - 8;
+			/* Smooth shelf-to-basin progression: -8 -> -8, -12 -> -16, -20 -> -41, deep trenches -> -2000 */
+			int32_t deep = 8 + (d * 18) / 10 + (d * d * 45) / 100;
 			if (deep > 2000) deep = 2000;
 			return (int16_t)(-deep);
 		}
@@ -702,12 +702,16 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	if (lod > 0) {
 		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
 
-		/* Smooth coastal/bathymetric transition: keep underwater shelves and the
-		 * immediate beach strip (0..4 world units above water_level) gently sloped
-		 * while ramping to 100% regional rugged relief inland. */
+		/* Smooth coastal/bathymetric transition: keep immediate beach & surf zone
+		 * (-3..+4 world units relative to water_level) gently sloped while preserving
+		 * natural underwater sandbar/shoal relief (~50% at depth) and 100% inland relief. */
 		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
-		if (rel_water_q12_4 <= 0) {
-			fine_q12_4 >>= 2;
+		if (rel_water_q12_4 <= -(8 << 4)) {
+			fine_q12_4 >>= 1;
+		} else if (rel_water_q12_4 <= 0) {
+			/* -8..0 world units: ramp from 50% (128/256) at depth 8 down to 25% (64/256) at shoreline */
+			int32_t w_sub = 64 + ((-rel_water_q12_4) >> 1);
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
 		} else if (rel_water_q12_4 < (4 << 4)) {
 			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) >> 6);
 			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);

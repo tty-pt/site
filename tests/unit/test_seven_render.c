@@ -2204,7 +2204,10 @@ int main(void)
 		assert(vs_t && strstr(vs_t, "sampleHeightSmooth"));
 		assert(fs_t && strstr(fs_t, "seabedAbsorption"));
 		assert(vs_w && strstr(vs_w, "sampleHeightSmooth"));
-		assert(fs_w && strstr(fs_w, "if (vWaterDepth <= 0.0)"));
+		assert(fs_w && strstr(fs_w, "if (fragWaterDepth <= 0.0)"));
+		assert(fs_w && strstr(fs_w, "eval_zoom_water_waves"));
+		assert(fs_w && strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)"));
+		assert(fs_w && !strstr(fs_w, "cSeabed"));
 		assert(vs_b && strstr(vs_b, "a_local_pos"));
 		assert(fs_b && strstr(fs_b, "waterAbsorption"));
 
@@ -2606,6 +2609,79 @@ int main(void)
 
 		printf("PASS: non-stationary regional 3D relief verified (clear=%d rooms avg=%.1f, rolling=%d, rugged=%d rooms avg=%.1f max=%.1f world units)\n",
 		       clear_rooms, avg_clear_span, rolling_rooms, rugged_rooms, avg_rugged_span, max_rugged_span);
+	}
+
+	/* Phase 6: Realistic Physical Water Optics, Single-Pass Seabed Transmission & 6-Octave Zoom Wave Cascade */
+	{
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		const char *fs_w = nd_seven_gl_fs_water();
+		assert(fs_t && fs_w);
+
+		/* 1. Single-pass seabed transmission: s_fs_terrain owns Beer-Lambert absorption & littoral sand,
+		 * while s_fs_water is a pure air-water surface interface with zero fake opaque cSeabed */
+		assert(strstr(fs_t, "littoralSand") != NULL);
+		assert(strstr(fs_t, "shallowFactor = smoothstep(0.0, 10.0, d)") != NULL);
+		assert(strstr(fs_t, "effectiveOpticalPath") != NULL);
+		assert(strstr(fs_w, "eval_zoom_water_waves") != NULL);
+		assert(strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)") != NULL);
+		assert(strstr(fs_w, "cSeabed") == NULL);
+
+		/* 2. Verify 6-octave zoom-continuous wave cascade across planetary orbit to ultra-close zoom:
+		 * Tier 0: Planetary / orbital zoom (cam_dist = 35000, footprint = 12.0)
+		 * Tier 1: Macro regional zoom (cam_dist = 4500, footprint = 2.0)
+		 * Tier 2: Normal 1x zoom (cam_dist = 280, footprint = 0.40)
+		 * Tier 3: Ultra-close 8x zoom (cam_dist = 38, footprint = 0.02) */
+		const float w_dists[4] = { 35000.0f, 4500.0f, 280.0f, 38.0f };
+		const float w_fw[4]    = {    12.0f,    2.0f,  0.40f,  0.02f };
+		float w_grad[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+		for (int t = 0; t < 4; t++) {
+			float g_sum = 0.0f;
+			int n = 0;
+			for (int ry = 0; ry < 16; ry++) {
+				for (int rx = 0; rx < 16; rx++) {
+					float wx = 240.0f + (float)rx * 0.35f;
+					float wy = 180.0f + (float)ry * 0.35f;
+					float gx = 0.0f, gy = 0.0f, crest = 0.0f;
+					nd_seven_gl_eval_water_waves(wx, wy, 12.5f, w_dists[t], w_fw[t], &gx, &gy, &crest);
+					g_sum += hypotf(gx, gy);
+					n++;
+				}
+			}
+			w_grad[t] = g_sum / (float)n;
+		}
+
+		/* Planetary/orbital zoom retains live macro ocean swell (w_grad[0] > 0),
+		 * and zooming in progressively unlocks finer wind waves, chop, and capillary ripples */
+		assert(w_grad[0] > 0.003f);
+		assert(w_grad[1] > w_grad[0] * 1.4f);
+		assert(w_grad[2] > w_grad[1] * 1.4f);
+		assert(w_grad[3] > w_grad[2] * 1.3f);
+
+		/* 3. Verify temporal phase-wrapping stability: wave gradients at t = 100,000s remain
+		 * just as crisp and non-degenerate as at t = 10s (zero float32 precision loss over time) */
+		float g_early = 0.0f, g_late = 0.0f;
+		for (int k = 0; k < 32; k++) {
+			float wx = 100.0f + (float)k * 1.13f;
+			float wy = 200.0f + (float)k * 0.87f;
+			float gx1 = 0.0f, gy1 = 0.0f, gx2 = 0.0f, gy2 = 0.0f;
+			nd_seven_gl_eval_water_waves(wx, wy, 10.0f,     180.0f, 0.15f, &gx1, &gy1, NULL);
+			nd_seven_gl_eval_water_waves(wx, wy, 100000.0f, 180.0f, 0.15f, &gx2, &gy2, NULL);
+			g_early += hypotf(gx1, gy1);
+			g_late  += hypotf(gx2, gy2);
+		}
+		assert(g_late > g_early * 0.75f && g_late < g_early * 1.35f);
+
+		/* 4. Verify natural bathymetric shelf progression in nd_field_bimodal_hypsometry:
+		 * Shallow coastal elevations (-1..-7) remain gentle wading shallows instead of dropping to -12 */
+		assert(nd_field_bimodal_hypsometry(-2) == -2);
+		assert(nd_field_bimodal_hypsometry(-6) == -6);
+		assert(nd_field_bimodal_hypsometry(-7) == -7);
+		assert(nd_field_bimodal_hypsometry(-12) < -14);
+		assert(nd_field_bimodal_hypsometry(-30) < -60);
+
+		printf("PASS: single-pass volumetric water optics, 6-octave orbital-to-capillary wave cascade (grad: orbit=%.4f, macro=%.4f, 1x=%.4f, 8x=%.4f), and t=100000s temporal stability verified\n",
+		       w_grad[0], w_grad[1], w_grad[2], w_grad[3]);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
