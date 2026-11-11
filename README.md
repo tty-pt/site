@@ -3,11 +3,11 @@
 Pure-C web platform and NeverDark MUCK universe built on the **axil** HTTP/WebSocket library, the **libxylem** XY module system, the **hyle** data engine, and the **bud** HTML/DOM builder.
 
 > **Jump Directly to What You Need:**
-> - 🚀 **[Situation A: Turnkey Setup (Site + 32-Planet Universe)](#situation-a-turnkey-deployment-site--32-planet-universe)** — Install all libs, seed a 32-planet sector with 3D WebGL showcase, and run everything on `:8080`.
+> - 🚀 **[Situation A: Turnkey Setup (Site + 32-Planet Universe)](#situation-a-turnkey-deployment-site--seeded-universe)** — Install all libs, seed a 32-planet sector with 3D WebGL showcase, and run everything on `:8080`.
 > - 🛠️ **[Situation B: Clean / Unseeded Setup (In-Game Worldbuilding)](#situation-b-clean--unseeded-deployment-in-game-worldbuilding)** — Start with a bare database and build planets, rooms, and items in-game.
 > - 🎵 **[Situation C: Music Platform Only](#situation-c-lightweight-music-platform-only)** — Run just the music platform dev server (`poem`, `song`, `grp`, `gig`).
 > - 🧊 **[Showcase: The 3D WebGL World (Planet 2: Aethelgard)](#showcase-the-3d-webgl-world-planet-2-aethelgard)** — Explore the hardware-accelerated 3D multi-room bastion.
-> - 📚 **[Documentation Library](#documentation-index)** — 18 deep-dive architectural specifications and manuals.
+> - 📚 **[Documentation Library](#documentation-index)** — 39 deep-dive architectural specifications and manuals.
 > - 🧪 **[Testing & Quality Gates](#testing--quality-gates)** — Automated E2E universe testing and boundary audits.
 
 ---
@@ -95,9 +95,9 @@ make watch          # auto-rebuild + restart on :8080 (requires entr)
 
 ## Showcase: The 3D WebGL World (Planet 2: Aethelgard)
 
-NeverDark features an in-WASM hardware-accelerated 3D scene engine ([`mods/nd/ux/nd_webgl.c`](./mods/nd/ux/nd_webgl.c)) running alongside the 2D tile blitter.
+NeverDark features an in-WASM hardware-accelerated 2.5D/3D Seven scene engine ([`mods/nd/ux/nd_seven.c`](./mods/nd/ux/nd_seven.c) and [`mods/nd/ux/nd_seven_gl.c`](./mods/nd/ux/nd_seven_gl.c)) running alongside the 2D tile blitter.
 
-When running Situation A (`make run-sector32`), **Planet 2 ("Aethelgard")** is pre-configured as a multi-room 3D architectural showcase:
+When running Situation A (`./start.sh`), **Planet 2 ("Aethelgard")** is pre-configured as a multi-room 3D architectural showcase:
 - **(0, 0, 0, 2) — The High Crystal Sanctum**: Central hall with floating Crystal Core and open archways in all 4 cardinal directions.
 - **(1, 0, 0, 2) — The Observatory Terrace**: High-altitude terrace overlooking the stellar void with Star Tracker fixture.
 - **(0, 1, 0, 2) — The Luminescent Spire**: Illuminated tower holding the Sun Prism relic.
@@ -113,7 +113,7 @@ When running Situation A (`make run-sector32`), **Planet 2 ("Aethelgard")** is p
 
 ## Architecture & Core Invariants
 
-- **Single-Port Unified Service**: HTTP GET, SSR HTML, static assets (`/nd.wasm`, `/bud-client.js`, `/styles.css`), and full-duplex WebSocket upgrades are multiplexed on port `:8080` in a single process.
+- **Single-Port Unified Service**: HTTP GET, SSR HTML, static assets (`/nd.wasm`, `/stele-client.js`, `/styles.css`), and full-duplex WebSocket upgrades are multiplexed on port `:8080` in a single process.
 - **SSR-First Isomorphic Architecture**: Pure-C UX components (`mods/*/ux`) compile twice — as native `.so` shared modules for instant Server-Side Rendering (SSR) and into WebAssembly (`htdocs/*.wasm`) for browser enhancement. Zero platform preprocessor branching (`#ifdef __wasm__`) in feature code.
 - **Universal WASM Substrate & Clean Library Decoupling**: `external/libbud` serves as a pure C UI tree and VDOM diff engine without runtime slot or browser assumptions; `external/libstele` acts as the domain-agnostic WASM substrate; `htdocs/stele-client.js` provisions dynamic on-demand component loading with isolated linear memory instances per component.
 - **Zero Foreign Runtime in the Request Path**: Pure C on the server and pure C in WASM. No Rust, Dioxus, Deno, or Node in the request pipeline.
@@ -132,7 +132,9 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/OVERVIEW.md`](./docs/OVERVIEW.md)** | **5-minute orientation**: technology stack, framework-pair model, request path, and invariants. |
 | **[`docs/BUILD.md`](./docs/BUILD.md)** | Toolchain installation, native and WASI compilation, chroot execution, and dependencies. |
 | **[`docs/GOALS.md`](./docs/GOALS.md)** | Core system goals, structural invariants, and regression checklists. |
+| **[`docs/SIBLING_REPOS.md`](./docs/SIBLING_REPOS.md)** | Sibling repositories and auxiliary services (`axil-nd`, `axil-auren`, `axil-resume-search`). |
 | **[`AGENTS.md`](./AGENTS.md)** | Developer index, cross-module boundary rules, and development conventions. |
+| **[`ROADMAP.md`](./ROADMAP.md)** | Hyle ecosystem & cross-framework convergence roadmap (React/Next.js). |
 
 ### Architecture & System Design
 | Document | Focus |
@@ -140,15 +142,27 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)** | Dynamic module graph (`mods.load`), load order, XY hook contract, and data integrity. |
 | **[`docs/DESIGN.md`](./docs/DESIGN.md)** | Component encapsulation, abstraction barriers, and architectural boundaries. |
 | **[`docs/CONVENTIONS.md`](./docs/CONVENTIONS.md)** | C coding style, request handlers, form parsing, XY macros, and preprocessor constraints. |
+| **[`docs/MONOREPO_UNIFIED_WASM_KERNEL.md`](./docs/MONOREPO_UNIFIED_WASM_KERNEL.md)** | Unified client WASM kernel architecture for the pure-C monorepo. |
+| **[`docs/NEXT_GEN_WASM_ARCHITECTURAL_PLAN.md`](./docs/NEXT_GEN_WASM_ARCHITECTURAL_PLAN.md)** | Capability bridge distribution, technical debt elimination, and `libcorm`/`libxylem` in WASM. |
+| **[`docs/COLOCATED_NODE_WASM_ADAPTERS.md`](./docs/COLOCATED_NODE_WASM_ADAPTERS.md)** | Colocated Node.js N-API and WebAssembly reactor adapters across `@tty-pt/*` packages. |
 
 ### NeverDark MUCK, Procedural Terrain & 3D WebGL
 | Document | Focus |
 | :--- | :--- |
 | **[`docs/25D.md`](./docs/25D.md)** | **2.5D Seven continuous 3D terrain specification**: 55° diorama camera, continuous heightfield meshes, and billboard entity anchors. |
+| **[`docs/TERRAIN_ROADMAP.md`](./docs/TERRAIN_ROADMAP.md)** | **Procedural 3D terrain & cavern roadmap**: multi-scale topography, subterranean caverns, and LOD pipeline. |
 | **[`docs/RECUR_NOISE.md`](./docs/RECUR_NOISE.md)** | **Recursive noise mathematics**: pure-integer spatial subdivision (`noise_fix_v`), dimensional collapse, and octave hierarchy. |
-| **[`docs/WATER_REQUIREMENTS.md`](./docs/WATER_REQUIREMENTS.md)** | **Authoritative water specification**: Beer-Lambert volumetric optical absorption ($L = d / \cos\theta$) and physical parameters. |
-| **[`docs/SHORE.md`](./docs/SHORE.md)** | **Seamless shoreline & bathymetry**: continuous 7×7 depth fields, organic coastlines, and topological boundary invariants. |
+| **[`docs/LOD_ELEVATION_RECURSIVE_NOISE_ANALYSIS.md`](./docs/LOD_ELEVATION_RECURSIVE_NOISE_ANALYSIS.md)** | **LOD elevation & recursive noise blending**: multi-scale octave blending (`chaff_octave_blend_recursive`) and slope analysis. |
+| **[`docs/ANALYSIS_TERRAIN_CHUNKS_LOD_STRATOSPHERE.md`](./docs/ANALYSIS_TERRAIN_CHUNKS_LOD_STRATOSPHERE.md)** | **Terrain chunks, LOD smoothing & stratosphere camera**: client chunk merging, `libareole` quadtree culling, and orbital views. |
 | **[`docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md`](./docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md)** | **Multi-scale GPU architecture**: client WebGL acceleration, server zero-OpenGL invariant, and stratosphere scaling. |
+| **[`docs/WATER_REQUIREMENTS.md`](./docs/WATER_REQUIREMENTS.md)** | **Authoritative water specification**: Beer-Lambert volumetric optical absorption ($L = d / \cos\theta$) and physical parameters. |
+| **[`docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md`](./docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md)** | **Shallow water optical extinction for billboards**: submergence depth calibration and refractive billboard shading. |
+| **[`docs/handoff-water-realism.md`](./docs/handoff-water-realism.md)** | **Water realism handoff**: world-anchored pure-C procedural water optics for the NeverDark Seven stage. |
+| **[`docs/SHORE.md`](./docs/SHORE.md)** | **Seamless shoreline & bathymetry**: continuous 7×7 depth fields, organic coastlines, and topological boundary invariants. |
+| **[`docs/SEVEN_WAYS_COLLISION_ANALYSIS.md`](./docs/SEVEN_WAYS_COLLISION_ANALYSIS.md)** | **Seven-Ways collision map analysis**: 2.5D obstacle modeling and spatial walkability masks. |
+| **[`docs/AOT_GAME_CONTENTS_ANALYSIS.md`](./docs/AOT_GAME_CONTENTS_ANALYSIS.md)** | **Ahead-of-Time (AOT) vs. on-room-entry content**: procedural world materialization and persistence trade-offs. |
+| **[`docs/ND-PERSISTENCE-LIFECYCLE.md`](./docs/ND-PERSISTENCE-LIFECYCLE.md)** | **World & UX persistence lifecycle**: entity mutation consistency, stone picking, and Corm DB synchronization. |
+| **[`docs/AXIL_ND_MCP_BCP_IMPROVEMENT_SPEC.md`](./docs/AXIL_ND_MCP_BCP_IMPROVEMENT_SPEC.md)** | **MCP/BCP protocol modernization**: structured Binary Client Protocol and Model Context Protocol integration for `axil-nd`. |
 | **[`docs/NEXT_GEN_ND_ARCHITECTURE.md`](./docs/NEXT_GEN_ND_ARCHITECTURE.md)** | Master specification: single-socket WebSocket multiplexer, declarative BCP framework, reactive 3D/2D scene synchronizer, and SSR state hydration. |
 | **[`docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md`](./docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md)** | Operational deployment guide: single-port architecture, seeder, and automated E2E test harness. |
 | **[`docs/ND-VIEWPORTS.md`](./docs/ND-VIEWPORTS.md)** | Viewport drivers: ANSI TTY terminal, 2D Lamina tilemap, and WebGL 3D scene engine. |
@@ -160,17 +174,22 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/WEB_HAL_IMPLEMENTATION_PLAN.md`](./docs/WEB_HAL_IMPLEMENTATION_PLAN.md)** | Sequenced rollout roadmap: Web HAL bridges, frame loop contracts, and NeverDark/site harmonization. |
 | **[`docs/STYLING.md`](./docs/STYLING.md)** | CSS design tokens, asset versioning, and cache busting. |
 
-### Data Engine & Schemas
+### Data Engine, AI Inference & Multi-Axis Memory
 | Document | Focus |
 | :--- | :--- |
 | **[`docs/SCHEMA.md`](./docs/SCHEMA.md)** | Canonical `hyle_schema_desc_t` data descriptors and validation rules. |
 | **[`docs/FILTERS.md`](./docs/FILTERS.md)** | Full-text search (FTS), term interning, and schema hints via `libhyle-bud`. |
 | **[`docs/PICKERS.md`](./docs/PICKERS.md)** | Omni-dropdowns, asynchronous option search, and keyboard navigation. |
+| **[`docs/LOCAL_LLM.md`](./docs/LOCAL_LLM.md)** | Local LLM inference (`axil-auren`), streaming chat sessions, and Pi agent integration. |
+| **[`docs/SEMANTIC_SEARCH.md`](./docs/SEMANTIC_SEARCH.md)** | Custom semantic and hybrid search using `axil-auren`, `libsepal`, `liblemma`, and `libcorm`. |
+| **[`docs/MULTI_AXIS_MEMORY_FUSION.md`](./docs/MULTI_AXIS_MEMORY_FUSION.md)** | Multi-axis memory fusion combining dense vectors (`libsepal`), symbolic epistemology (`pi-mm`), and Corm axes (`libjoint`, `libislet`, `liblemma`). |
 
-### Testing & Operations
+### Testing, Release Distribution & Operations
 | Document | Focus |
 | :--- | :--- |
 | **[`docs/TESTING.md`](./docs/TESTING.md)** | Unit, integration, and Playwright end-to-end testing requirements. |
+| **[`docs/CI_NPM_DISTRIBUTION.md`](./docs/CI_NPM_DISTRIBUTION.md)** | CI automation and universal C/WASM package distribution via `@tty-pt/*` on NPM. |
+| **[`docs/RELEASE_EXECUTION_STRATEGY.md`](./docs/RELEASE_EXECUTION_STRATEGY.md)** | Ecosystem release sequencing and topological publishing strategy across submodules. |
 | **[`docs/EXTENSIONS.md`](./docs/EXTENSIONS.md)** | Pi coding agent extension workflows and custom agent commands. |
 | **[`docs/ADVANCED_GIT_RECOVERY.md`](./docs/ADVANCED_GIT_RECOVERY.md)** | Git recovery workflows, reflog reconstruction, and submodule state preservation. |
 | **[`docs/archive/`](./docs/archive/)** | Completed architecture journals (`ST.md`, `NO_WIZ.md`), past release wave records, and historical audits. |
@@ -211,26 +230,42 @@ sh scripts/check-module-boundaries.sh   # enforces strict cross-module encapsula
 - **`/core`** — Bootstrap DAG, root router, module loader, and core redirects.
 - **`/auth`** — Session lifecycle, password authentication, and CSRF protection.
 - **`/common`** — Shared response helpers, layouts, and declarative UI builders (`site_ui_form_from_desc`, `site_ui_picker`).
+- **`/i18n`** — Internationalization dictionary registry and locale string resolution.
 - **`/source`** — Dataset registration and HTTP API transport over `libhyle-source`.
 - **`/index`** — Generic CRUD routes, list views, and picker option endpoints.
 - **`/poem`** — Poem upload, display, and listing.
 - **`/song`** — Song detail, chord charts, transposition, and media attachments.
 - **`/grp`** — Group repertoire management and format categories.
 - **`/gig`** — Gigs and setlists with transpose settings and format tags.
+- **`/software`** — Software catalog and Markdown project documentation viewer.
 - **`/mpfd`** — Streaming multipart/form-data parser.
+- **`/redir`** — Legacy route redirection helpers.
 - **`/site_chrome`** — WASM client chrome enhancement (`htdocs/site_chrome.wasm`).
-- **`/auren`** — Local in-browser WebAssembly LLM inference engine (`mods/auren/ux/` $\rightarrow$ `auren.so` & `auren_fe.wasm`) powered by `axil-auren`.
+- **`/auren`** — Local in-browser WebAssembly LLM inference sandbox (`mods/auren/ux/` $\rightarrow$ `auren.so` & `auren.wasm`).
+- **`/chat`** — Multi-session local LLM streaming chat workspace (`mods/chat/ux/` $\rightarrow$ `chat.so` & `chat.wasm`) backed by `axil-auren`.
 - **`/nd`** — Isomorphic frontend reactor for NeverDark MUCK (`mods/nd/ux/` $\rightarrow$ `nd.so` & `nd.wasm`) with pluggable TTY, Lamina 2D, and Seven 2.5D/3D toroidal planetary WebGL viewports.
 
 ### Core Infrastructure Submodules (`external/`)
-- **`axil`** — Single-port HTTP/WebSocket network daemon and transport multiplexer.
-- **`libxylem`** — Zero-cost C function dispatch bus (`XY_DECL`, `XY_IMPL`, `XY_LISTENER_TAG`).
-- **`libcorm`** — Embedded transactional key-value and record storage engine.
-- **`libbud`** — Pure virtual DOM tree builder and SSR serializer.
-- **`libhyle`** — Relational schema engine, query planner, and full-text search index.
-- **`libhyle-bud`** — Bridge connecting Hyle schema hints to Bud UI binders.
+- **`axil`** — Single-port HTTP/WebSocket network daemon and transport multiplexer (`@tty-pt/axil`).
+- **`axil-auth`** — Authentication and session token management module for `axil`.
+- **`axil-hyle`** — Framework-neutral `axil`↔`hyle` REST CRUD connector.
+- **`axil-tty`** — WebSocket-to-PTY interactive browser terminal bridge (`@tty-pt/axil-tty`).
+- **`axil-auren`** — Pure-C local LLM inference, embedding, and classification server.
+- **`axil-resume-search`** — Pure-C PDF resume ingestion, vector embedding, and job candidate matching service.
+- **`libxylem`** — Zero-cost C function dispatch bus and region-isolated module loader (`@tty-pt/xylem`).
+- **`libcorm`** — In-memory key-value map store and multi-axis recall kernel (`@tty-pt/corm`).
+- **`libjoint`** — Temporal presence interval-tree engine (`@tty-pt/joint`, Time axis).
+- **`libislet`** — Multi-dimensional Morton code (Z-order) spatial index (`@tty-pt/islet`, Space axis).
+- **`liblemma`** — Accent-sensitive lexical tokenizer and inverted FTS index (`@tty-pt/lemma`, Text axis).
+- **`libsepal`** — Two-stage ANN semantic vector store (`@tty-pt/sepal`, Meaning axis).
+- **`libbud`** — Pure C virtual DOM tree builder, 5-field state binder, and VDOM diff engine (`@tty-pt/bud`).
+- **`libhyle`** — Relational schema engine, query planner, and full-text search index (`@tty-pt/hyle`).
+- **`libhyle-source`** — Pluggable dataset persistence engine (`store_fs`, `store_mem`, DSV, JSON overlays).
+- **`libhyle-bud`** — Bridge connecting Hyle schema hints to Bud UI binders (`@tty-pt/hyle-bud`).
+- **`libhyle-react`** — React/Next.js bindings for Hyle schemas and Bud state reconciliation.
 - **`libstele`** — Universal system substrate (`<ttypt/stele.h>`, `<ttypt/iso.h>`) and single shared WebAssembly allocator (`@tty-pt/stele`).
-- **`libnoise`** & **`libchunk`** — Pure-integer multi-scale recursive 1/f noise (`libchaff`), toroidal solar/climate geometry, and 16-level quadtree spatial LOD hierarchy.
-- **`liblamina`** — 2D software tile blitter and 2.5D/3D WebGL continuous heightfield & Beer-Lambert water optics bridge.
+- **`libchaff`** & **`libareole`** — Pure-integer multi-scale recursive 1/f noise (`@tty-pt/chaff`), toroidal solar/climate geometry, and 16-level quadtree spatial LOD & frustum culling hierarchy (`@tty-pt/areole`).
+- **`liblamina`** — 2D software tile blitter and 2.5D/3D WebGL continuous heightfield & Beer-Lambert water optics bridge (`@tty-pt/lamina`).
+- **`libpitch`** — Pure-C musical chord parser and key transposition library (`@tty-pt/pitch`).
 - **`axil-nd`** — NeverDark MUCK server engine with 4D spacetime universe simulation.
-- **`nd-*`** — 19 gameplay and content tenant modules (`nd-attr`, `nd-equip`, `nd-fight`, `nd-spell`, `nd-shop`, `nd-level`, `nd-mortal`, `nd-race`, `nd-class`, `nd-mob`, `nd-biome`, `nd-plant`, `nd-drink`, `nd-seat`, `nd-stone`, `nd-vanilla`, `nd-wts`, `nd-other`).
+- **`nd-*`** — Gameplay and content tenant modules (`nd-attr`, `nd-biome`, `nd-class`, `nd-drink`, `nd-equip`, `nd-fight`, `nd-level`, `nd-mob`, `nd-mortal`, `nd-other`, `nd-plant`, `nd-race`, `nd-region`, `nd-seat`, `nd-shop`, `nd-spell`, `nd-stone`, `nd-vanilla`, `nd-weather`, `nd-world`, `nd-wts`).

@@ -22,7 +22,7 @@ make watch          # auto-rebuild + restart on :8080
    The isomorphic WASM boundary is governed by `<ttypt/stele_wasm.h>` (which transitively
    includes `<ttypt/iso.h>` for `ISO_EXPORT` / `ISO_IMPORT`). Interactive UX modules register
    via `STL_WASM_MODULE(...)` and invalidate slots via `stl_slot_invalidate()`. Standalone libraries
-   (`libbud`, `libtransp`) include only `<ttypt/iso.h>` with zero UI substrate dependencies.
+   (`libbud`, `libpitch`) include only `<ttypt/iso.h>` with zero UI substrate dependencies.
    Forbidden in UX: `XY_`/`xy_`/`corm_`/`source_`/`axil_`/`lemma_`/
    `hyle_source_`/`var/` literals. Sanctioned `#include "*.c"` only
    `site_ui.c|list.c` (`scripts/check-module-boundaries.sh`).
@@ -96,7 +96,7 @@ make watch          # auto-rebuild + restart on :8080
    - **Final Quality Gates**: Target builds complete with zero compiler errors, code contains zero debug artifacts (no temp logs or leftover debug code), and the relevant targeted test commands pass cleanly with exit code 0.
 
 9. **Abstraction-First Test-Driven Development & Integration Sequencing.**
-   Always implement with tests for each individual abstraction (e.g. `libislet`, `libchunk`). Test each abstraction thoroughly with standalone unit suites as its part is completed, then code the integration across consuming modules (e.g. `Seven`, `Lamina`), then test the full end-to-end integration. Never integrate unverified abstractions or attempt monolithic cross-module wiring before unit verification.
+   Always implement with tests for each individual abstraction (e.g. `libislet`, `libareole`). Test each abstraction thoroughly with standalone unit suites as its part is completed, then code the integration across consuming modules (e.g. `Seven`, `Lamina`), then test the full end-to-end integration. Never integrate unverified abstractions or attempt monolithic cross-module wiring before unit verification.
 
 ## Sibling Repositories & External Services
 
@@ -122,12 +122,29 @@ Operational guides, build steps, and test instructions for sibling ports and aux
 | Advanced Git Recovery | `docs/ADVANCED_GIT_RECOVERY.md` |
 | Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
+| Unified client WASM kernel architecture | `docs/MONOREPO_UNIFIED_WASM_KERNEL.md` |
+| Next-gen WASM architectural plan (`libcorm`/`libxylem` in WASM) | `docs/NEXT_GEN_WASM_ARCHITECTURAL_PLAN.md` |
+| Colocated Node.js N-API & WebAssembly adapters | `docs/COLOCATED_NODE_WASM_ADAPTERS.md` |
+| CI automation & universal C distribution via NPM | `docs/CI_NPM_DISTRIBUTION.md` |
+| Ecosystem release execution strategy | `docs/RELEASE_EXECUTION_STRATEGY.md` |
 | Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
+| Multi-axis memory fusion (`axil-auren`, `pi-mm`, `libcorm` axes) | `docs/MULTI_AXIS_MEMORY_FUSION.md` |
 | Realistic pure-C water for the NeverDark Seven stage (handoff) | `docs/handoff-water-realism.md` |
+| Shallow water optical extinction calibration for billboards | `docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md` |
 | NeverDark 2.5D Seven continuous 3D terrain renderer specification | `docs/25D.md` |
-| Recursive noise algorithm & libnoise/chaff mathematical foundation | `docs/RECUR_NOISE.md` |
+| NeverDark procedural 3D terrain & cavern architecture roadmap | `docs/TERRAIN_ROADMAP.md` |
+| Recursive noise algorithm & `libchaff` mathematical foundation | `docs/RECUR_NOISE.md` |
+| LOD elevation growth & recursive noise blending analysis | `docs/LOD_ELEVATION_RECURSIVE_NOISE_ANALYSIS.md` |
+| Client-side chunk merging, LOD smoothing & stratosphere camera | `docs/ANALYSIS_TERRAIN_CHUNKS_LOD_STRATOSPHERE.md` |
 | Physical water optics, volumetric absorption & rendering specification | `docs/WATER_REQUIREMENTS.md` |
 | Seamless shoreline & continuous bathymetry ("chunks can't disagree") | `docs/SHORE.md` |
+| Seven-Ways collision map analysis & 2.5D obstacle modeling | `docs/SEVEN_WAYS_COLLISION_ANALYSIS.md` |
+| Ahead-of-Time (AOT) vs. on-room-entry game content architecture | `docs/AOT_GAME_CONTENTS_ANALYSIS.md` |
+| NeverDark entity persistence lifecycle & Corm DB consistency | `docs/ND-PERSISTENCE-LIFECYCLE.md` |
+| `axil-nd` MCP/BCP protocol architecture & modernization | `docs/AXIL_ND_MCP_BCP_IMPROVEMENT_SPEC.md` |
 | Multi-scale noise, client GPU acceleration & stratosphere architecture | `docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md` |
+| Next-generation NeverDark architecture (single-socket WS, BCP, hydration) | `docs/NEXT_GEN_ND_ARCHITECTURE.md` |
+| NeverDark full universe deployment, seeder & E2E harness | `docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md` |
+| NeverDark pluggable viewports (ANSI TTY, 2D Lamina, 3D WebGL) | `docs/ND-VIEWPORTS.md` |
 | Hyle ecosystem & cross-framework convergence (React/Next.js) | `ROADMAP.md` |
 | Axil PDF resume ingestion & job search service (`axil-resume-search`) | `external/axil-resume-search/README.md` |
