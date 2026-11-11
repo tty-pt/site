@@ -120,6 +120,11 @@ const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
 
+/* Query active GPU mesh quad resolution for a given LOD level:
+ * Level 0 returns 48 (48x48 quads = 4,608 triangles, 2.25x density);
+ * Level 1+ returns 32 (32x32 quads = 2,048 triangles). */
+uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level);
+
 #ifdef __cplusplus
 }
 #endif

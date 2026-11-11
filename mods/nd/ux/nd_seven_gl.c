@@ -17,11 +17,18 @@
 #define PI_F 3.14159265358979323846f
 #define TWO_PI_F 6.28318530717958647692f
 
-/* 32x32 quad grid topology = 33x33 vertices = 1,089 vertices */
-#define GL_GRID_QUADS 32
+/* Level 1+ standard grid: 32x32 quads = 33x33 vertices = 1,089 vertices (2,048 triangles) */
+#define GL_GRID_QUADS_LO 32
+#define GL_GRID_QUADS GL_GRID_QUADS_LO
 #define GL_GRID_VERTS (GL_GRID_QUADS + 1)
 #define GL_TOTAL_VERTS (GL_GRID_VERTS * GL_GRID_VERTS)
 #define GL_TOTAL_INDICES (GL_GRID_QUADS * GL_GRID_QUADS * 6)
+
+/* Level 0 high-detail grid: 48x48 quads = 49x49 vertices = 2,401 vertices (4,608 triangles, 2.25x density) */
+#define GL_GRID_QUADS_HI 48
+#define GL_GRID_VERTS_HI (GL_GRID_QUADS_HI + 1)
+#define GL_TOTAL_VERTS_HI (GL_GRID_VERTS_HI * GL_GRID_VERTS_HI)
+#define GL_TOTAL_INDICES_HI (GL_GRID_QUADS_HI * GL_GRID_QUADS_HI * 6)
 
 #define MAX_CHUNK_TEXTURES 128
 #define MAX_WATER_QUEUE 128
@@ -1162,6 +1169,7 @@ typedef struct {
 	uint32_t rev;
 	int32_t ox, oy;
 	int32_t span_w, span_h;
+	uint32_t tex_w, tex_h;
 	uint32_t last_touch;
 	GLuint height_tex;
 	GLuint substrate_tex;
@@ -1170,6 +1178,7 @@ typedef struct {
 typedef struct {
 	int32_t ox, oy;
 	int32_t span_w, span_h;
+	uint8_t level;
 	float sea_level;
 	GLuint height_tex;
 } gl_water_chunk_t;
@@ -1182,6 +1191,8 @@ static struct {
 
 	GLuint grid_vbo;
 	GLuint grid_ibo;
+	GLuint grid_vbo_hi;
+	GLuint grid_ibo_hi;
 
 	GLuint bb_vbo;
 	GLuint atlas_tex;
@@ -1286,6 +1297,41 @@ static void init_grid_buffers(void)
 	s_gl.grid_ibo = glCreateBuffer();
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices, sizeof(indices), GL_STATIC_DRAW);
+
+	float grid_uv_hi[GL_TOTAL_VERTS_HI * 2];
+	for (int y = 0; y < GL_GRID_VERTS_HI; y++) {
+		for (int x = 0; x < GL_GRID_VERTS_HI; x++) {
+			int idx = (y * GL_GRID_VERTS_HI + x) * 2;
+			grid_uv_hi[idx]     = (float)x / (float)GL_GRID_QUADS_HI;
+			grid_uv_hi[idx + 1] = (float)y / (float)GL_GRID_QUADS_HI;
+		}
+	}
+
+	uint16_t indices_hi[GL_TOTAL_INDICES_HI];
+	int i_idx_hi = 0;
+	for (int y = 0; y < GL_GRID_QUADS_HI; y++) {
+		for (int x = 0; x < GL_GRID_QUADS_HI; x++) {
+			uint16_t i0 = (uint16_t)(y * GL_GRID_VERTS_HI + x);
+			uint16_t i1 = (uint16_t)(i0 + 1);
+			uint16_t i2 = (uint16_t)((y + 1) * GL_GRID_VERTS_HI + x);
+			uint16_t i3 = (uint16_t)(i2 + 1);
+
+			indices_hi[i_idx_hi++] = i0;
+			indices_hi[i_idx_hi++] = i1;
+			indices_hi[i_idx_hi++] = i2;
+			indices_hi[i_idx_hi++] = i1;
+			indices_hi[i_idx_hi++] = i3;
+			indices_hi[i_idx_hi++] = i2;
+		}
+	}
+
+	s_gl.grid_vbo_hi = glCreateBuffer();
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_hi);
+	glBufferData(GL_ARRAY_BUFFER, grid_uv_hi, sizeof(grid_uv_hi), GL_STATIC_DRAW);
+
+	s_gl.grid_ibo_hi = glCreateBuffer();
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_hi);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices_hi, sizeof(indices_hi), GL_STATIC_DRAW);
 
 	s_gl.bb_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
@@ -1498,7 +1544,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	}
 
 	bool needs_upload = (!slot->active || slot->rev != rev ||
-	                     slot->world != world || slot->ox != ox || slot->oy != oy);
+	                     slot->world != world || slot->ox != ox || slot->oy != oy ||
+	                     slot->tex_w != chunk_w || slot->tex_h != chunk_h);
 
 	if (needs_upload) {
 		slot->active = 1;
@@ -1509,6 +1556,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		slot->oy = oy;
 		slot->span_w = span_w;
 		slot->span_h = span_h;
+		slot->tex_w = chunk_w;
+		slot->tex_h = chunk_h;
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, slot->height_tex);
@@ -1568,12 +1617,16 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.terrain_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo);
+	GLuint active_vbo = (level == 0) ? s_gl.grid_vbo_hi : s_gl.grid_vbo;
+	GLuint active_ibo = (level == 0) ? s_gl.grid_ibo_hi : s_gl.grid_ibo;
+	GLsizei active_indices = (level == 0) ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES;
+
+	glBindBuffer(GL_ARRAY_BUFFER, active_vbo);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
 
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo);
-	glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES, GL_UNSIGNED_SHORT, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, active_ibo);
+	glDrawElements(GL_TRIANGLES, active_indices, GL_UNSIGNED_SHORT, 0);
 
 	/* Queue water pass for this chunk if world has water */
 	if (sea_level > -900.0f && s_gl.water_count < MAX_WATER_QUEUE) {
@@ -1581,6 +1634,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		s_gl.water_queue[s_gl.water_count].oy = oy;
 		s_gl.water_queue[s_gl.water_count].span_w = span_w;
 		s_gl.water_queue[s_gl.water_count].span_h = span_h;
+		s_gl.water_queue[s_gl.water_count].level = level;
 		s_gl.water_queue[s_gl.water_count].sea_level = sea_level;
 		s_gl.water_queue[s_gl.water_count].height_tex = slot->height_tex;
 		s_gl.water_count++;
@@ -1625,13 +1679,16 @@ void nd_seven_gl_flush_water(void)
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.water_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo);
-
 	for (uint32_t i = 0; i < s_gl.water_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.water_queue[i];
+		GLuint w_vbo = (chk->level == 0) ? s_gl.grid_vbo_hi : s_gl.grid_vbo;
+		GLuint w_ibo = (chk->level == 0) ? s_gl.grid_ibo_hi : s_gl.grid_ibo;
+		GLsizei w_indices = (chk->level == 0) ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES;
+
+		glBindBuffer(GL_ARRAY_BUFFER, w_vbo);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, w_ibo);
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, chk->height_tex);
@@ -1644,7 +1701,7 @@ void nd_seven_gl_flush_water(void)
 		glUniform2f(s_gl.water_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
 		glUniform1f(s_gl.water_pipe.uSeaLevel, chk->sea_level);
 
-		glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES, GL_UNSIGNED_SHORT, 0);
+		glDrawElements(GL_TRIANGLES, w_indices, GL_UNSIGNED_SHORT, 0);
 	}
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1728,4 +1785,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glDisableVertexAttribArray(3);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
+}
+
+uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level)
+{
+	return (level == 0) ? GL_GRID_QUADS_HI : GL_GRID_QUADS_LO;
 }
