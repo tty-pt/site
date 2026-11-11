@@ -12,6 +12,7 @@ enum { DIR_DOWN, DIR_UP, DIR_LEFT, DIR_RIGHT };
 int nd_seven_get_lx(void);
 int nd_seven_get_ly(void);
 int nd_seven_get_dir(void);
+int nd_seven_get_world(void);
 int nd_seven_get_walking(void);
 uint32_t nd_seven_get_anim(void);
 void nd_seven_step_anim(uint32_t delta);

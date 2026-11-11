@@ -2,7 +2,7 @@
 #define SITE_MUSIC_H
 
 #include "bud/bud.h"
-#include <transp/music.h>
+#include <pitch/music.h>
 
 static inline bud_node *
 site_ui_render_key_options(int cur_key, int orig_key, int latin)

@@ -39,7 +39,7 @@ grep -r <string> .git/lost-found/other
 
 ## 3. When git cannot help — recover outside git
 
-1. **Opencode transcript** `~/.local/share/opencode/log/opencode.log` `57M` + `/tmp/opencode/tool-output/` + `.pi/quest/current/*/execution.log` — often echoes the diff verbatim.
+1. **Opencode transcript** `~/.local/share/opencode/log/opencode.log` `57M` + `/tmp/opencode/tool-output/` + `.pi/quest/future/*.md` / handoffs — often echoes the diff verbatim.
 2. **Editor local history** `~/.config/Code/Backups/` JetBrains `Local History` `~/.local/state/nvim/backup/` `.swp`.
 3. **Filesystem undelete** `extundelete /dev/nvme0n1p2 --restore-file <path>` (needs `sudo`, low odds after `reset` on `97%` full, blocks overwritten).
 4. **No btrfs/zfs snapshot** on this host (`df -T ext4` `mountinfo` no `lvm`).

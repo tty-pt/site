@@ -23,6 +23,7 @@
 
 #include <nd/config.h>
 #include <nd/noise.h>
+#include <nd/field.h>
 #include <nd/params.h>
 #include <nd/player.h>
 #include <nd/view.h>
@@ -245,12 +246,10 @@ int
 e_ground(unsigned room, enum exit e)
 {
 	pos_t pos;
-
-	if (e & (E_UP | E_DOWN))
-		return 0;
+	(void) e;
 
 	eng_map_where(pos, room);
-	return pos[2] == 0;
+	return 1;
 }
 
 enum exit
@@ -296,6 +295,7 @@ st_update(double dt)
 	day_tick += whole;
 	if (day_tick > (1ULL << DAYTICK_Y))
 		day_tick = 0;
+	nd_field_set_sun_azimuth(nd_field_sun_azimuth_from_day_tick(day_tick));
 
 	if (day_tick >= (1ULL << (DAYTICK_Y - 1))) {
 		if (day_n)
@@ -462,11 +462,6 @@ st_room_at(unsigned player_ref, pos_t pos)
 	exits_infer(there_ref, rthere);
 
 	fprintf(stderr, "st_room_at %u\n", player_ref);
-
-	if (pos[2] != 0) {
-		corm_put(obj_hd, &there_ref, &there);
-		return there_ref;
-	}
 
 	rthere->floor = bio.bio_idx;
 	corm_put(obj_hd, &there_ref, &there);

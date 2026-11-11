@@ -9,8 +9,8 @@
 
 #include "bud/bud_app.h"
 #include "bud/bud_slot.h"
+#include "bud/bud_state.h"
 
-#include <ttypt/axil.h>
 #ifdef COMMON_INTERNAL_H
 int respond_html(int fd, const char *html);
 #else
@@ -174,10 +174,11 @@ char *site_ui_page_lang(
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
-	        "<script type=\"application/json\" id=\"chrome-state\">"
-	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
-	        "\"user\":\"%s\",\"lang\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
+	        "<script id=\"chrome-state\" data-title=\"%s\" data-path=\"%s\" "
+	        "data-icon=\"%s\" data-user=\"%s\" data-lang=\"%s\"></script>\n"
+	        "%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
+	        "<script type=\"module\" src=\"/bud-hydrate.js" SITE_CLIENT_V "\"></script>\n"
 	        "<script type=\"module\" src=\"/stele-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        locale, title_esc, extra_head, module_attr, state_title, state_path,
@@ -200,10 +201,11 @@ char *site_ui_page_lang(
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
-	        "<script type=\"application/json\" id=\"chrome-state\">"
-	        "{\"title\":\"%s\",\"path\":\"%s\",\"icon\":\"%s\","
-	        "\"user\":\"%s\",\"lang\":\"%s\"}</script>\n%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
+	        "<script id=\"chrome-state\" data-title=\"%s\" data-path=\"%s\" "
+	        "data-icon=\"%s\" data-user=\"%s\" data-lang=\"%s\"></script>\n"
+	        "%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
+	        "<script type=\"module\" src=\"/bud-hydrate.js" SITE_CLIENT_V "\"></script>\n"
 	        "<script type=\"module\" src=\"/stele-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        locale, title_esc, extra_head, module_attr, state_title, state_path,
@@ -236,8 +238,35 @@ char *site_ui_state_head(const char *json)
 	snprintf(
 	        head, len,
 	        "<script type=\"application/json\" "
-	        "id=\"bud-state\">%s</script>",
+	        "id=\"bud-state\" data-state=\"1\">%s</script>",
 	        json);
+	return head;
+}
+
+char *site_ui_state_head_bin(const void *bin, size_t len)
+{
+	if (!bin || len == 0)
+		return NULL;
+	size_t b64_len = bud_b64_encode_len(len);
+	char *b64 = (char *)malloc(b64_len);
+	if (!b64)
+		return NULL;
+	if (bud_b64_encode(bin, len, b64, b64_len) <= 0) {
+		free(b64);
+		return NULL;
+	}
+	size_t head_len = b64_len + 160;
+	char *head = (char *)malloc(head_len);
+	if (!head) {
+		free(b64);
+		return NULL;
+	}
+	snprintf(
+	        head, head_len,
+	        "<script type=\"application/octet-stream\" "
+	        "id=\"bud-state\" data-state=\"1\" data-encoding=\"base64\">%s</script>",
+	        b64);
+	free(b64);
 	return head;
 }
 
@@ -248,11 +277,99 @@ int site_ui_respond_with_state(
 {
 	char *head = site_ui_state_head(state_json);
 	char *page = site_ui_page(title, path, icon, user, head, module, body);
-	int rc = 0;
-	if (page)
-		rc = respond_html(fd, page);
-	else
-		axil_respond(fd, 500, "Internal Server Error");
+	int rc = respond_html(fd, page);
+	free(head);
+	return rc;
+}
+
+int site_ui_respond_with_state_bin(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const void *bin, size_t len, const char *module,
+        bud_node *body)
+{
+	char *head = site_ui_state_head_bin(bin, len);
+	char *page = site_ui_page(title, path, icon, user, head, module, body);
+	int rc = respond_html(fd, page);
+	free(head);
+	return rc;
+}
+
+char *site_ui_state_head_src(const char *src_url)
+{
+	size_t len;
+	char *head;
+	if (!src_url || !src_url[0])
+		return NULL;
+	len = strlen(src_url) * 2 + 256;
+	head = (char *)malloc(len);
+	if (!head)
+		return NULL;
+	snprintf(
+	        head, len,
+	        "<link rel=\"preload\" href=\"%s\" as=\"fetch\" "
+	        "type=\"application/octet-stream\" crossorigin>\n"
+	        "<meta name=\"state-src\" content=\"%s\">\n"
+	        "<meta name=\"bud-state-src\" content=\"%s\">",
+	        src_url, src_url, src_url);
+	return head;
+}
+
+char *site_ui_state_head_preload(const char *src_url, const char *fallback_json)
+{
+	size_t len;
+	char *head;
+	if (!src_url || !src_url[0])
+		return site_ui_state_head(fallback_json);
+
+	size_t src_len = strlen(src_url);
+	size_t json_len = (fallback_json && fallback_json[0]) ? strlen(fallback_json) : 0;
+	len = src_len * 2 + json_len + 384;
+	head = (char *)malloc(len);
+	if (!head)
+		return NULL;
+
+	if (json_len > 0) {
+		snprintf(
+		        head, len,
+		        "<link rel=\"preload\" href=\"%s\" as=\"fetch\" "
+		        "type=\"application/octet-stream\" crossorigin>\n"
+		        "<meta name=\"state-src\" content=\"%s\">\n"
+		        "<meta name=\"bud-state-src\" content=\"%s\">\n"
+		        "<script type=\"application/json\" id=\"bud-state\" data-state=\"1\">%s</script>",
+		        src_url, src_url, src_url, fallback_json);
+	} else {
+		snprintf(
+		        head, len,
+		        "<link rel=\"preload\" href=\"%s\" as=\"fetch\" "
+		        "type=\"application/octet-stream\" crossorigin>\n"
+		        "<meta name=\"state-src\" content=\"%s\">\n"
+		        "<meta name=\"bud-state-src\" content=\"%s\">\n"
+		        "<script type=\"application/octet-stream\" id=\"bud-state\" data-state=\"1\" data-src=\"%s\"></script>",
+		        src_url, src_url, src_url, src_url);
+	}
+	return head;
+}
+
+int site_ui_respond_with_state_src(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *src_url, const char *module,
+        bud_node *body)
+{
+	char *head = site_ui_state_head_src(src_url);
+	char *page = site_ui_page(title, path, icon, user, head, module, body);
+	int rc = respond_html(fd, page);
+	free(head);
+	return rc;
+}
+
+int site_ui_respond_with_state_preload(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *src_url, const char *fallback_json,
+        const char *module, bud_node *body)
+{
+	char *head = site_ui_state_head_preload(src_url, fallback_json);
+	char *page = site_ui_page(title, path, icon, user, head, module, body);
+	int rc = respond_html(fd, page);
 	free(head);
 	return rc;
 }

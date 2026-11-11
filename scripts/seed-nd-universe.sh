@@ -31,6 +31,7 @@ if [ ! -d "$AXIL_ND_DIR" ]; then
 fi
 
 mkdir -p "$(dirname "$TARGET_DB")"
+rm -f "$TARGET_DB" "$TARGET_DB.seed-v5" "$TARGET_DB-corm" "$TARGET_DB-islet" 2>/dev/null || true
 cp "$REPO_ROOT"/external/nd-*/data/*.dsv "$(dirname "$TARGET_DB")"/ 2>/dev/null || true
 cp "$REPO_ROOT"/mods/nd/data/*.dsv "$(dirname "$TARGET_DB")"/ 2>/dev/null || true
 TARGET_DB="$(cd "$(dirname "$TARGET_DB")" 2>/dev/null && pwd)/$(basename "$TARGET_DB")"
@@ -120,8 +121,8 @@ fi
 
 echo "Connecting admin session to seed $NUM_PLANETS planet(s)..."
 KEY=$(head -c 16 /dev/urandom | base64 | tr -d '\n')
-printf -v WS_REQ 'GET /nd HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n' \
-	"$SEED_PORT" "$KEY"
+WS_REQ=$(printf 'GET /nd HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n' \
+	"$SEED_PORT" "$KEY")
 
 exec 8<>/dev/tcp/127.0.0.1/$SEED_PORT
 printf '%s' "$WS_REQ" >&8

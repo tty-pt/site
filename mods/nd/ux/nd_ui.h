@@ -33,6 +33,12 @@ void nd_ui_init_defaults(void);
 const nd_client_state_t *nd_ui_get_client_state(void);
 
 /*
+ * RPG Chat expand/collapse state query & mutation.
+ */
+int nd_ui_get_chat_expanded(void);
+void nd_ui_set_chat_expanded(int expanded);
+
+/*
  * Client WASM entrypoint rehydrating JSON state from SSR.
  */
 void wasm_init(const char *json, int len);

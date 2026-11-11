@@ -1,6 +1,6 @@
-CFLAGS-libnd-obj-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-item-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-name-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-create-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-object-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
-CFLAGS-entity-o := -fPIC -I../axil-nd/include -D_GNU_SOURCE
+CFLAGS-libnd-obj-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-session/include -I../nd-speech/include -I../nd-region/include -I../nd-world/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE
+CFLAGS-item-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-session/include -I../nd-speech/include -I../nd-region/include -I../nd-world/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE
+CFLAGS-name-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-session/include -I../nd-speech/include -I../nd-region/include -I../nd-world/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE
+CFLAGS-create-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-session/include -I../nd-speech/include -I../nd-region/include -I../nd-world/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE
+CFLAGS-object-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-session/include -I../nd-speech/include -I../nd-region/include -I../nd-world/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE
+CFLAGS-entity-o := -fPIC -I../axil-nd/include -I../nd-mcp/include -I../nd-session/include -I../nd-speech/include -I../nd-region/include -I../nd-world/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE

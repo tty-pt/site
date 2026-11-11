@@ -1,8 +1,10 @@
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_motion.h"
+#include "nd_seven_ground.h"
 #include <string.h>
 
 static uint8_t s_atlas[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
+static uint32_t s_atlas_rgba[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
 static int s_atlas_ready;
 
 void atlas_load(void)
@@ -16,6 +18,10 @@ void atlas_load(void)
 		while (run-- && o < sizeof(s_atlas))
 			s_atlas[o++] = v;
 	}
+	for (size_t p = 0; p < sizeof(s_atlas); p++) {
+		uint8_t idx = s_atlas[p];
+		s_atlas_rgba[p] = (idx < ND_SEVEN_PALETTE_N) ? nd_seven_palette[idx] : 0;
+	}
 	s_atlas_ready = 1;
 }
 
@@ -23,6 +29,12 @@ const uint8_t *atlas_px(void)
 {
 	atlas_load();
 	return s_atlas;
+}
+
+const uint32_t *atlas_rgba(void)
+{
+	atlas_load();
+	return s_atlas_rgba;
 }
 
 static const uint32_t s_ansi[16] = {
@@ -78,16 +90,19 @@ void fill_px(uint32_t *fb, int w, int h, int x0, int y0, int x1, int y1, uint32_
 			put_px(fb, w, h, x, y, c);
 }
 
-void blit(uint32_t *fb, int w, int h, int id,
-          int sx, int sy, int sw, int sh,
-          int ax, int ay, int dx, int dy, int scale, const tint_t *tint,
-          int flip)
+void blit_sub(uint32_t *fb, int w, int h, int id,
+              int sx, int sy, int sw, int sh,
+              int ax, int ay, int dx, int dy, int scale, const tint_t *tint,
+              int flip, int sub_units)
 {
 	const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[id];
 	int ox = dx - ax * scale, oy = dy - ay * scale;
 
 	if (ox >= w || oy >= h || ox + sw * scale <= 0 || oy + sh * scale <= 0)
 		return;
+
+	int y_water = (sub_units > 0) ? (ay - sub_units) : 9999;
+
 	for (int y = 0; y < sh; y++) {
 		const uint8_t *row = &s_atlas[(r->y + sy + y) * ND_SEVEN_ATLAS_W + r->x + sx];
 		int yy0 = oy + y * scale;
@@ -104,11 +119,33 @@ void blit(uint32_t *fb, int w, int h, int id,
 				if (!tint->leaf || (pg > pr + 8 && pg > pb + 8))
 					c = tint_col(c, tint->r, tint->g, tint->b);
 			}
+			if (y >= y_water) {
+				int d_row = y - y_water;
+				if (d_row == 0) {
+					/* Crisp waterline meniscus highlight */
+					c = alpha_blend_rgb(c, RGB(240, 250, 255), 180);
+				} else {
+					uint32_t wcol = water_color_at_depth(d_row, 128, 128, 128);
+					int alpha = water_alpha_at_depth(d_row);
+					/* Non-linear shallow alpha ramp with immediate Caribbean turquoise baseline */
+					int shallow_alpha = 48 + ((d_row < 6) ? (alpha * d_row / 12) : (alpha * 2 / 5));
+					if (shallow_alpha > 255) shallow_alpha = 255;
+					c = alpha_blend_rgb(c, wcol, shallow_alpha);
+				}
+			}
 			for (int py = 0; py < scale; py++)
 				for (int px = 0; px < scale; px++)
 					put_px(fb, w, h, xx0 + px, yy0 + py, c);
 		}
 	}
+}
+
+void blit(uint32_t *fb, int w, int h, int id,
+          int sx, int sy, int sw, int sh,
+          int ax, int ay, int dx, int dy, int scale, const tint_t *tint,
+          int flip)
+{
+	blit_sub(fb, w, h, id, sx, sy, sw, sh, ax, ay, dx, dy, scale, tint, flip, 0);
 }
 
 void blit_all(uint32_t *fb, int w, int h, int id, int ax, int ay, int dx, int dy, int scale,
@@ -127,9 +164,10 @@ void blit_all_f(uint32_t *fb, int w, int h, int id, int ax, int ay, int dx, int 
 
 void urect(const ctx_t *c, int ux, int uy, int uw, int uh, uint32_t col)
 {
+	int sc = (c && c->scale > 0) ? c->scale : SCALE;
 	fill_px(c->fb, c->w, c->h,
-	        c->ox + ux * SCALE, c->oy + uy * SCALE,
-	        c->ox + (ux + uw) * SCALE, c->oy + (uy + uh) * SCALE, col);
+	        c->ox + ux * sc, c->oy + uy * sc,
+	        c->ox + (ux + uw) * sc, c->oy + (uy + uh) * sc, col);
 }
 
 void uellipse(const ctx_t *c, int ux, int uy, int rx, int ry, uint32_t col)
@@ -228,6 +266,12 @@ static void draw_rock(const ctx_t *c, int big, int fg, int variant)
 	urect(c, 0, -rh + 1, 1, rh - 2, dark);
 	if (variant & 1)
 		urect(c, -rw / 4, -rh / 2, 2, 1, light);
+	/* Moss / lichen patch on upper rock surface */
+	if (variant & 8)
+		urect(c, -rw / 3, -rh + 1, rw / 2, 1, RGB(72, 128, 54));
+	/* Geological strata line */
+	if (variant & 16)
+		urect(c, -rw / 2 + 1, -rh / 2, rw - 3, 1, shade(dark, 85));
 }
 
 static void draw_cactus(const ctx_t *c, int big, int fg, int variant)
@@ -263,10 +307,11 @@ static void draw_cactus(const ctx_t *c, int big, int fg, int variant)
 	urect(c, -1, -bh - 1, 2, 1, RGB(230, 120, 150));
 }
 
-static void draw_fir(const ctx_t *c, int big, int fg)
+static void draw_fir(const ctx_t *c, int big, int fg, int variant)
 {
 	uint32_t base = shade(s_ansi[fg & 15], 80);
-	int tiers = big ? 4 : 3, tierh = big ? 10 : 9, maxhw = big ? 15 : 11;
+	int extra = (variant & 1);
+	int tiers = (big ? 4 : 3) + extra, tierh = big ? 10 : 9, maxhw = big ? 15 : 11;
 	int top = -(tiers * (tierh - 3) + 9);
 
 	shadow(c, maxhw);
@@ -334,58 +379,164 @@ void plant_tint(int fg, tint_t *t)
 {
 	t->leaf = 1;
 	switch (fg & 15) {
-	case 3: case 11: t->r = 230; t->g = 118; t->b = 60; break;
-	case 1: case 9:  t->r = 255; t->g = 70;  t->b = 64; break;
-	case 7: case 15: t->r = 200; t->g = 150; t->b = 190; break;
+	case 3: case 11: t->r = 230; t->g = 118; t->b = 60; break; /* autumn gold / yellow */
+	case 1: case 9:  t->r = 255; t->g = 70;  t->b = 64; break; /* flowering red / apple */
+	case 7: case 15: t->r = 200; t->g = 150; t->b = 190; break; /* birch / blossom */
+	case 2: case 10: t->r = 115; t->g = 195; t->b = 95; break; /* lush emerald / spring conifer */
+	case 6: case 14: t->r = 85;  t->g = 180; t->b = 160; break; /* alpine spruce / boreal teal */
+	case 4: case 12: t->r = 160; t->g = 145; t->b = 90; break; /* savanna acacia / olive */
 	default:         t->r = t->g = t->b = 128; break;
 	}
 }
 
-void draw_world_obj(uint32_t *fb, int w, int h, const ndw_obj_t *o, int sx, int sy, uint32_t anim)
+int nd_seven_obj_sprite(const ndw_obj_t *o)
 {
-	ctx_t c = { fb, w, h, sx, sy };
+	if (!o) return 0;
+	switch (o->kind) {
+	case NDW_K_DECID:
+		if (o->big) {
+			int pick = o->variant & 3;
+			if (pick == 0) return NDS_TREE_OAK;
+			if (pick == 1) return NDS_TREE_APPLE;
+			if (pick == 2) return NDS_TREE_BIG;
+			return NDS_TREE_APPLE2;
+		}
+		return (o->variant & 1) ? NDS_TREE_ROUND : NDS_BUSH_DARK;
+
+	case NDW_K_TALL:
+		if (o->big) {
+			return (o->variant & 1) ? NDS_TREE_BIG : NDS_TREE_OAK;
+		}
+		return (o->variant & 1) ? NDS_TREE_APPLE2 : NDS_TREE_ROUND;
+
+	case NDW_K_FIR:
+		return o->big ? NDS_TREE_BIG : ((o->variant & 1) ? NDS_BUSH_TEAL : NDS_BUSH_DARK);
+
+	case NDW_K_CACTUS:
+		return (o->variant & 1) ? NDS_BUSH_DARK : NDS_BUSH_TEAL;
+
+	case NDW_K_STONE: {
+		static const int stones[4] = { NDS_STONE_FLAT, NDS_STONE_TINY, NDS_STONE_GREY, NDS_STONE_BLUE_SM };
+		return stones[o->variant & 3];
+	}
+
+	case NDW_K_ROCK: {
+		static const int rocks[6] = {
+			NDS_ROCK_GREY, NDS_ROCK_TAN, NDS_ROCK_WHITE,
+			NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_STONE_BLUE
+		};
+		return rocks[(o->variant >> 1) % 6];
+	}
+
+	case NDW_K_BOULDER:
+		return (o->variant & 1) ? NDS_ROCK_WHITE_BIG : NDS_ROCK_TAN_BIG;
+
+	default:
+		return 0;
+	}
+}
+
+static void draw_drop_shadow(uint32_t *fb, int w, int h, int sx, int sy, int rx, int ry)
+{
+	int x0 = sx - rx, x1 = sx + rx;
+	int y0 = sy - ry, y1 = sy + ry;
+	if (x0 < 0)
+		x0 = 0;
+	if (x1 >= w)
+		x1 = w - 1;
+	if (y0 < 0)
+		y0 = 0;
+	if (y1 >= h)
+		y1 = h - 1;
+
+	for (int y = y0; y <= y1; y++) {
+		int dy = y - sy;
+		for (int x = x0; x <= x1; x++) {
+			int dx = x - sx;
+			if ((dx * dx * ry * ry + dy * dy * rx * rx) <= (rx * rx * ry * ry)) {
+				uint32_t col = fb[y * w + x];
+				uint32_t r = (col & 0xFF) * 68 / 100;
+				uint32_t g = ((col >> 8) & 0xFF) * 68 / 100;
+				uint32_t b = ((col >> 16) & 0xFF) * 68 / 100;
+				fb[y * w + x] = (col & 0xFF000000) | (b << 16) | (g << 8) | r;
+			}
+		}
+	}
+}
+
+void draw_world_obj_scaled_sub(uint32_t *fb, int w, int h, const ndw_obj_t *o, int sx, int sy, uint32_t anim, int scale, int sub_units)
+{
+	if (scale < 1) scale = 1;
+	ctx_t c = { fb, w, h, sx, sy, scale };
 	const nd_seven_sprite_rect_t *r;
 	tint_t t;
 	int id;
+	int flip = (o->variant >> 2) & 1;
 
 	switch (o->kind) {
 	case NDW_K_DECID:
-		id = o->big ? ((o->variant & 1) ? NDS_TREE_OAK : NDS_TREE_APPLE) : NDS_TREE_ROUND;
-		goto tree;
 	case NDW_K_TALL:
-		id = o->big ? NDS_TREE_BIG : NDS_TREE_APPLE2;
-	tree:
+		id = nd_seven_obj_sprite(o);
+		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 14 : 10) * scale, (o->big ? 5 : 3) * scale);
 		plant_tint(o->fg, &t);
 		r = &nd_seven_sprite_rects[id];
-		blit_all(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, &t);
+		blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, &t, flip, sub_units);
 		break;
-	case NDW_K_FIR:      draw_fir(&c, o->big, o->fg); break;
-	case NDW_K_CACTUS:   draw_cactus(&c, o->big, o->fg, o->variant); break;
+	case NDW_K_FIR:
+		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 10 : 7) * scale, 3 * scale);
+		draw_fir(&c, o->big, o->fg, o->variant);
+		break;
+	case NDW_K_CACTUS:
+		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 9 : 6) * scale, 3 * scale);
+		draw_cactus(&c, o->big, o->fg, o->variant);
+		break;
 	case NDW_K_POND:     draw_pond(&c, (int)anim); break;
 	case NDW_K_SHOP:     draw_shop(&c, o->fg); break;
 	case NDW_K_STAIRS_DOWN: draw_stairs(&c, 0); break;
 	case NDW_K_STAIRS_UP:   draw_stairs(&c, 1); break;
-	case NDW_K_STONE:    draw_pebble(&c, o->fg, o->variant); break;
+	case NDW_K_STONE:
+		if ((o->variant & 7) < 3)
+			draw_pebble(&c, o->fg, o->variant);
+		else {
+			id = nd_seven_obj_sprite(o);
+			r = &nd_seven_sprite_rects[id];
+			draw_drop_shadow(fb, w, h, sx, sy, 4 * scale, 2 * scale);
+			blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, NULL, flip, sub_units);
+		}
+		break;
 	case NDW_K_ROCK:
-		if ((o->variant & 3) < 2)
+		draw_drop_shadow(fb, w, h, sx, sy, 7 * scale, 3 * scale);
+		if ((o->variant & 7) == 0)
 			draw_rock(&c, 0, o->fg, o->variant);
 		else {
-			id = (o->variant & 1) ? NDS_ROCK_GREY : NDS_ROCK_TAN;
+			id = nd_seven_obj_sprite(o);
 			r = &nd_seven_sprite_rects[id];
-			blit_all(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, NULL);
+			blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, NULL, flip, sub_units);
 		}
 		break;
 	case NDW_K_BOULDER:
-		id = (o->variant & 1) ? NDS_ROCK_WHITE_BIG : NDS_ROCK_TAN_BIG;
+		draw_drop_shadow(fb, w, h, sx, sy, 11 * scale, 4 * scale);
+		id = nd_seven_obj_sprite(o);
 		r = &nd_seven_sprite_rects[id];
-		blit_all(fb, w, h, id, r->w / 2, r->h - 1, sx, sy, SCALE, NULL);
+		blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, NULL, flip, sub_units);
 		break;
 	default:             draw_pawn(&c, o->glyph, o->fg); break;
 	}
 }
 
-void draw_lamb(uint32_t *fb, int w, int h, int sx, int sy)
+void draw_world_obj_scaled(uint32_t *fb, int w, int h, const ndw_obj_t *o, int sx, int sy, uint32_t anim, int scale)
 {
+	draw_world_obj_scaled_sub(fb, w, h, o, sx, sy, anim, scale, 0);
+}
+
+void draw_world_obj(uint32_t *fb, int w, int h, const ndw_obj_t *o, int sx, int sy, uint32_t anim)
+{
+	draw_world_obj_scaled(fb, w, h, o, sx, sy, anim, SCALE);
+}
+
+void draw_lamb_scaled_sub(uint32_t *fb, int w, int h, int sx, int sy, int scale, int sub_units)
+{
+	if (scale < 1) scale = 1;
 	int row, col;
 	if (nd_seven_get_walking()) {
 		row = nd_seven_get_dir();
@@ -394,6 +545,16 @@ void draw_lamb(uint32_t *fb, int w, int h, int sx, int sy)
 		row = 4 + nd_seven_get_dir();
 		col = (int)((nd_seven_get_anim() / 24) % 4);
 	}
-	blit(fb, w, h, NDS_LAMB, col * LAMB_SIZE, row * LAMB_SIZE, LAMB_SIZE, LAMB_SIZE,
-	     LAMB_AX, LAMB_AY, sx, sy, SCALE, NULL, 0);
+	blit_sub(fb, w, h, NDS_LAMB, col * LAMB_SIZE, row * LAMB_SIZE, LAMB_SIZE, LAMB_SIZE,
+	         LAMB_AX, LAMB_AY, sx, sy, scale, NULL, 0, sub_units);
+}
+
+void draw_lamb_scaled(uint32_t *fb, int w, int h, int sx, int sy, int scale)
+{
+	draw_lamb_scaled_sub(fb, w, h, sx, sy, scale, 0);
+}
+
+void draw_lamb(uint32_t *fb, int w, int h, int sx, int sy)
+{
+	draw_lamb_scaled(fb, w, h, sx, sy, SCALE);
 }

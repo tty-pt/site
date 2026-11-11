@@ -1,6 +1,7 @@
 #include "nd_seven_motion.h"
 #include "nd_seven_objects.h"
 #include "nd_seven_ground.h"
+#include <nd/field.h>
 #include <string.h>
 
 #define SCALE 2
@@ -148,6 +149,7 @@ ndw_tile_t nd_seven_convert_tile(const nd_map_tile_t *m)
 	if (m->flags & ND_MAP_FLAG_ROOM)   t.flags |= NDW_F_ROOM;
 	if (m->flags & ND_MAP_FLAG_PLAYER) t.flags |= NDW_F_PLAYER;
 	if (m->flags & ND_MAP_FLAG_ENTITY) t.flags |= NDW_F_ENTITY;
+	if ((m->flags & ND_MAP_FLAG_WATER) || m->bio_idx == 0) t.flags |= NDW_F_WATER;
 	t.glyph[0] = m->side_l; t.glyph[1] = m->symbol; t.glyph[2] = m->side_r;
 	t.fg[0] = m->fg_l & 15; t.fg[1] = m->fg & 15; t.fg[2] = m->fg_r & 15;
 	return t;
@@ -283,15 +285,14 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 		centre_remember(st, pos, t);
 		return 1;
 	} else {
-		if (col < 0) col = 0;
-		if (row < 0) row = 0;
-		if (col >= w) col = w - 1;
-		if (row >= h) row = h - 1;
-		*t = nd_seven_convert_tile(&md->tiles[row * md->width + col]);
-		t->flags &= (uint8_t)~(NDW_F_ROOM | NDW_F_PLAYER);
+		memset(t, 0, sizeof(*t));
+		int32_t wx = (int32_t)pos[0] * NDW_TILE_W + (NDW_TILE_W / 2);
+		int32_t wy = -(int32_t)pos[1] * NDW_TILE_H + (NDW_TILE_H / 2);
+		uint16_t world = (uint16_t)pos[3];
+		nd_field_sample_t fs = nd_field_sample(world, 0, wx, wy);
+		t->biome = fs.bio;
+		t->flags = fs.is_water ? NDW_F_WATER : 0;
 		t->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
-		memset(t->glyph, 0, sizeof(t->glyph));
-		memset(t->fg, 0, sizeof(t->fg));
 		return 2;
 	}
 }
@@ -322,6 +323,11 @@ void nd_seven_world_pos(const nd_client_state_t *st, int64_t *wx, int64_t *wy)
 	nd_seven_sync_origin(st);
 	if (wx) *wx = (int64_t)s_pos[0] * NDW_TILE_W + s_lx;
 	if (wy) *wy = (int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly;
+}
+
+int nd_seven_get_world(void)
+{
+	return (int)s_pos[3];
 }
 
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room)

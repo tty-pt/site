@@ -34,6 +34,25 @@ static int on_action_spells(bud_event *e) { (void)e; nd_ui_toggle_modal("spell")
 static int on_action_inv(bud_event *e) { (void)e; ws_send("inventory\n", 10); return 0; }
 static int on_action_look(bud_event *e) { (void)e; ws_send("look\n", 5); return 0; }
 
+int on_cycle_viewport(bud_event *e)
+{
+	(void)e;
+	if (g_driver_count > 1) {
+		g_active_driver_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
+		const nd_viewport_driver_t *drv = nd_get_viewport_driver_at(g_active_driver_idx);
+		if (drv && drv->id) {
+			snprintf(client_state.preferred_driver, sizeof(client_state.preferred_driver), "%s", drv->id);
+			if (strcmp(drv->id, "lamina-seven") == 0) {
+				client_state.layout_mode = ND_LAYOUT_GAME_2D;
+			} else {
+				client_state.layout_mode = ND_LAYOUT_STANDARD_HYBRID;
+			}
+		}
+		bud_app_set_state();
+	}
+	return 0;
+}
+
 bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler)
 {
 	return lx_n("button",
@@ -79,6 +98,21 @@ bud_node *render_action_bar(const nd_client_state_t *st)
 
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
 	bud_append(dock, make_btn("👁", "Look", on_action_look));
+
+	int allow_choice = !st || !(st->pres_flags & ND_REGION_LOCKED);
+	if (g_driver_count > 1 && allow_choice) {
+		int next_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
+		const char *icon = "📺";
+		if (g_viewport_drivers[next_idx].id) {
+			if (strstr(g_viewport_drivers[next_idx].id, "lamina"))
+				icon = "🎮";
+			else if (strstr(g_viewport_drivers[next_idx].id, "webgl") || strstr(g_viewport_drivers[next_idx].id, "3d"))
+				icon = "🧊";
+		}
+		bud_node *vbtn = make_btn(icon, "Switch Viewport", on_cycle_viewport);
+		bud_set_attr(vbtn, "data-bud-action", "cycle-viewport");
+		bud_append(dock, vbtn);
+	}
 
 	return dock;
 }

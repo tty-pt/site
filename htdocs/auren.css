@@ -1,0 +1,248 @@
+.auren-container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.auren-header {
+  border-bottom: 1px solid var(--border-color, #333);
+  padding-bottom: 1rem;
+}
+
+.auren-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.auren-title-row h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.auren-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.badge-gpu-on {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge-gpu-wait {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.auren-desc {
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+  color: var(--text-muted, #888);
+  line-height: 1.5;
+}
+
+.auren-model-bar {
+  margin-top: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #aaa;
+}
+
+.auren-select {
+  background: var(--bg-card, #1a1a1a);
+  border: 1px solid var(--border-color, #444);
+  color: #fff;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.auren-progress-box {
+  margin-top: 0.75rem;
+  background: var(--bg-card, #1a1a1a);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.auren-progress-label {
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  color: #bbb;
+}
+
+.auren-progress-bar {
+  height: 8px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.auren-progress-fill {
+  height: 100%;
+  background: #3b82f6;
+  transition: width 0.2s ease;
+}
+
+.auren-cache-pill {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #22c55e;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.auren-chat-viewport {
+  min-height: 320px;
+  max-height: 520px;
+  overflow-y: auto;
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border-color, #2a2a2a);
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.auren-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: #666;
+  font-style: italic;
+}
+
+.auren-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.8rem 1rem;
+  border-radius: 8px;
+  max-width: 85%;
+  line-height: 1.5;
+}
+
+.auren-msg.msg-user {
+  align-self: flex-end;
+  background: #1e3a8a;
+  color: #f0f9ff;
+  border-bottom-right-radius: 2px;
+}
+
+.auren-msg.msg-assistant {
+  align-self: flex-start;
+  background: #1f2937;
+  color: #f3f4f6;
+  border-bottom-left-radius: 2px;
+}
+
+.auren-msg-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+
+.auren-msg-body {
+  word-break: break-word;
+}
+
+.auren-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  background: #38bdf8;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: auren-blink 1s infinite;
+}
+
+@keyframes auren-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.auren-input-bar {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.auren-input-bar input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: var(--bg-card, #1a1a1a);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.auren-input-bar input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.auren-input-bar button {
+  padding: 0.75rem 1.5rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.auren-input-bar button:hover {
+  background: #1d4ed8;
+}
+
+.auren-quick-prompts {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.quick-label {
+  color: #666;
+}
+
+.btn-chip {
+  background: #262626;
+  border: 1px solid #404040;
+  color: #ccc;
+  padding: 0.3rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-chip:hover {
+  background: #333;
+  color: #fff;
+  border-color: #666;
+}

@@ -141,9 +141,14 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/DESIGN.md`](./docs/DESIGN.md)** | Component encapsulation, abstraction barriers, and architectural boundaries. |
 | **[`docs/CONVENTIONS.md`](./docs/CONVENTIONS.md)** | C coding style, request handlers, form parsing, XY macros, and preprocessor constraints. |
 
-### NeverDark MUCK & 3D WebGL Subsystem
+### NeverDark MUCK, Procedural Terrain & 3D WebGL
 | Document | Focus |
 | :--- | :--- |
+| **[`docs/25D.md`](./docs/25D.md)** | **2.5D Seven continuous 3D terrain specification**: 55° diorama camera, continuous heightfield meshes, and billboard entity anchors. |
+| **[`docs/RECUR_NOISE.md`](./docs/RECUR_NOISE.md)** | **Recursive noise mathematics**: pure-integer spatial subdivision (`noise_fix_v`), dimensional collapse, and octave hierarchy. |
+| **[`docs/WATER_REQUIREMENTS.md`](./docs/WATER_REQUIREMENTS.md)** | **Authoritative water specification**: Beer-Lambert volumetric optical absorption ($L = d / \cos\theta$) and physical parameters. |
+| **[`docs/SHORE.md`](./docs/SHORE.md)** | **Seamless shoreline & bathymetry**: continuous 7×7 depth fields, organic coastlines, and topological boundary invariants. |
+| **[`docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md`](./docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md)** | **Multi-scale GPU architecture**: client WebGL acceleration, server zero-OpenGL invariant, and stratosphere scaling. |
 | **[`docs/NEXT_GEN_ND_ARCHITECTURE.md`](./docs/NEXT_GEN_ND_ARCHITECTURE.md)** | Master specification: single-socket WebSocket multiplexer, declarative BCP framework, reactive 3D/2D scene synchronizer, and SSR state hydration. |
 | **[`docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md`](./docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md)** | Operational deployment guide: single-port architecture, seeder, and automated E2E test harness. |
 | **[`docs/ND-VIEWPORTS.md`](./docs/ND-VIEWPORTS.md)** | Viewport drivers: ANSI TTY terminal, 2D Lamina tilemap, and WebGL 3D scene engine. |
@@ -168,6 +173,7 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/TESTING.md`](./docs/TESTING.md)** | Unit, integration, and Playwright end-to-end testing requirements. |
 | **[`docs/EXTENSIONS.md`](./docs/EXTENSIONS.md)** | Pi coding agent extension workflows and custom agent commands. |
 | **[`docs/ADVANCED_GIT_RECOVERY.md`](./docs/ADVANCED_GIT_RECOVERY.md)** | Git recovery workflows, reflog reconstruction, and submodule state preservation. |
+| **[`docs/archive/`](./docs/archive/)** | Completed architecture journals (`ST.md`, `NO_WIZ.md`), past release wave records, and historical audits. |
 
 ---
 
@@ -213,7 +219,8 @@ sh scripts/check-module-boundaries.sh   # enforces strict cross-module encapsula
 - **`/gig`** — Gigs and setlists with transpose settings and format tags.
 - **`/mpfd`** — Streaming multipart/form-data parser.
 - **`/site_chrome`** — WASM client chrome enhancement (`htdocs/site_chrome.wasm`).
-- **`/nd`** — Isomorphic frontend reactor for NeverDark MUCK (`mods/nd/ux/` $\rightarrow$ `nd.so` & `nd.wasm`) with pluggable TTY, Lamina 2D, and WebGL 3D viewports.
+- **`/auren`** — Local in-browser WebAssembly LLM inference engine (`mods/auren/ux/` $\rightarrow$ `auren.so` & `auren_fe.wasm`) powered by `axil-auren`.
+- **`/nd`** — Isomorphic frontend reactor for NeverDark MUCK (`mods/nd/ux/` $\rightarrow$ `nd.so` & `nd.wasm`) with pluggable TTY, Lamina 2D, and Seven 2.5D/3D toroidal planetary WebGL viewports.
 
 ### Core Infrastructure Submodules (`external/`)
 - **`axil`** — Single-port HTTP/WebSocket network daemon and transport multiplexer.
@@ -222,6 +229,8 @@ sh scripts/check-module-boundaries.sh   # enforces strict cross-module encapsula
 - **`libbud`** — Pure virtual DOM tree builder and SSR serializer.
 - **`libhyle`** — Relational schema engine, query planner, and full-text search index.
 - **`libhyle-bud`** — Bridge connecting Hyle schema hints to Bud UI binders.
-- **`liblamina`** — 2D software tile blitter and WebGL hardware acceleration bridge.
+- **`libstele`** — Universal system substrate (`<ttypt/stele.h>`, `<ttypt/iso.h>`) and single shared WebAssembly allocator (`@tty-pt/stele`).
+- **`libnoise`** & **`libchunk`** — Pure-integer multi-scale recursive 1/f noise (`libchaff`), toroidal solar/climate geometry, and 16-level quadtree spatial LOD hierarchy.
+- **`liblamina`** — 2D software tile blitter and 2.5D/3D WebGL continuous heightfield & Beer-Lambert water optics bridge.
 - **`axil-nd`** — NeverDark MUCK server engine with 4D spacetime universe simulation.
 - **`nd-*`** — 19 gameplay and content tenant modules (`nd-attr`, `nd-equip`, `nd-fight`, `nd-spell`, `nd-shop`, `nd-level`, `nd-mortal`, `nd-race`, `nd-class`, `nd-mob`, `nd-biome`, `nd-plant`, `nd-drink`, `nd-seat`, `nd-stone`, `nd-vanilla`, `nd-wts`, `nd-other`).

@@ -1,6 +1,9 @@
 htdocs /*.css
 htdocs /*.js
 htdocs /*.wasm
+htdocs /*.gguf
+htdocs /models/*
+htdocs /vendor/*
 # external/axil-nd/{htdocs,art} are primary asset authorities post-chroot (relative to site root).
 external/axil-nd/htdocs /nd/*
 external/axil-nd/art /nd/art/*

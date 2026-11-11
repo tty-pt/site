@@ -81,83 +81,32 @@ make watch          # auto-rebuild + restart on :8080
      Send pi-quest-bundle.zip containing current code and latest run diagnostics.
      ```
 
-8. **Test-Driven Development (TDD) & Quality Gates.**
-   - **Build & Run First**: Discover how to build (`make`) and run (`make watch`) the project before editing feature code.
-   - **Write Tests First**: Develop unit/integration/E2E tests (`make test`) BEFORE writing feature code.
-   - **Iterative Loop**: Feature implementation $\rightarrow$ `make` $\rightarrow$ run/verify $\rightarrow$ test.
-   - **Final Quality Gates**: Build completes with zero errors, code contains zero debug artifacts (no temp logs or leftover debug code), and the full test suite (`make test`) passes with zero failures.
+8. **Targeted Verification Hierarchy & Quality Gates.**
+   - **Scope-Calibrated Actions First**: When code changes, perform ONLY the targeted rebuild and test actions corresponding to the modified files. Never run `make test` for single-module, UI, or client asset fixes.
+   - **Tiered Verification Hierarchy**:
+     - **Tier 0 (Targeted Module / UX / Asset)**:
+       - *Server-Side C Module* (`mods/<M>/*.c`, `include/*.h`): `make -C mods/<M>` (or `make mods`), then `make test-mod MOD=<M>` (or `(cd mods/<M> && ./test.sh)`).
+       - *Client-Side Isomorphic UX* (`mods/<M>/ux/*.c`): dual-compile with `make -C mods/<M>` (SSR) and `make site-wasm` (browser WASM), then verify with `sh scripts/check-module-boundaries.sh` and `sh scripts/check-wasm-imports.sh`.
+       - *Client Scripts / WebGL Bridge* (`htdocs/*.js`, `external/liblamina/`): sync to `htdocs/`, then `sh scripts/check-no-site-specific-js.sh` and targeted unit check (e.g. `sh tests/unit/run-test-lamina-bridge.sh`).
+       - *Core C Libraries* (`external/lib<L>/`): `make <L>-lib`, then `tests/unit/run-<L>-*.sh` or `make standalone-unit-tests`.
+       - *Harness / Tooling* (`.pi/extensions/pi-quest/`): `deno test --allow-all tests/` and `deno run --allow-all scripts/check-complexity.ts`.
+     - **Tier 1 (Fast Repo Suite)**: `make test-fast` (runs boundary check, C unit tests, and standalone unit tests in < 3 seconds without spawning background daemons or Deno E2E).
+     - **Tier 2 (Integration Suite)**: `make test-integration` (runs pages tests, server daemon tests, and WASM package suites).
+     - **Tier 3 (Monolithic Suite)**: `make test` (RESERVED ONLY for cross-cutting core architectural changes affecting the HTTP server daemon, TCP socket pipeline, or primary data engine storage).
+   - **Final Quality Gates**: Target builds complete with zero compiler errors, code contains zero debug artifacts (no temp logs or leftover debug code), and the relevant targeted test commands pass cleanly with exit code 0.
 
-## axil-nd (sibling module port) — build, run & test
+9. **Abstraction-First Test-Driven Development & Integration Sequencing.**
+   Always implement with tests for each individual abstraction (e.g. `libislet`, `libchunk`). Test each abstraction thoroughly with standalone unit suites as its part is completed, then code the integration across consuming modules (e.g. `Seven`, `Lamina`), then test the full end-to-end integration. Never integrate unverified abstractions or attempt monolithic cross-module wiring before unit verification.
 
-Sibling repo **`~/axil-nd`**: NeverDark MUCK engine as a generic axil module
-(`libaxil-nd.so`), port status + remaining work in `~/nd/ND_PORT.md` (what is
-missing to complete the port; the old full-plan file was removed). Builds
-against the **system-installed**
-axil/corm/xylem (`/usr/bin/axil`, headers `/usr/include/ttypt`, libs
-`/lib`+`/usr/lib`).
+## Sibling Repositories & External Services
 
-```sh
-make                  # builds lib/libaxil-nd.so (+ lib/axil-nd.so SONAME link)
-./test                # RUN the suite (test.sh). NOTE: `make test` only bakes
-                      #   test.sh into a `test` artifact (mk recipe) — it does
-                      #   NOT run it. Use ./test or ./test.sh.
-```
-
-Run manually (module loader appends `.so`, so pass the SONAME path):
-
-```sh
-( LD_LIBRARY_PATH=$PWD/lib axil -d -A -p 28000 -m /home/quirinpa/axil-nd/lib/axil-nd & )
-```
-
-Known issues:
-- `test.sh` flakes ~1 in 4 (`FAIL: no 101 in response` — real connection gets
-  `HTTP/1.1 200 OK`+COOP instead of 101). Recorded in `~/nd/ND_PORT.md`
-  (Known quirks);
-  first check: does `~/axil-tty/test.sh` (identical structure) flake too?
-- `make` prints `find: './htdocs': No such file or directory` — harmless
-  (htdocs/ is gitignored/absent, same as axil-tty).
-- After debug sessions run `pgrep -x axil` to catch stray axil daemons left
-  on fixed ports.
-
-Key axil wiring (verified from axil source): `on_axil_connect` fires ONLY on
-WS upgrade; raw TCP accepts use the weak `axil_accept` hook; returning <0
-from `on_axil_parse` skips `cmd_parse` (which routes HTTP methods, so it must
-pass through for HTTP/WS-upgrade requests). See `~/nd/ND_PORT.md` (Library
-usage findings + Locked decisions).
-
-## axil-auren (local LLM inference engine) — build, run & test
-
-Local LLM inference, OpenAI-compatible streaming chat, and dense vector embeddings engine
-running on port 4242 (`libaxil-auren.so`). Full guide and Pi agent setup in `docs/LOCAL_LLM.md`.
-To build custom semantic and hybrid search engines with `axil-auren`, `libsepal`, and `liblemma`, see `docs/SEMANTIC_SEARCH.md`.
-
-```sh
-# Turnkey server launcher:
-/home/quirinpa/axil-auren/scripts/auren-server
-
-# Run standalone engine unit suite:
-LD_LIBRARY_PATH=/home/quirinpa/axil-auren/lib \
-/home/quirinpa/axil-auren/bin/engine-test ~/.models/qwen2.5-0.5b-instruct.gguf
-```
-
-## axil-resume-search (PDF resume ingestion & job semantic search HTTP service) — build, run & test
-
-Pure-C Axil service module providing `POST /resume` (PDF upload via multipart/raw/JSON, `pdftotext` extraction, file persistence in `uploads/`, vector generation via `axil-auren` on port 4242, persistent vector storage in `libsepal`, lexical indexing in `liblemma`, metadata in `libcorm`), `GET /candidates` (candidate semantic and hybrid matching against job opportunity descriptions), `GET /resume/file` (PDF file download), and an interactive browser UI form at `GET /`.
-
-```sh
-# Turnkey launcher (runs on :8092 by default):
-./external/axil-resume-search/run.sh
-
-# Run end-to-end integration test suite:
-make -C external/axil-resume-search test
-```
-
-Full documentation and curl examples in `external/axil-resume-search/README.md`.
+Operational guides, build steps, and test instructions for sibling ports and auxiliary services (`axil-nd`, `axil-auren`, and `axil-resume-search`) are maintained in `docs/SIBLING_REPOS.md`.
 
 ## Topic index
 
 | Topic | Read |
 |-------|------|
+| Sibling repositories (`axil-nd`, `axil-auren`, `axil-resume-search`) | `docs/SIBLING_REPOS.md` |
 | 5-min orientation: stack, framework-pair model, request path, unbreakable rules | `docs/OVERVIEW.md` |
 | Local LLM inference, session continuity & Pi agent integration | `docs/LOCAL_LLM.md` |
 | Invariants & checklists | `docs/GOALS.md` |
@@ -174,4 +123,11 @@ Full documentation and curl examples in `external/axil-resume-search/README.md`.
 | Web HAL specification (C systems web runtime) | `docs/WEB_HAL_SPECIFICATION.md` |
 | Web HAL implementation plan (rollout roadmap) | `docs/WEB_HAL_IMPLEMENTATION_PLAN.md` |
 | Custom semantic & hybrid search (`axil-auren`, `libsepal`, `liblemma`) | `docs/SEMANTIC_SEARCH.md` |
+| Realistic pure-C water for the NeverDark Seven stage (handoff) | `docs/handoff-water-realism.md` |
+| NeverDark 2.5D Seven continuous 3D terrain renderer specification | `docs/25D.md` |
+| Recursive noise algorithm & libnoise/chaff mathematical foundation | `docs/RECUR_NOISE.md` |
+| Physical water optics, volumetric absorption & rendering specification | `docs/WATER_REQUIREMENTS.md` |
+| Seamless shoreline & continuous bathymetry ("chunks can't disagree") | `docs/SHORE.md` |
+| Multi-scale noise, client GPU acceleration & stratosphere architecture | `docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md` |
+| Hyle ecosystem & cross-framework convergence (React/Next.js) | `ROADMAP.md` |
 | Axil PDF resume ingestion & job search service (`axil-resume-search`) | `external/axil-resume-search/README.md` |

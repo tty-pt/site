@@ -1,7 +1,10 @@
 #include "nd_ui_internal.h"
 #include <ttypt/axil-ws.h>
 #include <ttypt/lam.h>
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
+#include "nd_seven_shader.h"
+#include "nd_seven_ground.h"
+#include "nd_seven.h"
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
@@ -15,6 +18,8 @@ int g_stage_w = ND_CANVAS_W, g_stage_h = ND_CANVAS_H;
 #define ND_STAGE_MAX_W 2560
 #define ND_STAGE_MAX_H 1440
 int g_ui_initialized = 0;
+
+static void seven_stage_redraw(void);
 
 char g_active_modal[32] = {0};
 
@@ -62,6 +67,64 @@ static bud_node *mount_tty(void)
 		lx_attr("data-line-mode", "true"),
 		lx_attr("style", "border: thin solid #9589c5 !important;"),
 		lx_attr("class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative"));
+}
+
+static int s_chat_expanded = 0;
+
+int nd_ui_get_chat_expanded(void)
+{
+	return s_chat_expanded;
+}
+
+void nd_ui_set_chat_expanded(int expanded)
+{
+	s_chat_expanded = expanded ? 1 : 0;
+}
+
+static int on_toggle_chat(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	s_chat_expanded = !s_chat_expanded;
+	bud_app_set_state();
+	return 0;
+}
+
+static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
+{
+	(void)st;
+	bud_node *chat = bud_element("div");
+	bud_set_attr(chat, "id", "rpg-chat");
+	bud_set_attr(chat, "class", s_chat_expanded
+		? "rpg-chat chat-expanded pointer-events-auto"
+		: "rpg-chat chat-compact pointer-events-auto");
+
+	/* Header bar with title and toggle button */
+	bud_node *hdr = bud_element("div");
+	bud_set_attr(hdr, "class", "chat-header select-none");
+
+	bud_node *title = bud_element("div");
+	bud_set_attr(title, "class", "flex items-center gap-1.5 font-bold text-neutral-200");
+	bud_append(title, bud_text("💬 Chat & Console"));
+	bud_append(hdr, title);
+
+	bud_node *btn = bud_element("button");
+	bud_set_attr(btn, "type", "button");
+	bud_set_attr(btn, "id", "chat-toggle-btn");
+	bud_set_attr(btn, "class", "px-1.5 py-0.5 rounded text-[11px] font-bold bg-neutral-800/80 hover:bg-neutral-700 text-neutral-200 border border-neutral-600/50 cursor-pointer");
+	bud_append(btn, bud_text(s_chat_expanded ? "▼ Minimize" : "▲ Expand"));
+	bud_bind(btn, "click", 1, on_toggle_chat);
+	bud_append(hdr, btn);
+	bud_append(chat, hdr);
+
+	/* Embedded xterm container */
+	bud_node *term = lx_n("div",
+		lx_attr("id", "term"),
+		lx_attr("data-bud-terminal", "1"),
+		lx_attr("data-line-mode", "true"),
+		lx_attr("class", "flex-1 w-full h-full min-h-0 font-mono text-neutral-200 overflow-hidden relative bg-transparent"));
+	bud_append(chat, term);
+
+	return chat;
 }
 
 nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS] = {0};
@@ -114,6 +177,17 @@ const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
 	return &g_viewport_drivers[idx];
 }
 
+static int s_enable_3d_terrain = 1;
+
+static int on_toggle_3d(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	s_enable_3d_terrain = !s_enable_3d_terrain;
+	nd_seven_set_3d_mode(s_enable_3d_terrain);
+	bud_app_set_state();
+	return 0;
+}
+
 static bud_node *mount_seven_stage(void)
 {
 	/* A different tag than the terminal's <div>: swapping stages must replace
@@ -124,7 +198,7 @@ static bud_node *mount_seven_stage(void)
 	 * The stage fills its holder: the canvas is resized by the lamina bridge
 	 * to whatever frame size the stage draws (data-bud-canvas-fit), 1:1 with
 	 * the screen, so the sprite scale never changes. */
-	return lx_n("nd-stage",
+	bud_node *stage = lx_n("nd-stage",
 		lx_attr("id", "game-stage"),
 		lx_attr("class", "absolute inset-0 min-w-0 min-h-0 overflow-hidden bg-neutral-950"),
 		lx_node(lx_n("canvas",
@@ -134,6 +208,17 @@ static bud_node *mount_seven_stage(void)
 			lx_attr("width", "640"),
 			lx_attr("height", "480"),
 			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))));
+
+	bud_node *btn = bud_element("button");
+	bud_set_attr(btn, "type", "button");
+	bud_set_attr(btn, "id", "toggle-3d-btn");
+	bud_set_attr(btn, "class", "cursor-pointer select-none");
+	bud_set_attr(btn, "style", "position:absolute;top:12px;left:12px;z-index:40;width:auto;height:auto;min-width:76px;padding:4px 10px;white-space:nowrap;background:rgba(24,24,27,0.88);color:#f5f5f5;border:1px solid rgba(255,255,255,0.25);border-radius:4px;cursor:pointer;font-family:monospace;font-weight:bold;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.6);");
+	bud_append(btn, bud_text(s_enable_3d_terrain ? "Mode: 3D" : "Mode: 2D"));
+	bud_bind(btn, "click", 1, on_toggle_3d);
+	bud_append(stage, btn);
+
+	return stage;
 }
 
 static const nd_viewport_driver_t s_seven_driver = {
@@ -154,6 +239,7 @@ void nd_ui_init_defaults(void)
 {
 	if (g_ui_initialized) return;
 	g_ui_initialized = 1;
+	nd_seven_set_3d_mode(s_enable_3d_terrain);
 	nd_scene_init(&g_scene);
 	nd_register_viewport_driver(&s_tty_driver);
 	nd_register_viewport_driver(&s_seven_driver);
@@ -301,15 +387,17 @@ static bud_node *render_viewport_slot(const nd_client_state_t *st)
 		vport = mount_tty();
 	}
 
+	bud_node *wrap = bud_element("div");
+	bud_set_attr(wrap, "id", "viewport-container");
+	bud_set_attr(wrap, "class", "relative flex-1 flex flex-col min-w-0 min-h-0");
+	bud_set_attr(wrap, "data-bud-key", "viewport-container");
+	bud_append(wrap, vport);
+
 	bud_node *overlay = nd_ui_glue_render_slot(ND_UI_SLOT_HUD_OVERLAYS, st);
 	if (overlay) {
-		bud_node *wrap = bud_element("div");
-		bud_set_attr(wrap, "class", "relative flex-1 flex flex-col min-w-0 min-h-0");
-		bud_append(wrap, vport);
 		bud_append(wrap, overlay);
-		return wrap;
 	}
-	return vport;
+	return wrap;
 }
 
 static int on_dismiss_target(bud_event *ev)
@@ -326,17 +414,25 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 	bud_set_attr(wrap, "id", "contents");
 	bud_set_attr(wrap, "class", "nd-contents w-full");
 
-	uint32_t active_loc = (st && st->target_ref) ? st->target_ref : (st ? st->room.ref : 0);
 	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
+	uint32_t container_target = (st && st->target_ref && !is_inventory) ? st->target_ref : 0;
 
 	int any = 0;
 	if (st) {
 		for (size_t i = 0; i < st->entity_count; i++) {
 			const nd_entity_desc_t *e = &st->entities[i];
-			if (!is_inventory && st->me && e->ref == st->me)
+			if (st->me && e->ref == st->me)
 				continue;
-			if (active_loc && e->location != active_loc)
-				continue;
+			if (is_inventory) {
+				if (!st->me || e->location != st->me)
+					continue;
+			} else if (container_target) {
+				if (e->location != container_target)
+					continue;
+			} else {
+				if (st->me && e->location == st->me)
+					continue;
+			}
 			any = 1;
 
 			bud_node *row = bud_element("nd-item");
@@ -344,6 +440,9 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			snprintf(ref_buf, sizeof(ref_buf), "%u", e->ref);
 			bud_set_attr(row, "data-ref", ref_buf);
 			bud_set_attr(row, "data-item-ref", ref_buf);
+			char row_key[48];
+			snprintf(row_key, sizeof(row_key), "item-%s", ref_buf);
+			bud_set_attr(row, "data-bud-key", row_key);
 			bud_set_attr(row, "title", e->name);
 
 			int is_selected = (st && st->selected_item_ref == e->ref);
@@ -395,7 +494,9 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_set_attr(look, "data-action", "look");
 			bud_set_attr(look, "data-cmd", look_cmd);
 			bud_set_attr(look, "class", "nd-pad btn text-xs");
-			bud_set_attr(look, "title", "Look");
+			char look_title[64];
+			snprintf(look_title, sizeof(look_title), "Look %s", e->name);
+			bud_set_attr(look, "title", look_title);
 			bud_append(look, bud_text("👁"));
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
@@ -433,6 +534,7 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 
 	if (!any) {
 		bud_node *empty = bud_element("div");
+		bud_set_attr(empty, "data-bud-key", "empty-contents");
 		bud_set_attr(empty, "class", "nd-empty italic select-none");
 		bud_append(empty, bud_text(is_inventory ? "Inventory is empty." : "Nothing here."));
 		bud_append(wrap, empty);
@@ -514,7 +616,7 @@ static bud_node *render_modals_slot(const nd_client_state_t *st)
 
 static int nd_ui_seven_active(const nd_client_state_t *st)
 {
-	return st && strcmp(st->preferred_driver, "lamina-seven") == 0;
+	return st && (strcmp(st->preferred_driver, "lamina-seven") == 0 || st->layout_mode == ND_LAYOUT_GAME_2D);
 }
 
 static int on_key_up(bud_event *e)
@@ -532,6 +634,19 @@ static int on_key_down(bud_event *e)
 		return 0;
 
 	if (nd_ui_seven_active(&client_state)) {
+		if (strcmp(key, "+") == 0 || strcmp(key, "=") == 0 || strcmp(key, "]") == 0 || strcmp(key, "PageUp") == 0) {
+			nd_seven_zoom_in();
+			seven_stage_redraw();
+			return 1;
+		} else if (strcmp(key, "-") == 0 || strcmp(key, "_") == 0 || strcmp(key, "[") == 0 || strcmp(key, "PageDown") == 0) {
+			nd_seven_zoom_out();
+			seven_stage_redraw();
+			return 1;
+		} else if (strcmp(key, "0") == 0 || strcmp(key, ")") == 0) {
+			nd_seven_set_zoom(1.0f);
+			seven_stage_redraw();
+			return 1;
+		}
 		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
 			char act[64];
 			if (nd_seven_action_execute(&client_state, act, sizeof(act)) > 0) {
@@ -590,7 +705,7 @@ static void apply_room_backdrop(bud_node *main_box, const nd_client_state_t *st)
 static bud_node *render_room_header(const nd_client_state_t *st)
 {
 	if (!st || (!st->room.name[0] && !st->room.ref))
-		return bud_element("div");
+		return lx_n("div", lx_attr("id", "room-header"), lx_attr("class", "hidden"));
 
 	char text[128];
 	if (st->room.name[0]) {
@@ -608,28 +723,82 @@ static bud_node *render_room_header(const nd_client_state_t *st)
 bud_node *nd_ui_render(const nd_client_state_t *st)
 {
 	nd_ui_init_defaults();
+	if (st && st->preferred_driver[0]) {
+		for (size_t i = 0; i < g_driver_count; i++) {
+			if (strcmp(g_viewport_drivers[i].id, st->preferred_driver) == 0) {
+				g_active_driver_idx = (int)i;
+				break;
+			}
+		}
+	}
 
 	bud_node *vport = render_viewport_slot(st);
 	bud_node *map = render_room_map(st);
 	bud_node *modals = render_modals_slot(st);
 
-	if (st && st->layout_mode == ND_LAYOUT_GAME_2D) {
-		/* Clean 2D Game Layout: render ONLY vport (game canvas) and map (minimap) */
+	int is_seven = (nd_ui_seven_active(st) || (st && st->layout_mode == ND_LAYOUT_GAME_2D));
+
+	if (is_seven) {
+		/* Full Seven Stage with floating RPG Chat Terminal and Right HUD */
 		bud_node *holder = bud_element("div");
 		bud_set_attr(holder, "id", "holder");
 		bud_set_attr(holder, "class", "nd game-2d-mode relative flex flex-col flex-1 min-h-0 w-full overflow-hidden");
 		bud_append(holder, vport);
-		if (map) {
-			/* The mini-map floats on top of the full-screen stage. */
-			bud_node *overlay = bud_element("div");
-			bud_set_attr(overlay, "id", "map-overlay");
-			bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end");
-			bud_set_attr(overlay, "style", "top:12px;right:12px");
-			bud_node *room_hdr = render_room_header(st);
-			if (room_hdr) bud_append(overlay, room_hdr);
-			bud_append(overlay, map);
-			bud_append(holder, overlay);
+
+		/* Floating RPG Chat Terminal (translucent, expandable/collapsible) */
+		bud_node *chat = render_rpg_chat_terminal(st);
+		bud_append(holder, chat);
+
+		/* Floating HUD Overlay on top-right: room header, minimap, target card, room contents, gauges */
+		bud_node *overlay = bud_element("div");
+		bud_set_attr(overlay, "id", "map-overlay");
+		bud_set_attr(overlay, "class", "absolute z-10 opacity-90 pointer-events-none flex flex-col gap-1 items-end max-w-[340px] max-h-[calc(100vh-100px)] overflow-y-auto");
+		bud_set_attr(overlay, "style", "top:12px;right:12px");
+
+		bud_node *room_hdr = render_room_header(st);
+		if (room_hdr) {
+			bud_set_attr(room_hdr, "data-bud-key", "room-header");
+			bud_append(overlay, room_hdr);
 		}
+
+		if (map) {
+			bud_node *map_box = bud_element("div");
+			bud_set_attr(map_box, "data-bud-key", "minimap");
+			bud_set_attr(map_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden");
+			bud_append(map_box, map);
+			bud_append(overlay, map_box);
+		}
+
+		if (st && st->target_ref) {
+			bud_node *tc = render_target_card(st);
+			bud_node *tc_box = bud_element("div");
+			bud_set_attr(tc_box, "data-bud-key", "target-card");
+			bud_set_attr(tc_box, "class", "pointer-events-auto shadow-lg rounded overflow-hidden");
+			bud_append(tc_box, tc);
+			bud_append(overlay, tc_box);
+		}
+
+		bud_node *contents = render_room_contents(st);
+		if (contents) {
+			bud_node *cnt_box = bud_element("div");
+			bud_set_attr(cnt_box, "data-bud-key", "contents");
+			bud_set_attr(cnt_box, "class", "rpg-hud-panel pointer-events-auto p-1.5 w-full flex flex-col flex-1 min-h-[60px] max-h-[50vh] overflow-y-auto");
+			bud_append(cnt_box, contents);
+			bud_append(overlay, cnt_box);
+		}
+
+		bud_node *gauges = render_gauges_slot(st);
+		bud_node *actions = render_action_bar(st);
+		if (gauges || actions) {
+			bud_node *stat_box = bud_element("div");
+			bud_set_attr(stat_box, "data-bud-key", "action-dock");
+			bud_set_attr(stat_box, "class", "rpg-hud-panel pointer-events-auto flex flex-col gap-1 items-end p-1.5 w-full");
+			if (gauges) bud_append(stat_box, gauges);
+			if (actions) bud_append(stat_box, actions);
+			bud_append(overlay, stat_box);
+		}
+
+		bud_append(holder, overlay);
 
 		bud_node *main_box = bud_element("div");
 		bud_set_attr(main_box, "id", "main");
@@ -642,11 +811,12 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
 
 		bud_node *root = bud_tpl(
-			"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+			"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina bud xylem' "
 			"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 			layout);
 
 		bud_bind(root, "cmd", 1, on_cmd_action);
+		bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
 		bud_bind(root, "keydown@window", 0, on_key_down);
 		bud_bind(root, "keyup@window", 0, on_key_up);
 		return root;
@@ -710,11 +880,12 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
 
 	bud_node *root = bud_tpl(
-		"<div id='bud-root' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+		"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina bud xylem' "
 		"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 		layout);
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
+	bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
 	bud_bind(root, "keydown@window", 0, on_key_down);
 	bud_bind(root, "keyup@window", 0, on_key_up);
 	return root;
@@ -738,16 +909,46 @@ static int seven_stage_fit(int width, int height)
 	return 1;
 }
 
+/* 2D/3D Renderer Toggle:
+ * 0 = Legacy 2D CPU software blit into g_lamina_fb via lam_canvas_flush
+ * 1 = Real 3D continuous WebGL terrain grid mesh displaced by elevation and lit by directional sunlight
+ */
 static void seven_stage_redraw(void)
 {
 	if (!seven_stage_fit(g_stage_w, g_stage_h))
 		return;
-	nd_seven_render(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
-	lam_canvas_flush(g_lamina_fb, (uint32_t)g_stage_w, (uint32_t)g_stage_h);
+
+	int64_t wx = 0, wy = 0;
+	nd_seven_world_pos(&client_state, &wx, &wy);
+	float wz = nd_seven_ground_elevation_f((int32_t)wx, (int32_t)wy);
+	float zoom = nd_seven_get_zoom();
+	float eff_cam_dist = ND_SEVEN_CAM_DIST / zoom;
+	float eff_scale = (float)SCALE * zoom;
+	(void)eff_scale;
+
+	/* 3D WebGL terrain mesh pipeline:
+	 * Camera tilted at diorama pitch targeting lamb foot position,
+	 * rendering authentic 3D triangle vertices displaced by continuous elevation H(wx, wy)
+	 * and illuminated by Northwest directional sunlight. */
+	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_YAW, ND_SEVEN_CAM_FOV);
+
+	/* Render scene: in 3D WebGL mode, pass NULL for fb to completely bypass
+	 * redundant CPU software framebuffer rasterization and clears, while
+	 * flushing 3D terrain grid meshes and 3D billboards directly to WebGL! */
+	nd_seven_render(NULL, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
+
+	/* Notice: lam_canvas_flush is intentionally NOT called in 3D mode,
+	 * so the 3D WebGL terrain mesh remains visible on #seven-stage-canvas! */
+
+	/* Reset 2D camera mode for DOM / UI overlays */
+	lam_cam_set_2d();
 }
+
+int g_map_dirty = 0;
 
 ISO_EXPORT(void, wasm_canvas_render, void)
 {
+	nd_seven_ground_build_budget(ND_CHUNK_BUILDS_PER_TICK);
 	if (nd_ui_seven_active(&client_state))
 		seven_stage_redraw();
 	nd_map_canvas_redraw(&client_state);
@@ -775,6 +976,11 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	nd_seven_sync_origin(&client_state);
 	sync_room_objects(&client_state);
 
+	/* Chunk construction is expensive: cap the number of new chunks this
+	 * tick. Tiles without a chunk draw a flat placeholder until built. */
+	nd_seven_ground_build_budget(ND_CHUNK_BUILDS_PER_TICK);
+	int map_on = nd_map_canvas_enabled(&client_state);
+
 	/* Phase 3: Simulation */
 	if (now_seven) {
 		int mv = nd_seven_tick(&client_state, dt);
@@ -782,15 +988,29 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 			char m[2] = { (char)mv, '\n' };
 			ws_send(m, 2);
 		}
-		/* Phase 4: Presentation (Pure drawing without state mutation) */
-		if ((s_tick_counter % 2) == 0) {
-			seven_stage_redraw();
-			/* Same cadence as the stage: the minimap follows the lamb in
-			 * lockstep instead of lagging a frame behind. */
+		/* Phase 4: Presentation (Pure drawing without state mutation)
+		 * Seven stage redraws every tick at native display refresh (60Hz / 120Hz). */
+		seven_stage_redraw();
+		if (map_on && (g_map_dirty || (s_tick_counter % 2) == 0)) {
 			nd_map_canvas_redraw(&client_state);
+			g_map_dirty = 0;
 		}
-	} else if ((s_tick_counter % 3) == 0) {
+	} else if (map_on && (g_map_dirty || (s_tick_counter % 3) == 0)) {
+		/* Server frames only mark the map dirty (nd_state_io.c); the
+		 * redraw happens here, never inside the websocket handler. */
 		nd_map_canvas_redraw(&client_state);
+		g_map_dirty = 0;
+	}
+
+	/* Renderer-independent chunk lifetime: with neither the Seven stage
+	 * nor a canvas map enabled nothing may stay cached; otherwise free
+	 * every chunk that left the 7x7 view window. */
+	if (!now_seven && !map_on) {
+		g_map_dirty = 0;
+		if (nd_seven_chunk_count() > 0)
+			nd_seven_ground_cache_forget();
+	} else {
+		nd_seven_ground_frame_end(&client_state.map_data);
 	}
 }
 

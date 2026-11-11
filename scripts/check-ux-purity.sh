@@ -47,15 +47,22 @@ is_allowed() {
         "$root/mods/common/ux/site_page.c:1") return 0 ;;
         "$root/mods/common/ux/site_paths.c:1") return 0 ;;
         "$root/mods/common/ux/site_chrome.c:1") return 0 ;;
+        "$root/mods/common/ux/list_bin.c:1") return 0 ;;
         "$root/mods/index/ux/list.c:1") return 0 ;;
         "$root/mods/index/ux/list_filters.c:1") return 0 ;;
         "$root/mods/index/ux/list_json.c:1") return 0 ;;
         "$root/mods/index/ux/list_layout.c:1") return 0 ;;
         "$root/mods/index/ux/list_query.c:1") return 0 ;;
         "$root/mods/index/ux/list_render.c:1") return 0 ;;
+        "$root/mods/index/ux/list_sort.c:1") return 0 ;;
         "$root/mods/chat/ux/chat_ui.c:1") return 0 ;;
+        "$root/mods/auren/ux/auren_ui.c:1") return 0 ;;
         # Specific allowed preprocessor uses
-        "$root/mods/common/ux/site_ui.c:31") return 0 ;;
+        "$root/mods/common/ux/site_ui.c:"*)
+            case "${2:-}" in
+                *__wasm__*) return 0 ;;
+            esac
+            ;;
         "$root/mods/common/ux/site_page.c:"*) return 0 ;;
     esac
     return 1

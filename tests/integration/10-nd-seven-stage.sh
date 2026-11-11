@@ -7,8 +7,13 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 AXIL_BIN="$REPO_ROOT/external/axil/bin/axil"
 [ -x "$AXIL_BIN" ] || AXIL_BIN=axil
+RUNNER="node"
 if ! command -v node >/dev/null || [ ! -d "$REPO_ROOT/node_modules/playwright" ]; then
-	echo "SKIP: 10-nd-seven-stage (node/playwright not installed)"; exit 0
+	if command -v deno >/dev/null; then
+		RUNNER="deno run --allow-all"
+	else
+		echo "SKIP: 10-nd-seven-stage (node/playwright not installed)"; exit 0
+	fi
 fi
 TMP="$(mktemp -d /tmp/nd-sevenstage-XXXXXX)"
 PID=""
@@ -37,8 +42,9 @@ until grep -q "st_init: st_restore: region id=0x0000000000000000" "$log" 2>/dev/
 	tries=$((tries - 1)); [ $tries -gt 0 ] || { echo "daemon did not start"; tail "$log"; exit 2; }
 	sleep 0.1
 done
+sleep 0.5
 
-(cd "$REPO_ROOT" && node tests/integration/nd-seven-stage.mjs "$port")
+(cd "$REPO_ROOT" && $RUNNER tests/integration/nd-seven-stage.mjs "$port")
 rc=$?
 [ $rc -eq 0 ] && echo "PASS: 10-nd-seven-stage"
 exit $rc

@@ -11,11 +11,11 @@
 
 #include "../../common/viewer_zoom.h"
 
-#include <transp/music.h>
-#include <transp/transp_flags.h>
+#include <pitch/music.h>
+#include <pitch/pitch_flags.h>
 #include "../../common/ux/site_music.h"
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 #include "../../common/state_macros.h"
 
 /* List machinery for the song picker (site_ui.c must come first). */
@@ -320,7 +320,7 @@ static bud_node *gig_stl_render(void)
 	        zoom_str, zoom_style, layout);
 
 	/* Root div */
-	g_sb_root = bud_tpl("<div id='bud-root'>%node</div>", g_sb_main);
+	g_sb_root = bud_tpl("<div id='bud-root' data-slot='1'>%node</div>", g_sb_main);
 
 	return g_sb_root;
 }

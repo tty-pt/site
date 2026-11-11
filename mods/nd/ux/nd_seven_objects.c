@@ -375,7 +375,8 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 	if (ti == 0 && tj == 0 && st && st->room.ref) {
 		const nd_scenery_def_t *def = nd_seven_get_scenery_def(o->kind);
 		if (def) {
-			for (size_t i = 0; i < st->entity_count; i++) {
+			size_t ec = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
+			for (size_t i = 0; i < ec; i++) {
 				const nd_entity_desc_t *e = &st->entities[i];
 				if (e->ref != st->me && e->location == st->room.ref &&
 				    !nd_seven_is_picked(e->ref) &&
@@ -408,7 +409,10 @@ void sync_room_objects(const nd_client_state_t *st)
 		return;
 
 	uint32_t ent_hash = 0;
-	for (size_t i = 0; i < st->entity_count; i++) {
+	size_t ec = st->entity_count;
+	if (ec > ND_MAX_ENTITIES)
+		ec = ND_MAX_ENTITIES;
+	for (size_t i = 0; i < ec; i++) {
 		ent_hash ^= (uint32_t)st->entities[i].ref * 31u + (uint32_t)st->entities[i].ch + (uint32_t)st->entities[i].location;
 		for (const char *p = st->entities[i].name; *p; p++)
 			ent_hash = ent_hash * 33u + (uint8_t)*p;
@@ -425,12 +429,12 @@ void sync_room_objects(const nd_client_state_t *st)
 	if (!need_sync)
 		return;
 
-	nd_seven_cache_room_entities(st->room.ref, pos, st->entities, st->entity_count);
+	nd_seven_cache_room_entities(st->room.ref, pos, st->entities, ec);
 
 	s_tracker.room_ref = st->room.ref;
 	memcpy(s_tracker.pos, pos, sizeof(pos));
 	memcpy(s_tracker.glyphs, t.glyph, 3);
-	s_tracker.last_entity_count = st->entity_count;
+	s_tracker.last_entity_count = ec;
 	s_tracker.last_entity_hash = ent_hash;
 	s_tracker.count = 0;
 	s_tracker.bound_entities = 0;
@@ -462,7 +466,7 @@ void sync_room_objects(const nd_client_state_t *st)
 		if (is_depletable && nd_seven_is_tile_obj_picked(pos, obj_slot))
 			s_tracker.objs[k].harvested = 1;
 
-		for (size_t ei = 0; ei < st->entity_count; ei++) {
+		for (size_t ei = 0; ei < ec; ei++) {
 			if (used_entity[ei])
 				continue;
 			const nd_entity_desc_t *e = &st->entities[ei];
@@ -487,7 +491,7 @@ void sync_room_objects(const nd_client_state_t *st)
 		int is_depletable = nd_seven_has_scenery_trait(s_tracker.objs[k].kind, ND_SCENERY_TRAIT_DEPLETABLE);
 		const nd_scenery_def_t *def = nd_seven_get_scenery_def(s_tracker.objs[k].kind);
 
-		for (size_t ei = 0; ei < st->entity_count; ei++) {
+		for (size_t ei = 0; ei < ec; ei++) {
 			if (used_entity[ei])
 				continue;
 			const nd_entity_desc_t *e = &st->entities[ei];
@@ -508,7 +512,7 @@ void sync_room_objects(const nd_client_state_t *st)
 	/* Finalize names and child drop harvest */
 	for (int k = 0; k < cnt; k++) {
 		if (s_tracker.objs[k].entity_ref) {
-			for (size_t si = 0; si < st->entity_count; si++) {
+			for (size_t si = 0; si < ec; si++) {
 				if (st->entities[si].location == s_tracker.objs[k].entity_ref &&
 				    nd_seven_is_picked(st->entities[si].ref)) {
 					s_tracker.objs[k].drop_harvested = 1;
@@ -551,7 +555,8 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	if (s_tracker.objs[k].entity_ref != 0) {
 		if (nd_seven_is_picked(s_tracker.objs[k].entity_ref))
 			return 0;
-		for (size_t ei = 0; ei < st->entity_count; ei++) {
+		size_t ec = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
+		for (size_t ei = 0; ei < ec; ei++) {
 			if (st->entities[ei].ref == s_tracker.objs[k].entity_ref &&
 			    st->entities[ei].location == st->room.ref)
 				return 1;
@@ -777,7 +782,8 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 
 	uint32_t room = st->room.ref;
 	if (room) {
-		for (size_t i = 0; i < st->entity_count; i++) {
+		size_t ec = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
+		for (size_t i = 0; i < ec; i++) {
 			const nd_entity_desc_t *e = &st->entities[i];
 			if (st->me && e->ref == st->me)
 				continue;
@@ -915,7 +921,7 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 	uint32_t room_ref = 0;
 	if (ti == 0 && tj == 0) {
 		ents = st->entities;
-		ent_count = st->entity_count;
+		ent_count = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
 		room_ref = st->room.ref;
 	} else {
 		ents = nd_seven_get_cached_entities(pos, &ent_count, &room_ref);

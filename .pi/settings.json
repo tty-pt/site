@@ -12,13 +12,25 @@
   },
   "compaction": {
     "enabled": true,
-    "reserveTokens": 4096,
-    "keepRecentTokens": 20000
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000,
+    "modelOverrides": {
+      "antigravity-acp/gemini-3.8-flash": {
+        "reserveTokens": 300000
+      },
+      "antigravity-acp/gemini-4-argon": {
+        "reserveTokens": 300000
+      },
+      "quest/auto": {
+        "reserveTokens": 300000
+      }
+    }
   },
   "pi-quest": {
     "askTimeoutMs": 60000,
     "depthCap": 3,
-    "strictMode": true,
+    "reviewPolicy": "balanced",
+    "strictMode": false,
     "draftThresholds": {
       "requirements": 2,
       "evidence": 7
@@ -28,44 +40,64 @@
         "tool": "subagent"
       }
     },
-    "reviewPolicy": "balanced",
     "modelAccuracy": {
+      "antigravity-acp/gemini-4-argon*": 1.0,
+      "antigravity-acp/gemini-3.1-pro*": 0.95,
+      "antigravity-acp/gemini-3.8-flash*": 0.67,
       "anthropic/claude-sonnet-5-5*": 0.95,
       "openai/gpt-4o*": 0.92,
-      "antigravity/gemini-3.8-flash*": 0.85,
       "local/qwen2.5-coder-32b": 0.75,
       "local/qwen*0.5b*": 0.35,
-      "*": 0.75
+      "*": 0.67
     },
     "judgeFallback": "skip",
     "roles": {
       "reviewer": [
-        "antigravity/gemini-3.8-flash",
-        "antigravity/claude-sonnet-5-5",
-        "anthropic/claude-sonnet-5-5:low"
+        "antigravity-acp/gemini-3.8-flash:medium",
+        "antigravity-acp/gemini-4-argon:medium"
       ],
       "validator": [
-        "antigravity/gemini-3.8-flash",
-        "antigravity/claude-sonnet-5-5"
+        "antigravity-acp/gemini-3.8-flash:low",
+        "antigravity-acp/gemini-4-argon:low"
       ]
     },
     "router": {
       "enabled": true,
       "provider": "quest",
       "id": "auto",
-      "default": "antigravity/gemini-3.8-flash",
-      "direct": "antigravity/gemini-3.8-flash:low",
+      "default": "antigravity-acp/gemini-3.8-flash:low",
+      "direct": "antigravity-acp/gemini-3.8-flash:low",
       "cooldownMs": 900000,
       "matrix": {
         "drafting": {
-          "complex": [
-            "anthropic/claude-sonnet-5-5:high",
-            "antigravity/gemini-3.8-flash"
+          "trivial": "antigravity-acp/gemini-3.8-flash:low",
+          "minor": "antigravity-acp/gemini-3.8-flash:low",
+          "standard": "antigravity-acp/gemini-3.8-flash:medium",
+          "major": [
+            "antigravity-acp/gemini-4-argon:high",
+            "antigravity-acp/gemini-3.8-flash:high"
           ],
-          "*": "antigravity/gemini-3.8-flash"
+          "complex": [
+            "antigravity-acp/gemini-4-argon:high",
+            "antigravity-acp/gemini-3.8-flash:high"
+          ],
+          "*": "antigravity-acp/gemini-3.8-flash:low"
         },
-        "implementing": "antigravity/gemini-3.8-flash",
-        "validating": "antigravity/gemini-3.8-flash"
+        "implementing": {
+          "trivial": "antigravity-acp/gemini-3.8-flash:low",
+          "minor": "antigravity-acp/gemini-3.8-flash:low",
+          "standard": "antigravity-acp/gemini-3.8-flash:medium",
+          "major": [
+            "antigravity-acp/gemini-4-argon:medium",
+            "antigravity-acp/gemini-3.8-flash:high"
+          ],
+          "complex": [
+            "antigravity-acp/gemini-4-argon:high",
+            "antigravity-acp/gemini-3.8-flash:high"
+          ],
+          "*": "antigravity-acp/gemini-3.8-flash:medium"
+        },
+        "validating": "antigravity-acp/gemini-3.8-flash:low"
       }
     },
     "lintRules": [
@@ -109,6 +141,51 @@
       "vai em frente",
       "avança",
       "pode avançar"
+    ],
+    "testCommands": [
+      "sh tests/unit/",
+      "sh scripts/check-",
+      "node tests/",
+      "make site-wasm",
+      "make test-mod",
+      "make test-fast",
+      "make boundary-check",
+      "make standalone-unit-tests"
+    ],
+    "actionMatrix": [
+      {
+        "scope": "client-isomorphic-ux",
+        "pattern": "^mods/([^/]+)/ux/",
+        "buildCommands": ["make site-wasm", "make -C mods/$1"],
+        "testCommands": ["sh scripts/check-module-boundaries.sh", "sh scripts/check-wasm-imports.sh", "make test-mod MOD=$1"],
+        "warning": "Do NOT run full test suite (make test); execute only the targeted actions above."
+      },
+      {
+        "scope": "server-module",
+        "pattern": "^mods/([^/]+)/(?!ux/)",
+        "buildCommands": ["make -C mods/$1"],
+        "testCommands": ["make test-mod MOD=$1"],
+        "warning": "Do NOT run full test suite (make test); execute only the targeted actions above."
+      },
+      {
+        "scope": "client-assets-or-bridge",
+        "pattern": "^(?:external/liblamina/)?htdocs/",
+        "testCommands": ["sh scripts/check-no-site-specific-js.sh", "sh tests/unit/run-test-lamina-bridge.sh"],
+        "warning": "Do NOT compile C modules or run make test; only verify generic JS and bridge tests."
+      },
+      {
+        "scope": "core-library",
+        "pattern": "^external/lib([^/]+)/",
+        "buildCommands": ["make $1-lib"],
+        "testCommands": ["make standalone-unit-tests"],
+        "warning": "Do NOT run e2e or integration tests; verify via standalone unit tests."
+      },
+      {
+        "scope": "pi-quest-extension",
+        "pattern": "^\\.pi/extensions/pi-quest/",
+        "testCommands": ["deno test --allow-all tests/", "deno run --allow-all scripts/check-complexity.ts"],
+        "warning": "Zero C/WASM rebuilds needed; run deno test and check-complexity."
+      }
     ]
   },
   "pi-early-compact": {

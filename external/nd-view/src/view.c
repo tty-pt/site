@@ -13,6 +13,7 @@
 #include <nd/view-types.h>
 #include <nd/map.h>
 #include <nd/world-types.h>
+#include <nd/field.h>
 unsigned nd_get(unsigned hd, void *value, void *key);
 ENT ent_get(unsigned ref);
 #include <nd/type.h>
@@ -442,6 +443,11 @@ view_build_tile(struct bio *n, unsigned loc_ref, view_tile_t *t, pos_t p)
 		t->bio_idx = n->bio_idx;
 	}
 
+	t->elevation = n->elevation;
+	t->water_level = n->water_level;
+	t->is_water = n->is_water;
+	t->water_depth = n->water_depth;
+
 	memcpy(&t->raw, &n->raw, sizeof(n->raw));
 }
 
@@ -523,23 +529,46 @@ eng_view(unsigned player_ref)
 				ROO *r = (ROO *)&r_obj.data;
 				if (!(r->flags & RF_TEMP))
 					flags |= ND_MAP_FLAG_ROOM;
+				if ((r->flags & RF_WATER) || !strcmp(r_obj.name, "water"))
+					flags |= ND_MAP_FLAG_WATER;
 			}
 		}
+
+		/* Compute 2D projected water coverage: >50% surface area submerged */
+		int rx = opos[0] - VIEW_AROUND + (i % VIEW_SIZE);
+		int ry = opos[1] + VIEW_AROUND - (i / VIEW_SIZE);
+		uint16_t rworld = (uint16_t)opos[3];
+		int32_t ox = (int32_t)rx * 160;
+		int32_t oy = -(int32_t)ry * 128;
+		int submerged_count = 0;
+		for (int sy = 16; sy < 128; sy += 32) {
+			for (int sx = 20; sx < 160; sx += 40) {
+				nd_field_sample_t s = nd_field_sample(rworld, 0, ox + sx, oy + sy);
+				if (s.elevation < s.water_level)
+					submerged_count++;
+			}
+		}
+		if (submerged_count > 8)
+			flags |= ND_MAP_FLAG_WATER;
+
 		if (is_player)
 			flags |= ND_MAP_FLAG_PLAYER;
 		if (vt->flags & vtf_entity)
 			flags |= ND_MAP_FLAG_ENTITY;
 		mt->flags = flags;
 
-		/* left cell: stairs down, else plants */
+		/* left cell: stairs down, else plants (suppressed on water) */
 		if (vt->exits & E_DOWN) {
 			mt->side_l = '<';
 			mt->fg_l = 7;
-		} else {
+		} else if (!(flags & ND_MAP_FLAG_WATER)) {
 			view_empty_cell(vt, 0, &mt->side_l, &mt->fg_l);
+		} else {
+			mt->side_l = 0;
+			mt->fg_l = 0;
 		}
 
-		/* centre cell: the player, then a registered flag glyph, else plants */
+		/* centre cell: the player, then a registered flag glyph, else plants (suppressed on water) */
 		vtf_t vtf;
 		if (is_player) {
 			mt->symbol = '!';
@@ -548,16 +577,22 @@ eng_view(unsigned player_ref)
 			mt->symbol = (uint8_t)vtf.emp;
 			mt->fg = (uint8_t)(nd_color_to_ansi(vtf.pi.fg) +
 				((vtf.pi.flags & BOLD) ? 8 : 0));
-		} else {
+		} else if (!(flags & ND_MAP_FLAG_WATER)) {
 			view_empty_cell(vt, 1, &mt->symbol, &mt->fg);
+		} else {
+			mt->symbol = 0;
+			mt->fg = 0;
 		}
 
-		/* right cell: stairs up, else plants */
+		/* right cell: stairs up, else plants (suppressed on water) */
 		if (vt->exits & E_UP) {
 			mt->side_r = '>';
 			mt->fg_r = 7;
-		} else {
+		} else if (!(flags & ND_MAP_FLAG_WATER)) {
 			view_empty_cell(vt, 2, &mt->side_r, &mt->fg_r);
+		} else {
+			mt->side_r = 0;
+			mt->fg_r = 0;
 		}
 	}
 

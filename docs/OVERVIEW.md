@@ -25,9 +25,13 @@ to wasm32-wasi for browser-side polish.
 | `external/axil-hyle` | framework-neutral Axil↔Hyle REST connector — JSON CRUD (`/api/dataset/...`) + partition routes; no bud symbols |
 | `external/libbud` | pure C DOM scaffold (SSR), 5-field UI binder (`bud_field_desc_t`), and pure VDOM diff engine (`bud_vdom_diff`) |
 | `external/libstele` | universal single-instantiation WASM reactor substrate, UI slots (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module lifecycle (`stl_module_ops_t`), and Web HAL host imports (`<ttypt/stele_wasm.h>`) |
+| `external/libnoise` | continuous multi-scale 1/f procedural noise engine (`libchaff`) with GLSL parity and toroidal periodic domain wrapping |
+| `external/libchunk` | multi-scale spatial hierarchy engine: 16-level LOD quadtree, analytic unprojection, frustum culling, and priority refinement |
+| `external/libhyle-react` | React/Next.js client bindings for Hyle schema and Bud state reconciliation |
 | `external/axil-tty` | WebSocket-to-PTY terminal streaming bridge |
 | `external/axil-nd` | modular NeverDark MUCK engine running in-process behind Axil |
-| `mods/*` | site modules — thin composition layers wiring the libraries together (`core`, `common`, `source`, `index`, `auth`, `mpfd`, `song`, `poem`, `gig`, `grp`, `nd`) |
+| `external/axil-auren` | local LLM inference engine running in-browser WebAssembly models (Wllama/Qwen/Llama) |
+| `mods/*` | site modules — thin composition layers wiring the libraries together (`core`, `common`, `source`, `index`, `auth`, `mpfd`, `song`, `poem`, `gig`, `grp`, `nd`, `auren`, `chat`) |
 
 ## Framework-pair model (the governing design rule)
 

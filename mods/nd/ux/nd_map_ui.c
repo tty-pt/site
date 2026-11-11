@@ -2,6 +2,7 @@
 #include "nd_lamina.h"
 #include "nd_seven.h"
 #include <ttypt/lam.h>
+#include "nd_seven_shader.h"
 
 static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 {
@@ -14,54 +15,65 @@ static void nd_ansi_to_html(const char *src, char *dst, size_t cap)
 	while (src[r] && w + 64 < cap) {
 		if (src[r] == '\033' && src[r + 1] == '[') {
 			r += 2;
-			while (src[r] && src[r] != 'm') {
+			while (src[r] && (src[r] < '@' || src[r] > '~')) {
 				int code = 0;
+				int has_digit = 0;
 				while (src[r] >= '0' && src[r] <= '9') {
 					code = code * 10 + (src[r] - '0');
 					r++;
+					has_digit = 1;
 				}
-				if (code == 0) {
-					fg = 7;
-					bg = 0;
-					bold = 0;
-				} else if (code == 1) {
-					bold = 1;
-				} else if (code == 2 || code == 22) {
-					bold = 0;
-				} else if (code >= 30 && code <= 37) {
-					fg = code - 30;
-				} else if (code == 39) {
-					fg = 7;
-				} else if (code >= 40 && code <= 47) {
-					bg = code - 40;
-				} else if (code == 49) {
-					bg = 0;
+				if (has_digit) {
+					if (code == 0) {
+						fg = 7;
+						bg = 0;
+						bold = 0;
+					} else if (code == 1) {
+						bold = 1;
+					} else if (code == 2 || code == 22) {
+						bold = 0;
+					} else if (code >= 30 && code <= 37) {
+						fg = code - 30;
+					} else if (code == 39) {
+						fg = 7;
+					} else if (code >= 40 && code <= 47) {
+						bg = code - 40;
+					} else if (code == 49) {
+						bg = 0;
+					}
 				}
-				if (src[r] == ';') r++;
+				if (src[r] == ';') {
+					r++;
+				} else if (!has_digit && src[r] && (src[r] < '@' || src[r] > '~')) {
+					r++;
+				}
 			}
-			if (src[r] == 'm') r++;
+			char term_char = src[r];
+			if (term_char) r++;
 
-			int eff_fg = (bold && fg < 8) ? (fg + 8) : fg;
-			if (span_open && (eff_fg != cur_fg || bg != cur_bg)) {
-				memcpy(dst + w, "</span>", 7);
-				w += 7;
-				span_open = 0;
-			}
+			if (term_char == 'm') {
+				int eff_fg = (bold && fg < 8) ? (fg + 8) : fg;
+				if (span_open && (eff_fg != cur_fg || bg != cur_bg)) {
+					memcpy(dst + w, "</span>", 7);
+					w += 7;
+					span_open = 0;
+				}
 
-			if (!span_open && (eff_fg != 7 || bg != 0)) {
-				char cls[64] = {0};
-				size_t clen = 0;
-				if (eff_fg != 7)
-					clen += snprintf(cls + clen, sizeof(cls) - clen, "cf%d", eff_fg);
-				if (bg != 0)
-					clen += snprintf(cls + clen, sizeof(cls) - clen, "%sc%d", clen ? " " : "", bg);
+				if (!span_open && (eff_fg != 7 || bg != 0)) {
+					char cls[64] = {0};
+					size_t clen = 0;
+					if (eff_fg != 7)
+						clen += snprintf(cls + clen, sizeof(cls) - clen, "cf%d", eff_fg);
+					if (bg != 0)
+						clen += snprintf(cls + clen, sizeof(cls) - clen, "%sc%d", clen ? " " : "", bg);
 
-				int n = snprintf(dst + w, cap - w, "<span class=\"%s\">", cls);
-				if (n > 0) {
-					w += (size_t)n;
-					span_open = 1;
-					cur_fg = eff_fg;
-					cur_bg = bg;
+					int n = snprintf(dst + w, cap - w, "<span class=\"%s\">", cls);
+					if (n > 0) {
+						w += (size_t)n;
+						span_open = 1;
+						cur_fg = eff_fg;
+						cur_bg = bg;
+					}
 				}
 			}
 		} else if (src[r] == '<') {
@@ -205,6 +217,21 @@ static void append_fallback_ascii(bud_node *parent, const nd_client_state_t *st,
 #define MAP_CANVAS_PX MAP_STR(ND_MAP_CANVAS_W)
 #define MAP_CANVAS_STYLE "width:" MAP_CANVAS_PX "px;height:" MAP_CANVAS_PX "px"
 
+/* The one predicate deciding whether the region enables the canvas map.
+ * render_room_map emits #room-map-canvas exactly when this is true, and the
+ * client builds terrain chunks for the minimap only when it is true. Unset,
+ * "none", "ascii" and "ascii-bud" all mean: no canvas, no chunk work. */
+int nd_map_canvas_enabled(const nd_client_state_t *st)
+{
+	if (st && (strcmp(st->preferred_driver, "lamina-seven") == 0 || st->layout_mode == ND_LAYOUT_GAME_2D))
+		return 1;
+	if (!st || !st->preferred_map_driver[0])
+		return 0;
+	const char *d = st->preferred_map_driver;
+	return strcmp(d, "none") != 0 && strcmp(d, "ascii") != 0 &&
+	       strcmp(d, "ascii-bud") != 0;
+}
+
 bud_node *render_room_map(const nd_client_state_t *st)
 {
 	const char *map_drv = (st && st->preferred_map_driver[0]) ? st->preferred_map_driver : "ascii-bud";
@@ -212,8 +239,8 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	if (strcmp(map_drv, "none") == 0)
 		return NULL;
 
-	/* If explicitly configured as ascii-bud / ascii, render the pure ASCII map */
-	if (strcmp(map_drv, "ascii-bud") == 0 || strcmp(map_drv, "ascii") == 0) {
+	/* Regions that do not enable a canvas map get the pure ASCII map */
+	if (!nd_map_canvas_enabled(st)) {
 		bud_node *ascii_map = lx_n("nd-map",
 			lx_attr("id", "room-map"),
 			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
@@ -248,14 +275,13 @@ static uint32_t s_map_frame = 0;
 
 void nd_map_canvas_redraw(const nd_client_state_t *st)
 {
-	if (!st) return;
-	const char *theme = st->preferred_map_driver[0] ? st->preferred_map_driver : "ascii-bud";
-	if (strcmp(theme, "none") == 0) return;
+	if (!nd_map_canvas_enabled(st))
+		return;
+	const char *theme = st->preferred_map_driver;
 
-	/* If legacy name "canvas" or "canvas-lamina" is passed, use default lamina theme */
-	if (strcmp(theme, "canvas") == 0 || strcmp(theme, "canvas-lamina") == 0 || strcmp(theme, "ascii-bud") == 0) {
+	/* Legacy names "canvas" / "canvas-lamina" mean the default lamina theme */
+	if (strcmp(theme, "canvas") == 0 || strcmp(theme, "canvas-lamina") == 0)
 		theme = "lamina";
-	}
 
 	/* With the Seven stage running, the player marker follows the lamb. */
 	int live = 0, lx = 0, ly = 0, have_room = 0;
@@ -270,5 +296,19 @@ void nd_map_canvas_redraw(const nd_client_state_t *st)
 	nd_lamina_render_map_live(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H,
 	                          &st->map_data, theme, st->tod, s_map_frame++,
 	                          live, lx, ly);
+
+	float map_cam_x = 0.0f, map_cam_y = 0.0f;
+	if (st->map_data.room_ref != 0) {
+		map_cam_x = (float)((int64_t)st->map_data.pos[0] * NDW_TILE_W + lx) - (float)ND_MAP_CANVAS_W / 2.0f;
+		map_cam_y = (float)((int64_t)(-st->map_data.pos[1]) * NDW_TILE_H + ly) - (float)ND_MAP_CANVAS_H / 2.0f;
+	}
+	float map_uniforms[4] = {
+		map_cam_x,
+		map_cam_y,
+		1.0f,
+		(float)s_map_frame * 0.05f
+	};
+	lam_shader_bind(nd_water_shader_id());
+	lam_shader_uniforms(nd_water_shader_id(), map_uniforms, 4);
 	lam_canvas_flush(s_map_fb, ND_MAP_CANVAS_W, ND_MAP_CANVAS_H);
 }

@@ -207,7 +207,7 @@ struct st_rec {
 		char driver[16]; /* preferred stage driver ("lamina-2d", "tty", "bud") */
 		char stage_driver[16];
 	};
-	char     map_driver[16]; /* preferred map driver ("ascii-bud", "canvas-lamina", "none") */
+	char     map_driver[16]; /* preferred map driver ("ascii-bud", "lamina", "none"); empty = inherit, default "ascii-bud" */
 	char     mods[ND_ST_MAX_MODS][ND_ST_MOD_NAME];
 };
 

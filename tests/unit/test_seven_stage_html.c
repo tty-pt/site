@@ -25,9 +25,9 @@ int main(void)
 	const char *map = strstr(html, "id=\"room-map-canvas\"");
 	assert(stage && map);
 	assert(strstr(html, "game-2d-mode"));
-	assert(strstr(html, "id=\"term\"") == NULL);
-	assert(strstr(html, "data-bud-terminal") == NULL);   /* no live xterm host left */
-	assert(strstr(html, "<nd-stage") != NULL);          /* a tag the terminal <div> is replaced by */
+	assert(strstr(html, "id=\"term\"") != NULL);
+	assert(strstr(html, "data-bud-terminal") != NULL);   /* live xterm host in floating RPG chat */
+	assert(strstr(html, "<nd-stage") != NULL);          /* a tag for the game stage */
 	/* each canvas tag carries its own size attribute */
 	const char *tag_end = strchr(stage, '>');
 	char *s_tag = strndup(stage, (size_t)(tag_end - stage));

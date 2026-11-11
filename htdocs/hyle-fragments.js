@@ -535,6 +535,32 @@ var existing = rows.querySelector('input[value="' + newId + '"]');
 		}
 	});
 
+	/* Singleselect click-to-deselect delegation */
+	document.addEventListener('pointerdown', function (e) {
+		var label = e.target.closest && e.target.closest('.hyle-ss-option');
+		var radio = label ? label.querySelector('input[type="radio"]') : (e.target.matches && e.target.matches('.hyle-ss-option input[type="radio"]') ? e.target : null);
+		if (radio && radio.value !== '') {
+			radio.__wasChecked = radio.checked;
+		}
+	}, true);
+
+	document.addEventListener('click', function (e) {
+		var label = e.target.closest && e.target.closest('.hyle-ss-option');
+		var radio = label ? label.querySelector('input[type="radio"]') : (e.target.matches && e.target.matches('.hyle-ss-option input[type="radio"]') ? e.target : null);
+		if (radio && radio.value !== '' && radio.__wasChecked) {
+			radio.__wasChecked = false;
+			setTimeout(function () {
+				radio.checked = false;
+				var optionsBox = radio.closest && radio.closest('.hyle-ss-options');
+				var defaultRadio = optionsBox ? optionsBox.querySelector('input[type="radio"][value=""]') : null;
+				if (defaultRadio) {
+					defaultRadio.checked = true;
+					defaultRadio.dispatchEvent(new Event('change', { bubbles: true }));
+				}
+			}, 0);
+		}
+	});
+
 	document.addEventListener('click', function (e) {
 		var addBtn = e.target.closest &&
 			e.target.closest('[data-hyle-picker-add]');

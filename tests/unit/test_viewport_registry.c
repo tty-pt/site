@@ -51,12 +51,14 @@ int main(void)
 	assert(ND_LAYOUT_GAME_2D == 3);
 	printf("PASS: ND_LAYOUT_GAME_2D constant is 3\n");
 
-	/* 5. Clean 2D UI Mode suppresses terminal/contents/actions/keypad */
+	/* 5. Seven RPG Mode renders game canvas, RPG chat terminal, and room contents/map */
 	nd_client_state_t st;
 	memset(&st, 0, sizeof(st));
 	strncpy(st.user, "hero", sizeof(st.user) - 1);
 	strncpy(st.preferred_driver, "lamina-seven", sizeof(st.preferred_driver) - 1);
 	strncpy(st.preferred_map_driver, "lamina", sizeof(st.preferred_map_driver) - 1);
+	st.room.ref = 1;
+	strncpy(st.room.name, "Town Square", sizeof(st.room.name) - 1);
 	st.layout_mode = ND_LAYOUT_GAME_2D;
 
 	bud_node *root = nd_ui_render(&st);
@@ -69,15 +71,30 @@ int main(void)
 	assert(strstr(html, "id=\"room-map\"") != NULL);
 	assert(strstr(html, "game-2d-mode") != NULL);
 
-	/* Must NOT contain right-panel, directions keypad, action bar, or contents */
-	assert(strstr(html, "id=\"right-panel\"") == NULL);
-	assert(strstr(html, "id=\"directions\"") == NULL);
-	assert(strstr(html, "id=\"g-actions\"") == NULL);
-	assert(strstr(html, "id=\"contents\"") == NULL);
-	assert(strstr(html, "id=\"term\"") == NULL);
+	/* Must contain RPG chat console with toggle button and terminal */
+	assert(strstr(html, "id=\"rpg-chat\"") != NULL);
+	assert(strstr(html, "id=\"chat-toggle-btn\"") != NULL);
+	assert(strstr(html, "id=\"term\"") != NULL);
+	assert(strstr(html, "chat-compact") != NULL);
+	assert(strstr(html, "▲ Expand") != NULL);
+
+	/* Test chat toggle mutation into expanded state */
+	nd_ui_set_chat_expanded(1);
+	assert(nd_ui_get_chat_expanded() == 1);
+	bud_free_string(html);
+	root = nd_ui_render(&st);
+	html = bud_render_html(root);
+	assert(html != NULL);
+	assert(strstr(html, "chat-expanded") != NULL);
+	assert(strstr(html, "▼ Minimize") != NULL);
+	nd_ui_set_chat_expanded(0);
+
+	/* Must contain room contents and room header in HUD */
+	assert(strstr(html, "id=\"contents\"") != NULL);
+	assert(strstr(html, "id=\"room-header\"") != NULL);
 
 	bud_free_string(html);
-	printf("PASS: ND_LAYOUT_GAME_2D cleanly renders ONLY game canvas and minimap\n");
+	printf("PASS: Seven mode cleanly renders game canvas, RPG chat terminal, and HUD elements\n");
 
 	/* 6. Standard layout mode still renders terminal and right-panel */
 	st.layout_mode = ND_LAYOUT_STANDARD_HYBRID;
@@ -88,11 +105,26 @@ int main(void)
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "id=\"right-panel\"") != NULL);
 	assert(strstr(html, "id=\"directions\"") != NULL);
+	assert(strstr(html, "data-bud-action=\"cycle-viewport\"") != NULL);
+	assert(strstr(html, "Switch Viewport") != NULL);
 	bud_free_string(html);
-	printf("PASS: ND_LAYOUT_STANDARD_HYBRID renders standard terminal and controls\n");
+	printf("PASS: ND_LAYOUT_STANDARD_HYBRID renders standard terminal, controls, and viewport switch button\n");
+
+	/* Test viewport cycling handler */
+	int on_cycle_viewport(bud_event *e);
+	extern nd_client_state_t client_state;
+	extern int g_active_driver_idx;
+	strncpy(client_state.preferred_driver, "tty", sizeof(client_state.preferred_driver) - 1);
+	g_active_driver_idx = 0;
+	on_cycle_viewport(NULL);
+	assert(strcmp(client_state.preferred_driver, "lamina-seven") == 0);
+	assert(client_state.layout_mode == ND_LAYOUT_GAME_2D);
+	on_cycle_viewport(NULL);
+	assert(strcmp(client_state.preferred_driver, "tty") == 0);
+	assert(client_state.layout_mode == ND_LAYOUT_STANDARD_HYBRID);
+	printf("PASS: on_cycle_viewport cycles smoothly between tty and lamina-seven drivers\n");
 
 	/* 7. Driver transition handshake and input reset (R2, R3) */
-	extern nd_client_state_t client_state;
 	void wasm_tick(float dt, int width, int height);
 
 	/* Set client to non-seven mode */

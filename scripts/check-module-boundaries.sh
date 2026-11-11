@@ -23,7 +23,7 @@ check_include(){
 		return 0
 	fi
 	case "$target_rel" in
-	mods/common/ux/site_ui.c|mods/index/ux/list.c)
+	mods/index/ux/list.c)
 		return 0
 		;;
 	esac
