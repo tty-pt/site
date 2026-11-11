@@ -177,7 +177,9 @@ int main(void)
 	html = bud_render_html(root);
 	assert(html != NULL);
 	assert(strstr(html, "<nd-avatar><span class=\"nd-glyph cf10\">!</span><img src=\"/nd/art/items/potion.png\"") != NULL);
+	assert(strstr(html, "id=\"contents-item-popper\"") != NULL);
 	assert(strstr(html, "nd-item-popup nd-item-popper") != NULL);
+	assert(strstr(html, "</nd-contents></div><div id=\"contents-item-popper\"") != NULL);
 	assert(strstr(html, "nd-popper-item") != NULL);
 	assert(strstr(html, "👁️ Look") != NULL);
 	assert(strstr(html, "🖐 Get") != NULL);

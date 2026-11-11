@@ -187,7 +187,31 @@ function buildEventPayload(info, event) {
 			vw = holder.clientWidth;
 			vh = holder.clientHeight;
 		}
-		return `${Math.round(event.clientX || 0)},${Math.round(event.clientY || 0)},${vw},${vh}`;
+		let wx = -1, wy = -1, ww = 0, wh = 0;
+		if ((info.event === 'mousedown' || info.event === 'pointerdown') && info.node && typeof info.node.closest === 'function') {
+			const winEl = info.node.closest('[data-win-id]');
+			if (winEl && typeof winEl.getBoundingClientRect === 'function') {
+				const r = winEl.getBoundingClientRect();
+				const hRect = holder && typeof holder.getBoundingClientRect === 'function' ? holder.getBoundingClientRect() : { left: 0, top: 0 };
+				if (r && r.width > 0 && r.height > 0) {
+					wx = Math.round(r.left - (hRect.left || 0));
+					wy = Math.round(r.top - (hRect.top || 0));
+					ww = Math.round(r.width);
+					wh = Math.round(r.height);
+				}
+			}
+		}
+		return `${Math.round(event.clientX || 0)},${Math.round(event.clientY || 0)},${vw},${vh},${wx},${wy},${ww},${wh}`;
+	}
+	if (event && info.event === 'click' && info.node && typeof info.node.getAttribute === 'function' && info.node.getAttribute('data-item-ref')) {
+		const winEl = typeof info.node.closest === 'function' ? info.node.closest('[data-win-id]') : null;
+		if (winEl && typeof winEl.getBoundingClientRect === 'function' && typeof info.node.getBoundingClientRect === 'function') {
+			const rowRect = info.node.getBoundingClientRect();
+			const winRect = winEl.getBoundingClientRect();
+			if (rowRect && winRect && winRect.height > 0) {
+				return String(Math.round(rowRect.bottom - winRect.top + 4));
+			}
+		}
 	}
 	return buildControlValue(event && event.target);
 }

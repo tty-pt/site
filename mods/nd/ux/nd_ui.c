@@ -90,6 +90,7 @@ static int s_chat_expanded = 0;
 static uint32_t s_prev_target_ref = 0;
 static uint32_t s_last_target_ref = 0;
 static int s_target_win_pinned = 0;
+static int s_popper_top_px = 62;
 
 /* Drag / Resize interaction state:
  * mode bitmask:
@@ -161,7 +162,7 @@ static void get_win_limits(int win_id, int *min_w, int *min_h, int *def_w, int *
 		*min_w = 200;
 		*min_h = 120;
 		*def_w = 300;
-		*def_h = 260;
+		*def_h = 240;
 		break;
 	case ND_WIN_TARGET:
 		*min_w = 140;
@@ -344,16 +345,27 @@ static int on_restore_persist(bud_event *ev)
 	return 0;
 }
 
-static void parse_mouse_coords(bud_event *ev, int *cx, int *cy, int *vw, int *vh)
+static void parse_mouse_coords(bud_event *ev, int *cx, int *cy, int *vw, int *vh, int *wx, int *wy, int *ww, int *wh)
 {
 	*cx = 0;
 	*cy = 0;
 	*vw = 0;
 	*vh = 0;
+	if (wx) *wx = -1;
+	if (wy) *wy = -1;
+	if (ww) *ww = 0;
+	if (wh) *wh = 0;
 	const char *s = ev ? (const char *)ev->user : NULL;
 	if (!s || !*s)
 		return;
-	sscanf(s, "%d,%d,%d,%d", cx, cy, vw, vh);
+	int rx = -1, ry = -1, rw = 0, rh = 0;
+	int n = sscanf(s, "%d,%d,%d,%d,%d,%d,%d,%d", cx, cy, vw, vh, &rx, &ry, &rw, &rh);
+	if (n >= 8) {
+		if (wx) *wx = rx;
+		if (wy) *wy = ry;
+		if (ww) *ww = rw;
+		if (wh) *wh = rh;
+	}
 }
 
 static int resolve_event_win(bud_event *ev, int *mode_out)
@@ -384,17 +396,26 @@ static int start_win_drag(bud_event *ev, int win_id, int mode)
 	if (win_id < 0 || win_id >= ND_WIN_COUNT) return 0;
 	if (s_win[win_id].minimized && mode != ND_DRAG_MOVE) return 0;
 
-	int cx = 0, cy = 0, vw = 0, vh = 0;
-	parse_mouse_coords(ev, &cx, &cy, &vw, &vh);
+	int cx = 0, cy = 0, vw = 0, vh = 0, wx = -1, wy = -1, ww = 0, wh = 0;
+	parse_mouse_coords(ev, &cx, &cy, &vw, &vh, &wx, &wy, &ww, &wh);
 
 	int min_w, min_h, def_w, def_h;
 	get_win_limits(win_id, &min_w, &min_h, &def_w, &def_h, vw, vh);
-	int cur_w = (s_win[win_id].w > 0) ? s_win[win_id].w : def_w;
-	int cur_h = (s_win[win_id].h > 0) ? s_win[win_id].h : def_h;
+	int cur_w = (ww > 0) ? ww : ((s_win[win_id].w > 0) ? s_win[win_id].w : def_w);
+	int cur_h = (wh > 0) ? wh : ((s_win[win_id].h > 0) ? s_win[win_id].h : def_h);
 	int dx = 0, dy = 0;
 	get_win_default_pos(win_id, vw, vh, cur_w, cur_h, &dx, &dy);
-	int cur_x = (s_win[win_id].x >= 0) ? s_win[win_id].x : dx;
-	int cur_y = (s_win[win_id].y >= 0) ? s_win[win_id].y : dy;
+	int cur_x = (wx >= 0) ? wx : ((s_win[win_id].x >= 0) ? s_win[win_id].x : dx);
+	int cur_y = (wy >= 0) ? wy : ((s_win[win_id].y >= 0) ? s_win[win_id].y : dy);
+
+	/* Lock live coordinates & dimensions immediately so dragging/resizing never snaps */
+	s_win[win_id].x = cur_x;
+	s_win[win_id].y = cur_y;
+	if (win_id != ND_WIN_TITLE) {
+		s_win[win_id].w = cur_w;
+		s_win[win_id].h = cur_h;
+	}
+	client_state.selected_item_ref = 0;
 
 	s_drag_win = win_id;
 	s_drag_mode = mode;
@@ -425,7 +446,7 @@ static int on_win_drag_move(bud_event *ev)
 {
 	if (s_drag_win < 0 || s_drag_win >= ND_WIN_COUNT || !s_drag_mode) return 0;
 	int cx = 0, cy = 0, vw = 0, vh = 0;
-	parse_mouse_coords(ev, &cx, &cy, &vw, &vh);
+	parse_mouse_coords(ev, &cx, &cy, &vw, &vh, NULL, NULL, NULL, NULL);
 	if (cx == 0 && cy == 0 && vw == 0 && vh == 0) return 0;
 
 	int win_id = s_drag_win;
@@ -510,6 +531,7 @@ static int on_win_minimize(bud_event *ev)
 	if (win_id < 0) return 0;
 	s_drag_win = -1;
 	s_drag_mode = 0;
+	client_state.selected_item_ref = 0;
 	s_win[win_id].minimized = !s_win[win_id].minimized;
 	if (win_id == ND_WIN_TARGET && s_win[win_id].minimized) {
 		if (client_state.target_ref)
@@ -545,6 +567,7 @@ static int on_win_reset(bud_event *ev)
 	if (win_id < 0) return 0;
 	s_drag_win = -1;
 	s_drag_mode = 0;
+	client_state.selected_item_ref = 0;
 	nd_ui_reset_win(win_id);
 	bud_app_set_state();
 	return 0;
@@ -918,6 +941,15 @@ static int on_item_select(bud_event *ev)
 	const char *ref_str = node ? bud_get_attr(node, "data-item-ref") : NULL;
 	if (!ref_str || !ref_str[0]) return 0;
 
+	const char *y_str = ev ? (const char *)ev->user : NULL;
+	if (y_str && y_str[0] && ((y_str[0] >= '0' && y_str[0] <= '9') || y_str[0] == '-')) {
+		int py = (int)strtol(y_str, NULL, 10);
+		if (py < 8) py = 8;
+		s_popper_top_px = py;
+	} else {
+		s_popper_top_px = 62;
+	}
+
 	uint32_t ref = (uint32_t)strtoul(ref_str, NULL, 10);
 	client_state.selected_item_ref = (client_state.selected_item_ref == ref) ? 0 : ref;
 	bud_app_set_state();
@@ -984,9 +1016,101 @@ static int on_dismiss_target(bud_event *ev)
 	if (client_state.target_ref)
 		s_last_target_ref = client_state.target_ref;
 	client_state.target_ref = 0;
+	client_state.selected_item_ref = 0;
 	s_target_win_pinned = 0;
 	bud_app_set_state();
 	return 0;
+}
+
+static bud_node *render_item_popper(const nd_client_state_t *st)
+{
+	uint32_t sel_ref = st ? st->selected_item_ref : 0;
+	if (!sel_ref || !st)
+		return NULL;
+
+	int is_inventory = (st->target_ref && st->me && st->target_ref == st->me);
+	uint32_t container_target = (st->target_ref && !is_inventory) ? st->target_ref : 0;
+
+	const nd_entity_desc_t *e = NULL;
+	for (size_t i = 0; i < st->entity_count; i++) {
+		const nd_entity_desc_t *cand = &st->entities[i];
+		if (st->me && cand->ref == st->me)
+			continue;
+		if (is_inventory) {
+			if (!st->me || cand->location != st->me)
+				continue;
+		} else if (container_target) {
+			if (cand->location != container_target)
+				continue;
+		} else {
+			if (st->me && cand->location == st->me)
+				continue;
+		}
+		if (cand->ref == sel_ref) {
+			e = cand;
+			break;
+		}
+	}
+	if (!e)
+		return NULL;
+
+	char ref_buf[32];
+	snprintf(ref_buf, sizeof(ref_buf), "%u", e->ref);
+
+	bud_node *act_dock = bud_element("div");
+	bud_set_attr(act_dock, "id", "contents-item-popper");
+	bud_set_attr(act_dock, "data-bud-key", "contents-item-popper");
+	bud_set_attr(act_dock, "class", "nd-item-popup nd-item-popper");
+	char pstyle[64];
+	int top_px = s_popper_top_px > 0 ? s_popper_top_px : 62;
+	snprintf(pstyle, sizeof(pstyle), "top:%dpx;right:10px;", top_px);
+	bud_set_attr(act_dock, "style", pstyle);
+
+	char look_cmd[48], get_cmd[48], drop_cmd[48];
+	snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);
+	snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
+	snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
+
+	/* Look menu item */
+	bud_node *look = bud_element("button");
+	bud_set_attr(look, "type", "button");
+	bud_set_attr(look, "data-action", "look");
+	bud_set_attr(look, "data-cmd", look_cmd);
+	bud_set_attr(look, "class", "nd-popper-item btn text-xs");
+	char look_title[64];
+	snprintf(look_title, sizeof(look_title), "Look %s", e->name);
+	bud_set_attr(look, "title", look_title);
+	bud_append(look, bud_text("👁️ Look"));
+	bud_bind(look, "click", 1, on_data_cmd);
+	bud_append(act_dock, look);
+
+	/* Get menu item: shown if ACT_GET (4) is set or item is gettable */
+	if ((e->actions & 4) || (e->location != st->me && !(e->flags & (ND_EF_PLAYER | ND_EF_CREATURE)) && e->type != 1 && e->actions == 0)) {
+		bud_node *get = bud_element("button");
+		bud_set_attr(get, "type", "button");
+		bud_set_attr(get, "data-action", "get");
+		bud_set_attr(get, "data-cmd", get_cmd);
+		bud_set_attr(get, "class", "nd-popper-item btn text-xs");
+		bud_set_attr(get, "title", "Get");
+		bud_append(get, bud_text("🖐 Get"));
+		bud_bind(get, "click", 1, on_data_cmd);
+		bud_append(act_dock, get);
+	}
+
+	/* Drop menu item: shown if ACT_DROP (8) is set or item is in inventory */
+	if ((e->actions & 8) || (e->location == st->me)) {
+		bud_node *drop = bud_element("button");
+		bud_set_attr(drop, "type", "button");
+		bud_set_attr(drop, "data-action", "drop");
+		bud_set_attr(drop, "data-cmd", drop_cmd);
+		bud_set_attr(drop, "class", "nd-popper-item btn text-xs");
+		bud_set_attr(drop, "title", "Drop");
+		bud_append(drop, bud_text("🪣 Drop"));
+		bud_bind(drop, "click", 1, on_data_cmd);
+		bud_append(act_dock, drop);
+	}
+
+	return act_dock;
 }
 
 static bud_node *render_room_contents(const nd_client_state_t *st)
@@ -1066,55 +1190,6 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_append(caret, bud_text(is_selected ? "▴" : "▾"));
 			bud_append(row, caret);
 
-			/* Popper-style Floating Action Dropdown Menu when selected */
-			bud_node *act_dock = bud_element("div");
-			bud_set_attr(act_dock, "class", is_selected ? "nd-item-popup nd-item-popper" : "hidden");
-
-			char look_cmd[48], get_cmd[48], drop_cmd[48];
-			snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);
-			snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
-			snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
-
-			/* Look menu item */
-			bud_node *look = bud_element("button");
-			bud_set_attr(look, "type", "button");
-			bud_set_attr(look, "data-action", "look");
-			bud_set_attr(look, "data-cmd", look_cmd);
-			bud_set_attr(look, "class", "nd-popper-item btn text-xs");
-			char look_title[64];
-			snprintf(look_title, sizeof(look_title), "Look %s", e->name);
-			bud_set_attr(look, "title", look_title);
-			bud_append(look, bud_text("👁️ Look"));
-			bud_bind(look, "click", 1, on_data_cmd);
-			bud_append(act_dock, look);
-
-			/* Get menu item: shown if ACT_GET (4) is set or item is gettable */
-			if ((e->actions & 4) || (e->location != st->me && !(e->flags & (ND_EF_PLAYER | ND_EF_CREATURE)) && e->type != 1 && e->actions == 0)) {
-				bud_node *get = bud_element("button");
-				bud_set_attr(get, "type", "button");
-				bud_set_attr(get, "data-action", "get");
-				bud_set_attr(get, "data-cmd", get_cmd);
-				bud_set_attr(get, "class", "nd-popper-item btn text-xs");
-				bud_set_attr(get, "title", "Get");
-				bud_append(get, bud_text("🖐 Get"));
-				bud_bind(get, "click", 1, on_data_cmd);
-				bud_append(act_dock, get);
-			}
-
-			/* Drop menu item: shown if ACT_DROP (8) is set or item is in inventory */
-			if ((e->actions & 8) || (e->location == st->me)) {
-				bud_node *drop = bud_element("button");
-				bud_set_attr(drop, "type", "button");
-				bud_set_attr(drop, "data-action", "drop");
-				bud_set_attr(drop, "data-cmd", drop_cmd);
-				bud_set_attr(drop, "class", "nd-popper-item btn text-xs");
-				bud_set_attr(drop, "title", "Drop");
-				bud_append(drop, bud_text("🪣 Drop"));
-				bud_bind(drop, "click", 1, on_data_cmd);
-				bud_append(act_dock, drop);
-			}
-
-			bud_append(row, act_dock);
 			bud_append(wrap, row);
 		}
 	}
@@ -1443,7 +1518,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			bud_append(overlay, map_box);
 		}
 
-		/* 4. Floating Room Contents Window (mid-right default, movable & resizable, larger default size, unclipped Popper menu) */
+		/* 4. Floating Room Contents Window (mid-right default, movable & resizable, scrollable body + unclipped top-level Popper menu) */
 		bud_node *contents = render_room_contents(st);
 		if (contents) {
 			bud_node *cnt_box = bud_element("div");
@@ -1452,16 +1527,22 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 			int is_min = s_win[ND_WIN_CONTENTS].minimized;
 			int is_drag = (s_drag_win == ND_WIN_CONTENTS && s_drag_mode != 0);
 			char ccls[192];
-			snprintf(ccls, sizeof(ccls), "hud-win hud-win-contents rpg-hud-panel pointer-events-auto p-2 w-full flex flex-col flex-initial min-h-[120px] max-h-[36vh]%s%s",
+			snprintf(ccls, sizeof(ccls), "hud-win hud-win-contents rpg-hud-panel pointer-events-auto p-2 flex flex-col flex-initial min-h-[120px] max-h-[36vh]%s%s",
 				is_min ? " hud-win-minimized" : "",
 				is_drag ? " hud-win-dragging" : "");
 			bud_set_attr(cnt_box, "class", ccls);
 			append_win_chrome(cnt_box, ND_WIN_CONTENTS, "contents", "📦 Room Contents", 0);
 
 			bud_node *cnt_body = bud_element("div");
-			bud_set_attr(cnt_body, "class", "hud-win-body flex flex-col flex-1 w-full min-h-0 overflow-visible");
+			bud_set_attr(cnt_body, "class", "hud-win-body flex flex-col flex-1 w-full min-h-0 overflow-hidden");
 			bud_append(cnt_body, contents);
 			bud_append(cnt_box, cnt_body);
+
+			/* Mount Popper-style action dropdown directly on #hud-win-contents outside the scroll container */
+			bud_node *popper = render_item_popper(st);
+			if (popper)
+				bud_append(cnt_box, popper);
+
 			bud_append(overlay, cnt_box);
 		}
 

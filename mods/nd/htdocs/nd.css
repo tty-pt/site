@@ -151,11 +151,16 @@ nd-stage,
 
 #map-overlay {
     z-index: 30 !important;
-    top: 12px;
-    right: 12px;
-    bottom: 76px;
-    padding-top: 16px !important;
-    max-height: calc(100% - 88px) !important;
+    inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    padding: 28px 12px 76px 12px !important;
     overflow: visible !important;
 }
 
@@ -165,10 +170,21 @@ nd-stage,
     overflow: visible !important;
 }
 
+#map-overlay [data-bud-key="gauges-dock"] {
+    position: absolute !important;
+    bottom: 76px;
+    right: 16px;
+    width: 228px !important;
+    max-width: 228px !important;
+}
+
 #map-overlay .hud-win[style*="left:"] {
-    position: fixed !important;
-    max-height: none !important;
+    position: absolute !important;
     z-index: 35 !important;
+}
+
+#map-overlay .hud-win[style*="height:"] {
+    max-height: none !important;
 }
 
 /* Unified Floating HUD Windows & Auto-Hiding Hover Toolbars */
@@ -447,6 +463,9 @@ nd-stage,
 /* Unified Minimap / Look-At Window: Transparent background by default, swaps to Look-At target card */
 #hud-win-map,
 #hud-win-map.rpg-hud-panel {
+    position: absolute !important;
+    top: 28px;
+    right: 12px;
     width: 220px;
     height: 220px;
     min-width: 140px !important;
@@ -633,9 +652,13 @@ nd-stage,
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Room Contents HUD Window: Larger Default Size, Round Avatars & Unclipped Popper-Style Action Dropdown */
+/* Room Contents HUD Window: Larger Default Size, Scrollable Body, Round Avatars & Unclipped Popper-Style Action Dropdown */
 #hud-win-contents {
+    position: absolute !important;
+    top: 256px;
+    right: 12px;
     width: 300px;
+    height: 240px;
     min-width: 200px !important;
     max-width: 90vw !important;
     min-height: 120px !important;
@@ -652,7 +675,11 @@ nd-stage,
 }
 
 #hud-win-contents > .hud-win-body {
-    overflow: visible !important;
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
 }
 
 #hud-win-contents[style*="height:"] {
@@ -668,10 +695,12 @@ nd-stage,
 #hud-win-contents nd-contents,
 #hud-win-contents .nd-contents {
     min-height: 0 !important;
-    max-height: none !important;
-    flex: 1 1 auto !important;
-    height: auto !important;
-    overflow: visible !important;
+    max-height: 100% !important;
+    flex: 1 1 0% !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
     gap: 5px !important;
 }
 
@@ -685,8 +714,9 @@ nd-stage,
     font-size: 12px !important;
     line-height: 1.3 !important;
     min-height: 54px !important;
+    flex-shrink: 0 !important;
     position: relative !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     transition: background-color 0.15s ease, border-color 0.15s ease !important;
     border: 1px solid transparent !important;
 }
@@ -749,11 +779,10 @@ nd-stage,
     padding-left: 4px !important;
 }
 
-/* Popper-style Floating Per-Item Action Dropdown Menu (Unclipped Over Contents Box) */
+/* Popper-style Floating Per-Item Action Dropdown Menu (Mounted directly on #hud-win-contents outside scrollport) */
 .nd-item-popup.nd-item-popper {
     position: absolute !important;
-    top: calc(100% + 6px) !important;
-    right: 6px !important;
+    right: 10px !important;
     min-width: 124px !important;
     display: flex !important;
     flex-direction: column !important;
@@ -766,7 +795,7 @@ nd-stage,
     border: 1px solid rgba(168, 155, 224, 0.65) !important;
     border-radius: 8px !important;
     box-shadow: 0 8px 22px rgba(0, 0, 0, 0.82), 0 0 0 1px rgba(0, 0, 0, 0.55) !important;
-    z-index: 80 !important;
+    z-index: 95 !important;
 }
 
 .nd-item-popup.nd-item-popper::before {
