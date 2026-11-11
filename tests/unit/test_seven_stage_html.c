@@ -69,7 +69,11 @@ int main(void)
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-map\""));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-target\""));
 		assert(strstr(html, "data-bud-persist-key=\"nd-win-contents\""));
-		assert(strstr(html, "data-bud-persist-key=\"nd-win-actions\""));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-actions\"") == NULL);
+		assert(strstr(html, "id=\"actions-toolbar\"") == NULL);
+		assert(strstr(html, "id=\"toggle-3d-btn\"") == NULL);
+		assert(strstr(html, "equip-socket"));
+		assert(strstr(html, "rpg-stat-row"));
 		assert(strstr(html, "game-2d-mode relative"));
 	}
 

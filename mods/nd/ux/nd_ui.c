@@ -768,15 +768,6 @@ const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
 
 static int s_enable_3d_terrain = 1;
 
-static int on_toggle_3d(bud_event *ev)
-{
-	if (ev) bud_event_stop_propagation(ev);
-	s_enable_3d_terrain = !s_enable_3d_terrain;
-	nd_seven_set_3d_mode(s_enable_3d_terrain);
-	bud_app_set_state();
-	return 0;
-}
-
 static bud_node *mount_seven_stage(void)
 {
 	/* A different tag than the terminal's <div>: swapping stages must replace
@@ -797,15 +788,6 @@ static bud_node *mount_seven_stage(void)
 			lx_attr("width", "640"),
 			lx_attr("height", "480"),
 			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))));
-
-	bud_node *btn = bud_element("button");
-	bud_set_attr(btn, "type", "button");
-	bud_set_attr(btn, "id", "toggle-3d-btn");
-	bud_set_attr(btn, "class", "cursor-pointer select-none");
-	bud_set_attr(btn, "style", "position:absolute;top:12px;left:12px;z-index:40;width:auto;height:auto;min-width:76px;padding:4px 10px;white-space:nowrap;background:rgba(24,24,27,0.88);color:#f5f5f5;border:1px solid rgba(255,255,255,0.25);border-radius:4px;cursor:pointer;font-family:monospace;font-weight:bold;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.6);");
-	bud_append(btn, bud_text(s_enable_3d_terrain ? "Mode: 3D" : "Mode: 2D"));
-	bud_bind(btn, "click", 1, on_toggle_3d);
-	bud_append(stage, btn);
 
 	return stage;
 }
@@ -911,8 +893,15 @@ int nd_ui_send_cmd(const char *cmd)
 static int on_data_cmd(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
-	const char *cmd = bud_get_attr(ev->target, "data-cmd");
+	bud_node *node = ev ? (ev->current_target ? ev->current_target : ev->target) : NULL;
+	const char *cmd = node ? bud_get_attr(node, "data-cmd") : NULL;
+	if (!cmd && ev && ev->target)
+		cmd = bud_get_attr(ev->target, "data-cmd");
 	if (!cmd || !cmd[0]) return 0;
+	if (client_state.selected_item_ref) {
+		client_state.selected_item_ref = 0;
+		bud_app_set_state();
+	}
 	return send_cmd(cmd);
 }
 
@@ -1072,50 +1061,56 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 			bud_append(name_span, bud_text(e->name));
 			bud_append(row, name_span);
 
-			/* Action Dock: floating popup capsule when selected */
+			/* Dropdown caret hint */
+			bud_node *caret = bud_element("span");
+			bud_set_attr(caret, "class", "nd-item-caret pointer-events-none");
+			bud_append(caret, bud_text(is_selected ? "▴" : "▾"));
+			bud_append(row, caret);
+
+			/* Popper-style Floating Action Dropdown Menu when selected */
 			bud_node *act_dock = bud_element("div");
-			bud_set_attr(act_dock, "class", is_selected ? "nd-item-popup flex items-center gap-1" : "hidden");
+			bud_set_attr(act_dock, "class", is_selected ? "nd-item-popup nd-item-popper" : "hidden");
 
 			char look_cmd[48], get_cmd[48], drop_cmd[48];
 			snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);
 			snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
 			snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
 
-			/* Look button */
+			/* Look menu item */
 			bud_node *look = bud_element("button");
 			bud_set_attr(look, "type", "button");
 			bud_set_attr(look, "data-action", "look");
 			bud_set_attr(look, "data-cmd", look_cmd);
-			bud_set_attr(look, "class", "nd-pad btn text-xs");
+			bud_set_attr(look, "class", "nd-popper-item btn text-xs");
 			char look_title[64];
 			snprintf(look_title, sizeof(look_title), "Look %s", e->name);
 			bud_set_attr(look, "title", look_title);
-			bud_append(look, bud_text("👁"));
+			bud_append(look, bud_text("👁 Look"));
 			bud_bind(look, "click", 1, on_data_cmd);
 			bud_append(act_dock, look);
 
-			/* Get button: shown if ACT_GET (4) is set or item is gettable */
+			/* Get menu item: shown if ACT_GET (4) is set or item is gettable */
 			if ((e->actions & 4) || (e->location != st->me && !(e->flags & (ND_EF_PLAYER | ND_EF_CREATURE)) && e->type != 1 && e->actions == 0)) {
 				bud_node *get = bud_element("button");
 				bud_set_attr(get, "type", "button");
 				bud_set_attr(get, "data-action", "get");
 				bud_set_attr(get, "data-cmd", get_cmd);
-				bud_set_attr(get, "class", "nd-pad btn text-xs");
+				bud_set_attr(get, "class", "nd-popper-item btn text-xs");
 				bud_set_attr(get, "title", "Get");
-				bud_append(get, bud_text("🖐"));
+				bud_append(get, bud_text("🖐 Get"));
 				bud_bind(get, "click", 1, on_data_cmd);
 				bud_append(act_dock, get);
 			}
 
-			/* Drop button: shown if ACT_DROP (8) is set or item is in inventory */
+			/* Drop menu item: shown if ACT_DROP (8) is set or item is in inventory */
 			if ((e->actions & 8) || (e->location == st->me)) {
 				bud_node *drop = bud_element("button");
 				bud_set_attr(drop, "type", "button");
 				bud_set_attr(drop, "data-action", "drop");
 				bud_set_attr(drop, "data-cmd", drop_cmd);
-				bud_set_attr(drop, "class", "nd-pad btn text-xs");
+				bud_set_attr(drop, "class", "nd-popper-item btn text-xs");
 				bud_set_attr(drop, "title", "Drop");
-				bud_append(drop, bud_text("🪣"));
+				bud_append(drop, bud_text("🪣 Drop"));
 				bud_bind(drop, "click", 1, on_data_cmd);
 				bud_append(act_dock, drop);
 			}
@@ -1252,7 +1247,7 @@ static bud_node *render_closed_windows_dock(void)
 
 	int any_closed = 0;
 	for (int w = 0; w < ND_WIN_COUNT; w++) {
-		if (!s_win[w].minimized)
+		if (w == ND_WIN_ACTIONS || !s_win[w].minimized)
 			continue;
 		any_closed = 1;
 		bud_node *btn = bud_element("button");
@@ -1540,20 +1535,13 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 		bud_append(holder, overlay);
 
-		/* 6. Floating Bottom-Right Actions Dock Window (movable & resizable) */
+		/* 6. Permanent Toolbar-Free Bottom-Right Actions Dock */
 		bud_node *actions = render_action_bar(st);
 		if (actions) {
 			bud_node *act_dock = bud_element("div");
 			bud_set_attr(act_dock, "id", "bottom-right-actions");
 			bud_set_attr(act_dock, "data-bud-key", "bottom-right-actions");
-			int is_min = s_win[ND_WIN_ACTIONS].minimized;
-			int is_drag = (s_drag_win == ND_WIN_ACTIONS && s_drag_mode != 0);
-			char acls[160];
-			snprintf(acls, sizeof(acls), "hud-win hud-win-actions pointer-events-auto%s%s",
-				is_min ? " hud-win-minimized" : "",
-				is_drag ? " hud-win-dragging" : "");
-			bud_set_attr(act_dock, "class", acls);
-			append_win_chrome(act_dock, ND_WIN_ACTIONS, "actions", "⚡ Actions", 0);
+			bud_set_attr(act_dock, "class", "hud-actions-dock pointer-events-auto");
 
 			bud_node *act_body = bud_element("div");
 			bud_set_attr(act_body, "class", "hud-win-body flex items-center justify-center w-full h-full");
