@@ -4,6 +4,7 @@ REPO_ROOT="$(pwd)"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT HUP INT TERM
 gcc -Wall -Wextra -Werror -O1 \
+    -I"$REPO_ROOT/external/nd-plant/include" \
     -I"$REPO_ROOT/external/nd-world/include" \
     -I"$REPO_ROOT/external/libchaff/include" \
     -I"$REPO_ROOT/external/libareole/include" \

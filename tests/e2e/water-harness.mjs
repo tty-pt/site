@@ -92,6 +92,8 @@ async function instance() {
 			lam_billboard_batch_flush: stub,
 			lam_cam_set_3d: stub,
 			lam_cam_set_2d: stub,
+			lam_image_request: stub,
+			lam_image_read: stub,
 		},
 		xylem: { wasm_xy_load_module: stub, wasm_xy_unload_module: stub },
 		stele: { stl_host_emit_patch: stub, stl_host_event_emit: stub },

@@ -292,3 +292,10 @@ nd-stage,
     overflow-y: visible !important;
 }
 
+nd-avatar img,
+#target-card img {
+    image-rendering: pixelated;
+    object-fit: contain;
+}
+
+

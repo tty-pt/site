@@ -2,9 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <nd/bcp-types.h>
+#include <nd/plant.h>
 #include <nd/seven-world.h>
 #include "nd_seven_ground.h"
 #include "nd_seven_motion.h"
+#include "nd_seven_atlas_draw.h"
 
 static ndw_tile_t tile(uint8_t biome, uint8_t exits, uint8_t flags,
                        int gl, int gc, int gr)
@@ -1149,6 +1151,79 @@ int main(void)
 		assert(r2_min_x >= 98 && r2_min_x <= 106 && r2_max_x >= 130);
 
 		printf("PASS: rock placement dispersion across Slot 0 [<=28..>=60], Slot 1 [<=50..>=110], and Slot 2 [>=98..>=130] verified\n");
+	}
+
+	/* Staged flora species metadata, 4 variants, collision footprint classes (0..2), and runtime sprite rect fallback (R1..R5) */
+	{
+		int16_t p_forest[4] = { 10, 20, 0, 0 };
+		/* Temperate Seasonal Forest (bio 12): temp ~ 95, rain ~ 190 */
+		int saw_oak = 0, saw_willow = 0, saw_maple = 0, saw_acacia = 0;
+		unsigned var_mask = 0;
+		for (int32_t rx = -12; rx <= 12; rx++) {
+			for (int32_t ry = -12; ry <= 12; ry++) {
+				uint32_t he = (uint32_t)(rx * 73856093 ^ ry * 19349663) & 0x7FFFu;
+				uint32_t w  = (uint32_t)(rx * 83492791 ^ ry * 2971215073u) & 0x7FFFu;
+				uint32_t tm = (uint32_t)(rx * 19349663 ^ ry * 73856093);
+				plant_tile_t pd;
+				nd_plant_noise_eval(&pd, he, w, 0, tm, 95, 190, NULL);
+				for (unsigned s = 0; s < 3; s++) {
+					uint8_t pid_s = 0, cm_s = 0;
+					if (!nd_plant_slot_meta(&pd, s, rx, ry, -1, &pid_s, &cm_s))
+						continue;
+					assert(pid_s != 0);
+					unsigned idx_s = ND_PLANT_UNPACK_IDX(pid_s);
+					unsigned is_big = ND_PLANT_UNPACK_BIG(pid_s);
+					unsigned v_s = ND_PLANT_UNPACK_VAR(pid_s);
+					assert(idx_s < ND_PLANT_MAX);
+					assert(is_big <= 1);
+					assert(v_s >= 1 && v_s <= 2);
+					const nd_plant_spec_t *sp = &s_nd_plant_specs[idx_s];
+					assert(cm_s == (is_big ? sp->big_col : sp->small_col));
+					assert(sp->small_art == 2 && sp->big_art == 2);
+					var_mask |= (1u << (v_s - 1u));
+					if (idx_s == 10) saw_oak++;
+					if (idx_s == 11) saw_willow++;
+					if (idx_s == 12) saw_maple++;
+					if (idx_s == 7)  saw_acacia++;
+				}
+			}
+		}
+		assert(saw_oak > 0 && saw_willow > 0 && saw_maple > 0);
+		assert(saw_acacia == 0);
+		assert(var_mask == 0x3u);
+
+		/* Walkable ground flora (col_mask == 0, e.g. fern idx 5) must NOT block player step */
+		ndw_tile_t tw = tile(12, 0x1B, 0, 'f', 0, 0);
+		tw.plant_id[0] = ND_PLANT_PACK_ID(5, 0, 0); /* fern small/1 */
+		tw.col_mask[0] = 0;
+		ndw_obj_t obw[NDW_MAX_OBJ];
+		int nw = ndw_tile_objects(&tw, p_forest, 0, obw);
+		assert(nw == 1);
+		assert(obw[0].plant_id == tw.plant_id[0]);
+		assert(obw[0].col_mask == 0);
+		assert(obw[0].hw == 0 && obw[0].hh == 0);
+		g_grid_tile = tw;
+		assert(ndw_blocked(lookup_open, NULL, obw[0].x, obw[0].y) == 0);
+
+		/* Blocking mature trunk (col_mask == 2, e.g. oak idx 10 big) MUST block player step at its base and cycle variants in cluster */
+		ndw_tile_t tb = tile(12, 0x1B, 0, 'X', 0, 0);
+		tb.plant_id[0] = ND_PLANT_PACK_ID(10, 1, 1); /* quercus robur big/2 */
+		tb.col_mask[0] = 2;
+		ndw_obj_t obb[NDW_MAX_OBJ];
+		int nb = ndw_tile_objects(&tb, p_forest, 0, obb);
+		assert(nb >= 2);
+		assert(obb[0].col_mask == 2);
+		assert(obb[0].hw >= 6 && obb[0].hw <= 8 && obb[0].hh >= 6 && obb[0].hh <= 7);
+		assert(ND_PLANT_UNPACK_VAR(obb[0].plant_id) != ND_PLANT_UNPACK_VAR(obb[1].plant_id));
+		g_grid_tile = tb;
+		assert(ndw_blocked(lookup_open, NULL, obb[0].x, obb[0].y) == 1);
+
+		/* Runtime atlas fallback when host image decode has not yet populated pixels */
+		nd_seven_sprite_rect_t rect = { 0, 0, 0, 0 };
+		int ready = nd_seven_plant_rect(tb.plant_id[0], &rect);
+		assert(ready == 0);
+
+		printf("PASS: staged flora metadata, 4 variants, Temperate Seasonal Forest species distribution, collision footprints, and sprite cache fallback verified\n");
 	}
 
 	printf("ALL SEVEN WORLD TESTS PASSED\n");

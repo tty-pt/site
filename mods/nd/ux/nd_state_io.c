@@ -295,6 +295,18 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 					uint8_t b2 = (h2 >= 'a') ? (h2 - 'a' + 10) : (h2 >= 'A') ? (h2 - 'A' + 10) : (h2 - '0');
 					raw[i] = (uint8_t)((b1 << 4) | b2);
 				}
+			} else if (hex_len == (16 + ND_MAP_TILES_COUNT * 12) * 2) {
+				uint8_t leg[16 + ND_MAP_TILES_COUNT * 12];
+				for (size_t i = 0; i < sizeof(leg); i++) {
+					char h1 = map_hex[i * 2];
+					char h2 = map_hex[i * 2 + 1];
+					uint8_t b1 = (h1 >= 'a') ? (h1 - 'a' + 10) : (h1 >= 'A') ? (h1 - 'A' + 10) : (h1 - '0');
+					uint8_t b2 = (h2 >= 'a') ? (h2 - 'a' + 10) : (h2 >= 'A') ? (h2 - 'A' + 10) : (h2 - '0');
+					leg[i] = (uint8_t)((b1 << 4) | b2);
+				}
+				memcpy(&client_state.map_data, leg, 16);
+				for (size_t k = 0; k < ND_MAP_TILES_COUNT; k++)
+					memcpy(&client_state.map_data.tiles[k], leg + 16 + k * 12, 12);
 			}
 		}
 

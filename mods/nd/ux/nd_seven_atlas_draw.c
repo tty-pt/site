@@ -1,11 +1,27 @@
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_motion.h"
 #include "nd_seven_ground.h"
+#include <ttypt/lam.h>
+#include <nd/plant.h>
+#include <stdio.h>
 #include <string.h>
 
 static uint8_t s_atlas[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
-static uint32_t s_atlas_rgba[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
+static uint32_t s_atlas_rgba[ND_SEVEN_ATLAS_W * ND_SEVEN_RUNTIME_ATLAS_H];
 static int s_atlas_ready;
+static uint32_t s_atlas_ver = 1;
+static uint16_t s_shelf_x = 0;
+static uint16_t s_shelf_y = ND_SEVEN_ATLAS_H_PX;
+static uint16_t s_shelf_h = 0;
+
+typedef struct {
+	uint32_t img_id;
+	uint8_t  loaded;
+	nd_seven_sprite_rect_t rect;
+} flora_dyn_slot_t;
+
+static flora_dyn_slot_t s_flora_slots[ND_PLANT_MAX][2][2];
+static uint32_t s_decode_scratch[160 * 160];
 
 void atlas_load(void)
 {
@@ -35,6 +51,80 @@ const uint32_t *atlas_rgba(void)
 {
 	atlas_load();
 	return s_atlas_rgba;
+}
+
+uint32_t atlas_rgba_version(void)
+{
+	atlas_load();
+	return s_atlas_ver;
+}
+
+int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
+{
+	if (!ND_PLANT_UNPACK_PRESENT(plant_id))
+		return 0;
+	unsigned sp_idx = ND_PLANT_UNPACK_IDX(plant_id);
+	unsigned is_big = ND_PLANT_UNPACK_BIG(plant_id);
+	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 1u;
+
+	atlas_load();
+	flora_dyn_slot_t *slot = &s_flora_slots[sp_idx][is_big][var_idx];
+	if (slot->loaded) {
+		if (out_rect) *out_rect = slot->rect;
+		return 1;
+	}
+	if (!slot->img_id) {
+		char url[96];
+		snprintf(url, sizeof(url), "/nd/art/plant/%s/%s/%u.png",
+		         s_nd_plant_specs[sp_idx].slug,
+		         is_big ? "big" : "small",
+		         var_idx + 1u);
+		slot->img_id = lam_image_request(url);
+	}
+	if (slot->img_id) {
+		uint32_t iw = 0, ih = 0;
+		if (lam_image_read(slot->img_id, s_decode_scratch, sizeof(s_decode_scratch), &iw, &ih) &&
+		    iw > 0 && ih > 0 && iw <= 160 && ih <= 160) {
+			if ((uint32_t)s_shelf_x + iw > ND_SEVEN_ATLAS_W) {
+				s_shelf_x = 0;
+				s_shelf_y = (uint16_t)(s_shelf_y + s_shelf_h);
+				s_shelf_h = 0;
+			}
+			if ((uint32_t)s_shelf_y + ih <= ND_SEVEN_RUNTIME_ATLAS_H) {
+				for (uint32_t ry = 0; ry < ih; ry++) {
+					memcpy(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
+					       &s_decode_scratch[ry * iw],
+					       iw * sizeof(uint32_t));
+				}
+				slot->rect.x = s_shelf_x;
+				slot->rect.y = s_shelf_y;
+				slot->rect.w = (uint16_t)iw;
+				slot->rect.h = (uint16_t)ih;
+				s_shelf_x = (uint16_t)(s_shelf_x + iw);
+				if (ih > s_shelf_h)
+					s_shelf_h = (uint16_t)ih;
+				slot->loaded = 1;
+				s_atlas_ver++;
+				if (out_rect) *out_rect = slot->rect;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+int nd_seven_obj_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect)
+{
+	if (!o || !out_rect)
+		return 0;
+	if (o->plant_id && nd_seven_plant_rect(o->plant_id, out_rect))
+		return 1;
+	int id = nd_seven_obj_sprite(o);
+	if (id > 0 && id < NDS_COUNT) {
+		*out_rect = nd_seven_sprite_rects[id];
+		return 1;
+	}
+	return 0;
 }
 
 static const uint32_t s_ansi[16] = {
@@ -464,14 +554,63 @@ static void draw_drop_shadow(uint32_t *fb, int w, int h, int sx, int sy, int rx,
 	}
 }
 
+static void blit_rgba_rect(uint32_t *fb, int w, int h, const nd_seven_sprite_rect_t *r,
+                           int ax, int ay, int dx, int dy, int scale, int flip, int sub_units)
+{
+	int sw = r->w, sh = r->h;
+	int ox = dx - ax * scale, oy = dy - ay * scale;
+	if (ox >= w || oy >= h || ox + sw * scale <= 0 || oy + sh * scale <= 0)
+		return;
+	int y_water = (sub_units > 0) ? (ay - sub_units) : 9999;
+
+	for (int y = 0; y < sh; y++) {
+		const uint32_t *row = &s_atlas_rgba[(r->y + y) * ND_SEVEN_ATLAS_W + r->x];
+		int yy0 = oy + y * scale;
+		if (yy0 >= h || yy0 + scale <= 0)
+			continue;
+		for (int x = 0; x < sw; x++) {
+			int srcx = flip ? (sw - 1 - x) : x;
+			uint32_t c = row[srcx];
+			int xx0 = ox + x * scale;
+			if (!(c >> 24) || xx0 >= w || xx0 + scale <= 0)
+				continue;
+			if (y >= y_water) {
+				int d_row = y - y_water;
+				if (d_row == 0) {
+					c = alpha_blend_rgb(c, RGB(240, 250, 255), 180);
+				} else {
+					uint32_t wcol = water_color_at_depth(d_row, 128, 128, 128);
+					int alpha = water_alpha_at_depth(d_row);
+					int shallow_alpha = 48 + ((d_row < 6) ? (alpha * d_row / 12) : (alpha * 2 / 5));
+					if (shallow_alpha > 255) shallow_alpha = 255;
+					c = alpha_blend_rgb(c, wcol, shallow_alpha);
+				}
+			}
+			for (int py = 0; py < scale; py++)
+				for (int px = 0; px < scale; px++)
+					put_px(fb, w, h, xx0 + px, yy0 + py, c);
+		}
+	}
+}
+
 void draw_world_obj_scaled_sub(uint32_t *fb, int w, int h, const ndw_obj_t *o, int sx, int sy, uint32_t anim, int scale, int sub_units)
 {
 	if (scale < 1) scale = 1;
 	ctx_t c = { fb, w, h, sx, sy, scale };
 	const nd_seven_sprite_rect_t *r;
+	nd_seven_sprite_rect_t dyn_r;
 	tint_t t;
 	int id;
 	int flip = (o->variant >> 2) & 1;
+
+	if (o->plant_id &&
+	    (o->kind == NDW_K_DECID || o->kind == NDW_K_TALL ||
+	     o->kind == NDW_K_FIR || o->kind == NDW_K_CACTUS) &&
+	    nd_seven_plant_rect(o->plant_id, &dyn_r)) {
+		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 12 : 8) * scale, (o->big ? 4 : 3) * scale);
+		blit_rgba_rect(fb, w, h, &dyn_r, dyn_r.w / 2, dyn_r.h - 1, sx, sy, scale, flip, sub_units);
+		return;
+	}
 
 	switch (o->kind) {
 	case NDW_K_DECID:
