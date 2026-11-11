@@ -67,6 +67,30 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	if (water_depth > 0 && !nd_seven_get_3d_mode()) {
 		col = water_color_at_depth((int)water_depth, 128, 128, 128);
 	}
+
+	/* Deterministic world-coordinate organic substrate variation + hypsometric tinting:
+	 * depends strictly on (wx, wy, fs.elevation_q12_4) so shared chunk perimeter vertices
+	 * evaluate 100% identical RGBA values across seams. */
+	{
+		uint32_t h_micro = ndw_mix((uint32_t)wx * 0x9E3779B9u ^ (uint32_t)wy * 0x85EBCA6Bu);
+		uint32_t h_meso  = ndw_mix((uint32_t)(wx >> 2) * 0xC2B2AE3Du ^ (uint32_t)(wy >> 2) * 0x27D4EB2Fu);
+		int organic_delta = (int)((h_micro >> 24) & 0x1Fu) - 16 + ((int)((h_meso >> 24) & 0x0Fu) - 8);
+		int elev_rel = ((int)fs.elevation_q12_4 - ((int)fs.water_level << 4)) >> 4;
+		if (elev_rel < 0) elev_rel = 0;
+		if (elev_rel > 48) elev_rel = 48;
+		int shade_q8 = 252 + (organic_delta >> 1) + (elev_rel >> 2);
+
+		int r = (int)(col & 0xFF);
+		int g = (int)((col >> 8) & 0xFF);
+		int b = (int)((col >> 16) & 0xFF);
+		r = (r * shade_q8) >> 8;
+		g = (g * (shade_q8 + ((organic_delta & 7) - 3))) >> 8;
+		b = (b * (shade_q8 - (elev_rel >> 4))) >> 8;
+		if (r < 0) r = 0; else if (r > 255) r = 255;
+		if (g < 0) g = 0; else if (g > 255) g = 255;
+		if (b < 0) b = 0; else if (b > 255) b = 255;
+		col = 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+	}
 	out->rgba = col;
 }
 

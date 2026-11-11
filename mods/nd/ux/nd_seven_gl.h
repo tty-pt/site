@@ -125,6 +125,15 @@ const char *nd_seven_gl_fs_billboard(void);
  * Level 1+ returns 32 (32x32 quads = 2,048 triangles). */
 uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level);
 
+/* Pure-C reference mirror of the 7-octave zoom-progressive & Nyquist-filtered
+ * terrain surface detail cascade in s_fs_terrain:
+ * Evaluates signed surface micro-relief height and writes analytical world-space
+ * partial derivatives (out_grad_x, out_grad_y) and micro-cavity AO factor (out_cavity_ao). */
+float nd_seven_gl_eval_terrain_detail(float wx, float wy,
+                                      float cam_dist, float pixel_footprint,
+                                      float *out_grad_x, float *out_grad_y,
+                                      float *out_cavity_ao);
+
 #ifdef __cplusplus
 }
 #endif

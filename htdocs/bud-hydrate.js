@@ -901,17 +901,54 @@ export class BudWasmBridge {
 	}
 
 	mount(instance, state) {
-		if (instance) {
-			this.wasm = instance;
-			this.memory = instance.exports?.memory || instance.memory || this.memory;
+		this.wasm = instance;
+		this.memory = instance.exports?.memory || instance.memory || this.memory;
+		if (this.wasm) {
 			this.rescan();
 		}
-		if (!this._mounted) {
-			this._mounted = true;
-			const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
-			if (fn) {
-				fn();
-			}
+		return this;
+	}
+
+	update(slot) {
+		this.flush();
+		return this;
+	}
+
+	unmount(slot) {
+		return this;
+	}
+
+	emitPatch(op, a, b, c) {
+		if (this.host && typeof this.host.replay === 'function') {
+			this.host.replay([{ op, a, b, c }]);
+		}
+	}
+
+	setWasm(wasm) {
+		this.wasm = wasm || null;
+		this.memory = this.wasm && this.wasm.memory ? this.wasm.memory : null;
+		if (this.wasm) {
+			this.rescan();
+		}
+		return this;
+	}
+
+	rescan() {
+		if (this.host) {
+			this.host.autoBindListeners();
+		}
+		return this;
+	}
+
+	setMemory(memory) {
+		this.memory = memory || null;
+		return this;
+	}
+
+	mount() {
+		const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
+		if (fn) {
+			fn();
 		}
 		if (typeof document !== 'undefined') {
 			if (this._docClickListener) {
@@ -950,43 +987,6 @@ export class BudWasmBridge {
 			};
 			document.addEventListener('click', this._docClickListener);
 		}
-		return this;
-	}
-
-	update(slot) {
-		this.flush();
-		return this;
-	}
-
-	unmount(slot) {
-		this._mounted = false;
-		return this;
-	}
-
-	emitPatch(op, a, b, c) {
-		if (this.host && typeof this.host.replay === 'function') {
-			this.host.replay([{ op, a, b, c }]);
-		}
-	}
-
-	setWasm(wasm) {
-		this.wasm = wasm || null;
-		this.memory = this.wasm && this.wasm.memory ? this.wasm.memory : null;
-		if (this.wasm) {
-			this.rescan();
-		}
-		return this;
-	}
-
-	rescan() {
-		if (this.host) {
-			this.host.autoBindListeners();
-		}
-		return this;
-	}
-
-	setMemory(memory) {
-		this.memory = memory || null;
 		return this;
 	}
 

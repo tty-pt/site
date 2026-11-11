@@ -2393,6 +2393,7 @@ int main(void)
 
 	/* High-Resolution 48x48 Level 0 Terrain Grid & Exact Seam Continuity Verification */
 	{
+		nd_seven_set_3d_mode(1);
 		ar_system_t *cs = nd_seven_get_chunk_sys();
 		assert(cs != NULL);
 
@@ -2410,11 +2411,88 @@ int main(void)
 
 		for (uint32_t r = 0; r < n00->vert_dim; r++) {
 			assert(n00->values[r * n00->vert_dim + 48] == n10->values[r * n10->vert_dim + 0]);
+			assert(n00->rgba[r * n00->vert_dim + 48] == n10->rgba[r * n10->vert_dim + 0]);
 		}
 		for (uint32_t c = 0; c < n00->vert_dim; c++) {
 			assert(n00->values[48 * n00->vert_dim + c] == n01->values[0 * n01->vert_dim + c]);
+			assert(n00->rgba[48 * n00->vert_dim + c] == n01->rgba[0 * n01->vert_dim + c]);
 		}
+
+		/* Verify organic substrate variation on dry land (non-flat RGBA across chunk vertices) */
+		uint32_t first_rgba = n00->rgba[0];
+		int distinct_rgba = 0;
+		for (uint32_t i = 1; i < n00->vert_count; i++) {
+			if (n00->rgba[i] != first_rgba)
+				distinct_rgba++;
+		}
+		assert(distinct_rgba > 100);
 		printf("PASS: 48x48 Level 0 chunk grid (49x49 vertices, 4,608 triangles) and 32x32 Level 1+ LOD grid verified with seamless boundaries\n");
+	}
+
+	/* R5: Zoom-Progressive 7-Octave Terrain Texture Realism, Analytical Gradients & Nyquist Filtering */
+	{
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		assert(fs_t != NULL);
+		assert(strstr(fs_t, "chaff_grad_noise2d") != NULL);
+		assert(strstr(fs_t, "eval_zoom_terrain_detail") != NULL);
+		assert(strstr(fs_t, "dFdx(vWorldPos)") != NULL);
+		assert(strstr(fs_t, "rockCrevice") != NULL);
+		assert(strstr(fs_t, "talusFactor") != NULL);
+		assert(strstr(fs_t, "quartzGlint") != NULL);
+		assert(strstr(fs_t, "bladeRelief") != NULL);
+
+		/* Evaluate sub-unit surface detail across 4 progressive zoom tiers:
+		 * Tier 0: Far zoom (cam_dist = 1800, footprint = 3.0)
+		 * Tier 1: Normal 1x zoom (cam_dist = 280, footprint = 0.45)
+		 * Tier 2: Close 2.5x zoom (cam_dist = 112, footprint = 0.18)
+		 * Tier 3: Ultra-close 8x zoom (cam_dist = 35, footprint = 0.05) */
+		const float dists[4] = { 1800.0f, 280.0f, 112.0f, 35.0f };
+		const float footprints[4] = { 3.0f, 0.45f, 0.18f, 0.05f };
+		float mean_grad[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float mean_cavity[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float sub_diff[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+		for (int t = 0; t < 4; t++) {
+			float g_sum = 0.0f;
+			float c_sum = 0.0f;
+			float d_sum = 0.0f;
+			float prev_h = 0.0f;
+			int samples = 0;
+			for (int ry = 0; ry < 24; ry++) {
+				for (int rx = 0; rx < 24; rx++) {
+					float wx = 120.0f + (float)rx * 0.04f;
+					float wy = 80.0f + (float)ry * 0.04f;
+					float gx = 0.0f, gy = 0.0f, cav = 0.0f;
+					float h = nd_seven_gl_eval_terrain_detail(wx, wy, dists[t], footprints[t], &gx, &gy, &cav);
+					g_sum += sqrtf(gx * gx + gy * gy);
+					c_sum += cav;
+					if (samples > 0)
+						d_sum += fabsf(h - prev_h);
+					prev_h = h;
+					samples++;
+				}
+			}
+			mean_grad[t] = g_sum / (float)samples;
+			mean_cavity[t] = c_sum / (float)samples;
+			sub_diff[t] = d_sum / (float)(samples - 1);
+		}
+
+		/* As camera zooms in (1800 -> 280 -> 112 -> 35), finer octaves unlock and sharpen surface detail */
+		assert(mean_grad[1] > mean_grad[0] * 1.5f);
+		assert(mean_grad[2] > mean_grad[1] * 1.5f);
+		assert(mean_grad[3] > mean_grad[2] * 1.4f);
+		assert(sub_diff[3] > sub_diff[1] * 1.3f);
+		assert(mean_cavity[3] > mean_cavity[1]);
+
+		/* Nyquist anti-aliasing check: at close distance (35.0) but coarse pixel footprint (2.0),
+		 * high-frequency octaves are automatically filtered out to prevent aliasing shimmer */
+		float gx_nyq = 0.0f, gy_nyq = 0.0f, gx_full = 0.0f, gy_full = 0.0f;
+		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 2.0f, &gx_nyq, &gy_nyq, NULL);
+		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 0.04f, &gx_full, &gy_full, NULL);
+		assert(hypotf(gx_nyq, gy_nyq) < hypotf(gx_full, gy_full) * 0.5f);
+
+		printf("PASS: zoom-progressive 7-octave terrain texture detail verified (mean grad: far=%.3f, 1x=%.3f, 2.5x=%.3f, 8x=%.3f)\n",
+		       mean_grad[0], mean_grad[1], mean_grad[2], mean_grad[3]);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
