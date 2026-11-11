@@ -179,11 +179,79 @@ function buildEventPayload(info, event) {
 		}
 		const doc = getDocumentForNode(info.node);
 		const view = doc && doc.defaultView;
-		const vw = view && view.innerWidth ? view.innerWidth : 0;
-		const vh = view && view.innerHeight ? view.innerHeight : 0;
+		let vw = view && view.innerWidth ? view.innerWidth : 0;
+		let vh = view && view.innerHeight ? view.innerHeight : 0;
+		const root = info.root || (info.node && info.node.ownerDocument);
+		const holder = root && typeof root.querySelector === 'function' ? root.querySelector('#holder') : null;
+		if (holder && holder.clientWidth > 0 && holder.clientHeight > 0) {
+			vw = holder.clientWidth;
+			vh = holder.clientHeight;
+		}
 		return `${Math.round(event.clientX || 0)},${Math.round(event.clientY || 0)},${vw},${vh}`;
 	}
 	return buildControlValue(event && event.target);
+}
+
+function hydratePersistNodes(root, wasm = null, memory = null) {
+	if (!root || typeof window === 'undefined' || !window.localStorage) return;
+	const list = typeof root.querySelectorAll === 'function' ? root.querySelectorAll('[data-bud-persist-key]') : [];
+	for (const el of list) {
+		const key = el.getAttribute('data-bud-persist-key');
+		if (!key) continue;
+		try {
+			const raw = window.localStorage.getItem(`bud:layout:${key}`);
+			if (!raw) continue;
+			const saved = JSON.parse(raw);
+			if (saved && typeof saved === 'object') {
+				if (typeof saved.style === 'string' && saved.style) {
+					el.setAttribute('style', saved.style);
+					el.setAttribute('data-bud-persisted-style', saved.style);
+				}
+				if (typeof saved.class === 'string' && saved.class) {
+					el.setAttribute('class', saved.class);
+					el.setAttribute('data-bud-persisted-class', saved.class);
+				}
+				const dispatchFn = getWasmExport(wasm, ['bud_app_dispatch']);
+				const malloc = getWasmExport(wasm, ['malloc']);
+				const free = getWasmExport(wasm, ['free']);
+				if (dispatchFn && malloc && memory) {
+					const nameBytes = new TextEncoder().encode('restore-persist\0');
+					const vStr = `${key}|${saved.style || ''}|${saved.class || ''}`;
+					const vBytes = new TextEncoder().encode(vStr + '\0');
+					const namePtr = malloc(nameBytes.length);
+					const vPtr = malloc(vBytes.length);
+					if (namePtr && vPtr) {
+						new Uint8Array(memory.buffer, namePtr, nameBytes.length).set(nameBytes);
+						new Uint8Array(memory.buffer, vPtr, vBytes.length).set(vBytes);
+						dispatchFn(0, namePtr, 1, vPtr);
+					}
+					if (free) {
+						if (namePtr) free(namePtr);
+						if (vPtr) free(vPtr);
+					}
+				}
+			}
+		} catch (_) {}
+	}
+}
+
+function persistNodeState(node) {
+	if (!node || node.nodeType !== Node.ELEMENT_NODE || typeof window === 'undefined' || !window.localStorage) return;
+	const key = node.getAttribute('data-bud-persist-key');
+	if (!key) return;
+	const style = node.getAttribute('style') || '';
+	const cls = node.getAttribute('class') || '';
+	try {
+		if (!style) {
+			window.localStorage.removeItem(`bud:layout:${key}`);
+			node.removeAttribute('data-bud-persisted-style');
+			node.removeAttribute('data-bud-persisted-class');
+		} else {
+			window.localStorage.setItem(`bud:layout:${key}`, JSON.stringify({ style, class: cls }));
+			node.setAttribute('data-bud-persisted-style', style);
+			node.setAttribute('data-bud-persisted-class', cls);
+		}
+	} catch (_) {}
 }
 
 function getListenerSpec(node, event) {
@@ -628,6 +696,9 @@ class BudHostBase {
 					if (node.getAttribute(attrName) !== attrVal) {
 						node.setAttribute(attrName, attrVal);
 					}
+					if (attrName === 'style' || attrName === 'class') {
+						persistNodeState(node);
+					}
 				}
 			}
 			return true;
@@ -741,6 +812,9 @@ class BudHostBase {
 			}
 			return true;
 		case 'patch-close':
+			if (this._currentParent && this._currentParent.nodeType === Node.ELEMENT_NODE) {
+				persistNodeState(this._currentParent);
+			}
 			this._currentParent = this._parentStack.pop() || this.root;
 			return true;
 		case 'patch-innerhtml':
@@ -957,6 +1031,9 @@ export class BudWasmBridge {
 	}
 
 	mount() {
+		if (this.root) {
+			hydratePersistNodes(this.root, this.wasm, this.memory);
+		}
 		const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
 		if (fn) {
 			fn();

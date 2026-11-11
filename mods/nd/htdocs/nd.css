@@ -151,24 +151,102 @@ nd-stage,
 
 #map-overlay {
     z-index: 30 !important;
-    top: 12px !important;
-    right: 12px !important;
-    bottom: 76px !important;
+    top: 12px;
+    right: 12px;
+    bottom: 76px;
     max-height: calc(100% - 88px) !important;
-    overflow-y: auto !important;
+    overflow: visible !important;
 }
 
 #map-overlay [data-bud-key="contents"] {
     flex: 0 1 auto !important;
-    max-height: 22vh !important;
+    max-height: 22vh;
     overflow-y: auto !important;
+}
+
+#map-overlay .hud-win[style*="left:"] {
+    position: fixed !important;
+    max-height: none !important;
+    z-index: 35 !important;
+}
+
+/* Unified Floating HUD Windows & Auto-Hiding Hover Toolbars */
+.hud-win {
+    position: relative;
+    display: flex !important;
+    flex-direction: column !important;
+    box-sizing: border-box !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.hud-win:hover,
+.hud-win.hud-win-dragging {
+    border-color: rgba(194, 179, 255, 0.72) !important;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.7) !important;
+}
+
+.hud-win-toolbar {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    padding: 0 8px !important;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden !important;
+    pointer-events: none;
+    background: rgba(18, 20, 28, 0.88) !important;
+    border-bottom: 1px solid transparent !important;
+    font-size: 11px !important;
+    user-select: none !important;
+    cursor: move !important;
+    transition: opacity 0.16s ease, max-height 0.16s ease, padding 0.16s ease, border-color 0.16s ease !important;
+    flex-shrink: 0 !important;
+    z-index: 32 !important;
+}
+
+.hud-win:hover > .hud-win-toolbar,
+.hud-win.hud-win-dragging > .hud-win-toolbar,
+.hud-win.hud-win-minimized > .hud-win-toolbar,
+.hud-win.chat-minimized > .hud-win-toolbar {
+    max-height: 30px !important;
+    opacity: 1 !important;
+    padding: 4px 8px !important;
+    pointer-events: auto !important;
+    border-bottom-color: rgba(149, 137, 197, 0.28) !important;
+}
+
+.hud-win.hud-win-minimized,
+.hud-win.chat-minimized {
+    height: auto !important;
+    min-height: 0 !important;
+    width: auto !important;
+    min-width: 170px !important;
+    max-width: 280px !important;
+    padding: 0 !important;
+    border-radius: 8px !important;
+    resize: none !important;
+}
+
+.hud-win.hud-win-minimized > .hud-win-body,
+.hud-win.hud-win-minimized > #term,
+.hud-win.hud-win-minimized > .chat-resize-handle,
+.hud-win.chat-minimized > .hud-win-body,
+.hud-win.chat-minimized > #term,
+.hud-win.chat-minimized > .chat-resize-handle {
+    display: none !important;
+}
+
+.hud-win.hud-win-minimized > .hud-win-toolbar,
+.hud-win.chat-minimized > .hud-win-toolbar {
+    border-bottom: none !important;
 }
 
 /* Floating RPG Chat Terminal */
 .rpg-chat {
     position: absolute !important;
-    bottom: 16px !important;
-    left: 16px !important;
+    bottom: 16px;
+    left: 16px;
     z-index: 20 !important;
     display: flex !important;
     flex-direction: column !important;
@@ -182,49 +260,49 @@ nd-stage,
     overflow: hidden !important;
     resize: both;
     width: 50vw;
-    min-width: 360px !important;
-    max-width: 85vw !important;
+    min-width: 260px !important;
+    max-width: 95vw !important;
 }
 
 .rpg-chat.chat-compact {
     height: 180px;
     min-height: 110px !important;
-    max-height: calc(100vh - 100px) !important;
+    max-height: calc(100vh - 80px) !important;
 }
 
 .rpg-chat.chat-expanded {
     height: 420px;
-    min-height: 160px !important;
-    max-height: calc(100vh - 100px) !important;
+    min-height: 140px !important;
+    max-height: calc(100vh - 80px) !important;
 }
 
-.rpg-chat.chat-minimized {
-    height: auto !important;
-    min-height: 0 !important;
-    width: 240px !important;
-    min-width: 200px !important;
-    resize: none !important;
-}
-
-.rpg-chat.chat-minimized #term,
-.rpg-chat.chat-minimized .chat-resize-handle {
-    display: none !important;
-}
-
-.rpg-chat.chat-minimized .chat-header {
-    border-bottom: none !important;
-}
-
+/* 8-Way Edge & Corner Resize Handles (active on window hover or drag) */
 .chat-resize-handle {
     position: absolute !important;
-    z-index: 30 !important;
+    z-index: 34 !important;
     user-select: none !important;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.hud-win:hover > .chat-resize-handle,
+.hud-win.hud-win-dragging > .chat-resize-handle {
     pointer-events: auto !important;
+    opacity: 1;
 }
 
 .chat-resize-n {
     top: 0 !important;
-    left: 0 !important;
+    left: 10px !important;
+    right: 10px !important;
+    height: 6px !important;
+    cursor: ns-resize !important;
+}
+
+.chat-resize-s {
+    bottom: 0 !important;
+    left: 10px !important;
     right: 10px !important;
     height: 6px !important;
     cursor: ns-resize !important;
@@ -233,7 +311,15 @@ nd-stage,
 .chat-resize-e {
     top: 10px !important;
     right: 0 !important;
-    bottom: 0 !important;
+    bottom: 10px !important;
+    width: 6px !important;
+    cursor: ew-resize !important;
+}
+
+.chat-resize-w {
+    top: 10px !important;
+    left: 0 !important;
+    bottom: 10px !important;
     width: 6px !important;
     cursor: ew-resize !important;
 }
@@ -243,28 +329,47 @@ nd-stage,
     right: 0 !important;
     width: 10px !important;
     height: 10px !important;
-    z-index: 35 !important;
+    z-index: 36 !important;
     cursor: nesw-resize !important;
 }
 
+.chat-resize-nw {
+    top: 0 !important;
+    left: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nwse-resize !important;
+}
+
+.chat-resize-se {
+    bottom: 0 !important;
+    right: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nwse-resize !important;
+}
+
+.chat-resize-sw {
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nesw-resize !important;
+}
+
+.hud-win.hud-win-dragging,
+.hud-win.hud-win-dragging *,
 .rpg-chat.chat-resizing,
 .rpg-chat.chat-resizing * {
     user-select: none !important;
 }
 
+.hud-win.hud-win-dragging #term,
 .rpg-chat.chat-resizing #term {
     pointer-events: none !important;
-}
-
-.chat-header {
-    display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    padding: 6px 10px 4px 10px !important;
-    background: rgba(18, 20, 28, 0.72) !important;
-    border-bottom: 1px solid rgba(149, 137, 197, 0.28) !important;
-    font-size: 11px !important;
-    user-select: none !important;
 }
 
 .chat-controls {
@@ -274,16 +379,16 @@ nd-stage,
 }
 
 .chat-ctrl-btn {
-    width: 22px !important;
-    height: 22px !important;
+    width: 20px !important;
+    height: 20px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
     border-radius: 4px !important;
-    background: rgba(35, 38, 55, 0.75) !important;
+    background: rgba(35, 38, 55, 0.85) !important;
     color: #e2e8f0 !important;
-    border: 1px solid rgba(149, 137, 197, 0.35) !important;
-    font-size: 12px !important;
+    border: 1px solid rgba(149, 137, 197, 0.38) !important;
+    font-size: 11px !important;
     line-height: 1 !important;
     cursor: pointer !important;
     transition: all 0.15s ease !important;
@@ -291,8 +396,8 @@ nd-stage,
 }
 
 .chat-ctrl-btn:hover {
-    background: rgba(58, 62, 90, 0.95) !important;
-    border-color: rgba(194, 179, 255, 0.85) !important;
+    background: rgba(58, 62, 90, 0.98) !important;
+    border-color: rgba(194, 179, 255, 0.9) !important;
     color: #ffffff !important;
 }
 
@@ -309,14 +414,14 @@ nd-stage,
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 4px rgba(0, 0, 0, 0.8) !important;
 }
 
-/* Top-Center High-Contrast Room Header (Seven Mode) */
+/* Top-Center High-Contrast Room Header Window (Seven Mode) */
 #room-header.seven-room-header {
     position: absolute !important;
-    top: 14px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 25 !important;
-    pointer-events: none !important;
+    pointer-events: auto !important;
     font-family: "Lucida Console", Monaco, monospace !important;
     font-size: 14px !important;
     font-weight: 700 !important;
@@ -327,14 +432,20 @@ nd-stage,
     backdrop-filter: blur(4px) !important;
     -webkit-backdrop-filter: blur(4px) !important;
     border: 1px solid rgba(149, 137, 197, 0.28) !important;
-    border-radius: 9999px !important;
-    padding: 4px 14px !important;
+    border-radius: 14px !important;
+    padding: 0 !important;
     white-space: nowrap !important;
+    overflow: hidden !important;
 }
 
-/* Floating RPG HUD Panels */
+.seven-room-title-body {
+    padding: 4px 14px !important;
+    text-align: center !important;
+}
+
+/* Floating RPG HUD Panels (Minimap & Room Contents) */
 .rpg-hud-panel {
-    background: rgba(10, 10, 15, 0.75) !important;
+    background: rgba(10, 10, 15, 0.65) !important;
     backdrop-filter: blur(6px) !important;
     -webkit-backdrop-filter: blur(6px) !important;
     border: 1px solid rgba(149, 137, 197, 0.4) !important;
@@ -343,36 +454,50 @@ nd-stage,
     box-sizing: border-box !important;
 }
 
-/* Floating Bottom-Right Actions Dock */
+#hud-win-map #room-map,
+#hud-win-map #room-map-canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+}
+
+/* Floating Bottom-Right Actions Dock Window */
 #bottom-right-actions {
     position: absolute !important;
-    bottom: 16px !important;
-    right: 16px !important;
+    bottom: 16px;
+    right: 16px;
     z-index: 25 !important;
     display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    gap: 8px !important;
-    padding: 6px 10px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 0 !important;
     background: rgba(10, 12, 18, 0.45) !important;
     border: 1px solid rgba(149, 137, 197, 0.32) !important;
-    border-radius: 9999px !important;
+    border-radius: 16px !important;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55) !important;
     backdrop-filter: blur(6px) !important;
     -webkit-backdrop-filter: blur(6px) !important;
     pointer-events: auto !important;
+    overflow: hidden !important;
+}
+
+#bottom-right-actions > .hud-win-body {
+    padding: 6px 10px !important;
 }
 
 #bottom-right-actions #g-actions {
     display: flex !important;
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     gap: 8px !important;
     align-items: center !important;
     justify-content: center !important;
 }
 
 #bottom-right-actions .btn,
-#bottom-right-actions button,
+#bottom-right-actions button.nd-pad,
 #bottom-right-actions nd-button {
     background: linear-gradient(135deg, rgba(35, 38, 55, 0.95), rgba(20, 22, 32, 0.95)) !important;
     color: #f3f4f6 !important;
@@ -393,7 +518,7 @@ nd-stage,
 }
 
 #bottom-right-actions .btn:hover,
-#bottom-right-actions button:hover,
+#bottom-right-actions button.nd-pad:hover,
 #bottom-right-actions nd-button:hover {
     background: linear-gradient(135deg, rgba(58, 62, 90, 1), rgba(30, 34, 52, 1)) !important;
     border-color: rgba(194, 179, 255, 0.85) !important;
@@ -403,22 +528,28 @@ nd-stage,
 }
 
 #bottom-right-actions .btn:active,
-#bottom-right-actions button:active,
+#bottom-right-actions button.nd-pad:active,
 #bottom-right-actions nd-button:active {
     transform: translateY(0) scale(0.96) !important;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Cap room contents vertically in 2D mode and in RPG HUD panels so it scrolls and never overlaps action buttons */
+/* Cap room contents vertically by default, while allowing user-resized #hud-win-contents to fill its window */
 .game-2d-mode nd-contents,
 .game-2d-mode .nd-contents,
 .rpg-hud-panel nd-contents,
 .rpg-hud-panel .nd-contents,
 #holder.game-2d-mode nd-contents,
 #holder.game-2d-mode .nd-contents {
-    max-height: 20vh !important;
-    flex: 0 1 auto !important;
+    max-height: 20vh;
+    flex: 1 1 auto !important;
     height: auto !important;
     overflow-y: auto !important;
 }
+
+#hud-win-contents[style*="height:"] nd-contents,
+#hud-win-contents[style*="height:"] .nd-contents {
+    max-height: none !important;
+}
+
 

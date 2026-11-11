@@ -71,17 +71,41 @@ int main(void)
 	assert(strstr(html, "id=\"room-map\"") != NULL);
 	assert(strstr(html, "game-2d-mode") != NULL);
 
-	/* Must contain RPG chat console with micro-icon controls, resize handles, and terminal */
+	/* Must contain RPG chat console with micro-icon controls, 8-way resize handles, hover toolbar, and terminal */
 	assert(strstr(html, "id=\"rpg-chat\"") != NULL);
+	assert(strstr(html, "data-bud-persist-key=\"nd-win-chat\"") != NULL);
+	assert(strstr(html, "id=\"chat-toolbar\"") != NULL);
 	assert(strstr(html, "id=\"chat-min-btn\"") != NULL);
 	assert(strstr(html, "id=\"chat-toggle-btn\"") != NULL);
+	assert(strstr(html, "id=\"chat-reset-btn\"") != NULL);
 	assert(strstr(html, "id=\"chat-resize-n\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-s\"") != NULL);
 	assert(strstr(html, "id=\"chat-resize-e\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-w\"") != NULL);
 	assert(strstr(html, "id=\"chat-resize-ne\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-nw\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-se\"") != NULL);
+	assert(strstr(html, "id=\"chat-resize-sw\"") != NULL);
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "chat-compact") != NULL);
+	assert(strstr(html, "hud-win-toolbar") != NULL);
 	assert(strstr(html, "—") != NULL);
 	assert(strstr(html, "⤢") != NULL);
+	assert(strstr(html, "↺") != NULL);
+
+	/* All 5 HUD elements (chat, title, map, contents, actions) must be movable/resizable HUD windows with persist keys */
+	assert(strstr(html, "data-bud-persist-key=\"nd-win-title\"") != NULL);
+	assert(strstr(html, "id=\"title-toolbar\"") != NULL);
+	assert(strstr(html, "id=\"title-resize-se\"") != NULL);
+	assert(strstr(html, "data-bud-persist-key=\"nd-win-map\"") != NULL);
+	assert(strstr(html, "id=\"map-toolbar\"") != NULL);
+	assert(strstr(html, "id=\"map-resize-se\"") != NULL);
+	assert(strstr(html, "data-bud-persist-key=\"nd-win-contents\"") != NULL);
+	assert(strstr(html, "id=\"contents-toolbar\"") != NULL);
+	assert(strstr(html, "id=\"contents-resize-se\"") != NULL);
+	assert(strstr(html, "data-bud-persist-key=\"nd-win-actions\"") != NULL);
+	assert(strstr(html, "id=\"actions-toolbar\"") != NULL);
+	assert(strstr(html, "id=\"actions-resize-se\"") != NULL);
 
 	/* Test Windows-style drag resize dimensions on #rpg-chat */
 	nd_ui_set_chat_size(640, 300);
@@ -93,6 +117,20 @@ int main(void)
 	assert(html != NULL);
 	assert(strstr(html, "style=\"width:640px;height:300px;\"") != NULL);
 	nd_ui_set_chat_size(0, 0);
+
+	/* Test moving and resizing any HUD window + localStorage restore via nd_ui_restore_persist */
+	nd_ui_restore_persist("nd-win-actions", "left:40px;top:50px;right:auto;bottom:auto;transform:none;width:300px;height:64px;|hud-win hud-win-actions");
+	int ax = 0, ay = 0, aw = 0, ah = 0;
+	nd_ui_get_win_rect(ND_WIN_ACTIONS, &ax, &ay, &aw, &ah);
+	assert(ax == 40 && ay == 50 && aw == 300 && ah == 64);
+	bud_free_string(html);
+	root = nd_ui_render(&st);
+	html = bud_render_html(root);
+	assert(html != NULL);
+	assert(strstr(html, "style=\"left:40px;top:50px;right:auto;bottom:auto;transform:none;width:300px;height:64px;\"") != NULL);
+	nd_ui_reset_win(ND_WIN_ACTIONS);
+	nd_ui_get_win_rect(ND_WIN_ACTIONS, &ax, &ay, &aw, &ah);
+	assert(ax == -1 && ay == -1 && aw == 0 && ah == 0);
 
 	/* Test chat toggle mutation into expanded state */
 	nd_ui_set_chat_expanded(1);
