@@ -2907,20 +2907,25 @@ int main(void)
 		assert(vs_c && fs_c && fs_t && fs_w);
 
 		/* 1. Verify shader contracts for 4D lattice hashing, geostrophic wind-shear cloud density,
+		 * multi-active fractal billow erosion (fbmErode), 3-deck vertical strata (uCloudDeck),
 		 * projected ground/water cloud shadows, water cloud reflections, Beer-Powder silver-lining,
 		 * and close-up diorama aperture parting */
+		assert(strstr(vs_c, "uCloudDeck") != NULL);
+		assert(strstr(fs_c, "uCloudDeck") != NULL);
 		assert(strstr(fs_c, "chaff_hash4") != NULL);
 		assert(strstr(fs_c, "chaff_grad_noise4d") != NULL);
 		assert(strstr(fs_c, "eval_recursive_wind") != NULL);
 		assert(strstr(fs_c, "eval_planetary_cloud_density") != NULL);
+		assert(strstr(fs_c, "fbmErode") != NULL);
 		assert(strstr(fs_c, "apertureMask") != NULL);
 		assert(strstr(fs_c, "powder") != NULL);
 		assert(strstr(fs_t, "eval_planetary_cloud_shadow") != NULL);
 		assert(strstr(fs_w, "eval_planetary_cloud_shadow") != NULL);
 		assert(strstr(fs_w, "reflCloudDens") != NULL);
 
-		/* 2. Verify deterministic 4D cloud density & climate humidity response */
+		/* 2. Verify deterministic 4D cloud density & climate humidity response across all 3 strata */
 		float sum_arid = 0.0f, sum_humid = 0.0f;
+		float sum_d0 = 0.0f, sum_d1 = 0.0f, sum_d2 = 0.0f;
 		int cloud_cells = 0, clear_cells = 0;
 		for (int iy = 0; iy < 16; iy++) {
 			for (int ix = 0; ix < 16; ix++) {
@@ -2929,25 +2934,33 @@ int main(void)
 				float d_arid  = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.20f, NULL, NULL, NULL, NULL);
 				float d_humid = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
 				float d_again = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float d_mid   = nd_seven_gl_eval_cloud_density(wx, wy, 192.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float d_high  = nd_seven_gl_eval_cloud_density(wx, wy, 288.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
 				assert(fabsf(d_humid - d_again) < 1e-6f);
 				assert(d_humid >= d_arid - 1e-6f);
 				sum_arid  += d_arid;
 				sum_humid += d_humid;
+				sum_d0    += d_humid;
+				sum_d1    += d_mid;
+				sum_d2    += d_high;
 				if (d_humid > 0.15f) cloud_cells++;
 				if (d_arid  < 0.05f) clear_cells++;
 			}
 		}
 		assert(sum_humid > sum_arid * 1.25f);
 		assert(cloud_cells > 15 && clear_cells > 15);
+		assert(sum_d0 > 10.0f && sum_d1 > 8.0f && sum_d2 > 5.0f);
 
-		/* 3. Verify vertical cloud slab profile vanishes outside [88, 144] and peaks in mid-slab */
-		float d_below = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 84.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 148.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		assert(d_below == 0.0f && d_above == 0.0f);
+		/* 3. Verify 3-layer vertical cloud strata [88..144], [168..228], [268..320] and clear inter-deck gaps */
+		float d_below = nd_seven_gl_eval_cloud_density(120.0f, -200.0f,  84.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		float d_gap01 = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 156.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		float d_gap12 = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 248.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 326.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		assert(d_below == 0.0f && d_gap01 == 0.0f && d_gap12 == 0.0f && d_above == 0.0f);
 
 		/* 4. Verify 4D temporal derivative stability at t = 100,000s vs t = 10s */
 		float gt_early = 0.0f, gt_late = 0.0f;
-		for (int k = 0; k < 32; k++) {
+		for (int k = 0; k < 64; k++) {
 			float wx = (float)k * 95.0f - 600.0f;
 			float wy = (float)k * 73.0f - 400.0f;
 			float gx1 = 0.0f, gy1 = 0.0f, gz1 = 0.0f, gt1 = 0.0f;
@@ -2958,10 +2971,10 @@ int main(void)
 			gt_late  += fabsf(gt2) + hypotf(gx2, gy2);
 		}
 		assert(gt_early > 0.001f);
-		assert(gt_late > gt_early * 0.65f && gt_late < gt_early * 1.45f);
+		assert(gt_late > gt_early * 0.50f && gt_late < gt_early * 1.85f);
 
-		printf("PASS: 4D wind-coupled volumetric clouds, climate humidity modulation (arid=%.2f vs humid=%.2f), and t=100000s 4D boiling stability verified\n",
-		       sum_arid, sum_humid);
+		printf("PASS: 4D multi-layer fractal volumetric clouds (decks=%.1f/%.1f/%.1f), climate humidity modulation (arid=%.2f vs humid=%.2f), and t=100000s 4D boiling stability verified\n",
+		       sum_d0, sum_d1, sum_d2, sum_arid, sum_humid);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

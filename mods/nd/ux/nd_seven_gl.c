@@ -539,39 +539,73 @@ static const char *s_fs_terrain =
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
 	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
+	"    float z = worldPos.z;\n"
+	"    float hLow  = clamp((z - 88.0) / 56.0, 0.0, 1.0);\n"
+	"    float hMid  = clamp((z - 168.0) / 60.0, 0.0, 1.0);\n"
+	"    float hHigh = clamp((z - 268.0) / 52.0, 0.0, 1.0);\n"
+	"    float vLow  = smoothstep(0.0, 0.18, hLow)  * smoothstep(1.0, 0.45, hLow);\n"
+	"    float vMid  = smoothstep(0.0, 0.22, hMid)  * smoothstep(1.0, 0.50, hMid);\n"
+	"    float vHigh = smoothstep(0.0, 0.25, hHigh) * smoothstep(1.0, 0.35, hHigh);\n"
+	"    float vProf = max(vLow, max(vMid * 0.88, vHigh * 0.72));\n"
+	"    if (vProf <= 0.001) return 0.0;\n"
 	"    vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
 	"    vec2 wDir = wind.xy;\n"
 	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
 	"    float gust = wind.z;\n"
+	"    float deckIdx = (z < 154.0) ? 0.0 : ((z < 248.0) ? 1.0 : 2.0);\n"
+	"    float hLocal  = (deckIdx < 0.5) ? hLow : ((deckIdx < 1.5) ? hMid : hHigh);\n"
+	"    float zSlice  = deckIdx * 7.3 + hLocal * 2.4;\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
-	"    float tMacro = mod(anim_time * 0.055, 1024.0);\n"
-	"    float tMeso  = mod(anim_time * 0.110, 1024.0);\n"
-	"    float tBill  = mod(anim_time * 0.185, 1024.0);\n"
-	"    float wBoil  = mod(anim_time * 0.075, 512.0);\n"
-	"    float hNorm  = clamp((worldPos.z - 88.0) / 56.0, 0.0, 1.0);\n"
-	"    vec2 shear   = (wDir * 0.85 + wPerp * 0.32) * (hNorm * 0.55);\n"
-	"    vec2 warp    = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.42;\n"
-	"    vec2 pMacro  = worldPos.xy * 0.0022 + warp * 0.45 + shear * 0.25 - prevDir * tMacro;\n"
-	"    vec2 pMeso   = worldPos.xy * 0.0068 + warp * 0.85 + shear * 0.55 - prevDir * tMeso;\n"
-	"    vec2 pBill   = worldPos.xy * 0.0195 + warp * 1.35 + shear * 0.95 - prevDir * tBill;\n"
-	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, hNorm * 0.8, wBoil * 0.45), 0x434C4430u);\n"
-	"    float nMeso  = chaff_grad_noise4d(vec4(pMeso,  hNorm * 1.6, wBoil * 0.90), 0x434C4431u);\n"
-	"    float nBill  = chaff_grad_noise4d(vec4(pBill,  hNorm * 3.0, wBoil * 1.55), 0x434C4432u);\n"
-	"    float ridgeBill = 1.0 - abs(2.0 * nBill - 1.0);\n"
-	"    float baseField = nMacro * 0.54 + nMeso * 0.30 + ridgeBill * 0.16;\n"
-	"    float thresh = clamp(0.56 - 0.18 * humidity, 0.34, 0.66);\n"
-	"    float rawDens = smoothstep(thresh, thresh + 0.26, baseField);\n"
-	"    float vProfile = smoothstep(0.0, 0.22, hNorm) * smoothstep(1.0, 0.52, hNorm);\n"
-	"    return rawDens * vProfile;\n"
+	"    float speedMul = 1.0 + deckIdx * 0.38;\n"
+	"    float t0 = mod(anim_time * 0.032 * speedMul, 1024.0);\n"
+	"    float t1 = mod(anim_time * 0.058 * speedMul, 1024.0);\n"
+	"    float t2 = mod(anim_time * 0.105 * speedMul, 1024.0);\n"
+	"    float t3 = mod(anim_time * 0.175 * speedMul, 1024.0);\n"
+	"    float t4 = mod(anim_time * 0.265 * speedMul, 1024.0);\n"
+	"    float wBoil = mod(anim_time * 0.075, 512.0);\n"
+	"    vec2 shear = (wDir * (0.85 - 0.18 * deckIdx) + wPerp * (0.32 + 0.24 * deckIdx)) * ((z - 88.0) * 0.012);\n"
+	"    vec2 warp  = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.48;\n"
+	"    vec2 xy0 = worldPos.xy + deckIdx * vec2(410.0, -290.0);\n"
+	"    vec2 pSyn  = xy0 * 0.00048 + warp * 0.20 + shear * 0.12 - prevDir * t0;\n"
+	"    float nSyn = chaff_grad_noise4d(vec4(pSyn, zSlice * 0.35, wBoil * 0.25), 0x434C4453u);\n"
+	"    vec2 xy1 = rot * xy0 + vec2(nSyn - 0.5) * 38.0;\n"
+	"    vec2 pMacro = xy1 * 0.00185 + warp * 0.45 + shear * 0.28 - prevDir * t1;\n"
+	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, zSlice * 0.70, wBoil * 0.45), 0x434C4430u);\n"
+	"    vec2 xy2 = rot * xy1 + vec2(nMacro - 0.5) * 22.0;\n"
+	"    vec2 pMeso = xy2 * 0.00580 + warp * 0.85 + shear * 0.55 - prevDir * t2;\n"
+	"    float nMeso = chaff_grad_noise4d(vec4(pMeso, zSlice * 1.35, wBoil * 0.85), 0x434C4431u);\n"
+	"    vec2 xy3 = rot * xy2 + vec2(nMeso - 0.5) * 11.0;\n"
+	"    vec2 pBill = xy3 * 0.01650 + warp * 1.30 + shear * 0.90 - prevDir * t3;\n"
+	"    float nBill = chaff_grad_noise4d(vec4(pBill, zSlice * 2.40, wBoil * 1.45), 0x434C4432u);\n"
+	"    vec2 xy4 = rot * xy3;\n"
+	"    vec2 pTurb = xy4 * 0.04400 + warp * 1.75 + shear * 1.35 - prevDir * t4;\n"
+	"    float nTurb = chaff_grad_noise4d(vec4(pTurb, zSlice * 4.10, wBoil * 2.25), 0x434C4433u);\n"
+	"    float billow2 = 1.0 - abs(2.0 * nMeso - 1.0);\n"
+	"    float billow3 = 1.0 - abs(2.0 * nBill - 1.0);\n"
+	"    float billow4 = 1.0 - abs(2.0 * nTurb - 1.0);\n"
+	"    float macroShape = nSyn * 0.36 + nMacro * 0.42 + (0.60 * nMeso + 0.40 * billow2) * 0.22;\n"
+	"    float fbmErode = (1.0 - billow3) * 0.52 + (1.0 - billow4) * 0.30 + (1.0 - nTurb) * 0.18;\n"
+	"    float deckBias = (deckIdx > 1.5) ? 0.06 : ((deckIdx > 0.5) ? 0.03 : 0.0);\n"
+	"    float thresh = clamp(0.49 - 0.19 * humidity + deckBias, 0.28, 0.62);\n"
+	"    float baseCov = smoothstep(thresh - 0.06, thresh + 0.24, macroShape);\n"
+	"    float erodeWeight = mix(0.38, 0.12, baseCov) + 0.08 * hLocal;\n"
+	"    float sculpted = clamp((macroShape - thresh + 0.12) / 0.28 - fbmErode * erodeWeight, 0.0, 1.0);\n"
+	"    float wispDetail = smoothstep(0.10, 0.78, sculpted) * (0.72 + 0.28 * billow3);\n"
+	"    return wispDetail * vProf;\n"
 	"}\n"
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity) {\n"
-	"    const float cloudBaseZ = 104.0;\n"
-	"    float dz = max(8.0, cloudBaseZ - fragZ);\n"
-	"    /* Project along Northwest directional sun ray L = normalize(-0.577, -0.577, 0.816) to cloud layer */\n"
-	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
-	"    float d0 = eval_planetary_cloud_density(vec3(projXY, 108.0), anim_time, humidity);\n"
-	"    float d1 = eval_planetary_cloud_density(vec3(projXY + vec2(-8.5, -8.5), 122.0), anim_time, humidity);\n"
-	"    return clamp((d0 * 0.62 + d1 * 0.38) * 1.25, 0.0, 0.52);\n"
+	"    /* Multi-layer sunlight projection along Northwest directional sun ray L = normalize(-0.577, -0.577, 0.816) */\n"
+	"    float dzLow  = max(8.0, 108.0 - fragZ);\n"
+	"    float dzMid  = max(16.0, 192.0 - fragZ);\n"
+	"    float dzHigh = max(24.0, 288.0 - fragZ);\n"
+	"    vec2 projLow  = fragXY + vec2(-0.7071, -0.7071) * dzLow;\n"
+	"    vec2 projMid  = fragXY + vec2(-0.7071, -0.7071) * dzMid;\n"
+	"    vec2 projHigh = fragXY + vec2(-0.7071, -0.7071) * dzHigh;\n"
+	"    float dLow  = eval_planetary_cloud_density(vec3(projLow,  110.0), anim_time, humidity);\n"
+	"    float dMid  = eval_planetary_cloud_density(vec3(projMid,  192.0), anim_time, humidity);\n"
+	"    float dHigh = eval_planetary_cloud_density(vec3(projHigh, 288.0), anim_time, humidity);\n"
+	"    return clamp((dLow * 0.58 + dMid * 0.30 + dHigh * 0.16) * 1.32, 0.0, 0.54);\n"
 	"}\n"
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
@@ -1148,38 +1182,72 @@ static const char *s_fs_water =
 	"    return mix(b0, b1, u.x);\n"
 	"}\n"
 	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
+	"    float z = worldPos.z;\n"
+	"    float hLow  = clamp((z - 88.0) / 56.0, 0.0, 1.0);\n"
+	"    float hMid  = clamp((z - 168.0) / 60.0, 0.0, 1.0);\n"
+	"    float hHigh = clamp((z - 268.0) / 52.0, 0.0, 1.0);\n"
+	"    float vLow  = smoothstep(0.0, 0.18, hLow)  * smoothstep(1.0, 0.45, hLow);\n"
+	"    float vMid  = smoothstep(0.0, 0.22, hMid)  * smoothstep(1.0, 0.50, hMid);\n"
+	"    float vHigh = smoothstep(0.0, 0.25, hHigh) * smoothstep(1.0, 0.35, hHigh);\n"
+	"    float vProf = max(vLow, max(vMid * 0.88, vHigh * 0.72));\n"
+	"    if (vProf <= 0.001) return 0.0;\n"
 	"    vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
 	"    vec2 wDir = wind.xy;\n"
 	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
 	"    float gust = wind.z;\n"
+	"    float deckIdx = (z < 154.0) ? 0.0 : ((z < 248.0) ? 1.0 : 2.0);\n"
+	"    float hLocal  = (deckIdx < 0.5) ? hLow : ((deckIdx < 1.5) ? hMid : hHigh);\n"
+	"    float zSlice  = deckIdx * 7.3 + hLocal * 2.4;\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
-	"    float tMacro = mod(anim_time * 0.055, 1024.0);\n"
-	"    float tMeso  = mod(anim_time * 0.110, 1024.0);\n"
-	"    float tBill  = mod(anim_time * 0.185, 1024.0);\n"
-	"    float wBoil  = mod(anim_time * 0.075, 512.0);\n"
-	"    float hNorm  = clamp((worldPos.z - 88.0) / 56.0, 0.0, 1.0);\n"
-	"    vec2 shear   = (wDir * 0.85 + wPerp * 0.32) * (hNorm * 0.55);\n"
-	"    vec2 warp    = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.42;\n"
-	"    vec2 pMacro  = worldPos.xy * 0.0022 + warp * 0.45 + shear * 0.25 - prevDir * tMacro;\n"
-	"    vec2 pMeso   = worldPos.xy * 0.0068 + warp * 0.85 + shear * 0.55 - prevDir * tMeso;\n"
-	"    vec2 pBill   = worldPos.xy * 0.0195 + warp * 1.35 + shear * 0.95 - prevDir * tBill;\n"
-	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, hNorm * 0.8, wBoil * 0.45), 0x434C4430u);\n"
-	"    float nMeso  = chaff_grad_noise4d(vec4(pMeso,  hNorm * 1.6, wBoil * 0.90), 0x434C4431u);\n"
-	"    float nBill  = chaff_grad_noise4d(vec4(pBill,  hNorm * 3.0, wBoil * 1.55), 0x434C4432u);\n"
-	"    float ridgeBill = 1.0 - abs(2.0 * nBill - 1.0);\n"
-	"    float baseField = nMacro * 0.54 + nMeso * 0.30 + ridgeBill * 0.16;\n"
-	"    float thresh = clamp(0.56 - 0.18 * humidity, 0.34, 0.66);\n"
-	"    float rawDens = smoothstep(thresh, thresh + 0.26, baseField);\n"
-	"    float vProfile = smoothstep(0.0, 0.22, hNorm) * smoothstep(1.0, 0.52, hNorm);\n"
-	"    return rawDens * vProfile;\n"
+	"    float speedMul = 1.0 + deckIdx * 0.38;\n"
+	"    float t0 = mod(anim_time * 0.032 * speedMul, 1024.0);\n"
+	"    float t1 = mod(anim_time * 0.058 * speedMul, 1024.0);\n"
+	"    float t2 = mod(anim_time * 0.105 * speedMul, 1024.0);\n"
+	"    float t3 = mod(anim_time * 0.175 * speedMul, 1024.0);\n"
+	"    float t4 = mod(anim_time * 0.265 * speedMul, 1024.0);\n"
+	"    float wBoil = mod(anim_time * 0.075, 512.0);\n"
+	"    vec2 shear = (wDir * (0.85 - 0.18 * deckIdx) + wPerp * (0.32 + 0.24 * deckIdx)) * ((z - 88.0) * 0.012);\n"
+	"    vec2 warp  = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.48;\n"
+	"    vec2 xy0 = worldPos.xy + deckIdx * vec2(410.0, -290.0);\n"
+	"    vec2 pSyn  = xy0 * 0.00048 + warp * 0.20 + shear * 0.12 - prevDir * t0;\n"
+	"    float nSyn = chaff_grad_noise4d(vec4(pSyn, zSlice * 0.35, wBoil * 0.25), 0x434C4453u);\n"
+	"    vec2 xy1 = rot * xy0 + vec2(nSyn - 0.5) * 38.0;\n"
+	"    vec2 pMacro = xy1 * 0.00185 + warp * 0.45 + shear * 0.28 - prevDir * t1;\n"
+	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, zSlice * 0.70, wBoil * 0.45), 0x434C4430u);\n"
+	"    vec2 xy2 = rot * xy1 + vec2(nMacro - 0.5) * 22.0;\n"
+	"    vec2 pMeso = xy2 * 0.00580 + warp * 0.85 + shear * 0.55 - prevDir * t2;\n"
+	"    float nMeso = chaff_grad_noise4d(vec4(pMeso, zSlice * 1.35, wBoil * 0.85), 0x434C4431u);\n"
+	"    vec2 xy3 = rot * xy2 + vec2(nMeso - 0.5) * 11.0;\n"
+	"    vec2 pBill = xy3 * 0.01650 + warp * 1.30 + shear * 0.90 - prevDir * t3;\n"
+	"    float nBill = chaff_grad_noise4d(vec4(pBill, zSlice * 2.40, wBoil * 1.45), 0x434C4432u);\n"
+	"    vec2 xy4 = rot * xy3;\n"
+	"    vec2 pTurb = xy4 * 0.04400 + warp * 1.75 + shear * 1.35 - prevDir * t4;\n"
+	"    float nTurb = chaff_grad_noise4d(vec4(pTurb, zSlice * 4.10, wBoil * 2.25), 0x434C4433u);\n"
+	"    float billow2 = 1.0 - abs(2.0 * nMeso - 1.0);\n"
+	"    float billow3 = 1.0 - abs(2.0 * nBill - 1.0);\n"
+	"    float billow4 = 1.0 - abs(2.0 * nTurb - 1.0);\n"
+	"    float macroShape = nSyn * 0.36 + nMacro * 0.42 + (0.60 * nMeso + 0.40 * billow2) * 0.22;\n"
+	"    float fbmErode = (1.0 - billow3) * 0.52 + (1.0 - billow4) * 0.30 + (1.0 - nTurb) * 0.18;\n"
+	"    float deckBias = (deckIdx > 1.5) ? 0.06 : ((deckIdx > 0.5) ? 0.03 : 0.0);\n"
+	"    float thresh = clamp(0.49 - 0.19 * humidity + deckBias, 0.28, 0.62);\n"
+	"    float baseCov = smoothstep(thresh - 0.06, thresh + 0.24, macroShape);\n"
+	"    float erodeWeight = mix(0.38, 0.12, baseCov) + 0.08 * hLocal;\n"
+	"    float sculpted = clamp((macroShape - thresh + 0.12) / 0.28 - fbmErode * erodeWeight, 0.0, 1.0);\n"
+	"    float wispDetail = smoothstep(0.10, 0.78, sculpted) * (0.72 + 0.28 * billow3);\n"
+	"    return wispDetail * vProf;\n"
 	"}\n"
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity) {\n"
-	"    const float cloudBaseZ = 104.0;\n"
-	"    float dz = max(8.0, cloudBaseZ - fragZ);\n"
-	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
-	"    float d0 = eval_planetary_cloud_density(vec3(projXY, 108.0), anim_time, humidity);\n"
-	"    float d1 = eval_planetary_cloud_density(vec3(projXY + vec2(-8.5, -8.5), 122.0), anim_time, humidity);\n"
-	"    return clamp((d0 * 0.62 + d1 * 0.38) * 1.25, 0.0, 0.52);\n"
+	"    float dzLow  = max(8.0, 108.0 - fragZ);\n"
+	"    float dzMid  = max(16.0, 192.0 - fragZ);\n"
+	"    float dzHigh = max(24.0, 288.0 - fragZ);\n"
+	"    vec2 projLow  = fragXY + vec2(-0.7071, -0.7071) * dzLow;\n"
+	"    vec2 projMid  = fragXY + vec2(-0.7071, -0.7071) * dzMid;\n"
+	"    vec2 projHigh = fragXY + vec2(-0.7071, -0.7071) * dzHigh;\n"
+	"    float dLow  = eval_planetary_cloud_density(vec3(projLow,  110.0), anim_time, humidity);\n"
+	"    float dMid  = eval_planetary_cloud_density(vec3(projMid,  192.0), anim_time, humidity);\n"
+	"    float dHigh = eval_planetary_cloud_density(vec3(projHigh, 288.0), anim_time, humidity);\n"
+	"    return clamp((dLow * 0.58 + dMid * 0.30 + dHigh * 0.16) * 1.32, 0.0, 0.54);\n"
 	"}\n"
 	"/* Height-model basin & upwind fetch classifier: distinguishes quiet lakes/sheltered coves from deep open sea\n"
 	" * using purely local continuous depth and shoreline slope (zero fixed chunk-UV probes, zero chunk seams) */\n"
@@ -1378,12 +1446,15 @@ static const char *s_fs_water =
 	"    float foamWeight    = foam;\n"
 	"    float totalWeight   = skyReflWeight + sssWeight + specWeight + foamWeight;\n"
 	"    vec3 reflSkyCol = mix(sky * 0.92, sky * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
-	"    /* Reflected volumetric clouds on water surface along wave-perturbed reflection ray */\n"
+	"    /* Reflected volumetric clouds on water surface along wave-perturbed reflection ray across low & mid strata */\n"
 	"    vec3 waveRefl = reflect(-viewDir, waveNormal);\n"
 	"    float reflUp = max(0.18, dot(waveRefl, torusN));\n"
 	"    vec2 reflHoriz = vec2(dot(waveRefl, tangentU), dot(waveRefl, tangentV));\n"
 	"    vec2 reflCloudXY = vWorldPos + reflHoriz * (max(12.0, 108.0 - uSeaLevel) / reflUp);\n"
-	"    float reflCloudDens = eval_planetary_cloud_density(vec3(reflCloudXY, 112.0), uAnimTime, bioHumidity);\n"
+	"    vec2 reflMidXY   = vWorldPos + reflHoriz * (max(24.0, 192.0 - uSeaLevel) / reflUp);\n"
+	"    float reflLowDens = eval_planetary_cloud_density(vec3(reflCloudXY, 112.0), uAnimTime, bioHumidity);\n"
+	"    float reflMidDens = eval_planetary_cloud_density(vec3(reflMidXY,   192.0), uAnimTime, bioHumidity);\n"
+	"    float reflCloudDens = clamp(reflLowDens + reflMidDens * 0.65 * (1.0 - reflLowDens), 0.0, 1.0);\n"
 	"    vec3 reflCloudCol = mix(vec3(0.76, 0.82, 0.90), vec3(0.98, 0.97, 0.95), clamp(0.55 + facetTilt * 1.4, 0.0, 1.0));\n"
 	"    reflSkyCol = mix(reflSkyCol * (1.0 - cloudShadow * 0.22), reflCloudCol, clamp(reflCloudDens * 0.65, 0.0, 0.72));\n"
 	"    vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
@@ -1770,6 +1841,7 @@ static const char *s_vs_cloud =
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform vec2 uTorusRadii;\n"
 	"uniform vec2 uWorldDim;\n"
+	"uniform vec4 uCloudDeck;\n"
 	"out vec2 vUV;\n"
 	"out vec2 vWorldPos;\n"
 	"out vec2 vRelXY;\n"
@@ -1797,7 +1869,7 @@ static const char *s_vs_cloud =
 	"    float dsv = -2.0 * shdv * shdv * sv0 + sdv * cv0;\n"
 	"    float cu = cu0 + dcu, su = su0 + dsu;\n"
 	"    float cv = cv0 + dcv, sv = sv0 + dsv;\n"
-	"    const float effWz = 108.0;\n"
+	"    float effWz = (uCloudDeck.y > 1.0) ? (uCloudDeck.x + 0.36 * uCloudDeck.y) : 108.0;\n"
 	"    float Rv0 = R + r0 * cv0;\n"
 	"    float dRv = r0 * dcv + effWz * cv;\n"
 	"    vec3 worldPos = uPlanetCenter + vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + effWz * sv);\n"
@@ -1832,6 +1904,7 @@ static const char *s_fs_cloud =
 	"uniform vec3 uSkyColor;\n"
 	"uniform float uAtmoIntensity;\n"
 	"uniform float uCamDist;\n"
+	"uniform vec4 uCloudDeck;\n"
 	"out vec4 FragColor;\n"
 	"uint chaff_rotl32(uint x, int r) {\n"
 	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
@@ -1938,30 +2011,60 @@ static const char *s_fs_cloud =
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
 	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
+	"    float z = worldPos.z;\n"
+	"    float hLow  = clamp((z - 88.0) / 56.0, 0.0, 1.0);\n"
+	"    float hMid  = clamp((z - 168.0) / 60.0, 0.0, 1.0);\n"
+	"    float hHigh = clamp((z - 268.0) / 52.0, 0.0, 1.0);\n"
+	"    float vLow  = smoothstep(0.0, 0.18, hLow)  * smoothstep(1.0, 0.45, hLow);\n"
+	"    float vMid  = smoothstep(0.0, 0.22, hMid)  * smoothstep(1.0, 0.50, hMid);\n"
+	"    float vHigh = smoothstep(0.0, 0.25, hHigh) * smoothstep(1.0, 0.35, hHigh);\n"
+	"    float vProf = max(vLow, max(vMid * 0.88, vHigh * 0.72));\n"
+	"    if (vProf <= 0.001) return 0.0;\n"
 	"    vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
 	"    vec2 wDir = wind.xy;\n"
 	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
 	"    float gust = wind.z;\n"
+	"    float deckIdx = (z < 154.0) ? 0.0 : ((z < 248.0) ? 1.0 : 2.0);\n"
+	"    float hLocal  = (deckIdx < 0.5) ? hLow : ((deckIdx < 1.5) ? hMid : hHigh);\n"
+	"    float zSlice  = deckIdx * 7.3 + hLocal * 2.4;\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
-	"    float tMacro = mod(anim_time * 0.055, 1024.0);\n"
-	"    float tMeso  = mod(anim_time * 0.110, 1024.0);\n"
-	"    float tBill  = mod(anim_time * 0.185, 1024.0);\n"
-	"    float wBoil  = mod(anim_time * 0.075, 512.0);\n"
-	"    float hNorm  = clamp((worldPos.z - 88.0) / 56.0, 0.0, 1.0);\n"
-	"    vec2 shear   = (wDir * 0.85 + wPerp * 0.32) * (hNorm * 0.55);\n"
-	"    vec2 warp    = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.42;\n"
-	"    vec2 pMacro  = worldPos.xy * 0.0022 + warp * 0.45 + shear * 0.25 - prevDir * tMacro;\n"
-	"    vec2 pMeso   = worldPos.xy * 0.0068 + warp * 0.85 + shear * 0.55 - prevDir * tMeso;\n"
-	"    vec2 pBill   = worldPos.xy * 0.0195 + warp * 1.35 + shear * 0.95 - prevDir * tBill;\n"
-	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, hNorm * 0.8, wBoil * 0.45), 0x434C4430u);\n"
-	"    float nMeso  = chaff_grad_noise4d(vec4(pMeso,  hNorm * 1.6, wBoil * 0.90), 0x434C4431u);\n"
-	"    float nBill  = chaff_grad_noise4d(vec4(pBill,  hNorm * 3.0, wBoil * 1.55), 0x434C4432u);\n"
-	"    float ridgeBill = 1.0 - abs(2.0 * nBill - 1.0);\n"
-	"    float baseField = nMacro * 0.54 + nMeso * 0.30 + ridgeBill * 0.16;\n"
-	"    float thresh = clamp(0.56 - 0.18 * humidity, 0.34, 0.66);\n"
-	"    float rawDens = smoothstep(thresh, thresh + 0.26, baseField);\n"
-	"    float vProfile = smoothstep(0.0, 0.22, hNorm) * smoothstep(1.0, 0.52, hNorm);\n"
-	"    return rawDens * vProfile;\n"
+	"    float speedMul = 1.0 + deckIdx * 0.38;\n"
+	"    float t0 = mod(anim_time * 0.032 * speedMul, 1024.0);\n"
+	"    float t1 = mod(anim_time * 0.058 * speedMul, 1024.0);\n"
+	"    float t2 = mod(anim_time * 0.105 * speedMul, 1024.0);\n"
+	"    float t3 = mod(anim_time * 0.175 * speedMul, 1024.0);\n"
+	"    float t4 = mod(anim_time * 0.265 * speedMul, 1024.0);\n"
+	"    float wBoil = mod(anim_time * 0.075, 512.0);\n"
+	"    vec2 shear = (wDir * (0.85 - 0.18 * deckIdx) + wPerp * (0.32 + 0.24 * deckIdx)) * ((z - 88.0) * 0.012);\n"
+	"    vec2 warp  = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.48;\n"
+	"    vec2 xy0 = worldPos.xy + deckIdx * vec2(410.0, -290.0);\n"
+	"    vec2 pSyn  = xy0 * 0.00048 + warp * 0.20 + shear * 0.12 - prevDir * t0;\n"
+	"    float nSyn = chaff_grad_noise4d(vec4(pSyn, zSlice * 0.35, wBoil * 0.25), 0x434C4453u);\n"
+	"    vec2 xy1 = rot * xy0 + vec2(nSyn - 0.5) * 38.0;\n"
+	"    vec2 pMacro = xy1 * 0.00185 + warp * 0.45 + shear * 0.28 - prevDir * t1;\n"
+	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, zSlice * 0.70, wBoil * 0.45), 0x434C4430u);\n"
+	"    vec2 xy2 = rot * xy1 + vec2(nMacro - 0.5) * 22.0;\n"
+	"    vec2 pMeso = xy2 * 0.00580 + warp * 0.85 + shear * 0.55 - prevDir * t2;\n"
+	"    float nMeso = chaff_grad_noise4d(vec4(pMeso, zSlice * 1.35, wBoil * 0.85), 0x434C4431u);\n"
+	"    vec2 xy3 = rot * xy2 + vec2(nMeso - 0.5) * 11.0;\n"
+	"    vec2 pBill = xy3 * 0.01650 + warp * 1.30 + shear * 0.90 - prevDir * t3;\n"
+	"    float nBill = chaff_grad_noise4d(vec4(pBill, zSlice * 2.40, wBoil * 1.45), 0x434C4432u);\n"
+	"    vec2 xy4 = rot * xy3;\n"
+	"    vec2 pTurb = xy4 * 0.04400 + warp * 1.75 + shear * 1.35 - prevDir * t4;\n"
+	"    float nTurb = chaff_grad_noise4d(vec4(pTurb, zSlice * 4.10, wBoil * 2.25), 0x434C4433u);\n"
+	"    float billow2 = 1.0 - abs(2.0 * nMeso - 1.0);\n"
+	"    float billow3 = 1.0 - abs(2.0 * nBill - 1.0);\n"
+	"    float billow4 = 1.0 - abs(2.0 * nTurb - 1.0);\n"
+	"    float macroShape = nSyn * 0.36 + nMacro * 0.42 + (0.60 * nMeso + 0.40 * billow2) * 0.22;\n"
+	"    float fbmErode = (1.0 - billow3) * 0.52 + (1.0 - billow4) * 0.30 + (1.0 - nTurb) * 0.18;\n"
+	"    float deckBias = (deckIdx > 1.5) ? 0.06 : ((deckIdx > 0.5) ? 0.03 : 0.0);\n"
+	"    float thresh = clamp(0.49 - 0.19 * humidity + deckBias, 0.28, 0.62);\n"
+	"    float baseCov = smoothstep(thresh - 0.06, thresh + 0.24, macroShape);\n"
+	"    float erodeWeight = mix(0.38, 0.12, baseCov) + 0.08 * hLocal;\n"
+	"    float sculpted = clamp((macroShape - thresh + 0.12) / 0.28 - fbmErode * erodeWeight, 0.0, 1.0);\n"
+	"    float wispDetail = smoothstep(0.10, 0.78, sculpted) * (0.72 + 0.28 * billow3);\n"
+	"    return wispDetail * vProf;\n"
 	"}\n"
 	"void main() {\n"
 	"    /* Close-up diorama aperture parting: clear center focal zone when camera is close so clouds never block gameplay */\n"
@@ -1985,35 +2088,48 @@ static const char *s_fs_cloud =
 	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    float viewUp = max(0.22, abs(dot(viewDir, torusN)));\n"
 	"    vec2 rayHoriz = vec2(dot(-viewDir, tangentU), dot(-viewDir, tangentV)) / viewUp;\n"
-	"    /* 5-step volumetric ray-slab integration across cloud layer [88.0 .. 144.0] */\n"
-	"    const float slabZ[5] = float[5](92.0, 102.0, 112.0, 124.0, 138.0);\n"
+	"    float deckBaseZ = (uCloudDeck.y > 1.0) ? uCloudDeck.x : 88.0;\n"
+	"    float deckSpanZ = (uCloudDeck.y > 1.0) ? uCloudDeck.y : 56.0;\n"
+	"    float deckIdx   = uCloudDeck.z;\n"
+	"    float deckAlpha = (uCloudDeck.w > 0.0) ? uCloudDeck.w : 1.0;\n"
+	"    float refShellZ = deckBaseZ + 0.36 * deckSpanZ;\n"
+	"    /* 5-step volumetric ray-slab integration across active cloud stratum [deckBaseZ .. deckBaseZ + deckSpanZ] */\n"
+	"    const float slabF[5] = float[5](0.10, 0.26, 0.45, 0.66, 0.88);\n"
 	"    const float slabW[5] = float[5](0.16, 0.24, 0.28, 0.20, 0.12);\n"
 	"    float trans = 1.0;\n"
 	"    vec3 accumLight = vec3(0.0);\n"
 	"    float cosTheta = dot(-viewDir, sunDir);\n"
 	"    float hgPhase = 0.65 + 0.55 * pow(clamp(0.5 + 0.5 * cosTheta, 0.0, 1.0), 3.0);\n"
 	"    for (int s = 0; s < 5; s++) {\n"
-	"        float z = slabZ[s];\n"
-	"        vec2 sampleXY = vWorldPos + rayHoriz * (z - 108.0);\n"
+	"        float hFrac = slabF[s];\n"
+	"        float z = deckBaseZ + hFrac * deckSpanZ;\n"
+	"        vec2 sampleXY = vWorldPos + rayHoriz * (z - refShellZ);\n"
 	"        float dens = eval_planetary_cloud_density(vec3(sampleXY, z), uAnimTime, bioHumidity);\n"
 	"        if (dens > 0.002) {\n"
 	"            float sunProbe = eval_planetary_cloud_density(vec3(sampleXY + vec2(-9.5, -9.5), z + 10.0), uAnimTime, bioHumidity);\n"
-	"            float tauSun = sunProbe * 2.4 + (1.0 - (z - 88.0) / 56.0) * 0.45;\n"
+	"            float upperShadow = 0.0;\n"
+	"            if (deckIdx < 0.5) {\n"
+	"                upperShadow = eval_planetary_cloud_density(vec3(sampleXY + vec2(-58.0, -58.0), 192.0), uAnimTime, bioHumidity) * 0.85;\n"
+	"            } else if (deckIdx < 1.5) {\n"
+	"                upperShadow = eval_planetary_cloud_density(vec3(sampleXY + vec2(-68.0, -68.0), 288.0), uAnimTime, bioHumidity) * 0.65;\n"
+	"            }\n"
+	"            float tauSun = (sunProbe + upperShadow) * 2.45 + (1.0 - hFrac) * 0.42;\n"
 	"            /* Beer-Powder silver-lining optical scattering */\n"
 	"            float beer = exp(-tauSun);\n"
-	"            float powder = 1.0 - exp(-tauSun * 2.2);\n"
-	"            float lightEnergy = mix(beer, beer * (0.45 + 0.95 * powder), 0.65) * hgPhase;\n"
-	"            float hFrac = (z - 88.0) / 56.0;\n"
-	"            vec3 baseShadow = mix(vec3(0.58, 0.65, 0.76), vec3(0.76, 0.82, 0.90), hFrac);\n"
-	"            vec3 sunLit = vec3(1.02, 0.99, 0.95);\n"
+	"            float powder = 1.0 - exp(-tauSun * 2.35);\n"
+	"            float lightEnergy = mix(beer, beer * (0.42 + 0.98 * powder), 0.68) * hgPhase;\n"
+	"            vec3 deepBase = mix(vec3(0.54, 0.62, 0.74), vec3(0.68, 0.76, 0.88), clamp(deckIdx * 0.45, 0.0, 1.0));\n"
+	"            vec3 crownShadow = mix(vec3(0.76, 0.82, 0.90), vec3(0.86, 0.91, 0.97), clamp(deckIdx * 0.45, 0.0, 1.0));\n"
+	"            vec3 baseShadow = mix(deepBase, crownShadow, hFrac);\n"
+	"            vec3 sunLit = vec3(1.03, 1.00, 0.96);\n"
 	"            vec3 stepCol = mix(baseShadow, sunLit, clamp(lightEnergy, 0.0, 1.0));\n"
-	"            float stepTau = dens * slabW[s] * 3.1;\n"
+	"            float stepTau = dens * slabW[s] * 3.15 * deckAlpha;\n"
 	"            float stepAlpha = 1.0 - exp(-stepTau);\n"
 	"            accumLight += trans * stepCol * stepAlpha;\n"
 	"            trans *= (1.0 - stepAlpha);\n"
 	"        }\n"
 	"    }\n"
-	"    float cloudAlpha = clamp((1.0 - trans) * apertureMask, 0.0, 0.86);\n"
+	"    float cloudAlpha = clamp((1.0 - trans) * apertureMask, 0.0, 0.88);\n"
 	"    if (cloudAlpha <= 0.005) discard;\n"
 	"    vec3 cloudRgb = accumLight / max(1e-4, 1.0 - trans);\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
@@ -2582,6 +2698,7 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uCamDist;
+	GLint uCloudDeck;
 	GLint aGridUV;
 } gl_cloud_pipe_t;
 
@@ -2856,6 +2973,7 @@ static void init_pipelines(void)
 		s_gl.cloud_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 		s_gl.cloud_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 		s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
+		s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
 		s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 	}
 
@@ -3294,6 +3412,17 @@ void nd_seven_gl_flush_clouds(void)
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
 
+	/* Three distinct vertical cloud strata (baseZ, spanZ, deckIdx, deckAlphaScale):
+	 * Deck 0: Low cumulus / stratocumulus [88..144]
+	 * Deck 1: Mid altocumulus / congestus [168..228]
+	 * Deck 2: High cirrus / anvil wisps [268..320] */
+	static const float cloud_decks[3][4] = {
+		{  88.0f, 56.0f, 0.0f, 1.00f },
+		{ 168.0f, 60.0f, 1.0f, 0.78f },
+		{ 268.0f, 52.0f, 2.0f, 0.56f }
+	};
+	float cam_alt = s_gl.cur_dist * sinf(s_gl.cur_pitch_deg * (PI_F / 180.0f));
+
 	for (uint32_t i = 0; i < s_gl.cloud_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.cloud_queue[i];
 
@@ -3308,7 +3437,14 @@ void nd_seven_gl_flush_clouds(void)
 		glUniform2f(s_gl.cloud_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
 		glUniform1f(s_gl.cloud_pipe.uSeaLevel, chk->sea_level);
 
-		glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES_MACRO, GL_UNSIGNED_SHORT, 0);
+		for (int d = 0; d < 3; d++) {
+			/* Painter's back-to-front order relative to camera altitude */
+			int deck = (cam_alt >= 220.0f) ? d : (2 - d);
+			glUniform4f(s_gl.cloud_pipe.uCloudDeck,
+			            cloud_decks[deck][0], cloud_decks[deck][1],
+			            cloud_decks[deck][2], cloud_decks[deck][3]);
+			glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES_MACRO, GL_UNSIGNED_SHORT, 0);
+		}
 	}
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -3891,68 +4027,133 @@ float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
                                      float *out_grad_x, float *out_grad_y,
                                      float *out_grad_z, float *out_grad_t)
 {
+	float hLow  = (wz - 88.0f) / 56.0f;
+	if (hLow < 0.0f) hLow = 0.0f;
+	if (hLow > 1.0f) hLow = 1.0f;
+	float hMid  = (wz - 168.0f) / 60.0f;
+	if (hMid < 0.0f) hMid = 0.0f;
+	if (hMid > 1.0f) hMid = 1.0f;
+	float hHigh = (wz - 268.0f) / 52.0f;
+	if (hHigh < 0.0f) hHigh = 0.0f;
+	if (hHigh > 1.0f) hHigh = 1.0f;
+
+	float vLow  = gl_smoothstep(0.0f, 0.18f, hLow)  * gl_smoothstep(1.0f, 0.45f, hLow);
+	float vMid  = gl_smoothstep(0.0f, 0.22f, hMid)  * gl_smoothstep(1.0f, 0.50f, hMid);
+	float vHigh = gl_smoothstep(0.0f, 0.25f, hHigh) * gl_smoothstep(1.0f, 0.35f, hHigh);
+	float vProf = fmaxf(vLow, fmaxf(vMid * 0.88f, vHigh * 0.72f));
+	if (vProf <= 0.001f) {
+		if (out_grad_x) *out_grad_x = 0.0f;
+		if (out_grad_y) *out_grad_y = 0.0f;
+		if (out_grad_z) *out_grad_z = 0.0f;
+		if (out_grad_t) *out_grad_t = 0.0f;
+		return 0.0f;
+	}
+
 	float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
 	gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
 	float wPerpX = -wDirY, wPerpY = wDirX;
 
+	float deckIdx = (wz < 154.0f) ? 0.0f : ((wz < 248.0f) ? 1.0f : 2.0f);
+	float hLocal  = (deckIdx < 0.5f) ? hLow : ((deckIdx < 1.5f) ? hMid : hHigh);
+	float spanZ   = (deckIdx < 0.5f) ? 56.0f : ((deckIdx < 1.5f) ? 60.0f : 52.0f);
+	float zSlice  = deckIdx * 7.3f + hLocal * 2.4f;
+
 	const float prevDirX = 0.741f, prevDirY = -0.671f;
-	float raw_tMacro = anim_time * 0.055f;
-	float tMacro = raw_tMacro - 1024.0f * floorf(raw_tMacro / 1024.0f);
-	float raw_tMeso = anim_time * 0.110f;
-	float tMeso = raw_tMeso - 1024.0f * floorf(raw_tMeso / 1024.0f);
-	float raw_tBill = anim_time * 0.185f;
-	float tBill = raw_tBill - 1024.0f * floorf(raw_tBill / 1024.0f);
+	float speedMul = 1.0f + deckIdx * 0.38f;
+	float raw_t0 = anim_time * 0.032f * speedMul;
+	float t0 = raw_t0 - 1024.0f * floorf(raw_t0 / 1024.0f);
+	float raw_t1 = anim_time * 0.058f * speedMul;
+	float t1 = raw_t1 - 1024.0f * floorf(raw_t1 / 1024.0f);
+	float raw_t2 = anim_time * 0.105f * speedMul;
+	float t2 = raw_t2 - 1024.0f * floorf(raw_t2 / 1024.0f);
+	float raw_t3 = anim_time * 0.175f * speedMul;
+	float t3 = raw_t3 - 1024.0f * floorf(raw_t3 / 1024.0f);
+	float raw_t4 = anim_time * 0.265f * speedMul;
+	float t4 = raw_t4 - 1024.0f * floorf(raw_t4 / 1024.0f);
 	float raw_wBoil = anim_time * 0.075f;
 	float wBoil = raw_wBoil - 512.0f * floorf(raw_wBoil / 512.0f);
 
-	float hNorm = (wz - 88.0f) / 56.0f;
-	if (hNorm < 0.0f) hNorm = 0.0f;
-	if (hNorm > 1.0f) hNorm = 1.0f;
+	float shearX = (wDirX * (0.85f - 0.18f * deckIdx) + wPerpX * (0.32f + 0.24f * deckIdx)) * ((wz - 88.0f) * 0.012f);
+	float shearY = (wDirY * (0.85f - 0.18f * deckIdx) + wPerpY * (0.32f + 0.24f * deckIdx)) * ((wz - 88.0f) * 0.012f);
+	float warpX  = (wDirX * (gust - 0.65f) + wPerpX * (catspaw - 0.5f)) * 0.48f;
+	float warpY  = (wDirY * (gust - 0.65f) + wPerpY * (catspaw - 0.5f)) * 0.48f;
 
-	float shearX = (wDirX * 0.85f + wPerpX * 0.32f) * (hNorm * 0.55f);
-	float shearY = (wDirY * 0.85f + wPerpY * 0.32f) * (hNorm * 0.55f);
-	float warpX  = (wDirX * (gust - 0.65f) + wPerpX * (catspaw - 0.5f)) * 0.42f;
-	float warpY  = (wDirY * (gust - 0.65f) + wPerpY * (catspaw - 0.5f)) * 0.42f;
+	float xy0x = wx + deckIdx * 410.0f;
+	float xy0y = wy - deckIdx * 290.0f;
+	float pSynX = xy0x * 0.00048f + warpX * 0.20f + shearX * 0.12f - prevDirX * t0;
+	float pSynY = xy0y * 0.00048f + warpY * 0.20f + shearY * 0.12f - prevDirY * t0;
+	float nSyn = 0.0f, gsx = 0.0f, gsy = 0.0f, gsz = 0.0f, gsw = 0.0f;
+	gl_chaff_grad_noise4d(pSynX, pSynY, zSlice * 0.35f, wBoil * 0.25f, 0x434C4453u, &nSyn, &gsx, &gsy, &gsz, &gsw);
 
-	float pMacroX = wx * 0.0022f + warpX * 0.45f + shearX * 0.25f - prevDirX * tMacro;
-	float pMacroY = wy * 0.0022f + warpY * 0.45f + shearY * 0.25f - prevDirY * tMacro;
-	float pMesoX  = wx * 0.0068f + warpX * 0.85f + shearX * 0.55f - prevDirX * tMeso;
-	float pMesoY  = wy * 0.0068f + warpY * 0.85f + shearY * 0.55f - prevDirY * tMeso;
-	float pBillX  = wx * 0.0195f + warpX * 1.35f + shearX * 0.95f - prevDirX * tBill;
-	float pBillY  = wy * 0.0195f + warpY * 1.35f + shearY * 0.95f - prevDirY * tBill;
-
+	float xy1x = ( 0.8f * xy0x + 0.6f * xy0y) + (nSyn - 0.5f) * 38.0f;
+	float xy1y = (-0.6f * xy0x + 0.8f * xy0y) + (nSyn - 0.5f) * 38.0f;
+	float pMacroX = xy1x * 0.00185f + warpX * 0.45f + shearX * 0.28f - prevDirX * t1;
+	float pMacroY = xy1y * 0.00185f + warpY * 0.45f + shearY * 0.28f - prevDirY * t1;
 	float nMacro = 0.0f, g0x = 0.0f, g0y = 0.0f, g0z = 0.0f, g0w = 0.0f;
-	float nMeso  = 0.0f, g1x = 0.0f, g1y = 0.0f, g1z = 0.0f, g1w = 0.0f;
-	float nBill  = 0.0f, g2x = 0.0f, g2y = 0.0f, g2z = 0.0f, g2w = 0.0f;
+	gl_chaff_grad_noise4d(pMacroX, pMacroY, zSlice * 0.70f, wBoil * 0.45f, 0x434C4430u, &nMacro, &g0x, &g0y, &g0z, &g0w);
 
-	gl_chaff_grad_noise4d(pMacroX, pMacroY, hNorm * 0.8f, wBoil * 0.45f, 0x434C4430u, &nMacro, &g0x, &g0y, &g0z, &g0w);
-	gl_chaff_grad_noise4d(pMesoX,  pMesoY,  hNorm * 1.6f, wBoil * 0.90f, 0x434C4431u, &nMeso,  &g1x, &g1y, &g1z, &g1w);
-	gl_chaff_grad_noise4d(pBillX,  pBillY,  hNorm * 3.0f, wBoil * 1.55f, 0x434C4432u, &nBill,  &g2x, &g2y, &g2z, &g2w);
+	float xy2x = ( 0.8f * xy1x + 0.6f * xy1y) + (nMacro - 0.5f) * 22.0f;
+	float xy2y = (-0.6f * xy1x + 0.8f * xy1y) + (nMacro - 0.5f) * 22.0f;
+	float pMesoX = xy2x * 0.00580f + warpX * 0.85f + shearX * 0.55f - prevDirX * t2;
+	float pMesoY = xy2y * 0.00580f + warpY * 0.85f + shearY * 0.55f - prevDirY * t2;
+	float nMeso = 0.0f, g1x = 0.0f, g1y = 0.0f, g1z = 0.0f, g1w = 0.0f;
+	gl_chaff_grad_noise4d(pMesoX, pMesoY, zSlice * 1.35f, wBoil * 0.85f, 0x434C4431u, &nMeso, &g1x, &g1y, &g1z, &g1w);
 
-	float ridgeBill = 1.0f - fabsf(2.0f * nBill - 1.0f);
-	float dRidge = (nBill < 0.5f) ? 2.0f : -2.0f;
+	float xy3x = ( 0.8f * xy2x + 0.6f * xy2y) + (nMeso - 0.5f) * 11.0f;
+	float xy3y = (-0.6f * xy2x + 0.8f * xy2y) + (nMeso - 0.5f) * 11.0f;
+	float pBillX = xy3x * 0.01650f + warpX * 1.30f + shearX * 0.90f - prevDirX * t3;
+	float pBillY = xy3y * 0.01650f + warpY * 1.30f + shearY * 0.90f - prevDirY * t3;
+	float nBill = 0.0f, g2x = 0.0f, g2y = 0.0f, g2z = 0.0f, g2w = 0.0f;
+	gl_chaff_grad_noise4d(pBillX, pBillY, zSlice * 2.40f, wBoil * 1.45f, 0x434C4432u, &nBill, &g2x, &g2y, &g2z, &g2w);
 
-	float baseField = nMacro * 0.54f + nMeso * 0.30f + ridgeBill * 0.16f;
-	float thresh = 0.56f - 0.18f * climate_humidity;
-	if (thresh < 0.34f) thresh = 0.34f;
-	if (thresh > 0.66f) thresh = 0.66f;
+	float xy4x =  0.8f * xy3x + 0.6f * xy3y;
+	float xy4y = -0.6f * xy3x + 0.8f * xy3y;
+	float pTurbX = xy4x * 0.04400f + warpX * 1.75f + shearX * 1.35f - prevDirX * t4;
+	float pTurbY = xy4y * 0.04400f + warpY * 1.75f + shearY * 1.35f - prevDirY * t4;
+	float nTurb = 0.0f, g3x = 0.0f, g3y = 0.0f, g3z = 0.0f, g3w = 0.0f;
+	gl_chaff_grad_noise4d(pTurbX, pTurbY, zSlice * 4.10f, wBoil * 2.25f, 0x434C4433u, &nTurb, &g3x, &g3y, &g3z, &g3w);
 
-	float rawDens = gl_smoothstep(thresh, thresh + 0.26f, baseField);
-	float vProfile = gl_smoothstep(0.0f, 0.22f, hNorm) * gl_smoothstep(1.0f, 0.52f, hNorm);
+	float billow2 = 1.0f - fabsf(2.0f * nMeso - 1.0f);
+	float billow3 = 1.0f - fabsf(2.0f * nBill - 1.0f);
+	float billow4 = 1.0f - fabsf(2.0f * nTurb - 1.0f);
+	float dRidge3 = (nBill < 0.5f) ? 2.0f : -2.0f;
+	float dRidge4 = (nTurb < 0.5f) ? 2.0f : -2.0f;
 
-	float df_dx = g0x * (0.54f * 0.0022f) + g1x * (0.30f * 0.0068f) + g2x * (dRidge * 0.16f * 0.0195f);
-	float df_dy = g0y * (0.54f * 0.0022f) + g1y * (0.30f * 0.0068f) + g2y * (dRidge * 0.16f * 0.0195f);
-	float df_dz = (g0z * (0.54f * 0.8f) + g1z * (0.30f * 1.6f) + g2z * (dRidge * 0.16f * 3.0f)) * (1.0f / 56.0f);
-	float df_dt = g0w * (0.54f * 0.45f * 0.075f) - (g0x * prevDirX + g0y * prevDirY) * (0.54f * 0.055f)
-	            + g1w * (0.30f * 0.90f * 0.075f) - (g1x * prevDirX + g1y * prevDirY) * (0.30f * 0.110f)
-	            + g2w * (dRidge * 0.16f * 1.55f * 0.075f) - (g2x * prevDirX + g2y * prevDirY) * (dRidge * 0.16f * 0.185f);
+	float macroShape = nSyn * 0.36f + nMacro * 0.42f + (0.60f * nMeso + 0.40f * billow2) * 0.22f;
+	float fbmErode   = (1.0f - billow3) * 0.52f + (1.0f - billow4) * 0.30f + (1.0f - nTurb) * 0.18f;
+	float deckBias   = (deckIdx > 1.5f) ? 0.06f : ((deckIdx > 0.5f) ? 0.03f : 0.0f);
+	float thresh     = 0.49f - 0.19f * climate_humidity + deckBias;
+	if (thresh < 0.28f) thresh = 0.28f;
+	if (thresh > 0.62f) thresh = 0.62f;
 
-	if (out_grad_x) *out_grad_x = df_dx * vProfile;
-	if (out_grad_y) *out_grad_y = df_dy * vProfile;
-	if (out_grad_z) *out_grad_z = df_dz * vProfile;
-	if (out_grad_t) *out_grad_t = df_dt * vProfile;
+	float baseCov = gl_smoothstep(thresh - 0.06f, thresh + 0.24f, macroShape);
+	float erodeWeight = 0.38f + (0.12f - 0.38f) * baseCov + 0.08f * hLocal;
+	float sculpted = (macroShape - thresh + 0.12f) / 0.28f - fbmErode * erodeWeight;
+	if (sculpted < 0.0f) sculpted = 0.0f;
+	if (sculpted > 1.0f) sculpted = 1.0f;
+	float wispDetail = gl_smoothstep(0.10f, 0.78f, sculpted) * (0.72f + 0.28f * billow3);
 
-	return rawDens * vProfile;
+	float df_dx = gsx * (0.36f * 0.00048f) + g0x * (0.42f * 0.00185f) + g1x * (0.22f * 0.00580f)
+	            + g2x * (dRidge3 * 0.52f * erodeWeight * 0.01650f)
+	            + g3x * (dRidge4 * 0.30f * erodeWeight * 0.04400f);
+	float df_dy = gsy * (0.36f * 0.00048f) + g0y * (0.42f * 0.00185f) + g1y * (0.22f * 0.00580f)
+	            + g2y * (dRidge3 * 0.52f * erodeWeight * 0.01650f)
+	            + g3y * (dRidge4 * 0.30f * erodeWeight * 0.04400f);
+	float df_dz = (gsz * (0.36f * 0.35f) + g0z * (0.42f * 0.70f) + g1z * (0.22f * 1.35f)
+	             + g2z * (dRidge3 * 0.52f * erodeWeight * 2.40f)
+	             + g3z * (dRidge4 * 0.30f * erodeWeight * 4.10f)) * (2.4f / spanZ);
+	float df_dt = gsw * (0.36f * 0.25f * 0.075f) - (gsx * prevDirX + gsy * prevDirY) * (0.36f * 0.032f * speedMul)
+	            + g0w * (0.42f * 0.45f * 0.075f) - (g0x * prevDirX + g0y * prevDirY) * (0.42f * 0.058f * speedMul)
+	            + g1w * (0.22f * 0.85f * 0.075f) - (g1x * prevDirX + g1y * prevDirY) * (0.22f * 0.105f * speedMul)
+	            + g2w * (dRidge3 * 0.52f * erodeWeight * 1.45f * 0.075f) - (g2x * prevDirX + g2y * prevDirY) * (dRidge3 * 0.52f * erodeWeight * 0.175f * speedMul)
+	            + g3w * (dRidge4 * 0.30f * erodeWeight * 2.25f * 0.075f) - (g3x * prevDirX + g3y * prevDirY) * (dRidge4 * 0.30f * erodeWeight * 0.265f * speedMul);
+
+	if (out_grad_x) *out_grad_x = df_dx * vProf;
+	if (out_grad_y) *out_grad_y = df_dy * vProf;
+	if (out_grad_z) *out_grad_z = df_dz * vProf;
+	if (out_grad_t) *out_grad_t = df_dt * vProf;
+
+	return wispDetail * vProf;
 }
 
 

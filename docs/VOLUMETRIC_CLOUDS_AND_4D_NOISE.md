@@ -84,27 +84,37 @@ flowchart LR
 
 ---
 
-## 3. Wind-Coupled 4D Volumetric Cloud Architecture in NeverDark Seven
+## 3. Wind-Coupled Multi-Layer 4D Fractal Cloud Architecture in NeverDark Seven
 
-### 3.1 Physical Coupling to the Multi-Octave Recursive Wind Field
+### 3.1 Multi-Active 4D Fractal Cascade & Perimeter Billow Erosion
 
-In `mods/nd/ux/nd_seven_gl.c`, `eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity)` samples the local wind vector and gust envelope directly from `eval_recursive_wind(worldPos.xy, anim_time)`:
-- **Geostrophic Altitude Wind-Shear**: Across the cloud slab $z \in [88.0, 144.0]$ ($h_{\text{norm}} = \text{clamp}((z - 88)/56, 0, 1)$), upper cloud tops experience geostrophic shear $\mathbf{s}(z) = (0.85\,\mathbf{w}_{\text{dir}} + 0.32\,\mathbf{w}_{\perp}) \cdot 0.55\,h_{\text{norm}}$, tilting cumulus towers downwind.
-- **Streamline Gust Domain Warping**: Spatial coordinates are warped by $\mathbf{w}_{\text{warp}} = 0.42\,\bigl((g - 0.65)\mathbf{w}_{\text{dir}} + (c - 0.5)\mathbf{w}_{\perp}\bigr)$ without multiplying by `anim_time`, ensuring wind advection velocity never accelerates over long sessions.
-- **4D Internal Boiling (`wBoil`)**: Three 4D octaves (`nMacro`, `nMeso`, and billow-ridged `nBill`) evolve along the 4th dimension $w_{\text{boil}} = \text{mod}(0.075 \cdot t, 512.0)$ using `chaff_grad_noise4d`, so cloud formations billow and morph internally while drifting across the planet.
-- **Biome & Bathymetric Climate Humidity**: Coverage threshold $\tau_{\text{clim}} = \text{clamp}(0.56 - 0.18 \cdot H_{\text{bio}}, 0.34, 0.66)$ couples cloud density to local substrate biome weights (`wTropical`, `wTemperate`, `wPolar`, `wVolcanic`) and water proximity, yielding lush cumulus decks over tropical/coastal regions and sparser skies over arid volcanic basins.
+In `mods/nd/ux/nd_seven_gl.c`, `eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity)` evaluates a **5-octave rotated and domain-warped 4D fractal cascade** coupled to `eval_recursive_wind(worldPos.xy, anim_time)`:
+- **Three Vertical Cloud Strata (`uCloudDeck`)**:
+  - **Deck 0 — Low Cumulus / Stratocumulus ($z \in [88, 144]$)**: Dense cauliflower cumulus towers and broken stratocumulus bases.
+  - **Deck 1 — Mid Altocumulus / Congestus ($z \in [168, 228]$)**: Mid-level dappled cloud banks with elevated wind speed and geostrophic directional veer.
+  - **Deck 2 — High Cirrus / Anvil Wisps ($z \in [268, 320]$)**: High-altitude fibrous wisps sheared strongly by upper-tropospheric winds.
+  Each deck samples an uncorrelated 4D $Z$-slice (`zSlice = deckIdx * 7.3 + hLocal * 2.4`) and spatial offset (`deckIdx * vec2(410.0, -290.0)`), producing genuine 3D vertical parallax and independent layer evolution across all zoom levels.
+- **5-Octave 4D Spatiotemporal Cascade with Inter-Octave Rotation & Domain Warping**:
+  1. **Synoptic Weather Fronts (`0.00048`, seed `0x434C4453`)**: Organizes planetary-scale cloud bands and clear-sky corridors when zoomed out toward the stratosphere.
+  2. **Macro Cloud Clusters (`0.00185`, seed `0x434C4430`)**: Rotated by `mat2(0.8, -0.6, 0.6, 0.8)` and warped by synoptic gradients to form mesoscale cloud groups.
+  3. **Mesoscale Cumulus Bodies (`0.00580`, seed `0x434C4431`)**: Blends smooth and billow-folded (`1.0 - abs(2.0 * nMeso - 1.0)`) lobes.
+  4. **Billowing Cauliflower Turrets (`0.01650`, seed `0x434C4432`)**: High-contrast 4D billow ridges (`billow3`).
+  5. **Fine Turbulent Wisps (`0.04400`, seed `0x434C4433`)**: High-frequency 4D curl/billow filaments (`billow4`, `nTurb`).
+- **Fractal Perimeter Erosion (`fbmErode`)**:
+  Instead of linearly averaging octaves (which blurs clouds into flat blobs), the macro/mesoscale envelope `macroShape` is **eroded at its perimeter** by the higher-frequency 4D billow cascade `fbmErode = 0.52*(1 - billow3) + 0.30*(1 - billow4) + 0.18*(1 - nTurb)`, weighted strongest along cloud edges and upper anvil tops (`erodeWeight = mix(0.38, 0.12, baseCov) + 0.08 * hLocal`).
+- **Biome & Bathymetric Climate Humidity**: Coverage threshold $\tau_{\text{clim}} = \text{clamp}(0.49 - 0.19 \cdot H_{\text{bio}} + \text{deckBias}, 0.28, 0.62)$ couples cloud density to local substrate biome weights (`wTropical`, `wTemperate`, `wPolar`, `wVolcanic`) and water proximity.
 
 ### 3.2 Three-Pass Atmospheric Integration in the 3D Stage
 
-1. **Pass 1 — Projected Cloud Ground Shadows (`s_fs_terrain`)**:
-   `eval_planetary_cloud_shadow` projects each terrain fragment along the Northwest directional sun vector $\mathbf{L}_{\text{sun}} = \text{normalize}(-0.577, -0.577, 0.816)$ to the cloud base ($z = 104.0$) and dual-samples 4D cloud optical thickness, modulating direct solar diffuse and wet-shore/mineral specular glints while smoothly preserving shallow underwater seabed transmission.
-2. **Pass 2 — Water Cloud Shadows & Wave-Perturbed Cloud Reflections (`s_fs_water`)**:
-   Modulates solar glitter (`specSun`) and wave slope hillshading by `sunTrans`, and traces the wave-normal reflection ray `waveRefl = reflect(-viewDir, waveNormal)` to the cloud layer ($z = 108.0$) to blend reflected sunlit clouds into `reflSkyCol`.
-3. **Pass 3 — Curved-Torus Volumetric Cloud Shell (`s_vs_cloud`, `s_fs_cloud`, `nd_seven_gl_flush_clouds`)**:
-   - **Curved-Torus Shell Geometry**: Renders each visible chunk's macro grid at torus elevation `effWz = 108.0` after billboards.
-   - **Close-Up Diorama Aperture Parting**: When the camera zooms in close (`uCamDist < 1350.0`), a smooth radial aperture (`apertureMask`) parts clouds around the focal center (`length(vRelXY)`) so low-altitude clouds never obscure the player or nearby interactive scenery, while closing seamlessly into a continuous planetary cloud deck as the camera zooms out toward the stratosphere.
-   - **5-Step Volumetric Ray-Slab Integration & Beer-Powder Silver-Lining**: Integrates optical depth across 5 elevation slabs ($z \in \{92, 102, 112, 124, 138\}$) with Henyey-Greenstein forward scattering and Beer-Powder transmittance:
-     $$E_{\text{light}}(\tau_{\odot}) = \text{mix}\!\left(e^{-\tau_{\odot}}, \; e^{-\tau_{\odot}}\bigl(0.45 + 0.95(1 - e^{-2.2\tau_{\odot}})\bigr), \; 0.65\right) \cdot \Phi_{\text{HG}}(\cos\theta)$$
+1. **Pass 1 — Multi-Layer Projected Cloud Ground Shadows (`s_fs_terrain`)**:
+   `eval_planetary_cloud_shadow` projects each terrain fragment along the Northwest directional sun vector $\mathbf{L}_{\text{sun}} = \text{normalize}(-0.577, -0.577, 0.816)$ to all three cloud strata ($z \in \{110, 192, 288\}$) with altitude-proportional lateral displacement (`dzLow`, `dzMid`, `dzHigh`), modulating direct solar diffuse and wet-shore/mineral specular glints while smoothly preserving shallow underwater seabed transmission.
+2. **Pass 2 — Water Cloud Shadows & Multi-Layer Wave-Perturbed Cloud Reflections (`s_fs_water`)**:
+   Modulates solar glitter (`specSun`) and wave slope hillshading by `sunTrans`, and traces the wave-normal reflection ray `waveRefl = reflect(-viewDir, waveNormal)` across both low ($z = 112$) and mid ($z = 192$) cloud strata to blend reflected sunlit clouds into `reflSkyCol`.
+3. **Pass 3 — Multi-Shell Curved-Torus Volumetric Cloud Pass (`s_vs_cloud`, `s_fs_cloud`, `nd_seven_gl_flush_clouds`)**:
+   - **Three Curved-Torus Altitude Shells**: `nd_seven_gl_flush_clouds` renders all three cloud decks (`[88..144]`, `[168..228]`, `[268..320]`) via `uCloudDeck` in back-to-front painter's order relative to camera altitude.
+   - **Close-Up Diorama Aperture Parting**: When the camera zooms in close (`uCamDist < 1350.0`), a smooth radial aperture (`apertureMask`) parts clouds around the focal center (`length(vRelXY)`) so low-altitude clouds never obscure gameplay, while closing seamlessly into a multi-layer planetary cloudscape as the camera zooms out.
+   - **5-Step Volumetric Ray-Slab Integration, Inter-Deck Self-Shadowing & Beer-Powder Silver-Lining**: Integrates optical depth across 5 normalized slab heights per deck (`slabF = {0.10, 0.26, 0.45, 0.66, 0.88}`), including **inter-deck shadow casting** (upper decks casting sun shadows onto lower decks) and Henyey-Greenstein + Beer-Powder silver-lining scattering:
+     $$E_{\text{light}}(\tau_{\odot}) = \text{mix}\!\left(e^{-\tau_{\odot}}, \; e^{-\tau_{\odot}}\bigl(0.42 + 0.98(1 - e^{-2.35\tau_{\odot}})\bigr), \; 0.68\right) \cdot \Phi_{\text{HG}}(\cos\theta)$$
 
 ---
 
@@ -116,4 +126,4 @@ In `mods/nd/ux/nd_seven_gl.c`, `eval_planetary_cloud_density(vec3 worldPos, floa
   - Test 16: Verifies 100% bit-exact parity between `chaff_glsl_ref_hash4` and `noise_r(va, seed, 0, 4)`, plus `chaff_glsl_ref_sample_grad_4d` analytical derivative accuracy against central finite differences.
 - **`tests/unit/test_seven_render.c`**:
   - Validates all 4 WebGL2 shader programs (`terrain`, `water`, `billboard`, `cloud`) with `glslangValidator -l` (GLSL ES 3.00).
-  - Verifies `nd_seven_gl_eval_cloud_density` determinism, climate humidity sensitivity (`humid > arid * 1.25`), vertical slab profile bounds, and 4D temporal derivative stability at $t = 100{,}000\text{ s}$ vs $t = 10\text{ s}$.
+  - Verifies `nd_seven_gl_eval_cloud_density` determinism across all 3 vertical cloud strata (`z = 108, 192, 288`), clear inter-deck gaps (`z = 84, 156, 248, 326`), climate humidity sensitivity (`humid > arid * 1.25`), and 4D temporal derivative stability at $t = 100{,}000\text{ s}$ vs $t = 10\text{ s}$.
