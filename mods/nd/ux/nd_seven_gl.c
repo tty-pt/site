@@ -1041,7 +1041,7 @@ static const char *s_fs_terrain =
 	"    float billowFbm = 0.0;\n"
 	"    float billowWeightSum = 0.0;\n"
 	"    if (dist < dFar[3]) {\n"
-	"        vec4 wind = (dist < dFar[4]) ? eval_recursive_wind(worldPos.xy, anim_time) : vec4(prevDir, 0.75, 0.50);\n"
+	"        vec4 wind = (dist < dFar[4]) ? eval_recursive_wind(worldPos.xy, anim_time, fw, dist) : vec4(prevDir, 0.75, 0.50);\n"
 	"        vec2 wDir = wind.xy;\n"
 	"        vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
 	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 92.0) * 0.012);\n"
@@ -1050,7 +1050,7 @@ static const char *s_fs_terrain =
 	"        for (int j = 0; j < 5; j++) {\n"
 	"            int i = j + 3;\n"
 	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"            float wNyq  = smoothstep(0.80, 0.20, freqs[i] * fw);\n"
+	"            float wNyq  = nd_octave_weight(1.0 / freqs[i], fw);\n"
 	"            float w = wDist * wNyq;\n"
 	"            if (w > 0.001) {\n"
 	"                float phase = mod(anim_time * spds[i], 1024.0);\n"
@@ -3114,6 +3114,11 @@ static const char *s_fs_cloud =
 	"float cloud_remap(float v, float l0, float h0, float l1, float h1) {\n"
 	"    return l1 + (v - l0) * (h1 - l1) / max(1e-5, h0 - l0);\n"
 	"}\n"
+	"const float OCTAVE_MIN_PX  = 1.35;\n"
+	"const float OCTAVE_FULL_PX = 4.50;\n"
+	"float nd_octave_weight(float wavelength, float fw) {\n"
+	"    return smoothstep(OCTAVE_MIN_PX, OCTAVE_FULL_PX, wavelength / max(fw, 1e-4));\n"
+	"}\n"
 	"float eval_zoom_cloud_density(vec3 worldPos, float anim_time, float humidity, float dist, float fw) {\n"
 	"    float z = worldPos.z;\n"
 	"    if (z <= 92.0 || z >= 232.0) return 0.0;\n"
@@ -3181,7 +3186,7 @@ static const char *s_fs_cloud =
 	"        for (int j = 0; j < 5; j++) {\n"
 	"            int i = j + 3;\n"
 	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"            float wNyq  = smoothstep(0.80, 0.20, freqs[i] * fw);\n"
+	"            float wNyq  = nd_octave_weight(1.0 / freqs[i], fw);\n"
 	"            float w = wDist * wNyq;\n"
 	"            if (w > 0.001) {\n"
 	"                float phase = mod(anim_time * spds[i], 1024.0);\n"
@@ -4482,6 +4487,11 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		s_gl.cloud_queue[s_gl.cloud_count].sea_level = terrain_sea_lvl;
 		s_gl.cloud_queue[s_gl.cloud_count].height_tex = slot->height_tex;
 		s_gl.cloud_queue[s_gl.cloud_count].substrate_tex = slot->substrate_tex;
+		s_gl.cloud_queue[s_gl.cloud_count].rel_center[0] = rel_center[0];
+		s_gl.cloud_queue[s_gl.cloud_count].rel_center[1] = rel_center[1];
+		s_gl.cloud_queue[s_gl.cloud_count].rel_center[2] = rel_center[2];
+		s_gl.cloud_queue[s_gl.cloud_count].major_r = eff_pdef->major_r;
+		s_gl.cloud_queue[s_gl.cloud_count].minor_r = eff_pdef->minor_r;
 		s_gl.cloud_count++;
 	}
 }
@@ -4592,13 +4602,14 @@ void nd_seven_gl_flush_clouds(void)
 	glUniform2f(s_gl.cloud_pipe.uTorusRadii, s_gl.cur_pdef.major_r, s_gl.cur_pdef.minor_r);
 	glUniform2f(s_gl.cloud_pipe.uWorldDim, ND_SEVEN_WORLD_DIM_W, ND_SEVEN_WORLD_DIM_H);
 
-	glUniform1f(s_gl.cloud_pipe.uFogStart, s_gl.cur_dist * 1.5f);
-	glUniform1f(s_gl.cloud_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
+	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+	float fog_scale = 1.0f + space_t * 250.0f;
+	glUniform1f(s_gl.cloud_pipe.uFogStart, s_gl.cur_dist * 1.5f * fog_scale);
+	glUniform1f(s_gl.cloud_pipe.uFogEnd, s_gl.cur_dist * 4.0f * fog_scale);
 	glUniform1f(s_gl.cloud_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.cloud_pipe.uCamDist, s_gl.cur_dist);
 	glUniform4f(s_gl.cloud_pipe.uCloudDeck, 92.0f, 140.0f, 0.0f, 1.0f);
 
-	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 	glUniform3f(s_gl.cloud_pipe.uSkyColor,
 	            0.55f * (1.0f - space_t) + 0.012f * space_t,
 	            0.70f * (1.0f - space_t) + 0.016f * space_t,
@@ -4620,6 +4631,8 @@ void nd_seven_gl_flush_clouds(void)
 		glBindTexture(GL_TEXTURE_2D, chk->substrate_tex);
 		glUniform1i(s_gl.cloud_pipe.uSubstrateTex, 0);
 
+		glUniform3fv(s_gl.cloud_pipe.uPlanetCenter, 1, chk->rel_center);
+		glUniform2f(s_gl.cloud_pipe.uTorusRadii, chk->major_r, chk->minor_r);
 		glUniform2f(s_gl.cloud_pipe.uChunkOrigin, (float)chk->ox, (float)chk->oy);
 		glUniform2f(s_gl.cloud_pipe.uChunkRelOrigin,
 		            (float)((double)chk->ox - (double)s_gl.cur_tx),
