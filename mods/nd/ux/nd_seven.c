@@ -237,9 +237,9 @@ int nd_seven_is_universe_owner(const nd_client_state_t *st)
 
 /* Celestial Body Definitions */
 static const nd_planet_def_t s_planets[] = {
-	{ .world_id = 0, .center = { 0.0f, 0.0f, 0.0f },             .major_r = 2000000.0f, .minor_r = 1335000.0f },
-	{ .world_id = 1, .center = { 0.0f, 0.0f, 0.0f },             .major_r = 2000000.0f, .minor_r = 1335000.0f }, /* Citadel (Large Torus) */
-	{ .world_id = 2, .center = { 6000000.0f, 3500000.0f, 2000000.0f }, .major_r =  800000.0f, .minor_r =  500000.0f }, /* Aethelgard / Moon (Medium Torus) */
+	{ .world_id = 0, .center = { 0.0f, 0.0f, 0.0f },               .major_r = 2000000.0f, .minor_r = 1335000.0f },
+	{ .world_id = 1, .center = { 0.0f, 0.0f, 0.0f },               .major_r = 2000000.0f, .minor_r = 1335000.0f }, /* Citadel (Large Torus) */
+	{ .world_id = 2, .center = { 4500000.0f, -14000000.0f, -8500000.0f }, .major_r =  800000.0f, .minor_r =  500000.0f }, /* Aethelgard / Moon (Far Behind Main Planet) */
 };
 
 const nd_planet_def_t *nd_seven_get_planet(uint16_t world)
@@ -344,22 +344,16 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	size_t max_leaves = SEVEN_MAX_VISIBLE_LEAVES;
 	uint8_t min_lvl = 0;
 
-	/* From atmosphere, low orbit, and space (dist >= 2500), polygons are no longer needed
-	 * at high frequency; visual fidelity comes from the GPU high-definition procedural noise
-	 * image. Raise target_quad_px and min_level with altitude so visible chunks stay coarse,
-	 * lightweight, and uniform (zero split/merge flickering when moving). */
+	/* Continuous logarithmic LOD stepping function from atmosphere through orbital space:
+	 * replaces discrete switch-cases with a single smooth log2(dist / 2000) scale law. */
 	if (dist >= 2500.0f) {
-		float atmo_t = (dist - 2500.0f) / 42000.0f;
-		if (atmo_t < 0.0f) atmo_t = 0.0f;
-		if (atmo_t > 1.0f) atmo_t = 1.0f;
+		float atmo_t = fminf(1.0f, fmaxf(0.0f, (dist - 2500.0f) / 42000.0f));
 		target_quad_px = 1.80f + 10.20f * atmo_t;
 		max_leaves = (size_t)(96.0f - 56.0f * atmo_t);
-		if (dist >= 64000.0f)      min_lvl = 6;
-		else if (dist >= 32000.0f) min_lvl = 5;
-		else if (dist >= 16000.0f) min_lvl = 4;
-		else if (dist >= 8000.0f)  min_lvl = 3;
-		else if (dist >= 4000.0f)  min_lvl = 2;
-		else                       min_lvl = 1;
+		int lvl_step = (int)floorf(log2f(dist * (1.0f / 2000.0f)));
+		if (lvl_step < 1) lvl_step = 1;
+		if (lvl_step > 6) lvl_step = 6;
+		min_lvl = (uint8_t)lvl_step;
 	}
 
 	ar_cull_opts_t opts = {
@@ -423,28 +417,30 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                                sea_lvl, pdef);
 	}
 
-	/* Multi-Planet Rendering: When in high-altitude/orbit space view, dispatch secondary celestial bodies */
+	/* Multi-Planet Rendering: When in orbital/space view, dispatch the full 4x4 Level 14 torus
+	 * of the secondary celestial body (located far behind the main planet) */
 	if (zoom <= 0.05f) {
 		uint16_t alt_world = (world == 2) ? 1 : 2;
 		const nd_planet_def_t *alt_pdef = nd_seven_get_planet(alt_world);
 		if (alt_pdef) {
 			ar_cull_opts_t alt_opts = opts;
 			alt_opts.view_id = 2;
+			alt_opts.min_level = 14;
+			alt_opts.max_level = 14;
 			const ar_node_t *alt_visible[16];
 			size_t alt_count = ar_system_query_matrix(cs, alt_world, mvp, &alt_opts, alt_visible, 16);
+			int16_t alt_wl_i = nd_field_water_level(alt_world);
 			for (size_t m = 0; m < alt_count; m++) {
 				const ar_node_t *node = alt_visible[m];
 				if (!node) continue;
 				uint32_t vdim = node->vert_dim;
 
-				/* Pass ND_SEVEN_SEA_LEVEL_NONE for secondary celestial body in deep space
-				 * so it does not push tangent-space water chunks into the primary planet's water queue */
 				nd_seven_gl_flush_terrain_chunk(alt_world, node->level, node->rev,
 				                                node->ox, node->oy, node->w, node->h,
 				                                node->rgba, node->values,
 				                                vdim, vdim,
 				                                (uint32_t)w, (uint32_t)h,
-				                                ND_SEVEN_SEA_LEVEL_NONE, alt_pdef);
+				                                (float)alt_wl_i, alt_pdef);
 			}
 		}
 	}

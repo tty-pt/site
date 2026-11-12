@@ -124,9 +124,9 @@ static void test_multi_planet_definitions(void)
 	assert(p2 != NULL);
 	assert(p2->major_r == 800000.0f);
 	assert(p2->minor_r == 500000.0f);
-	assert(p2->center[0] == 6000000.0f);
-	assert(p2->center[1] == 3500000.0f);
-	assert(p2->center[2] == 2000000.0f);
+	assert(p2->center[0] == 4500000.0f);
+	assert(p2->center[1] == -14000000.0f);
+	assert(p2->center[2] == -8500000.0f);
 
 	printf("  PASS: Planet 1 (Citadel) and Planet 2 (Aethelgard Moon) verified\n");
 }
