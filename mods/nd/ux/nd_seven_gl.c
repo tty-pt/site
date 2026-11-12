@@ -1523,30 +1523,76 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 	float fx = px - (float)ix;
 	float fy = py - (float)iy;
 
-	float wx = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
-	float wy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
-	if (uc <= 0.0001f || uc >= 0.9999f) wy = fy;
-	if (vc <= 0.0001f || vc >= 0.9999f) wx = fx;
-
 	int w = (int)tex_w;
 	int h = (int)tex_h;
+
+	float wx[4] = {
+		fx * (-0.5f + fx * (1.0f - 0.5f * fx)),
+		1.0f + fx * fx * (-2.5f + 1.5f * fx),
+		fx * (0.5f + fx * (2.0f - 1.5f * fx)),
+		fx * fx * (-0.5f + 0.5f * fx)
+	};
+	float wy[4] = {
+		fy * (-0.5f + fy * (1.0f - 0.5f * fy)),
+		1.0f + fy * fy * (-2.5f + 1.5f * fy),
+		fy * (0.5f + fy * (2.0f - 1.5f * fy)),
+		fy * fy * (-0.5f + 0.5f * fy)
+	};
+	float dwx[4] = {
+		-0.5f + fx * (2.0f - 1.5f * fx),
+		fx * (-5.0f + 4.5f * fx),
+		0.5f + fx * (4.0f - 4.5f * fx),
+		fx * (-1.0f + 1.5f * fx)
+	};
+	float dwy[4] = {
+		-0.5f + fy * (2.0f - 1.5f * fy),
+		fy * (-5.0f + 4.5f * fy),
+		0.5f + fy * (4.0f - 4.5f * fy),
+		fy * (-1.0f + 1.5f * fy)
+	};
+
+	float h_bicubic = 0.0f;
+	float gx_bicubic = 0.0f;
+	float gy_bicubic = 0.0f;
+
+	for (int j = 0; j < 4; j++) {
+		float row_h = 0.0f;
+		float row_dx = 0.0f;
+		int cy = iy + j - 1;
+		for (int i = 0; i < 4; i++) {
+			int cx = ix + i - 1;
+			float val = get_h16(height_i16, cx, cy, w, h);
+			row_h += val * wx[i];
+			row_dx += val * dwx[i];
+		}
+		h_bicubic += row_h * wy[j];
+		gx_bicubic += row_dx * wy[j];
+		gy_bicubic += row_h * dwy[j];
+	}
+
+	float border_x = fminf(px, max_xf - px);
+	float border_y = fminf(py, max_yf - py);
+	float border_dist = fminf(border_x, border_y);
+	float border_blend = border_dist < 0.0f ? 0.0f : (border_dist > 1.0f ? 1.0f : border_dist);
 
 	float h00 = get_h16(height_i16, ix,     iy,     w, h);
 	float h10 = get_h16(height_i16, ix + 1, iy,     w, h);
 	float h01 = get_h16(height_i16, ix,     iy + 1, w, h);
 	float h11 = get_h16(height_i16, ix + 1, iy + 1, w, h);
 
-	float b0 = h00 + (h10 - h00) * wx;
-	float b1 = h01 + (h11 - h01) * wx;
-	float raw_h = b0 + (b1 - b0) * wy;
+	float b0 = h00 + (h10 - h00) * fx;
+	float b1 = h01 + (h11 - h01) * fx;
+	float h_linear = b0 + (b1 - b0) * fy;
+
+	float raw_h = h_linear + (h_bicubic - h_linear) * border_blend;
 
 	if (out_grad_x || out_grad_y) {
-		float dx0 = h10 - h00;
-		float dx1 = h11 - h01;
-		float dy0 = h01 - h00;
-		float dy1 = h11 - h10;
-		if (out_grad_x) *out_grad_x = (dx0 + (dx1 - dx0) * wy) * (max_xf / (span_x > 0.0f ? span_x : 160.0f));
-		if (out_grad_y) *out_grad_y = (dy0 + (dy1 - dy0) * wx) * (max_yf / (span_y > 0.0f ? span_y : 128.0f));
+		float dx_linear = (h10 - h00) + ((h11 - h01) - (h10 - h00)) * fy;
+		float dy_linear = (h01 - h00) + ((h11 - h10) - (h01 - h00)) * fx;
+		float final_gx = dx_linear + (gx_bicubic - dx_linear) * border_blend;
+		float final_gy = dy_linear + (gy_bicubic - dy_linear) * border_blend;
+		if (out_grad_x) *out_grad_x = final_gx * (max_xf / (span_x > 0.0f ? span_x : 160.0f));
+		if (out_grad_y) *out_grad_y = final_gy * (max_yf / (span_y > 0.0f ? span_y : 128.0f));
 	}
 
 	return raw_h * 0.0625f;

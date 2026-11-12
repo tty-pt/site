@@ -2724,10 +2724,29 @@ int main(void)
 				remove(vpath);
 				remove(fpath);
 				assert(rc == 0);
-				remove(vpath);
-				remove(fpath);
-				assert(rc == 0);
 			}
+		}
+
+		/* 6. Verify 4x4 Catmull-Rom bicubic C1 gradient continuity across texel boundaries:
+		 * On a steady diagonal height ramp h(x,y) = 16*(x + y), the gradient at interior texel
+		 * grid lines (f = 0) must be strictly non-zero and continuous (unlike 2x2 quintic S-curve
+		 * plateauing which forced derivative = 0 on every texel line). */
+		{
+			int16_t ramp[9 * 9];
+			for (int ry = 0; ry < 9; ry++) {
+				for (int rx = 0; rx < 9; rx++) {
+					ramp[ry * 9 + rx] = (int16_t)((rx + ry) * 32);
+				}
+			}
+			/* Sample exactly on interior texel grid line u = 4/8 = 0.5, v = 4/8 = 0.5 */
+			float gx_grid = 0.0f, gy_grid = 0.0f;
+			float h_grid = nd_seven_gl_sample_height_smooth(ramp, 9, 9, 0.5f, 0.5f, 160.0f, 128.0f, &gx_grid, &gy_grid);
+			float gx_mid = 0.0f, gy_mid = 0.0f;
+			float h_mid = nd_seven_gl_sample_height_smooth(ramp, 9, 9, 0.5625f, 0.5625f, 160.0f, 128.0f, &gx_mid, &gy_mid);
+			assert(fabsf(h_grid - 16.0f) < 1e-4f);
+			assert(h_mid > h_grid);
+			assert(gx_grid > 0.5f && gy_grid > 0.5f);
+			assert(fabsf(gx_grid - gx_mid) < 1e-3f && fabsf(gy_grid - gy_mid) < 1e-3f);
 		}
 
 		printf("PASS: single-pass volumetric water optics, 6-octave orbital-to-capillary wave cascade (grad: orbit=%.4f, macro=%.4f, 1x=%.4f, 8x=%.4f), t=100000s temporal stability, and glslangValidator GLSL ES 3.00 compile+link verified\n",
