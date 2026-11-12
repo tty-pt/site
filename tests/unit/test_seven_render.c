@@ -2617,13 +2617,28 @@ int main(void)
 		const char *fs_w = nd_seven_gl_fs_water();
 		assert(fs_t && fs_w);
 
-		/* 1. Single-pass seabed transmission: s_fs_terrain owns Beer-Lambert absorption & littoral sand,
-		 * while s_fs_water is a pure air-water surface interface with zero fake opaque cSeabed */
+		/* 1. Single-pass seabed transmission & Phase 8 realistic water shader invariants:
+		 * - 4x4 Catmull-Rom bicubic spline in both s_fs_terrain and s_fs_water
+		 * - Shared world-space sub-texel shoreline micro-relief
+		 * - Biome-aware water body palette and seabed substrate derived from uSubstrateTex
+		 * - Capillary wet-shore darkening
+		 * - Non-pulsating shoreline swash (no global time-sine) with distance attenuation
+		 * - 3D wave slope hillshading
+		 * - s_fs_water is a pure air-water surface interface with zero fake opaque cSeabed */
 		assert(strstr(fs_t, "littoralSand") != NULL);
-		assert(strstr(fs_t, "shallowFactor = smoothstep(0.0, 10.0, d)") != NULL);
-		assert(strstr(fs_t, "effectiveOpticalPath") != NULL);
+		assert(strstr(fs_t, "hBicubic") != NULL);
+		assert(strstr(fs_t, "eval_shore_micro_relief") != NULL);
+		assert(strstr(fs_t, "wTropical") != NULL && strstr(fs_t, "wPolar") != NULL);
+		assert(strstr(fs_t, "shoreWetMoisture") != NULL);
+		assert(strstr(fs_t, "C_SHALLOW") != NULL && strstr(fs_t, "C_ABYSS") != NULL);
 		assert(strstr(fs_w, "eval_zoom_water_waves") != NULL);
-		assert(strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)") != NULL);
+		assert(strstr(fs_w, "hBicubic") != NULL);
+		assert(strstr(fs_w, "eval_shore_micro_relief") != NULL);
+		assert(strstr(fs_w, "shoreDist") != NULL);
+		assert(strstr(fs_w, "foamDistFade") != NULL);
+		assert(strstr(fs_w, "waveSlopeDiff") != NULL);
+		assert(strstr(fs_w, "swashPhase = sin(") == NULL);
+		assert(strstr(fs_w, "meniscus * 0.78") == NULL);
 		assert(strstr(fs_w, "cSeabed") == NULL);
 
 		/* 2. Verify 6-octave zoom-continuous wave cascade across planetary orbit to ultra-close zoom:
@@ -2706,6 +2721,9 @@ int main(void)
 				fclose(ff);
 				snprintf(cmd, sizeof(cmd), "glslangValidator -l '%s' '%s' >/dev/null", vpath, fpath);
 				int rc = system(cmd);
+				remove(vpath);
+				remove(fpath);
+				assert(rc == 0);
 				remove(vpath);
 				remove(fpath);
 				assert(rc == 0);
