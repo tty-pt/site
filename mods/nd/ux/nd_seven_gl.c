@@ -479,6 +479,100 @@ static const char *s_fs_terrain =
 	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
 	"    return texture(uSubstrateTex, (ip + u + 0.5) / texSize);\n"
 	"}\n"
+	"uint chaff_hash4(ivec4 p, uint seed) {\n"
+	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
+	"    uint v2 = (uint(p.z) & 0xFFFFu) | ((uint(p.w) & 0xFFFFu) << 16u);\n"
+	"    uint h = seed + 0x165667B1u + 8u;\n"
+	"    h += v1 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h += v2 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h ^= h >> 15u;\n"
+	"    h *= 0x85EBCA77u;\n"
+	"    h ^= h >> 13u;\n"
+	"    h *= 0xC2B2AE3Du;\n"
+	"    h ^= h >> 16u;\n"
+	"    return h;\n"
+	"}\n"
+	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
+	"    vec4 ip = floor(p);\n"
+	"    vec4 fp = p - ip;\n"
+	"    vec4 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    ivec4 c = ivec4(ip);\n"
+	"    float d[8];\n"
+	"    for (int i = 0; i < 8; i++) {\n"
+	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
+	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        d[i] = mix(v0, v1, u.w);\n"
+	"    }\n"
+	"    float c0 = mix(d[0], d[4], u.z);\n"
+	"    float c1 = mix(d[1], d[5], u.z);\n"
+	"    float c2 = mix(d[2], d[6], u.z);\n"
+	"    float c3 = mix(d[3], d[7], u.z);\n"
+	"    float b0 = mix(c0, c2, u.y);\n"
+	"    float b1 = mix(c1, c3, u.y);\n"
+	"    return mix(b0, b1, u.x);\n"
+	"}\n"
+	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
+	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
+	"    const vec2 dir0 = vec2(0.741, -0.671);\n"
+	"    const vec2 dir1 = vec2(0.822, -0.569);\n"
+	"    const vec2 dir2 = vec2(0.640, -0.768);\n"
+	"    float t0 = mod(anim_time * 0.08, 1024.0);\n"
+	"    vec2 p0 = worldPos * 0.0055 - dir0 * t0;\n"
+	"    vec3 w0 = chaff_grad_noise2d(p0, 0x57494E44u);\n"
+	"    vec2 baseWind = normalize(dir0 + vec2(-w0.z, w0.y) * 0.28);\n"
+	"    float t1 = mod(anim_time * 0.22, 1024.0);\n"
+	"    vec2 p1 = rot * (worldPos * 0.028 + w0.yz * 0.65) - dir1 * t1;\n"
+	"    vec3 w1 = chaff_grad_noise2d(p1, 0x47555354u);\n"
+	"    vec2 mesoGrad = irot * w1.yz;\n"
+	"    vec2 localWind1 = normalize(baseWind + vec2(-mesoGrad.y, mesoGrad.x) * 0.22);\n"
+	"    float t2 = mod(anim_time * 0.48, 1024.0);\n"
+	"    vec2 p2 = rot * (rot * (worldPos * 0.120) + w0.yz * 0.45 + w1.yz * 0.55) - dir2 * t2;\n"
+	"    vec3 w2 = chaff_grad_noise2d(p2, 0x45444459u);\n"
+	"    vec2 microGrad = (irot * irot) * w2.yz;\n"
+	"    vec2 windDir = normalize(localWind1 + vec2(-microGrad.y, microGrad.x) * 0.16);\n"
+	"    float gustEnv = clamp(0.42 + 0.45 * w0.x + 0.55 * (w1.x - 0.38) + 0.30 * (w2.x - 0.42), 0.25, 1.35);\n"
+	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
+	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
+	"}\n"
+	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
+	"    vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
+	"    float tMacro = mod(anim_time * 0.055, 1024.0);\n"
+	"    float tMeso  = mod(anim_time * 0.110, 1024.0);\n"
+	"    float tBill  = mod(anim_time * 0.185, 1024.0);\n"
+	"    float wBoil  = mod(anim_time * 0.075, 512.0);\n"
+	"    float hNorm  = clamp((worldPos.z - 88.0) / 56.0, 0.0, 1.0);\n"
+	"    vec2 shear   = (wDir * 0.85 + wPerp * 0.32) * (hNorm * 0.55);\n"
+	"    vec2 warp    = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.42;\n"
+	"    vec2 pMacro  = worldPos.xy * 0.0022 + warp * 0.45 + shear * 0.25 - prevDir * tMacro;\n"
+	"    vec2 pMeso   = worldPos.xy * 0.0068 + warp * 0.85 + shear * 0.55 - prevDir * tMeso;\n"
+	"    vec2 pBill   = worldPos.xy * 0.0195 + warp * 1.35 + shear * 0.95 - prevDir * tBill;\n"
+	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, hNorm * 0.8, wBoil * 0.45), 0x434C4430u);\n"
+	"    float nMeso  = chaff_grad_noise4d(vec4(pMeso,  hNorm * 1.6, wBoil * 0.90), 0x434C4431u);\n"
+	"    float nBill  = chaff_grad_noise4d(vec4(pBill,  hNorm * 3.0, wBoil * 1.55), 0x434C4432u);\n"
+	"    float ridgeBill = 1.0 - abs(2.0 * nBill - 1.0);\n"
+	"    float baseField = nMacro * 0.54 + nMeso * 0.30 + ridgeBill * 0.16;\n"
+	"    float thresh = clamp(0.56 - 0.18 * humidity, 0.34, 0.66);\n"
+	"    float rawDens = smoothstep(thresh, thresh + 0.26, baseField);\n"
+	"    float vProfile = smoothstep(0.0, 0.22, hNorm) * smoothstep(1.0, 0.52, hNorm);\n"
+	"    return rawDens * vProfile;\n"
+	"}\n"
+	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity) {\n"
+	"    const float cloudBaseZ = 104.0;\n"
+	"    float dz = max(8.0, cloudBaseZ - fragZ);\n"
+	"    /* Project along Northwest directional sun ray L = normalize(-0.577, -0.577, 0.816) to cloud layer */\n"
+	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
+	"    float d0 = eval_planetary_cloud_density(vec3(projXY, 108.0), anim_time, humidity);\n"
+	"    float d1 = eval_planetary_cloud_density(vec3(projXY + vec2(-8.5, -8.5), 122.0), anim_time, humidity);\n"
+	"    return clamp((d0 * 0.62 + d1 * 0.38) * 1.25, 0.0, 0.52);\n"
+	"}\n"
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
 	"    float effectiveScale = scale * 0.0625;\n"
@@ -518,9 +612,13 @@ static const char *s_fs_terrain =
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
+	"    float bioHumidity = clamp(0.55 * wTemperate + 0.82 * wTropical + 0.48 * wPolar + 0.20 * wVolcanic + 0.25 * smoothstep(-4.0, 8.0, fragWaterDepth), 0.15, 0.95);\n"
+	"    float dryCloudMask = (uSeaLevel > -900.0) ? smoothstep(2.0, -0.5, fragWaterDepth) : 1.0;\n"
+	"    float cloudShadow = eval_planetary_cloud_shadow(vWorldPos, fragZ, uAnimTime, bioHumidity) * dryCloudMask;\n"
+	"    float sunTrans = 1.0 - cloudShadow;\n"
 	"    vec3 L_frag = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    float baseDiff = max(0.0, dot(fragNormal, L_frag));\n"
-	"    float effLighting = 0.45 + 0.55 * baseDiff;\n"
+	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans;\n"
+	"    float effLighting = (0.45 - 0.10 * cloudShadow) + 0.55 * baseDiff;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
 	"    float dryLighting = effLighting;\n"
 	"    float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
@@ -600,9 +698,9 @@ static const char *s_fs_terrain =
 	"            vec3 N_frag = normalize(fragNormal - microGrad.x * normStrength * tangentU - microGrad.y * normStrength * tangentV);\n"
 	"            vec3 viewDir = normalize(vViewDir);\n"
 	"            vec3 H_half = normalize(L_frag + viewDir);\n"
-	"            float perFragDiff = max(0.0, dot(N_frag, L_frag));\n"
+	"            float perFragDiff = max(0.0, dot(N_frag, L_frag)) * sunTrans;\n"
 	"            float cavityAO = clamp(1.0 - slope * 0.26 + h0 * 0.26 - microCavity * 0.42 - rockCrevice * 0.34, 0.54, 1.05);\n"
-	"            float fragLit = 0.40 * cavityAO + 0.60 * perFragDiff * cavityAO;\n"
+	"            float fragLit = (0.40 - 0.08 * cloudShadow) * cavityAO + 0.60 * perFragDiff * cavityAO;\n"
 	"            dryLighting = mix(dryLighting, fragLit, macroFade);\n"
 	"            float microShade = clamp(1.0 + h0 * (0.30 + 0.16 * closeZoom) * macroFade, 0.72, 1.28);\n"
 	"            dryCol *= microShade;\n"
@@ -611,12 +709,12 @@ static const char *s_fs_terrain =
 	"            dryCol *= (1.0 - shoreWetMoisture * 0.20);\n"
 	"            float subAerialMask = smoothstep(0.25, -0.02, fragWaterDepth);\n"
 	"            float wetSpecAngle = max(0.0, dot(N_frag, H_half));\n"
-	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.32 * wetSand + 0.24 * shoreWetMoisture) * subAerialMask;\n"
-	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.42 * subAerialMask;\n"
+	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.32 * wetSand + 0.24 * shoreWetMoisture) * subAerialMask * sunTrans;\n"
+	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.42 * subAerialMask * sunTrans;\n"
 	"            dryCol += vec3((wetFilmSpec + quartzGlint) * (0.35 + 0.65 * sandBlend) * distFade);\n"
 	"            if (rockFactor > 0.25 && distFade > 0.0) {\n"
 	"                float specAngle = max(0.0, dot(N_frag, H_half));\n"
-	"                float spec = pow(specAngle, 24.0) * (rockFactor * (0.20 + 0.12 * closeZoom) * (1.0 - rockCrevice) * distFade);\n"
+	"                float spec = pow(specAngle, 24.0) * (rockFactor * (0.20 + 0.12 * closeZoom) * (1.0 - rockCrevice) * distFade * sunTrans);\n"
 	"                dryCol += vec3(spec);\n"
 	"            }\n"
 	"        }\n"
@@ -639,9 +737,9 @@ static const char *s_fs_terrain =
 	"        subCol = mix(benthicSubstrate, littoralSand, shallowSandMask * (0.45 + 0.55 * distFade));\n"
 	"        if (distFade > 0.01 && fragWaterDepth < 18.0) {\n"
 	"            vec3 N_sub = normalize(fragNormal - detail.y * (0.30 * distFade) * tangentU - detail.z * (0.30 * distFade) * tangentV);\n"
-	"            float subDiff = max(0.0, dot(N_sub, L_frag));\n"
+	"            float subDiff = max(0.0, dot(N_sub, L_frag)) * sunTrans;\n"
 	"            float subCavity = clamp(1.0 + detail.x * 0.28 - detail.w * 0.38, 0.62, 1.18);\n"
-	"            subLighting = mix(subLighting, (0.45 + 0.55 * subDiff) * subCavity, distFade);\n"
+	"            subLighting = mix(subLighting, ((0.45 - 0.10 * cloudShadow) + 0.55 * subDiff) * subCavity, distFade);\n"
 	"        }\n"
 	"    }\n"
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
@@ -1014,6 +1112,75 @@ static const char *s_fs_water =
 	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
+	"uint chaff_hash4(ivec4 p, uint seed) {\n"
+	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
+	"    uint v2 = (uint(p.z) & 0xFFFFu) | ((uint(p.w) & 0xFFFFu) << 16u);\n"
+	"    uint h = seed + 0x165667B1u + 8u;\n"
+	"    h += v1 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h += v2 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h ^= h >> 15u;\n"
+	"    h *= 0x85EBCA77u;\n"
+	"    h ^= h >> 13u;\n"
+	"    h *= 0xC2B2AE3Du;\n"
+	"    h ^= h >> 16u;\n"
+	"    return h;\n"
+	"}\n"
+	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
+	"    vec4 ip = floor(p);\n"
+	"    vec4 fp = p - ip;\n"
+	"    vec4 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    ivec4 c = ivec4(ip);\n"
+	"    float d[8];\n"
+	"    for (int i = 0; i < 8; i++) {\n"
+	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
+	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        d[i] = mix(v0, v1, u.w);\n"
+	"    }\n"
+	"    float c0 = mix(d[0], d[4], u.z);\n"
+	"    float c1 = mix(d[1], d[5], u.z);\n"
+	"    float c2 = mix(d[2], d[6], u.z);\n"
+	"    float c3 = mix(d[3], d[7], u.z);\n"
+	"    float b0 = mix(c0, c2, u.y);\n"
+	"    float b1 = mix(c1, c3, u.y);\n"
+	"    return mix(b0, b1, u.x);\n"
+	"}\n"
+	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
+	"    vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
+	"    float tMacro = mod(anim_time * 0.055, 1024.0);\n"
+	"    float tMeso  = mod(anim_time * 0.110, 1024.0);\n"
+	"    float tBill  = mod(anim_time * 0.185, 1024.0);\n"
+	"    float wBoil  = mod(anim_time * 0.075, 512.0);\n"
+	"    float hNorm  = clamp((worldPos.z - 88.0) / 56.0, 0.0, 1.0);\n"
+	"    vec2 shear   = (wDir * 0.85 + wPerp * 0.32) * (hNorm * 0.55);\n"
+	"    vec2 warp    = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.42;\n"
+	"    vec2 pMacro  = worldPos.xy * 0.0022 + warp * 0.45 + shear * 0.25 - prevDir * tMacro;\n"
+	"    vec2 pMeso   = worldPos.xy * 0.0068 + warp * 0.85 + shear * 0.55 - prevDir * tMeso;\n"
+	"    vec2 pBill   = worldPos.xy * 0.0195 + warp * 1.35 + shear * 0.95 - prevDir * tBill;\n"
+	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, hNorm * 0.8, wBoil * 0.45), 0x434C4430u);\n"
+	"    float nMeso  = chaff_grad_noise4d(vec4(pMeso,  hNorm * 1.6, wBoil * 0.90), 0x434C4431u);\n"
+	"    float nBill  = chaff_grad_noise4d(vec4(pBill,  hNorm * 3.0, wBoil * 1.55), 0x434C4432u);\n"
+	"    float ridgeBill = 1.0 - abs(2.0 * nBill - 1.0);\n"
+	"    float baseField = nMacro * 0.54 + nMeso * 0.30 + ridgeBill * 0.16;\n"
+	"    float thresh = clamp(0.56 - 0.18 * humidity, 0.34, 0.66);\n"
+	"    float rawDens = smoothstep(thresh, thresh + 0.26, baseField);\n"
+	"    float vProfile = smoothstep(0.0, 0.22, hNorm) * smoothstep(1.0, 0.52, hNorm);\n"
+	"    return rawDens * vProfile;\n"
+	"}\n"
+	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity) {\n"
+	"    const float cloudBaseZ = 104.0;\n"
+	"    float dz = max(8.0, cloudBaseZ - fragZ);\n"
+	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
+	"    float d0 = eval_planetary_cloud_density(vec3(projXY, 108.0), anim_time, humidity);\n"
+	"    float d1 = eval_planetary_cloud_density(vec3(projXY + vec2(-8.5, -8.5), 122.0), anim_time, humidity);\n"
+	"    return clamp((d0 * 0.62 + d1 * 0.38) * 1.25, 0.0, 0.52);\n"
+	"}\n"
 	"/* Height-model basin & upwind fetch classifier: distinguishes quiet lakes/sheltered coves from deep open sea\n"
 	" * using purely local continuous depth and shoreline slope (zero fixed chunk-UV probes, zero chunk seams) */\n"
 	"vec2 eval_water_fetch_and_basin(vec2 uv, vec2 windDir, vec2 shoreGrad, float fragWaterDepth, float effectiveScale) {\n"
@@ -1133,6 +1300,9 @@ static const char *s_fs_water =
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
+	"    float bioHumidity = clamp(0.65 * wTemperate + 0.88 * wTropical + 0.52 * wPolar + 0.25 * wVolcanic + 0.15 * smoothstep(0.0, 16.0, fragWaterDepth), 0.25, 0.95);\n"
+	"    float cloudShadow = eval_planetary_cloud_shadow(vWorldPos, uSeaLevel, uAnimTime, bioHumidity);\n"
+	"    float sunTrans = 1.0 - cloudShadow * 0.78;\n"
 	"    vec3 C_SHALLOW = vec3(0.16, 0.56, 0.62) * wTropical\n"
 	"                   + vec3(0.11, 0.42, 0.46) * wTemperate\n"
 	"                   + vec3(0.17, 0.50, 0.62) * wPolar\n"
@@ -1175,7 +1345,7 @@ static const char *s_fs_water =
 	"    float specMicro   = pow(smoothstep(0.9942, 0.9997, NdotH_cap), 2.5) * (0.42 + 0.52 * wind.w) * (0.50 + 0.50 * closeWeight);\n"
 	"    float specWavelet = pow(smoothstep(0.9840, 0.9982, NdotH_wave), 2.0) * (0.22 + 0.18 * wind.z);\n"
 	"    float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
-	"    float specSun     = (specMicro + specWavelet + specBroad) * smoothstep(0.0, 0.25, fragWaterDepth);\n"
+	"    float specSun     = (specMicro + specWavelet + specBroad) * smoothstep(0.0, 0.25, fragWaterDepth) * sunTrans;\n"
 	"    /* Schlick Fresnel for air-water interface (R0 = 0.02) + per-wavelet facet tilt contrast */\n"
 	"    float flatNdotV = max(0.0, dot(torusN, viewDir));\n"
 	"    float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
@@ -1184,9 +1354,9 @@ static const char *s_fs_water =
 	"    vec3 sunColor = vec3(1.0, 0.98, 0.92);\n"
 	"    /* 3D wave slope hillshading: sunward wave faces tilt luminous, leeward troughs deepen */\n"
 	"    float waveSlopeDiff = dot(specNormal, sunDir) - dot(torusN, sunDir);\n"
-	"    float hillshadeLit = max(0.0, waveSlopeDiff);\n"
+	"    float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans;\n"
 	"    float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
-	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40);\n"
+	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40 - cloudShadow * 0.18);\n"
 	"    /* Subsurface wave-crest back-scattering only in deeper water (suppressed in crystal shallows) */\n"
 	"    float deepSssMask = smoothstep(2.5, 10.0, fragWaterDepth);\n"
 	"    float crestGlow = clamp(waves.w * 0.60 + hillshadeLit * 1.40, 0.0, 1.0) * deepSssMask;\n"
@@ -1208,6 +1378,14 @@ static const char *s_fs_water =
 	"    float foamWeight    = foam;\n"
 	"    float totalWeight   = skyReflWeight + sssWeight + specWeight + foamWeight;\n"
 	"    vec3 reflSkyCol = mix(sky * 0.92, sky * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
+	"    /* Reflected volumetric clouds on water surface along wave-perturbed reflection ray */\n"
+	"    vec3 waveRefl = reflect(-viewDir, waveNormal);\n"
+	"    float reflUp = max(0.18, dot(waveRefl, torusN));\n"
+	"    vec2 reflHoriz = vec2(dot(waveRefl, tangentU), dot(waveRefl, tangentV));\n"
+	"    vec2 reflCloudXY = vWorldPos + reflHoriz * (max(12.0, 108.0 - uSeaLevel) / reflUp);\n"
+	"    float reflCloudDens = eval_planetary_cloud_density(vec3(reflCloudXY, 112.0), uAnimTime, bioHumidity);\n"
+	"    vec3 reflCloudCol = mix(vec3(0.76, 0.82, 0.90), vec3(0.98, 0.97, 0.95), clamp(0.55 + facetTilt * 1.4, 0.0, 1.0));\n"
+	"    reflSkyCol = mix(reflSkyCol * (1.0 - cloudShadow * 0.22), reflCloudCol, clamp(reflCloudDens * 0.65, 0.0, 0.72));\n"
 	"    vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
 	"    vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
 	"    if (uLambLight.w > 0.001) {\n"
@@ -1576,12 +1754,283 @@ static const char *s_fs_billboard =
 	"    FragColor = vec4(finalRgb, outAlpha);\n"
 	"}\n";
 
+static const char *s_vs_cloud =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"precision highp int;\n"
+	"precision highp sampler2D;\n"
+	"layout (location = 0) in vec2 a_grid_uv;\n"
+	"uniform mat4 uMVP;\n"
+	"uniform sampler2D uSubstrateTex;\n"
+	"uniform vec2 uChunkOrigin;\n"
+	"uniform vec2 uChunkRelOrigin;\n"
+	"uniform vec2 uChunkSpan;\n"
+	"uniform vec4 uRefTrig;\n"
+	"uniform vec3 uCameraPos;\n"
+	"uniform vec3 uPlanetCenter;\n"
+	"uniform vec2 uTorusRadii;\n"
+	"uniform vec2 uWorldDim;\n"
+	"out vec2 vUV;\n"
+	"out vec2 vWorldPos;\n"
+	"out vec2 vRelXY;\n"
+	"out float vDistance;\n"
+	"out vec3 vViewDir;\n"
+	"out vec3 vTorusNormal;\n"
+	"out vec3 vTangentU;\n"
+	"out vec3 vTangentV;\n"
+	"void main() {\n"
+	"    vUV = a_grid_uv;\n"
+	"    vec2 worldXY = vec2(uChunkOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
+	"    vec2 relXY = vec2(uChunkRelOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkRelOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
+	"    const float TWO_PI = 6.28318530718;\n"
+	"    float R = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
+	"    float r0 = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
+	"    vec2 wdim = (uWorldDim.x > 0.0 && uWorldDim.y > 0.0) ? uWorldDim : vec2(10485760.0, 8388608.0);\n"
+	"    float du = TWO_PI * (relXY.x / wdim.x);\n"
+	"    float dv = TWO_PI * (relXY.y / wdim.y);\n"
+	"    float sdu = sin(du), shdu = sin(0.5 * du);\n"
+	"    float sdv = sin(dv), shdv = sin(0.5 * dv);\n"
+	"    float cu0 = uRefTrig.x, su0 = uRefTrig.y, cv0 = uRefTrig.z, sv0 = uRefTrig.w;\n"
+	"    float dcu = -2.0 * shdu * shdu * cu0 - sdu * su0;\n"
+	"    float dsu = -2.0 * shdu * shdu * su0 + sdu * cu0;\n"
+	"    float dcv = -2.0 * shdv * shdv * cv0 - sdv * sv0;\n"
+	"    float dsv = -2.0 * shdv * shdv * sv0 + sdv * cv0;\n"
+	"    float cu = cu0 + dcu, su = su0 + dsu;\n"
+	"    float cv = cv0 + dcv, sv = sv0 + dsv;\n"
+	"    const float effWz = 108.0;\n"
+	"    float Rv0 = R + r0 * cv0;\n"
+	"    float dRv = r0 * dcv + effWz * cv;\n"
+	"    vec3 worldPos = uPlanetCenter + vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + effWz * sv);\n"
+	"    vTorusNormal = vec3(cv * cu, cv * su, sv);\n"
+	"    vTangentU = vec3(-su, cu, 0.0);\n"
+	"    vTangentV = vec3(-sv * cu, -sv * su, cv);\n"
+	"    vWorldPos = worldXY;\n"
+	"    vRelXY = relXY;\n"
+	"    vDistance = length(worldPos - uCameraPos);\n"
+	"    vViewDir = uCameraPos - worldPos;\n"
+	"    gl_Position = uMVP * vec4(worldPos, 1.0);\n"
+	"}\n";
+
+static const char *s_fs_cloud =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"precision highp int;\n"
+	"precision highp sampler2D;\n"
+	"in vec2 vUV;\n"
+	"in vec2 vWorldPos;\n"
+	"in vec2 vRelXY;\n"
+	"in float vDistance;\n"
+	"in vec3 vViewDir;\n"
+	"in vec3 vTorusNormal;\n"
+	"in vec3 vTangentU;\n"
+	"in vec3 vTangentV;\n"
+	"uniform sampler2D uSubstrateTex;\n"
+	"uniform float uSeaLevel;\n"
+	"uniform float uFogStart;\n"
+	"uniform float uFogEnd;\n"
+	"uniform float uAnimTime;\n"
+	"uniform vec3 uSkyColor;\n"
+	"uniform float uAtmoIntensity;\n"
+	"uniform float uCamDist;\n"
+	"out vec4 FragColor;\n"
+	"uint chaff_rotl32(uint x, int r) {\n"
+	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
+	"}\n"
+	"uint chaff_hash3(ivec3 p, uint seed) {\n"
+	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
+	"    uint v2 = (uint(p.z) & 0xFFFFu);\n"
+	"    uint h = seed + 0x165667B1u + 6u;\n"
+	"    h += v1 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h += v2 * 0x85EBCA77u;\n"
+	"    h = chaff_rotl32(h, 13) * 0xC2B2AE3Du;\n"
+	"    h ^= h >> 15u;\n"
+	"    h *= 0x85EBCA77u;\n"
+	"    h ^= h >> 16u;\n"
+	"    return h;\n"
+	"}\n"
+	"vec2 chaff_grad_dir(int cx, int cy, uint seed) {\n"
+	"    uint h = chaff_hash3(ivec3(cx, cy, 0), seed);\n"
+	"    float gx = float(int(h & 0xFFFFu) - 32768) * (1.0 / 32768.0);\n"
+	"    float gy = float(int(h >> 16u) - 32768) * (1.0 / 32768.0);\n"
+	"    vec2 g = vec2(gx, gy);\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
+	"vec3 chaff_grad_noise2d(vec2 p, uint seed) {\n"
+	"    vec2 ip = floor(p);\n"
+	"    vec2 fp = p - ip;\n"
+	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    vec2 du = 30.0 * fp * fp * (fp * (fp - 2.0) + 1.0);\n"
+	"    ivec2 c = ivec2(ip);\n"
+	"    vec2 g00 = chaff_grad_dir(c.x,     c.y,     seed);\n"
+	"    vec2 g10 = chaff_grad_dir(c.x + 1, c.y,     seed);\n"
+	"    vec2 g01 = chaff_grad_dir(c.x,     c.y + 1, seed);\n"
+	"    vec2 g11 = chaff_grad_dir(c.x + 1, c.y + 1, seed);\n"
+	"    float v00 = dot(g00, fp);\n"
+	"    float v10 = dot(g10, fp - vec2(1.0, 0.0));\n"
+	"    float v01 = dot(g01, fp - vec2(0.0, 1.0));\n"
+	"    float v11 = dot(g11, fp - vec2(1.0, 1.0));\n"
+	"    float k0 = v10 - v00;\n"
+	"    float k1 = v01 - v00;\n"
+	"    float k2 = v11 - v01 - k0;\n"
+	"    float val = 0.5 + 0.70710678 * (v00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y);\n"
+	"    vec2 gInterp = g00 + (g10 - g00) * u.x + (g01 - g00) * u.y + (g11 - g01 - g10 + g00) * (u.x * u.y);\n"
+	"    vec2 grad = 0.70710678 * (gInterp + du * vec2(k0 + k2 * u.y, k1 + k2 * u.x));\n"
+	"    return vec3(clamp(val, 0.0, 1.0), grad.x, grad.y);\n"
+	"}\n"
+	"uint chaff_hash4(ivec4 p, uint seed) {\n"
+	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
+	"    uint v2 = (uint(p.z) & 0xFFFFu) | ((uint(p.w) & 0xFFFFu) << 16u);\n"
+	"    uint h = seed + 0x165667B1u + 8u;\n"
+	"    h += v1 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h += v2 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h ^= h >> 15u;\n"
+	"    h *= 0x85EBCA77u;\n"
+	"    h ^= h >> 13u;\n"
+	"    h *= 0xC2B2AE3Du;\n"
+	"    h ^= h >> 16u;\n"
+	"    return h;\n"
+	"}\n"
+	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
+	"    vec4 ip = floor(p);\n"
+	"    vec4 fp = p - ip;\n"
+	"    vec4 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    ivec4 c = ivec4(ip);\n"
+	"    float d[8];\n"
+	"    for (int i = 0; i < 8; i++) {\n"
+	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
+	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        d[i] = mix(v0, v1, u.w);\n"
+	"    }\n"
+	"    float c0 = mix(d[0], d[4], u.z);\n"
+	"    float c1 = mix(d[1], d[5], u.z);\n"
+	"    float c2 = mix(d[2], d[6], u.z);\n"
+	"    float c3 = mix(d[3], d[7], u.z);\n"
+	"    float b0 = mix(c0, c2, u.y);\n"
+	"    float b1 = mix(c1, c3, u.y);\n"
+	"    return mix(b0, b1, u.x);\n"
+	"}\n"
+	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
+	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
+	"    const vec2 dir0 = vec2(0.741, -0.671);\n"
+	"    const vec2 dir1 = vec2(0.822, -0.569);\n"
+	"    const vec2 dir2 = vec2(0.640, -0.768);\n"
+	"    float t0 = mod(anim_time * 0.08, 1024.0);\n"
+	"    vec2 p0 = worldPos * 0.0055 - dir0 * t0;\n"
+	"    vec3 w0 = chaff_grad_noise2d(p0, 0x57494E44u);\n"
+	"    vec2 baseWind = normalize(dir0 + vec2(-w0.z, w0.y) * 0.28);\n"
+	"    float t1 = mod(anim_time * 0.22, 1024.0);\n"
+	"    vec2 p1 = rot * (worldPos * 0.028 + w0.yz * 0.65) - dir1 * t1;\n"
+	"    vec3 w1 = chaff_grad_noise2d(p1, 0x47555354u);\n"
+	"    vec2 mesoGrad = irot * w1.yz;\n"
+	"    vec2 localWind1 = normalize(baseWind + vec2(-mesoGrad.y, mesoGrad.x) * 0.22);\n"
+	"    float t2 = mod(anim_time * 0.48, 1024.0);\n"
+	"    vec2 p2 = rot * (rot * (worldPos * 0.120) + w0.yz * 0.45 + w1.yz * 0.55) - dir2 * t2;\n"
+	"    vec3 w2 = chaff_grad_noise2d(p2, 0x45444459u);\n"
+	"    vec2 microGrad = (irot * irot) * w2.yz;\n"
+	"    vec2 windDir = normalize(localWind1 + vec2(-microGrad.y, microGrad.x) * 0.16);\n"
+	"    float gustEnv = clamp(0.42 + 0.45 * w0.x + 0.55 * (w1.x - 0.38) + 0.30 * (w2.x - 0.42), 0.25, 1.35);\n"
+	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
+	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
+	"}\n"
+	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
+	"    vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
+	"    float tMacro = mod(anim_time * 0.055, 1024.0);\n"
+	"    float tMeso  = mod(anim_time * 0.110, 1024.0);\n"
+	"    float tBill  = mod(anim_time * 0.185, 1024.0);\n"
+	"    float wBoil  = mod(anim_time * 0.075, 512.0);\n"
+	"    float hNorm  = clamp((worldPos.z - 88.0) / 56.0, 0.0, 1.0);\n"
+	"    vec2 shear   = (wDir * 0.85 + wPerp * 0.32) * (hNorm * 0.55);\n"
+	"    vec2 warp    = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.42;\n"
+	"    vec2 pMacro  = worldPos.xy * 0.0022 + warp * 0.45 + shear * 0.25 - prevDir * tMacro;\n"
+	"    vec2 pMeso   = worldPos.xy * 0.0068 + warp * 0.85 + shear * 0.55 - prevDir * tMeso;\n"
+	"    vec2 pBill   = worldPos.xy * 0.0195 + warp * 1.35 + shear * 0.95 - prevDir * tBill;\n"
+	"    float nMacro = chaff_grad_noise4d(vec4(pMacro, hNorm * 0.8, wBoil * 0.45), 0x434C4430u);\n"
+	"    float nMeso  = chaff_grad_noise4d(vec4(pMeso,  hNorm * 1.6, wBoil * 0.90), 0x434C4431u);\n"
+	"    float nBill  = chaff_grad_noise4d(vec4(pBill,  hNorm * 3.0, wBoil * 1.55), 0x434C4432u);\n"
+	"    float ridgeBill = 1.0 - abs(2.0 * nBill - 1.0);\n"
+	"    float baseField = nMacro * 0.54 + nMeso * 0.30 + ridgeBill * 0.16;\n"
+	"    float thresh = clamp(0.56 - 0.18 * humidity, 0.34, 0.66);\n"
+	"    float rawDens = smoothstep(thresh, thresh + 0.26, baseField);\n"
+	"    float vProfile = smoothstep(0.0, 0.22, hNorm) * smoothstep(1.0, 0.52, hNorm);\n"
+	"    return rawDens * vProfile;\n"
+	"}\n"
+	"void main() {\n"
+	"    /* Close-up diorama aperture parting: clear center focal zone when camera is close so clouds never block gameplay */\n"
+	"    float closeFactor = clamp((1350.0 - uCamDist) / 950.0, 0.0, 1.0);\n"
+	"    float focalDist = length(vRelXY);\n"
+	"    float apertureRadius = mix(0.0, 320.0, closeFactor);\n"
+	"    float apertureMask = mix(1.0, smoothstep(apertureRadius * 0.45, apertureRadius + 240.0, focalDist), closeFactor);\n"
+	"    if (apertureMask <= 0.005) discard;\n"
+	"    vec3 rawBiome = texture(uSubstrateTex, vUV).rgb;\n"
+	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
+	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
+	"    float wVolcanic = smoothstep(0.32, 0.14, maxBio);\n"
+	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
+	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
+	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
+	"    float bioHumidity = clamp(0.58 * wTemperate + 0.85 * wTropical + 0.50 * wPolar + 0.22 * wVolcanic + ((uSeaLevel > -900.0) ? 0.12 : 0.0), 0.18, 0.95);\n"
+	"    vec3 viewDir = normalize(vViewDir);\n"
+	"    vec3 torusN = normalize(vTorusNormal);\n"
+	"    vec3 tangentU = normalize(vTangentU);\n"
+	"    vec3 tangentV = normalize(vTangentV);\n"
+	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
+	"    float viewUp = max(0.22, abs(dot(viewDir, torusN)));\n"
+	"    vec2 rayHoriz = vec2(dot(-viewDir, tangentU), dot(-viewDir, tangentV)) / viewUp;\n"
+	"    /* 5-step volumetric ray-slab integration across cloud layer [88.0 .. 144.0] */\n"
+	"    const float slabZ[5] = float[5](92.0, 102.0, 112.0, 124.0, 138.0);\n"
+	"    const float slabW[5] = float[5](0.16, 0.24, 0.28, 0.20, 0.12);\n"
+	"    float trans = 1.0;\n"
+	"    vec3 accumLight = vec3(0.0);\n"
+	"    float cosTheta = dot(-viewDir, sunDir);\n"
+	"    float hgPhase = 0.65 + 0.55 * pow(clamp(0.5 + 0.5 * cosTheta, 0.0, 1.0), 3.0);\n"
+	"    for (int s = 0; s < 5; s++) {\n"
+	"        float z = slabZ[s];\n"
+	"        vec2 sampleXY = vWorldPos + rayHoriz * (z - 108.0);\n"
+	"        float dens = eval_planetary_cloud_density(vec3(sampleXY, z), uAnimTime, bioHumidity);\n"
+	"        if (dens > 0.002) {\n"
+	"            float sunProbe = eval_planetary_cloud_density(vec3(sampleXY + vec2(-9.5, -9.5), z + 10.0), uAnimTime, bioHumidity);\n"
+	"            float tauSun = sunProbe * 2.4 + (1.0 - (z - 88.0) / 56.0) * 0.45;\n"
+	"            /* Beer-Powder silver-lining optical scattering */\n"
+	"            float beer = exp(-tauSun);\n"
+	"            float powder = 1.0 - exp(-tauSun * 2.2);\n"
+	"            float lightEnergy = mix(beer, beer * (0.45 + 0.95 * powder), 0.65) * hgPhase;\n"
+	"            float hFrac = (z - 88.0) / 56.0;\n"
+	"            vec3 baseShadow = mix(vec3(0.58, 0.65, 0.76), vec3(0.76, 0.82, 0.90), hFrac);\n"
+	"            vec3 sunLit = vec3(1.02, 0.99, 0.95);\n"
+	"            vec3 stepCol = mix(baseShadow, sunLit, clamp(lightEnergy, 0.0, 1.0));\n"
+	"            float stepTau = dens * slabW[s] * 3.1;\n"
+	"            float stepAlpha = 1.0 - exp(-stepTau);\n"
+	"            accumLight += trans * stepCol * stepAlpha;\n"
+	"            trans *= (1.0 - stepAlpha);\n"
+	"        }\n"
+	"    }\n"
+	"    float cloudAlpha = clamp((1.0 - trans) * apertureMask, 0.0, 0.86);\n"
+	"    if (cloudAlpha <= 0.005) discard;\n"
+	"    vec3 cloudRgb = accumLight / max(1e-4, 1.0 - trans);\n"
+	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
+	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
+	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
+	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
+	"    FragColor = vec4(mix(cloudRgb, sky, fogFactor * uAtmoIntensity), cloudAlpha);\n"
+	"}\n";
+
 const char *nd_seven_gl_vs_terrain(void) { return s_vs_terrain; }
 const char *nd_seven_gl_fs_terrain(void) { return s_fs_terrain; }
 const char *nd_seven_gl_vs_water(void) { return s_vs_water; }
 const char *nd_seven_gl_fs_water(void) { return s_fs_water; }
 const char *nd_seven_gl_vs_billboard(void) { return s_vs_billboard; }
 const char *nd_seven_gl_fs_billboard(void) { return s_fs_billboard; }
+const char *nd_seven_gl_vs_cloud(void) { return s_vs_cloud; }
+const char *nd_seven_gl_fs_cloud(void) { return s_fs_cloud; }
 
 /* --- Pure-C Torus Geometry & Camera Math --- */
 
@@ -2115,6 +2564,28 @@ typedef struct {
 } gl_billboard_pipe_t;
 
 typedef struct {
+	GLuint prog;
+	GLint uMVP;
+	GLint uSubstrateTex;
+	GLint uChunkOrigin;
+	GLint uChunkRelOrigin;
+	GLint uChunkSpan;
+	GLint uRefTrig;
+	GLint uSeaLevel;
+	GLint uCameraPos;
+	GLint uPlanetCenter;
+	GLint uTorusRadii;
+	GLint uWorldDim;
+	GLint uFogStart;
+	GLint uFogEnd;
+	GLint uAnimTime;
+	GLint uSkyColor;
+	GLint uAtmoIntensity;
+	GLint uCamDist;
+	GLint aGridUV;
+} gl_cloud_pipe_t;
+
+typedef struct {
 	uint16_t world;
 	uint8_t level;
 	uint8_t active;
@@ -2141,6 +2612,7 @@ static struct {
 	gl_terrain_pipe_t terrain_pipe;
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
+	gl_cloud_pipe_t cloud_pipe;
 
 	GLuint grid_vbo_macro;
 	GLuint grid_ibo_macro;
@@ -2162,6 +2634,8 @@ static struct {
 
 	gl_water_chunk_t water_queue[MAX_WATER_QUEUE];
 	uint32_t water_count;
+	gl_water_chunk_t cloud_queue[MAX_WATER_QUEUE];
+	uint32_t cloud_count;
 
 	float cur_mvp[16];
 	float cur_eye[3];
@@ -2361,6 +2835,30 @@ static void init_pipelines(void)
 		s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
 	}
 
+	/* Cloud pipeline */
+	s_gl.cloud_pipe.prog = create_program(s_vs_cloud, s_fs_cloud);
+	if (s_gl.cloud_pipe.prog) {
+		GLuint p = s_gl.cloud_pipe.prog;
+		s_gl.cloud_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+		s_gl.cloud_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+		s_gl.cloud_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
+		s_gl.cloud_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+		s_gl.cloud_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
+		s_gl.cloud_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
+		s_gl.cloud_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+		s_gl.cloud_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
+		s_gl.cloud_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
+		s_gl.cloud_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+		s_gl.cloud_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
+		s_gl.cloud_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
+		s_gl.cloud_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
+		s_gl.cloud_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
+		s_gl.cloud_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
+		s_gl.cloud_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+		s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
+		s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+	}
+
 	init_grid_buffers();
 	s_gl.initialized = true;
 }
@@ -2401,6 +2899,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 {
 	s_gl.frame_count++;
 	s_gl.water_count = 0;
+	s_gl.cloud_count = 0;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
 	s_gl.cur_pitch_deg = pitch_deg;
@@ -2659,6 +3158,19 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		s_gl.water_queue[s_gl.water_count].substrate_tex = slot->substrate_tex;
 		s_gl.water_count++;
 	}
+
+	/* Queue volumetric cloud shell pass for this chunk */
+	if (s_gl.cloud_count < MAX_WATER_QUEUE) {
+		s_gl.cloud_queue[s_gl.cloud_count].ox = ox;
+		s_gl.cloud_queue[s_gl.cloud_count].oy = oy;
+		s_gl.cloud_queue[s_gl.cloud_count].span_w = span_w;
+		s_gl.cloud_queue[s_gl.cloud_count].span_h = span_h;
+		s_gl.cloud_queue[s_gl.cloud_count].level = level;
+		s_gl.cloud_queue[s_gl.cloud_count].sea_level = terrain_sea_lvl;
+		s_gl.cloud_queue[s_gl.cloud_count].height_tex = slot->height_tex;
+		s_gl.cloud_queue[s_gl.cloud_count].substrate_tex = slot->substrate_tex;
+		s_gl.cloud_count++;
+	}
 }
 
 void nd_seven_gl_flush_water(void)
@@ -2731,6 +3243,71 @@ void nd_seven_gl_flush_water(void)
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
 	s_gl.water_count = 0;
+}
+
+void nd_seven_gl_flush_clouds(void)
+{
+	if (!s_gl.initialized || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0) {
+		s_gl.cloud_count = 0;
+		return;
+	}
+
+	glUseProgram(s_gl.cloud_pipe.prog);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_FALSE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+
+	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
+	glUniformMatrix4fv(s_gl.cloud_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
+	glUniform4f(s_gl.cloud_pipe.uRefTrig,
+	            s_gl.cur_ref_trig[0], s_gl.cur_ref_trig[1],
+	            s_gl.cur_ref_trig[2], s_gl.cur_ref_trig[3]);
+	glUniform3fv(s_gl.cloud_pipe.uCameraPos, 1, s_gl.cur_eye);
+	glUniform3fv(s_gl.cloud_pipe.uPlanetCenter, 1, zero_center);
+	glUniform2f(s_gl.cloud_pipe.uTorusRadii, s_gl.cur_pdef.major_r, s_gl.cur_pdef.minor_r);
+	glUniform2f(s_gl.cloud_pipe.uWorldDim, ND_SEVEN_WORLD_DIM_W, ND_SEVEN_WORLD_DIM_H);
+
+	glUniform1f(s_gl.cloud_pipe.uFogStart, s_gl.cur_dist * 1.5f);
+	glUniform1f(s_gl.cloud_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
+	glUniform1f(s_gl.cloud_pipe.uAnimTime, s_gl.cur_anim_time);
+	glUniform1f(s_gl.cloud_pipe.uCamDist, s_gl.cur_dist);
+
+	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+	glUniform3f(s_gl.cloud_pipe.uSkyColor,
+	            0.55f * (1.0f - space_t) + 0.012f * space_t,
+	            0.70f * (1.0f - space_t) + 0.016f * space_t,
+	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	glUniform1f(s_gl.cloud_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_macro);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
+
+	for (uint32_t i = 0; i < s_gl.cloud_count; i++) {
+		const gl_water_chunk_t *chk = &s_gl.cloud_queue[i];
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, chk->substrate_tex);
+		glUniform1i(s_gl.cloud_pipe.uSubstrateTex, 0);
+
+		glUniform2f(s_gl.cloud_pipe.uChunkOrigin, (float)chk->ox, (float)chk->oy);
+		glUniform2f(s_gl.cloud_pipe.uChunkRelOrigin,
+		            (float)((double)chk->ox - (double)s_gl.cur_tx),
+		            (float)((double)chk->oy - (double)s_gl.cur_ty));
+		glUniform2f(s_gl.cloud_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
+		glUniform1f(s_gl.cloud_pipe.uSeaLevel, chk->sea_level);
+
+		glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES_MACRO, GL_UNSIGNED_SHORT, 0);
+	}
+
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+	s_gl.cloud_count = 0;
 }
 
 void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
@@ -3215,6 +3792,159 @@ float nd_seven_gl_eval_billboard_lighting(float qx, float qy,
 	float light_scalar = (amb_luma * 0.52f + 1.01f * (0.58f * sun_diff)) * (cavity_ao * contact_ao);
 	return 0.22f + 0.78f * light_scalar;
 }
+
+static inline uint32_t gl_chaff_hash4(int32_t px, int32_t py, int32_t pz, int32_t pw, uint32_t seed)
+{
+	uint32_t v1 = ((uint32_t)py & 0xFFFFu) | (((uint32_t)px & 0xFFFFu) << 16u);
+	uint32_t v2 = ((uint32_t)pz & 0xFFFFu) | (((uint32_t)pw & 0xFFFFu) << 16u);
+	uint32_t h = seed + 0x165667B1u + 8u;
+	h += v1 * 0xC2B2AE3Du;
+	h = gl_chaff_rotl32(h, 17) * 0x27D4EB2Fu;
+	h += v2 * 0xC2B2AE3Du;
+	h = gl_chaff_rotl32(h, 17) * 0x27D4EB2Fu;
+	h ^= h >> 15u;
+	h *= 0x85EBCA77u;
+	h ^= h >> 13u;
+	h *= 0xC2B2AE3Du;
+	h ^= h >> 16u;
+	return h;
+}
+
+static inline void gl_chaff_grad_noise4d(float px, float py, float pz, float pw, uint32_t seed,
+                                         float *out_val,
+                                         float *out_gx, float *out_gy,
+                                         float *out_gz, float *out_gw)
+{
+	float ipx = floorf(px), ipy = floorf(py), ipz = floorf(pz), ipw = floorf(pw);
+	float fpx = px - ipx,   fpy = py - ipy,   fpz = pz - ipz,   fpw = pw - ipw;
+	float ux = fpx * fpx * fpx * (fpx * (fpx * 6.0f - 15.0f) + 10.0f);
+	float uy = fpy * fpy * fpy * (fpy * (fpy * 6.0f - 15.0f) + 10.0f);
+	float uz = fpz * fpz * fpz * (fpz * (fpz * 6.0f - 15.0f) + 10.0f);
+	float uw = fpw * fpw * fpw * (fpw * (fpw * 6.0f - 15.0f) + 10.0f);
+	float dux = 30.0f * fpx * fpx * (fpx * (fpx - 2.0f) + 1.0f);
+	float duy = 30.0f * fpy * fpy * (fpy * (fpy - 2.0f) + 1.0f);
+	float duz = 30.0f * fpz * fpz * (fpz * (fpz - 2.0f) + 1.0f);
+	float duw = 30.0f * fpw * fpw * (fpw * (fpw - 2.0f) + 1.0f);
+
+	int32_t cx = (int32_t)ipx;
+	int32_t cy = (int32_t)ipy;
+	int32_t cz = (int32_t)ipz;
+	int32_t cw = (int32_t)ipw;
+
+	float d[8], ddw[8];
+	for (int i = 0; i < 8; i++) {
+		int32_t ox = i & 1;
+		int32_t oy = (i >> 1) & 1;
+		int32_t oz = (i >> 2) & 1;
+		float v0 = (float)(gl_chaff_hash4(cx + ox, cy + oy, cz + oz, cw,     seed) >> 24u) * (1.0f / 255.0f);
+		float v1 = (float)(gl_chaff_hash4(cx + ox, cy + oy, cz + oz, cw + 1, seed) >> 24u) * (1.0f / 255.0f);
+		d[i]   = v0 + (v1 - v0) * uw;
+		ddw[i] = v1 - v0;
+	}
+
+	float c0 = d[0] + (d[4] - d[0]) * uz;
+	float c1 = d[1] + (d[5] - d[1]) * uz;
+	float c2 = d[2] + (d[6] - d[2]) * uz;
+	float c3 = d[3] + (d[7] - d[3]) * uz;
+
+	float b0 = c0 + (c2 - c0) * uy;
+	float b1 = c1 + (c3 - c1) * uy;
+	if (out_val) *out_val = b0 + (b1 - b0) * ux;
+
+	if (out_gx) *out_gx = (b1 - b0) * dux;
+	if (out_gy) {
+		float dy0 = c2 - c0;
+		float dy1 = c3 - c1;
+		*out_gy = (dy0 + (dy1 - dy0) * ux) * duy;
+	}
+	if (out_gz) {
+		float dz00 = d[4] - d[0], dz10 = d[5] - d[1];
+		float dz01 = d[6] - d[2], dz11 = d[7] - d[3];
+		float dz0  = dz00 + (dz10 - dz00) * ux;
+		float dz1  = dz01 + (dz11 - dz01) * ux;
+		*out_gz = (dz0 + (dz1 - dz0) * uy) * duz;
+	}
+	if (out_gw) {
+		float dw0 = ddw[0] + (ddw[4] - ddw[0]) * uz;
+		float dw1 = ddw[1] + (ddw[5] - ddw[1]) * uz;
+		float dw2 = ddw[2] + (ddw[6] - ddw[2]) * uz;
+		float dw3 = ddw[3] + (ddw[7] - ddw[3]) * uz;
+		float dwb0 = dw0 + (dw2 - dw0) * uy;
+		float dwb1 = dw1 + (dw3 - dw1) * uy;
+		*out_gw = (dwb0 + (dwb1 - dwb0) * ux) * duw;
+	}
+}
+
+float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
+                                     float anim_time,
+                                     float climate_humidity,
+                                     float *out_grad_x, float *out_grad_y,
+                                     float *out_grad_z, float *out_grad_t)
+{
+	float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
+	gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
+	float wPerpX = -wDirY, wPerpY = wDirX;
+
+	const float prevDirX = 0.741f, prevDirY = -0.671f;
+	float raw_tMacro = anim_time * 0.055f;
+	float tMacro = raw_tMacro - 1024.0f * floorf(raw_tMacro / 1024.0f);
+	float raw_tMeso = anim_time * 0.110f;
+	float tMeso = raw_tMeso - 1024.0f * floorf(raw_tMeso / 1024.0f);
+	float raw_tBill = anim_time * 0.185f;
+	float tBill = raw_tBill - 1024.0f * floorf(raw_tBill / 1024.0f);
+	float raw_wBoil = anim_time * 0.075f;
+	float wBoil = raw_wBoil - 512.0f * floorf(raw_wBoil / 512.0f);
+
+	float hNorm = (wz - 88.0f) / 56.0f;
+	if (hNorm < 0.0f) hNorm = 0.0f;
+	if (hNorm > 1.0f) hNorm = 1.0f;
+
+	float shearX = (wDirX * 0.85f + wPerpX * 0.32f) * (hNorm * 0.55f);
+	float shearY = (wDirY * 0.85f + wPerpY * 0.32f) * (hNorm * 0.55f);
+	float warpX  = (wDirX * (gust - 0.65f) + wPerpX * (catspaw - 0.5f)) * 0.42f;
+	float warpY  = (wDirY * (gust - 0.65f) + wPerpY * (catspaw - 0.5f)) * 0.42f;
+
+	float pMacroX = wx * 0.0022f + warpX * 0.45f + shearX * 0.25f - prevDirX * tMacro;
+	float pMacroY = wy * 0.0022f + warpY * 0.45f + shearY * 0.25f - prevDirY * tMacro;
+	float pMesoX  = wx * 0.0068f + warpX * 0.85f + shearX * 0.55f - prevDirX * tMeso;
+	float pMesoY  = wy * 0.0068f + warpY * 0.85f + shearY * 0.55f - prevDirY * tMeso;
+	float pBillX  = wx * 0.0195f + warpX * 1.35f + shearX * 0.95f - prevDirX * tBill;
+	float pBillY  = wy * 0.0195f + warpY * 1.35f + shearY * 0.95f - prevDirY * tBill;
+
+	float nMacro = 0.0f, g0x = 0.0f, g0y = 0.0f, g0z = 0.0f, g0w = 0.0f;
+	float nMeso  = 0.0f, g1x = 0.0f, g1y = 0.0f, g1z = 0.0f, g1w = 0.0f;
+	float nBill  = 0.0f, g2x = 0.0f, g2y = 0.0f, g2z = 0.0f, g2w = 0.0f;
+
+	gl_chaff_grad_noise4d(pMacroX, pMacroY, hNorm * 0.8f, wBoil * 0.45f, 0x434C4430u, &nMacro, &g0x, &g0y, &g0z, &g0w);
+	gl_chaff_grad_noise4d(pMesoX,  pMesoY,  hNorm * 1.6f, wBoil * 0.90f, 0x434C4431u, &nMeso,  &g1x, &g1y, &g1z, &g1w);
+	gl_chaff_grad_noise4d(pBillX,  pBillY,  hNorm * 3.0f, wBoil * 1.55f, 0x434C4432u, &nBill,  &g2x, &g2y, &g2z, &g2w);
+
+	float ridgeBill = 1.0f - fabsf(2.0f * nBill - 1.0f);
+	float dRidge = (nBill < 0.5f) ? 2.0f : -2.0f;
+
+	float baseField = nMacro * 0.54f + nMeso * 0.30f + ridgeBill * 0.16f;
+	float thresh = 0.56f - 0.18f * climate_humidity;
+	if (thresh < 0.34f) thresh = 0.34f;
+	if (thresh > 0.66f) thresh = 0.66f;
+
+	float rawDens = gl_smoothstep(thresh, thresh + 0.26f, baseField);
+	float vProfile = gl_smoothstep(0.0f, 0.22f, hNorm) * gl_smoothstep(1.0f, 0.52f, hNorm);
+
+	float df_dx = g0x * (0.54f * 0.0022f) + g1x * (0.30f * 0.0068f) + g2x * (dRidge * 0.16f * 0.0195f);
+	float df_dy = g0y * (0.54f * 0.0022f) + g1y * (0.30f * 0.0068f) + g2y * (dRidge * 0.16f * 0.0195f);
+	float df_dz = (g0z * (0.54f * 0.8f) + g1z * (0.30f * 1.6f) + g2z * (dRidge * 0.16f * 3.0f)) * (1.0f / 56.0f);
+	float df_dt = g0w * (0.54f * 0.45f * 0.075f) - (g0x * prevDirX + g0y * prevDirY) * (0.54f * 0.055f)
+	            + g1w * (0.30f * 0.90f * 0.075f) - (g1x * prevDirX + g1y * prevDirY) * (0.30f * 0.110f)
+	            + g2w * (dRidge * 0.16f * 1.55f * 0.075f) - (g2x * prevDirX + g2y * prevDirY) * (dRidge * 0.16f * 0.185f);
+
+	if (out_grad_x) *out_grad_x = df_dx * vProfile;
+	if (out_grad_y) *out_grad_y = df_dy * vProfile;
+	if (out_grad_z) *out_grad_z = df_dz * vProfile;
+	if (out_grad_t) *out_grad_t = df_dt * vProfile;
+
+	return rawDens * vProfile;
+}
+
 
 
 

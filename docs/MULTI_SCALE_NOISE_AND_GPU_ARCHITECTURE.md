@@ -271,6 +271,9 @@ Switching chunk generation in `chunk_get_or_create()` from 20,480 scalar queries
    * Wire `chaff_glsl` into `FS_WATER_3D` in `lamina-bridge.js` to replace placeholder diagonal sine wave.
    * Implement Beer-Lambert multi-scale optical depth attenuation ($I = I_0 e^{-\mu d}$) and swash/backwash shoreline foam dynamics ($d \le 2$).
 
-6. **Phase 6: Stratosphere Camera & Horizon Curvature (PLANNED)**:
-   * Implement quadratic horizon curvature in Web HAL 3D projection ($Z_{\text{curved}} = H - \frac{r^2}{2 R_{\text{planet}}}$).
-   * Implement Rayleigh atmospheric scattering and ocean sun glint specular reflection.
+6. **Phase 6: Stratosphere Camera & Horizon Curvature (COMPLETE)**:
+   * Implemented curved planetary torus frame (`nd_seven_gl_torus_frame`), double-precision relative chunk origins, Rayleigh limb scattering, and ocean sun glint specular reflection.
+
+7. **Phase 7: 4D Spatiotemporal Analytical Noise & Wind-Coupled Volumetric Clouds (COMPLETE)**:
+   * Extended `libchaff` (`<ttypt/noise.h>`, `<ttypt/chaff.h>`, `<ttypt/chaff_glsl.h>`) with `chaff_sample_4d_t`, `chaff_sample_grad_4d()`, `chaff_fill_slice_4d()` ($16 \to 8 \to 4$ hypercube pre-collapse), and 8-byte `XXH32` `chaff_hash4`.
+   * Integrated geostrophic wind-shear volumetric clouds (`s_vs_cloud`, `s_fs_cloud`, `nd_seven_gl_flush_clouds`), projected ground/water cloud shadows, and water cloud reflections in `mods/nd/ux/nd_seven_gl.c`. See [`docs/VOLUMETRIC_CLOUDS_AND_4D_NOISE.md`](VOLUMETRIC_CLOUDS_AND_4D_NOISE.md).

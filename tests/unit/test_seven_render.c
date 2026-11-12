@@ -2730,19 +2730,20 @@ int main(void)
 		assert(nd_field_bimodal_hypsometry(-12) < -14);
 		assert(nd_field_bimodal_hypsometry(-30) < -60);
 
-		/* 5. Verify all 3 WebGL2 shader programs (terrain, water, billboard) compile and link cleanly
+		/* 5. Verify all 4 WebGL2 shader programs (terrain, water, billboard, cloud) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[3] = {
+			} progs[4] = {
 				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
 				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
-				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() }
+				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() },
+				{ "cloud",     nd_seven_gl_vs_cloud(),     nd_seven_gl_fs_cloud()     }
 			};
-			for (int p = 0; p < 3; p++) {
+			for (int p = 0; p < 4; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
@@ -2848,6 +2849,72 @@ int main(void)
 
 		printf("PASS: 3D billboard volumetric normals (sun=%.3f vs lee=%.3f), ground-contact AO (base=%.2f vs crown=%.2f), and SE tangent shadow quads verified\n",
 		       lit_sun_crown, lit_lee_base, ao_base, ao_crown);
+	}
+
+	/* Phase 8: 4D Wind-Coupled Volumetric Clouds, Projected Ground/Water Shadows & Water Cloud Reflections */
+	{
+		const char *vs_c = nd_seven_gl_vs_cloud();
+		const char *fs_c = nd_seven_gl_fs_cloud();
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		const char *fs_w = nd_seven_gl_fs_water();
+		assert(vs_c && fs_c && fs_t && fs_w);
+
+		/* 1. Verify shader contracts for 4D lattice hashing, geostrophic wind-shear cloud density,
+		 * projected ground/water cloud shadows, water cloud reflections, Beer-Powder silver-lining,
+		 * and close-up diorama aperture parting */
+		assert(strstr(fs_c, "chaff_hash4") != NULL);
+		assert(strstr(fs_c, "chaff_grad_noise4d") != NULL);
+		assert(strstr(fs_c, "eval_recursive_wind") != NULL);
+		assert(strstr(fs_c, "eval_planetary_cloud_density") != NULL);
+		assert(strstr(fs_c, "apertureMask") != NULL);
+		assert(strstr(fs_c, "powder") != NULL);
+		assert(strstr(fs_t, "eval_planetary_cloud_shadow") != NULL);
+		assert(strstr(fs_w, "eval_planetary_cloud_shadow") != NULL);
+		assert(strstr(fs_w, "reflCloudDens") != NULL);
+
+		/* 2. Verify deterministic 4D cloud density & climate humidity response */
+		float sum_arid = 0.0f, sum_humid = 0.0f;
+		int cloud_cells = 0, clear_cells = 0;
+		for (int iy = 0; iy < 16; iy++) {
+			for (int ix = 0; ix < 16; ix++) {
+				float wx = (float)ix * 140.0f - 800.0f;
+				float wy = (float)iy * 140.0f - 800.0f;
+				float d_arid  = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.20f, NULL, NULL, NULL, NULL);
+				float d_humid = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float d_again = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				assert(fabsf(d_humid - d_again) < 1e-6f);
+				assert(d_humid >= d_arid - 1e-6f);
+				sum_arid  += d_arid;
+				sum_humid += d_humid;
+				if (d_humid > 0.15f) cloud_cells++;
+				if (d_arid  < 0.05f) clear_cells++;
+			}
+		}
+		assert(sum_humid > sum_arid * 1.25f);
+		assert(cloud_cells > 15 && clear_cells > 15);
+
+		/* 3. Verify vertical cloud slab profile vanishes outside [88, 144] and peaks in mid-slab */
+		float d_below = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 84.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 148.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		assert(d_below == 0.0f && d_above == 0.0f);
+
+		/* 4. Verify 4D temporal derivative stability at t = 100,000s vs t = 10s */
+		float gt_early = 0.0f, gt_late = 0.0f;
+		for (int k = 0; k < 32; k++) {
+			float wx = (float)k * 95.0f - 600.0f;
+			float wy = (float)k * 73.0f - 400.0f;
+			float gx1 = 0.0f, gy1 = 0.0f, gz1 = 0.0f, gt1 = 0.0f;
+			float gx2 = 0.0f, gy2 = 0.0f, gz2 = 0.0f, gt2 = 0.0f;
+			nd_seven_gl_eval_cloud_density(wx, wy, 110.0f, 10.0f,     0.75f, &gx1, &gy1, &gz1, &gt1);
+			nd_seven_gl_eval_cloud_density(wx, wy, 110.0f, 100000.0f, 0.75f, &gx2, &gy2, &gz2, &gt2);
+			gt_early += fabsf(gt1) + hypotf(gx1, gy1);
+			gt_late  += fabsf(gt2) + hypotf(gx2, gy2);
+		}
+		assert(gt_early > 0.001f);
+		assert(gt_late > gt_early * 0.65f && gt_late < gt_early * 1.45f);
+
+		printf("PASS: 4D wind-coupled volumetric clouds, climate humidity modulation (arid=%.2f vs humid=%.2f), and t=100000s 4D boiling stability verified\n",
+		       sum_arid, sum_humid);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

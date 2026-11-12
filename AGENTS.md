@@ -143,6 +143,7 @@ Operational guides, build steps, and test instructions for sibling ports and aux
 | NeverDark entity persistence lifecycle & Corm DB consistency | `docs/ND-PERSISTENCE-LIFECYCLE.md` |
 | `axil-nd` MCP/BCP protocol architecture & modernization | `docs/AXIL_ND_MCP_BCP_IMPROVEMENT_SPEC.md` |
 | Multi-scale noise, client GPU acceleration & stratosphere architecture | `docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md` |
+| 4D analytical spatiotemporal noise & wind-coupled volumetric clouds | `docs/VOLUMETRIC_CLOUDS_AND_4D_NOISE.md` |
 | Next-generation NeverDark architecture (single-socket WS, BCP, hydration) | `docs/NEXT_GEN_ND_ARCHITECTURE.md` |
 | NeverDark full universe deployment, seeder & E2E harness | `docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md` |
 | NeverDark pluggable viewports (ANSI TTY, 2D Lamina, 3D WebGL) | `docs/ND-VIEWPORTS.md` |

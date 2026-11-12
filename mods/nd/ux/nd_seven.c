@@ -1120,6 +1120,9 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 	if (is_3d && !near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
+	if (is_3d) {
+		nd_seven_gl_flush_clouds();
+	}
 
 	{
 		char act[64];

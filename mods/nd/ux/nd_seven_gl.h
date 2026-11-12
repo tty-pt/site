@@ -145,6 +145,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 void nd_seven_gl_flush_water(void);
 
+void nd_seven_gl_flush_clouds(void);
+
 void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   uint32_t count,
                                   const uint32_t *atlas_rgba);
@@ -156,6 +158,8 @@ const char *nd_seven_gl_vs_water(void);
 const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
+const char *nd_seven_gl_vs_cloud(void);
+const char *nd_seven_gl_fs_cloud(void);
 
 /* Query active GPU mesh quad resolution for a given LOD level and camera distance:
  * Level 0 at mid-near zoom (340 < cam_dist < 5000) returns 48 (48x48 quads = 4,608 triangles);
@@ -184,6 +188,14 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
                                    float cam_dist, float pixel_footprint,
                                    float *out_grad_x, float *out_grad_y,
                                    float *out_crest);
+
+/* Pure-C reference mirror of the deterministic 4D wind-coupled volumetric cloud
+ * density and analytical 4D spatiotemporal partial derivatives in s_fs_cloud / s_fs_terrain / s_fs_water. */
+float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
+                                     float anim_time,
+                                     float climate_humidity,
+                                     float *out_grad_x, float *out_grad_y,
+                                     float *out_grad_z, float *out_grad_t);
 
 #ifdef __cplusplus
 }
