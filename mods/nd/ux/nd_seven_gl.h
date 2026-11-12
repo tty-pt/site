@@ -10,6 +10,13 @@
 extern "C" {
 #endif
 
+/* Billboard shading / material style hints */
+#define ND_BB_STYLE_STANDARD  0u  /* General sprite / entity / lamb */
+#define ND_BB_STYLE_LEAF_TINT 1u  /* Flora with leaf-selective plant_tint in tint_rgba.rgb */
+#define ND_BB_STYLE_FLORA     2u  /* Flora with full-sprite tint */
+#define ND_BB_STYLE_MINERAL   3u  /* Rock / stone / boulder mineral scenery */
+#define ND_BB_STYLE_GLOW      4u  /* Subtle emissive universe-owner lamb glow */
+
 typedef struct {
 	float x, y, z;
 	float width, height;
@@ -17,15 +24,21 @@ typedef struct {
 	float water_z_off;  /* offset from bottom of quad to physical ground/water contact line */
 	float u0, v0, u1, v1;
 	uint32_t tint_rgba;
+	uint8_t style;      /* ND_BB_STYLE_* material/shading hint (0 = standard) */
+	uint8_t shadow_rx;  /* 3D ground contact shadow X radius in world units (0 = auto from width) */
+	uint8_t shadow_ry;  /* 3D ground contact shadow Y radius in world units (0 = auto from width) */
+	uint8_t pad0;
 } lam_billboard_gpu_t;
 
-/* 12 floats (48 bytes) per billboard vertex:
- * world_pos[3], uv[2], tint[4], local_pos[3] */
+/* 20 floats (80 bytes) per billboard vertex:
+ * world_pos[3], uv[2], tint[4], local_pos[3], quad_uv[4], sprite_bounds[4] */
 typedef struct {
 	float world_pos[3];
 	float uv[2];
 	float tint[4];
 	float local_pos[3];
+	float quad_uv[4];       /* x: [-1..1], y: [0..1] (or [-1..1] for shadow), z: ground_z, w: style (-1 = shadow) */
+	float sprite_bounds[4]; /* u_min, v_min, u_max, v_max in atlas UV space */
 } nd_seven_gl_bb_vert_t;
 
 /* Pure-C Torus Orthonormal Frame & Position Evaluation:
@@ -75,6 +88,23 @@ void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
                                      const nd_planet_def_t *pdef,
                                      nd_seven_gl_bb_vert_t out_verts[6]);
 
+/* 3D Ground-Contact Shadow Quad Construction:
+ * Evaluates a 6-vertex tangent-plane shadow quad beneath the billboard, shifted
+ * slightly Southeast away from the Northwest directional sun. */
+void nd_seven_gl_eval_billboard_shadow_quad(const lam_billboard_gpu_t *b,
+                                            const nd_planet_def_t *pdef,
+                                            nd_seven_gl_bb_vert_t out_verts[6]);
+
+/* Pure-C reference mirror of the 3D volumetric billboard normal, directional sun
+ * illumination, micro-relief, and ground-contact ambient occlusion in s_fs_billboard:
+ * Evaluates the effective 3D lighting multiplier and writes the perturbed unit normal
+ * (out_normal) and ground-contact ambient occlusion factor (out_contact_ao). */
+float nd_seven_gl_eval_billboard_lighting(float qx, float qy,
+                                          float wx, float wz, float ground_z,
+                                          float cam_dist,
+                                          float out_normal[3],
+                                          float *out_contact_ao);
+
 /* Smooth 4-Tap Hermite Height Reconstruction (CPU mirror of sampleHeightSmooth):
  * Returns unpacked elevation wz = raw_h * 0.0625f and writes analytical gradients. */
 float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
@@ -94,6 +124,11 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
                                     float *out_wz, float *out_water_depth);
 
 /* 3D WebGL2 Frame & Pass Dispatchers */
+void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity);
+float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
+                                  float lamb_wx, float lamb_wy, float lamb_wz,
+                                  float intensity);
+
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
                              float tx, float ty, float tz,
                              float dist, float pitch_deg, float fov_deg,

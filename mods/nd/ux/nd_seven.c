@@ -60,6 +60,11 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	 * where sub-texel shoreline relief or capillary wet sand can reach sea level sets flag bit 0. */
 	int32_t shore_ceil_q12_4 = ((int32_t)fs.water_level + 4) << 4;
 	out->flags = (water_depth > 0 || (int32_t)fs.elevation_q12_4 <= shore_ceil_q12_4) ? 1 : 0;
+	if (out->flags) {
+		uint16_t wl_u16 = (uint16_t)fs.water_level;
+		out->attr[4] = (uint8_t)(wl_u16 & 0xFFu);
+		out->attr[5] = (uint8_t)(wl_u16 >> 8);
+	}
 
 	uint32_t c1 = ndw_biome_base_rgb(fs.bio);
 	uint32_t c2 = ndw_biome_base_rgb(fs.bio2);
@@ -216,13 +221,13 @@ int16_t nd_seven_lamb_elevation(const nd_client_state_t *st, int32_t wx, int32_t
 	int16_t ground_elev = nd_seven_ground_elevation(wx, wy);
 	if (st && st->map_data.width > 0) {
 		uint16_t world = (uint16_t)st->map_data.pos[3];
-		int16_t w_level = nd_field_water_level(world);
-		if (w_level > 0 && ground_elev < w_level) {
+		int16_t w_level = nd_field_sample(world, 3, wx, wy).water_level;
+		if (ground_elev < w_level) {
 			int ti = ndw_fdiv(wx, NDW_TILE_W);
 			int pos_y = -ndw_fdiv(wy, NDW_TILE_H);
 			int16_t cpos[4] = { (int16_t)ti, (int16_t)pos_y, 0, (int16_t)world };
 			const nd_room_chunk_t *chk = nd_seven_chunk_find(cpos);
-			if (chk && chk->has_water) {
+			if ((chk && chk->has_water) || w_level > nd_field_water_level(world)) {
 				/* Buoyancy: swimming elevation in deep water keeps the lamb realistically half-submerged */
 				int16_t swim_floor = (int16_t)(w_level - 8);
 				if (ground_elev < swim_floor)
@@ -238,13 +243,13 @@ float nd_seven_lamb_elevation_f(const nd_client_state_t *st, int32_t wx, int32_t
 	float ground_elev_f = nd_seven_ground_elevation_f(wx, wy);
 	if (st && st->map_data.width > 0) {
 		uint16_t world = (uint16_t)st->map_data.pos[3];
-		int16_t w_level = nd_field_water_level(world);
-		if (w_level > 0 && ground_elev_f < (float)w_level) {
+		int16_t w_level = nd_field_sample(world, 3, wx, wy).water_level;
+		if (ground_elev_f < (float)w_level) {
 			int ti = ndw_fdiv(wx, NDW_TILE_W);
 			int pos_y = -ndw_fdiv(wy, NDW_TILE_H);
 			int16_t cpos[4] = { (int16_t)ti, (int16_t)pos_y, 0, (int16_t)world };
 			const nd_room_chunk_t *chk = nd_seven_chunk_find(cpos);
-			if (chk && chk->has_water) {
+			if ((chk && chk->has_water) || w_level > nd_field_water_level(world)) {
 				float swim_floor = (float)(w_level - 8);
 				if (ground_elev_f < swim_floor)
 					return swim_floor;
@@ -399,6 +404,19 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
+		if ((node->flags & 1) != 0 && node->samples && node->min_val > ((int32_t)(w_lvl_i + 8) << 4)) {
+			uint32_t vcnt = node->vert_count;
+			for (uint32_t vi = 0; vi < vcnt; vi++) {
+				if (node->samples[vi].flags & 1) {
+					int16_t s_wl = (int16_t)((uint16_t)node->samples[vi].attr[4] |
+					                         ((uint16_t)node->samples[vi].attr[5] << 8));
+					if (s_wl > w_lvl_i) {
+						w_lvl_i = s_wl;
+						break;
+					}
+				}
+			}
+		}
 		float sea_lvl = has_water ? (float)w_lvl_i : ND_SEVEN_SEA_LEVEL_NONE;
 		uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
@@ -446,6 +464,67 @@ static lam_billboard_gpu_t s_mid_stream_batch[MID_STREAM_CHUNK];
 static uint32_t s_mid_batch_len = 0;
 static uint32_t s_last_mid_gpu_count = 0;
 
+static void seven_apply_obj_billboard_style(const ndw_obj_t *o,
+                                            const nd_seven_sprite_rect_t *sr,
+                                            uint32_t base_tint,
+                                            lam_billboard_gpu_t *bb)
+{
+	uint32_t alpha_byte = base_tint & 0xFFu;
+	bb->tint_rgba = base_tint;
+	bb->style = ND_BB_STYLE_STANDARD;
+	bb->shadow_rx = 0;
+	bb->shadow_ry = 0;
+	bb->pad0 = 0;
+	if (!o)
+		return;
+
+	switch (o->kind) {
+	case NDW_K_DECID:
+	case NDW_K_TALL:
+		bb->shadow_rx = (uint8_t)(o->big ? 14 : 10);
+		bb->shadow_ry = (uint8_t)(o->big ? 6 : 4);
+		if (!sr || sr->y < ND_SEVEN_ATLAS_H_PX) {
+			tint_t pt;
+			plant_tint(o->fg, &pt);
+			bb->tint_rgba = ((uint32_t)(pt.r & 0xFF) << 24) |
+			                ((uint32_t)(pt.g & 0xFF) << 16) |
+			                ((uint32_t)(pt.b & 0xFF) << 8)  |
+			                alpha_byte;
+			bb->style = ND_BB_STYLE_LEAF_TINT;
+		} else {
+			bb->style = ND_BB_STYLE_FLORA;
+		}
+		break;
+	case NDW_K_FIR:
+		bb->shadow_rx = (uint8_t)(o->big ? 10 : 7);
+		bb->shadow_ry = 4;
+		bb->style = ND_BB_STYLE_FLORA;
+		break;
+	case NDW_K_CACTUS:
+		bb->shadow_rx = (uint8_t)(o->big ? 9 : 6);
+		bb->shadow_ry = 4;
+		bb->style = ND_BB_STYLE_FLORA;
+		break;
+	case NDW_K_STONE:
+		bb->shadow_rx = 4;
+		bb->shadow_ry = 2;
+		bb->style = ND_BB_STYLE_MINERAL;
+		break;
+	case NDW_K_ROCK:
+		bb->shadow_rx = 7;
+		bb->shadow_ry = 3;
+		bb->style = ND_BB_STYLE_MINERAL;
+		break;
+	case NDW_K_BOULDER:
+		bb->shadow_rx = 11;
+		bb->shadow_ry = 5;
+		bb->style = ND_BB_STYLE_MINERAL;
+		break;
+	default:
+		break;
+	}
+}
+
 static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node_t *node,
                                       const int16_t pos[4], int16_t w_level,
                                       uint32_t tint)
@@ -483,7 +562,14 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 
 		int16_t elev_q = node->values[gy_v * node->vert_dim + gx_v];
 		int16_t wz = nd_field_elevation_to_block(elev_q);
-		if (w_level > 0 && wz <= w_level &&
+		int16_t local_wl = w_level;
+		if (node->samples && (node->samples[gy_v * node->vert_dim + gx_v].flags & 1)) {
+			int16_t s_wl = (int16_t)((uint16_t)node->samples[gy_v * node->vert_dim + gx_v].attr[4] |
+			                         ((uint16_t)node->samples[gy_v * node->vert_dim + gx_v].attr[5] << 8));
+			if (s_wl > local_wl)
+				local_wl = s_wl;
+		}
+		if (wz <= local_wl &&
 		    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS)
 			continue; /* Anti-submersion for flora */
 
@@ -512,7 +598,7 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 		}
 		bb.v0 = (float)sr->y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-		bb.tint_rgba = tint;
+		seven_apply_obj_billboard_style(&raw_objs[k], sr, tint, &bb);
 
 		s_mid_stream_batch[s_mid_batch_len++] = bb;
 		if (s_last_mid_gpu_count < MID_MAX_DRAW)
@@ -708,7 +794,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 
 			for (int a = 0; a < n; a++) {
 				int sub_units = 0;
-				if (w_level > 0 && dr[a].wz < w_level) {
+				if (dr[a].wz < w_level) {
 					int ti = ndw_fdiv(dr[a].wx, NDW_TILE_W);
 					int pos_y = -ndw_fdiv(dr[a].wy, NDW_TILE_H);
 					int16_t cpos[4] = { (int16_t)ti, (int16_t)pos_y, 0, (int16_t)world };
@@ -752,6 +838,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 
 		for (int a = 0; a < n && all_gpu_count < ALL_GPU_MAX_DRAW; a++) {
 			int has_sprite = 0;
+			int entity_spr = 0;
+			nd_seven_sprite_rect_t obj_sr = { 0, 0, 0, 0 };
 			float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
 			float bw = 0.0f, bh = 0.0f;
 			float bay = 0.0f, bwz_off = 0.0f;
@@ -784,6 +872,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				} else {
 					sprite = NDS_STONE_TINY;
 				}
+				entity_spr = sprite;
 				const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[sprite];
 				bw = (float)sr->w;
 				bh = (float)sr->h;
@@ -800,13 +889,13 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			} else if (dr[a].what == D_OBJ) {
 				if (dr[a].obj.kind >= NDW_K_DECID && dr[a].obj.kind <= NDW_K_CACTUS) {
 					uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
-					int16_t w_level = nd_field_water_level(world);
-					if (w_level > 0 && dr[a].wz < w_level) {
+					int16_t w_level = nd_field_sample(world, 0, dr[a].wx, dr[a].wy).water_level;
+					if (dr[a].wz <= w_level) {
 						int ti = ndw_fdiv(dr[a].wx, NDW_TILE_W);
 						int pos_y = -ndw_fdiv(dr[a].wy, NDW_TILE_H);
 						int16_t cpos[4] = { (int16_t)ti, (int16_t)pos_y, 0, (int16_t)world };
 						const nd_room_chunk_t *chk = nd_seven_chunk_find(cpos);
-						if (chk && chk->has_water)
+						if ((chk && chk->has_water) || w_level > nd_field_water_level(world))
 							continue; /* Anti-submersion: omit trees/flora in 3D WebGL mode */
 					}
 				}
@@ -825,6 +914,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 					}
 				}
 				if (has_sprite) {
+					obj_sr = sr_val;
 					bw = (float)sr_val.w;
 					bh = (float)sr_val.h;
 					bay = (float)ndw_obj_anchor_y(&dr[a].obj, sr_val.h);
@@ -849,19 +939,35 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				if (tint_b == 0)
 					continue;
 
-				s_all_gpu_batch[all_gpu_count].x = (float)dr[a].wx;
+				lam_billboard_gpu_t *dst_bb = &s_all_gpu_batch[all_gpu_count];
+				dst_bb->x = (float)dr[a].wx;
 				/* Give the lamb a microscopic +0.01f wy bias so it always wins exact row ties */
-				s_all_gpu_batch[all_gpu_count].y = (float)dr[a].wy + (dr[a].what == D_LAMB ? 0.01f : 0.0f);
-				s_all_gpu_batch[all_gpu_count].z = dr[a].z_f;
-				s_all_gpu_batch[all_gpu_count].width = bw;
-				s_all_gpu_batch[all_gpu_count].height = bh;
-				s_all_gpu_batch[all_gpu_count].anchor_y = bay;
-				s_all_gpu_batch[all_gpu_count].water_z_off = bwz_off;
-				s_all_gpu_batch[all_gpu_count].u0 = u0;
-				s_all_gpu_batch[all_gpu_count].v0 = v0;
-				s_all_gpu_batch[all_gpu_count].u1 = u1;
-				s_all_gpu_batch[all_gpu_count].v1 = v1;
-				s_all_gpu_batch[all_gpu_count].tint_rgba = tint_b;
+				dst_bb->y = (float)dr[a].wy + (dr[a].what == D_LAMB ? 0.01f : 0.0f);
+				dst_bb->z = dr[a].z_f;
+				dst_bb->width = bw;
+				dst_bb->height = bh;
+				dst_bb->anchor_y = bay;
+				dst_bb->water_z_off = bwz_off;
+				dst_bb->u0 = u0;
+				dst_bb->v0 = v0;
+				dst_bb->u1 = u1;
+				dst_bb->v1 = v1;
+				if (dr[a].what == D_OBJ) {
+					seven_apply_obj_billboard_style(&dr[a].obj, &obj_sr, tint_b, dst_bb);
+				} else if (dr[a].what == D_LAMB) {
+					dst_bb->tint_rgba = tint_b;
+					dst_bb->style = ND_BB_STYLE_STANDARD;
+					dst_bb->shadow_rx = 8;
+					dst_bb->shadow_ry = 4;
+					dst_bb->pad0 = 0;
+				} else {
+					dst_bb->tint_rgba = tint_b;
+					dst_bb->style = (entity_spr >= NDS_ROCK_TAN_BIG && entity_spr <= NDS_STONE_TINY)
+					                ? ND_BB_STYLE_MINERAL : ND_BB_STYLE_STANDARD;
+					dst_bb->shadow_rx = (uint8_t)(bw * 0.34f > 4.0f ? bw * 0.34f : 4.0f);
+					dst_bb->shadow_ry = (uint8_t)(dst_bb->shadow_rx * 0.45f > 2.0f ? dst_bb->shadow_rx * 0.45f : 2.0f);
+					dst_bb->pad0 = 0;
+				}
 				all_gpu_count++;
 			}
 		}

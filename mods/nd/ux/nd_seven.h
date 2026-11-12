@@ -64,6 +64,7 @@ int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy);
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room);
 int16_t nd_seven_lamb_elevation(const nd_client_state_t *st, int32_t wx, int32_t wy);
+int nd_seven_is_universe_owner(const nd_client_state_t *st);
 
 /* Unified multi-scale terrain chunk system */
 ar_system_t *nd_seven_get_chunk_sys(void);

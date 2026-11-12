@@ -166,12 +166,13 @@ nd_terrain_is_cave(int16_t x, int16_t y, int16_t z, uint16_t world)
 static inline int
 nd_terrain_is_entrance(int16_t x, int16_t y, uint16_t world)
 {
-	int16_t h = nd_terrain_height(x, y, world);
-	int16_t w = nd_terrain_water_level(world);
-	if (h <= w)
+	int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+	int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
+	nd_field_sample_t s = nd_field_sample(world, 0, wx, wy);
+	if (s.elevation <= s.water_level)
 		return 0;
 
-	return nd_terrain_is_cave(x, y, h - 1, world);
+	return nd_terrain_is_cave(x, y, s.elevation - 1, world);
 }
 
 /* --- Climate & Biome Resolution ------------------------------------------ */
@@ -179,20 +180,18 @@ nd_terrain_is_entrance(int16_t x, int16_t y, uint16_t world)
 static inline uint8_t
 nd_terrain_biome(int16_t x, int16_t y, int16_t z, uint16_t world)
 {
-	int16_t h = nd_terrain_height(x, y, world);
-	int16_t w = nd_terrain_water_level(world);
+	int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+	int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
+	nd_field_sample_t s = nd_field_sample(world, 0, wx, wy);
 
-	if (z <= h && h < w)
+	if (z <= s.elevation && s.elevation < s.water_level)
 		return BIOME_WATER;
 
-	if (z < h && nd_terrain_is_cave(x, y, z, world)) {
+	if (z < s.elevation && nd_terrain_is_cave(x, y, z, world)) {
 		if (z < -60) return BIOME_VOLCANIC;
 		return BIOME_SHRUBLAND;
 	}
 
-	int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
-	int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
-	nd_field_sample_t s = nd_field_sample(world, 0, wx, wy);
 	return s.bio;
 }
 

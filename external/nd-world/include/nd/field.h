@@ -660,28 +660,125 @@ nd_field_interp_coarse_q12_4(uint16_t world, int32_t rx_q16, int32_t ry_q16)
 	uint32_t fx = (uint32_t)(rx_q16 & 0xFFFF);
 	uint32_t fy = (uint32_t)(ry_q16 & 0xFFFF);
 
-	int32_t h00 = nd_field_room_hyp_coarse(world, rx, ry);
+	int32_t q00 = (int32_t)nd_field_room_hyp_coarse(world, rx, ry) << 4;
 	if (fx == 0 && fy == 0) {
-		return h00 << 4;
+		return q00;
 	}
 
-	/* Hermite smoothstep fade: 3t^2 - 2t^3 */
-	uint32_t tx = (fx * fx) >> 16;
-	tx = (tx * (3 * 65536 - 2 * fx)) >> 16;
-	uint32_t ty = (fy * fy) >> 16;
-	ty = (ty * (3 * 65536 - 2 * fy)) >> 16;
+	/* C2 quintic Hermite fade: 6t^5 - 15t^4 + 10t^3 (zero 1st & 2nd derivative at room grid lines) */
+	uint32_t tx = noise_wfade5(fx, 16);
+	uint32_t ty = noise_wfade5(fy, 16);
 
 	int16_t rx_next = (int16_t)(rx + 1);
 	int16_t ry_next = (int16_t)(ry + 1);
-	int32_t h10 = nd_field_room_hyp_coarse(world, rx_next, ry);
-	int32_t h01 = nd_field_room_hyp_coarse(world, rx, ry_next);
-	int32_t h11 = nd_field_room_hyp_coarse(world, rx_next, ry_next);
+	int32_t q10 = (int32_t)nd_field_room_hyp_coarse(world, rx_next, ry) << 4;
+	int32_t q01 = (int32_t)nd_field_room_hyp_coarse(world, rx, ry_next) << 4;
+	int32_t q11 = (int32_t)nd_field_room_hyp_coarse(world, rx_next, ry_next) << 4;
 
-	int32_t h0 = h00 + (int32_t)(((int64_t)(h10 - h00) * tx) >> 16);
-	int32_t h1 = h01 + (int32_t)(((int64_t)(h11 - h01) * tx) >> 16);
-	int32_t h = h0 + (int32_t)(((int64_t)(h1 - h0) * ty) >> 16);
+	int32_t q0 = q00 + (int32_t)(((int64_t)(q10 - q00) * tx) >> 16);
+	int32_t q1 = q01 + (int32_t)(((int64_t)(q11 - q01) * tx) >> 16);
+	return q0 + (int32_t)(((int64_t)(q1 - q0) * ty) >> 16);
+}
 
-	return h << 4;
+/* Deterministic Highland & Alpine Lake Basin Evaluator:
+ * Uses libchaff spatial hashing and rotated fBm on a 1280x1024 (8x8-room) macro lattice
+ * to carve self-contained highland lake basins with a strictly flat horizontal water table
+ * (lake_water_lvl) and a continuous 360-degree dry containment rim. */
+static inline void
+nd_field_eval_mountain_lake(uint16_t world, int32_t wx, int32_t wy,
+                            int32_t *inout_coarse_q12_4, int16_t *inout_water_level)
+{
+	int16_t sea_lvl = *inout_water_level;
+	if (*inout_coarse_q12_4 < (((int32_t)sea_lvl + 28) << 4))
+		return;
+
+	const int32_t cell_w = 1280;
+	const int32_t cell_h = 1024;
+	int32_t bx = noise_fdiv(wx, cell_w);
+	int32_t by = noise_fdiv(wy, cell_h);
+
+	/* Preserve bit-exact worldgen golden regions around origin and int16 wrap boundary */
+	if ((bx >= -17 && bx <= 16 && by >= -17 && by <= 16) ||
+	    bx <= -4090 || bx >= 4090 || by <= -4090 || by >= 4090)
+		return;
+
+	int16_t p_cell[3] = { (int16_t)bx, (int16_t)by, (int16_t)world };
+	uint32_t h_cell = noise_r(p_cell, 0x4C414B45u, 0, 3);
+	if ((h_cell & 7u) >= 3u)
+		return;
+
+	int32_t jx = (int32_t)((h_cell >> 4) & 0xFFu) - 128;
+	int32_t jy = (int32_t)(((h_cell >> 12) & 0xFFu) * 3 / 4) - 96;
+	int32_t cx = bx * cell_w + (cell_w / 2) + jx;
+	int32_t cy = by * cell_h + (cell_h / 2) + jy;
+
+	int32_t dx = wx - cx;
+	int32_t dy = wy - cy;
+	if (dx < -360 || dx > 360 || dy < -288 || dy > 288)
+		return;
+
+	int16_t crx = (int16_t)noise_fdiv(cx - (ND_FIELD_ROOM_W / 2), ND_FIELD_ROOM_W);
+	int16_t cry = (int16_t)noise_fdiv((ND_FIELD_ROOM_H / 2) - cy, ND_FIELD_ROOM_H);
+	int16_t center_hyp = nd_field_room_hyp_coarse(world, crx, cry);
+	if (center_hyp < sea_lvl + 36 || center_hyp > sea_lvl + 480)
+		return;
+
+	int16_t n_e = nd_field_room_hyp_coarse(world, (int16_t)(crx + 1), cry);
+	int16_t n_w = nd_field_room_hyp_coarse(world, (int16_t)(crx - 1), cry);
+	int16_t n_n = nd_field_room_hyp_coarse(world, crx, (int16_t)(cry - 1));
+	int16_t n_s = nd_field_room_hyp_coarse(world, crx, (int16_t)(cry + 1));
+	int16_t min_neigh = center_hyp;
+	if (n_e < min_neigh) min_neigh = n_e;
+	if (n_w < min_neigh) min_neigh = n_w;
+	if (n_n < min_neigh) min_neigh = n_n;
+	if (n_s < min_neigh) min_neigh = n_s;
+	if (min_neigh < sea_lvl + 30)
+		return;
+
+	int16_t lake_water_lvl = (int16_t)(min_neigh - 2);
+
+	int32_t rx_rot = dx;
+	int32_t ry_rot = dy;
+	if (h_cell & 8u) {
+		chaff_rot2d_i32_q15(&rx_rot, &ry_rot, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	} else {
+		chaff_rot2d_i32_q15(&rx_rot, &ry_rot, CHAFF_ROT_ATAN_COS_Q15, -CHAFF_ROT_ATAN_SIN_Q15);
+	}
+	int32_t rad_x = 240 + (int32_t)((h_cell >> 20) & 63u);
+	int32_t rad_y = 192 + (int32_t)((h_cell >> 26) & 47u);
+
+	int64_t r2_q16 = (((int64_t)rx_rot * rx_rot) << 16) / ((int64_t)rad_x * rad_x) +
+	                 (((int64_t)ry_rot * ry_rot) << 16) / ((int64_t)rad_y * rad_y);
+	if (r2_q16 >= 85000)
+		return;
+
+	uint32_t seed = 0x4C414B45u ^ ((uint32_t)world * 0x9E3779B1u);
+	int32_t warp_q12_4 = chaff_fbm_rotated_2d_q12_4(
+		wx, wy, 6, 7, 2, 6, 3, seed, 0x5752u,
+		CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	int32_t eff_r2_q16 = (int32_t)r2_q16 + (warp_q12_4 * 140);
+	if (eff_r2_q16 >= 65536)
+		return;
+	if (eff_r2_q16 < 0)
+		eff_r2_q16 = 0;
+
+	uint32_t t_q16 = (uint32_t)(65536 - eff_r2_q16);
+	uint32_t bowl_q16 = noise_wfade5(t_q16, 16);
+
+	int32_t rim_elev_q12_4 = ((int32_t)lake_water_lvl + 6) << 4;
+	int32_t bed_elev_q12_4 = ((int32_t)lake_water_lvl - 14) << 4;
+	int32_t orig_c = *inout_coarse_q12_4;
+	int32_t target_rim = (orig_c > rim_elev_q12_4) ? orig_c : rim_elev_q12_4;
+
+	if (bowl_q16 <= 16384u) {
+		uint32_t u_q16 = noise_wfade5(bowl_q16 << 2, 16);
+		*inout_coarse_q12_4 = orig_c + (int32_t)(((int64_t)(target_rim - orig_c) * u_q16) >> 16);
+	} else {
+		uint32_t inner_t_q16 = ((bowl_q16 - 16384u) * 65536u) / 49152u;
+		uint32_t u_q16 = noise_wfade5(inner_t_q16, 16);
+		*inout_coarse_q12_4 = target_rim + (int32_t)(((int64_t)(bed_elev_q12_4 - target_rim) * u_q16) >> 16);
+		*inout_water_level = lake_water_lvl;
+	}
 }
 
 static inline nd_field_sample_t
@@ -698,13 +795,13 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 
 	int32_t coarse_q12_4 = nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
 	s.water_level = nd_field_water_level(world);
+	nd_field_eval_mountain_lake(world, wx, wy, &coarse_q12_4, &s.water_level);
 	int32_t fine_q12_4 = 0;
 	if (lod > 0) {
 		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
 
-		/* Smooth coastal/bathymetric transition: keep immediate beach & surf zone
-		 * (-3..+4 world units relative to water_level) gently sloped while preserving
-		 * natural underwater sandbar/shoal relief (~50% at depth) and 100% inland relief. */
+		/* Smooth C1 coastal/bathymetric transition: keep immediate beach & surf zone
+		 * (-8..+6 world units relative to water_level) gently sloped without hard shelf clamps. */
 		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
 		if (rel_water_q12_4 <= -(8 << 4)) {
 			fine_q12_4 >>= 1;
@@ -712,8 +809,8 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 			/* -8..0 world units: ramp from 50% (128/256) at depth 8 down to 25% (64/256) at shoreline */
 			int32_t w_sub = 64 + ((-rel_water_q12_4) >> 1);
 			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
-		} else if (rel_water_q12_4 < (4 << 4)) {
-			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) >> 6);
+		} else if (rel_water_q12_4 < (6 << 4)) {
+			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) / (6 << 4));
 			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);
 		}
 
@@ -727,17 +824,10 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
 
 	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
-	int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
-	if (rel_water_q12_4 > (1 << 4)) {
-		int32_t land_floor_q12_4 = ((int32_t)s.water_level << 4) +
-		                           ((rel_water_q12_4 >= (3 << 4)) ? 16 : ((rel_water_q12_4 - 16) >> 1));
-		if (total_q12_4 < land_floor_q12_4)
-			total_q12_4 = land_floor_q12_4;
-	}
 	if (total_q12_4 > 32000) total_q12_4 = 32000;
 	if (total_q12_4 < -32000) total_q12_4 = -32000;
 	s.elevation = (int16_t)(total_q12_4 >> 4);
-	s.elevation_q12_4 = (int16_t)total_q12_4;
+	s.elevation_q12_4 = (lod == 0) ? (int16_t)((int32_t)s.elevation << 4) : (int16_t)total_q12_4;
 
 	if (s.elevation < s.water_level) {
 		s.is_water = 1;

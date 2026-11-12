@@ -2788,6 +2788,68 @@ int main(void)
 		       w_grad[0], w_grad[1], w_grad[2], w_grad[3]);
 	}
 
+	/* Phase 7: 3D Billboard Environment Integration (Volumetric Normals, Ground-Contact AO, 3D Drop Shadows & Sub-Texel Filtering) */
+	{
+		const char *vs_b = nd_seven_gl_vs_billboard();
+		const char *fs_b = nd_seven_gl_fs_billboard();
+		assert(vs_b && fs_b);
+		assert(strstr(vs_b, "a_quad_uv") != NULL);
+		assert(strstr(vs_b, "a_sprite_bounds") != NULL);
+		assert(strstr(fs_b, "sampleAtlasSmooth") != NULL);
+		assert(strstr(fs_b, "fetchBoundedTexel") != NULL);
+		assert(strstr(fs_b, "chaff_grad_noise2d") != NULL);
+		assert(strstr(fs_b, "contactAO") != NULL);
+		assert(strstr(fs_b, "fogFactor") != NULL);
+
+		/* 1. Verify 3D volumetric directional lighting (sunward NW upper-left > leeward SE lower-right)
+		 * and ground-contact root ambient occlusion (base < crown) */
+		float n_sun[3] = { 0 }, n_lee[3] = { 0 };
+		float ao_base = 0.0f, ao_crown = 0.0f;
+		float lit_sun_crown = nd_seven_gl_eval_billboard_lighting(-0.65f, 0.80f, 320.0f, 22.0f, 10.0f, 280.0f, n_sun, &ao_crown);
+		float lit_lee_base  = nd_seven_gl_eval_billboard_lighting( 0.65f, 0.15f, 320.0f, 10.2f, 10.0f, 280.0f, n_lee, &ao_base);
+		assert(n_sun[0] < 0.0f && n_sun[2] > 0.4f);
+		assert(n_lee[0] > 0.0f);
+		assert(ao_base < 0.72f);
+		assert(ao_crown > 0.98f);
+		assert(lit_sun_crown > lit_lee_base * 1.35f);
+
+		/* 2. Verify 3D ground-contact shadow quad geometry on the curved torus tangent plane */
+		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
+		lam_billboard_gpu_t tree_bb = {
+			.x = 480.0f, .y = 384.0f, .z = 12.0f,
+			.width = 61.0f, .height = 74.0f,
+			.anchor_y = 6.0f, .water_z_off = 0.0f,
+			.u0 = 0.1f, .v0 = 0.1f, .u1 = 0.2f, .v1 = 0.3f,
+			.tint_rgba = 0x73C35FFF,
+			.style = ND_BB_STYLE_LEAF_TINT,
+			.shadow_rx = 14, .shadow_ry = 6
+		};
+		nd_seven_gl_bb_vert_t bverts[6], sverts[6];
+		nd_seven_gl_eval_billboard_quad(&tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, bverts);
+		nd_seven_gl_eval_billboard_shadow_quad(&tree_bb, pdef, sverts);
+
+		/* Upright quad carries style and clamped sprite UV bounds */
+		assert(fabsf(bverts[0].quad_uv[3] - (float)ND_BB_STYLE_LEAF_TINT) < 1e-5f);
+		assert(fabsf(bverts[0].quad_uv[2] - 12.0f) < 1e-5f);
+		assert(fabsf(bverts[0].sprite_bounds[0] - 0.1f) < 1e-5f);
+		assert(fabsf(bverts[0].sprite_bounds[2] - 0.2f) < 1e-5f);
+		/* Horizontal local_pos[0] spans [x - width/2, x + width/2] across the quad */
+		assert(fabsf((bverts[1].local_pos[0] - bverts[0].local_pos[0]) - 61.0f) < 1e-4f);
+
+		/* Shadow quad carries quad_uv[3] == -1.0f and shifts slightly Southeast (+x, +y) away from NW sun */
+		for (int i = 0; i < 6; i++) {
+			assert(fabsf(sverts[i].quad_uv[3] - (-1.0f)) < 1e-5f);
+			assert(fabsf(sverts[i].local_pos[2] - 12.0f) < 1e-5f);
+		}
+		float sh_center_x = 0.5f * (sverts[0].local_pos[0] + sverts[1].local_pos[0]);
+		float sh_center_y = 0.5f * (sverts[0].local_pos[1] + sverts[2].local_pos[1]);
+		assert(sh_center_x > tree_bb.x + 1.0f);
+		assert(sh_center_y > tree_bb.y + 0.5f);
+
+		printf("PASS: 3D billboard volumetric normals (sun=%.3f vs lee=%.3f), ground-contact AO (base=%.2f vs crown=%.2f), and SE tangent shadow quads verified\n",
+		       lit_sun_crown, lit_lee_base, ao_base, ao_crown);
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

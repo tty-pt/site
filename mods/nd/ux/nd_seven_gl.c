@@ -52,7 +52,7 @@
 
 #define MAX_CHUNK_TEXTURES 192
 #define MAX_WATER_QUEUE 192
-#define MAX_BB_VERTS 12288
+#define MAX_BB_VERTS 24576
 
 /* --- GLSL 300 es Shaders --- */
 
@@ -284,6 +284,7 @@ static const char *s_fs_terrain =
 	"uniform float uAnimTime;\n"
 	"uniform vec3 uSkyColor;\n"
 	"uniform float uAtmoIntensity;\n"
+	"uniform vec4 uLambLight;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -645,7 +646,16 @@ static const char *s_fs_terrain =
 	"    }\n"
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
 	"    float submergedBlend = smoothstep(0.35, 5.5, fragWaterDepth);\n"
+	"    vec3 baseAlbedo = mix(dryCol, subCol, submergedBlend);\n"
 	"    vec3 lit = mix(dryCol * dryLighting, subCol * subLighting, submergedBlend);\n"
+	"    if (uLambLight.w > 0.001) {\n"
+	"        vec3 toLamb = vec3((uLambLight.x - vWorldPos.x) * tangentU + (uLambLight.y - vWorldPos.y) * tangentV + (uLambLight.z + 10.0 - fragZ) * torusN);\n"
+	"        float d2 = dot(toLamb, toLamb);\n"
+	"        float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
+	"        float nDotL = (d2 > 1e-4) ? max(0.25, dot(fragNormal, toLamb * inversesqrt(d2))) : 1.0;\n"
+	"        vec3 warmGlow = vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.24 * atten * nDotL);\n"
+	"        lit += (baseAlbedo * 0.72 + vec3(0.28)) * warmGlow;\n"
+	"    }\n"
 	"    /* 3. Physical Volumetric Water Extinction & Biome-Aware Optics (Crystal-Clear Shallows) */\n"
 	"    if (fragWaterDepth > 0.0) {\n"
 	"        float d = clamp(fragWaterDepth, 0.0, 64.0);\n"
@@ -854,6 +864,7 @@ static const char *s_fs_water =
 	"uniform float uAnimTime;\n"
 	"uniform vec3 uSkyColor;\n"
 	"uniform float uAtmoIntensity;\n"
+	"uniform vec4 uLambLight;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -1003,24 +1014,15 @@ static const char *s_fs_water =
 	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
-	"/* Height-model basin & upwind fetch classifier: distinguishes quiet lakes/sheltered coves from deep open sea */\n"
+	"/* Height-model basin & upwind fetch classifier: distinguishes quiet lakes/sheltered coves from deep open sea\n"
+	" * using purely local continuous depth and shoreline slope (zero fixed chunk-UV probes, zero chunk seams) */\n"
 	"vec2 eval_water_fetch_and_basin(vec2 uv, vec2 windDir, vec2 shoreGrad, float fragWaterDepth, float effectiveScale) {\n"
-	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
-	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
-	"    ivec2 maxC = ivec2(maxCoordF);\n"
-	"    vec2 offshoreDir = (length(shoreGrad) > 1e-4) ? (-normalize(shoreGrad)) : windDir;\n"
-	"    float d_up1 = uSeaLevel - getH(ivec2(clamp(uv - windDir * 0.10, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_up2 = uSeaLevel - getH(ivec2(clamp(uv - windDir * 0.24, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_off1 = uSeaLevel - getH(ivec2(clamp(uv + offshoreDir * 0.16, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_off2 = uSeaLevel - getH(ivec2(clamp(uv + offshoreDir * 0.34, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_c0 = uSeaLevel - getH(ivec2(vec2(0.5, 0.5) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_c1 = uSeaLevel - getH(ivec2(vec2(0.2, 0.2) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_c2 = uSeaLevel - getH(ivec2(vec2(0.8, 0.2) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_c3 = uSeaLevel - getH(ivec2(vec2(0.2, 0.8) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float d_c4 = uSeaLevel - getH(ivec2(vec2(0.8, 0.8) * maxCoordF), maxC) * effectiveScale;\n"
-	"    float maxD = max(fragWaterDepth, max(max(d_off1, d_off2), max(d_c0, max(max(d_c1, d_c2), max(d_c3, d_c4)))));\n"
-	"    float meanD = (max(0.0, d_off1) + max(0.0, d_off2) + max(0.0, d_c0) + max(0.0, d_up1) + max(0.0, d_up2)) * 0.2;\n"
-	"    float openSeaFactor = smoothstep(14.0, 28.0, maxD) * smoothstep(7.0, 18.0, meanD);\n"
+	"    float slopeMag = length(shoreGrad);\n"
+	"    float windAlign = (slopeMag > 1e-4) ? dot(-shoreGrad / slopeMag, windDir) : 0.0;\n"
+	"    float d_up1 = max(0.0, fragWaterDepth - max(0.0, windAlign) * slopeMag * 12.0);\n"
+	"    float d_up2 = max(0.0, fragWaterDepth - max(0.0, windAlign) * slopeMag * 28.0);\n"
+	"    float d_off = fragWaterDepth + slopeMag * 18.0;\n"
+	"    float openSeaFactor = smoothstep(8.0, 22.0, d_off) * smoothstep(2.5, 12.0, fragWaterDepth);\n"
 	"    float windFetch = clamp(0.25 + 0.40 * smoothstep(0.4, 5.0, d_up1) + 0.35 * smoothstep(1.2, 12.0, d_up2), 0.25, 1.0);\n"
 	"    return vec2(openSeaFactor, windFetch);\n"
 	"}\n"
@@ -1208,6 +1210,12 @@ static const char *s_fs_water =
 	"    vec3 reflSkyCol = mix(sky * 0.92, sky * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
 	"    vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
 	"    vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
+	"    if (uLambLight.w > 0.001) {\n"
+	"        vec2 dXY = uLambLight.xy - vWorldPos;\n"
+	"        float d2 = dot(dXY, dXY);\n"
+	"        float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
+	"        surfaceRgb += vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.16 * atten);\n"
+	"    }\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    surfaceRgb = mix(surfaceRgb, vec3(0.35, 0.70, 1.0), limb * 0.55 * uAtmoIntensity);\n"
 	"    float edgeFade = smoothstep(0.0, 0.14, fragWaterDepth);\n"
@@ -1223,32 +1231,41 @@ static const char *s_vs_billboard =
 	"layout (location = 1) in vec2 a_uv;\n"
 	"layout (location = 2) in vec4 a_tint;\n"
 	"layout (location = 3) in vec3 a_local_pos;\n"
+	"layout (location = 4) in vec4 a_quad_uv;\n"
+	"layout (location = 5) in vec4 a_sprite_bounds;\n"
 	"uniform mat4 uMVP;\n"
 	"uniform vec3 uCameraPos;\n"
 	"out vec2 vUV;\n"
 	"out vec4 vTint;\n"
 	"out vec3 vWorldPos;\n"
 	"out vec3 vLocalPos;\n"
+	"out vec4 vQuadUV;\n"
+	"out vec4 vSpriteBounds;\n"
 	"void main() {\n"
 	"    vUV = a_uv;\n"
 	"    vTint = a_tint;\n"
 	"    vWorldPos = a_pos;\n"
 	"    vLocalPos = a_local_pos;\n"
+	"    vQuadUV = a_quad_uv;\n"
+	"    vSpriteBounds = a_sprite_bounds;\n"
 	"    vec3 toCam = uCameraPos - a_pos;\n"
 	"    float dCam = length(toCam);\n"
 	"    vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
-	"    float bias = min(24.0, dCam * 0.08);\n"
+	"    float bias = (a_quad_uv.w < -0.5) ? min(10.0, dCam * 0.035) : min(24.0, dCam * 0.08);\n"
 	"    gl_Position = uMVP * vec4(a_pos + dirToCam * bias, 1.0);\n"
 	"}\n";
 
 static const char *s_fs_billboard =
 	"#version 300 es\n"
 	"precision highp float;\n"
+	"precision highp int;\n"
 	"precision highp sampler2D;\n"
 	"in vec2 vUV;\n"
 	"in vec4 vTint;\n"
 	"in vec3 vWorldPos;\n"
 	"in vec3 vLocalPos;\n"
+	"in vec4 vQuadUV;\n"
+	"in vec4 vSpriteBounds;\n"
 	"uniform sampler2D uAtlasTex;\n"
 	"uniform float uSeaLevel;\n"
 	"uniform float uAnimTime;\n"
@@ -1257,6 +1274,7 @@ static const char *s_fs_billboard =
 	"uniform float uFogEnd;\n"
 	"uniform vec3 uSkyColor;\n"
 	"uniform float uAtmoIntensity;\n"
+	"uniform vec4 uLambLight;\n"
 	"out vec4 FragColor;\n"
 	"uint chaff_rotl32(uint x, int r) {\n"
 	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
@@ -1273,6 +1291,35 @@ static const char *s_fs_billboard =
 	"    h *= 0x85EBCA77u;\n"
 	"    h ^= h >> 16u;\n"
 	"    return h;\n"
+	"}\n"
+	"vec2 chaff_grad_dir(int cx, int cy, uint seed) {\n"
+	"    uint h = chaff_hash3(ivec3(cx, cy, 0), seed);\n"
+	"    float gx = float(int(h & 0xFFFFu) - 32768) * (1.0 / 32768.0);\n"
+	"    float gy = float(int(h >> 16u) - 32768) * (1.0 / 32768.0);\n"
+	"    vec2 g = vec2(gx, gy);\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
+	"vec3 chaff_grad_noise2d(vec2 p, uint seed) {\n"
+	"    vec2 ip = floor(p);\n"
+	"    vec2 fp = p - ip;\n"
+	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    vec2 du = 30.0 * fp * fp * (fp * (fp - 2.0) + 1.0);\n"
+	"    ivec2 c = ivec2(ip);\n"
+	"    vec2 g00 = chaff_grad_dir(c.x,     c.y,     seed);\n"
+	"    vec2 g10 = chaff_grad_dir(c.x + 1, c.y,     seed);\n"
+	"    vec2 g01 = chaff_grad_dir(c.x,     c.y + 1, seed);\n"
+	"    vec2 g11 = chaff_grad_dir(c.x + 1, c.y + 1, seed);\n"
+	"    float v00 = dot(g00, fp);\n"
+	"    float v10 = dot(g10, fp - vec2(1.0, 0.0));\n"
+	"    float v01 = dot(g01, fp - vec2(0.0, 1.0));\n"
+	"    float v11 = dot(g11, fp - vec2(1.0, 1.0));\n"
+	"    float k0 = v10 - v00;\n"
+	"    float k1 = v01 - v00;\n"
+	"    float k2 = v11 - v01 - k0;\n"
+	"    float val = 0.5 + 0.70710678 * (v00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y);\n"
+	"    vec2 gInterp = g00 + (g10 - g00) * u.x + (g01 - g00) * u.y + (g11 - g01 - g10 + g00) * (u.x * u.y);\n"
+	"    vec2 grad = 0.70710678 * (gInterp + du * vec2(k0 + k2 * u.y, k1 + k2 * u.x));\n"
+	"    return vec3(clamp(val, 0.0, 1.0), grad.x, grad.y);\n"
 	"}\n"
 	"float chaff_sample_3d(vec3 pos, uint shift, uint seed) {\n"
 	"    float cell_size = float(1u << shift);\n"
@@ -1299,13 +1346,98 @@ static const char *s_fs_billboard =
 	"    float b1 = mix(b01, b11, u.y);\n"
 	"    return mix(b0, b1, uz) / 255.0;\n"
 	"}\n"
+	"vec4 fetchBoundedTexel(ivec2 tc, ivec4 iBounds, ivec2 maxTex) {\n"
+	"    if (tc.x < iBounds.x || tc.x > iBounds.z || tc.y < iBounds.y || tc.y > iBounds.w) {\n"
+	"        return vec4(0.0);\n"
+	"    }\n"
+	"    return texelFetch(uAtlasTex, clamp(tc, ivec2(0), maxTex), 0);\n"
+	"}\n"
+	"vec4 sampleAtlasSmooth(vec2 uv, vec4 bounds, float style) {\n"
+	"    vec2 texSize = vec2(textureSize(uAtlasTex, 0));\n"
+	"    ivec2 maxTex = ivec2(texSize) - ivec2(1);\n"
+	"    vec4 effB = (bounds.z > bounds.x && bounds.w > bounds.y) ? bounds : vec4(0.0, 0.0, 1.0, 1.0);\n"
+	"    ivec4 iBounds = ivec4(\n"
+	"        ivec2(floor(effB.xy * texSize + 1e-3)),\n"
+	"        ivec2(ceil(effB.zw * texSize - 1e-3)) - ivec2(1)\n"
+	"    );\n"
+	"    vec2 p = uv * texSize - 0.5;\n"
+	"    ivec2 i0 = ivec2(floor(p));\n"
+	"    vec2 f = p - vec2(i0);\n"
+	"    vec2 fw = fwidth(p);\n"
+	"    vec2 filterW = clamp(fw * 0.90, vec2(0.26), vec2(0.50));\n"
+	"    vec2 u = smoothstep(0.5 - filterW, 0.5 + filterW, f);\n"
+	"    vec4 c00 = fetchBoundedTexel(i0,                iBounds, maxTex);\n"
+	"    vec4 c10 = fetchBoundedTexel(i0 + ivec2(1, 0),  iBounds, maxTex);\n"
+	"    vec4 c01 = fetchBoundedTexel(i0 + ivec2(0, 1),  iBounds, maxTex);\n"
+	"    vec4 c11 = fetchBoundedTexel(i0 + ivec2(1, 1),  iBounds, maxTex);\n"
+	"    float b00 = (1.0 - u.x) * (1.0 - u.y);\n"
+	"    float b10 = u.x * (1.0 - u.y);\n"
+	"    float b01 = (1.0 - u.x) * u.y;\n"
+	"    float b11 = u.x * u.y;\n"
+	"    float a = c00.a * b00 + c10.a * b10 + c01.a * b01 + c11.a * b11;\n"
+	"    float l00 = dot(c00.rgb, vec3(0.299, 0.587, 0.114));\n"
+	"    float l10 = dot(c10.rgb, vec3(0.299, 0.587, 0.114));\n"
+	"    float l01 = dot(c01.rgb, vec3(0.299, 0.587, 0.114));\n"
+	"    float l11 = dot(c11.rgb, vec3(0.299, 0.587, 0.114));\n"
+	"    /* Favor non-outline interior texel luminance so 1px dark retro ink borders soften into surface albedo */\n"
+	"    float w00 = c00.a * b00 * (0.28 + 0.72 * smoothstep(0.08, 0.28, l00));\n"
+	"    float w10 = c10.a * b10 * (0.28 + 0.72 * smoothstep(0.08, 0.28, l10));\n"
+	"    float w01 = c01.a * b01 * (0.28 + 0.72 * smoothstep(0.08, 0.28, l01));\n"
+	"    float w11 = c11.a * b11 * (0.28 + 0.72 * smoothstep(0.08, 0.28, l11));\n"
+	"    float wSum = w00 + w10 + w01 + w11;\n"
+	"    vec3 rgb = (wSum > 1e-5) ? ((c00.rgb * w00 + c10.rgb * w10 + c01.rgb * w01 + c11.rgb * w11) / wSum) : vec3(0.0);\n"
+	"    if (style > 0.5 && style < 3.5 && a > 0.15) {\n"
+	"        /* Interior tonal de-banding for scenery: smooths discrete pixel-art steps into continuous 3D gradients */\n"
+	"        ivec2 ic = ivec2(floor(uv * texSize));\n"
+	"        vec4 n0 = fetchBoundedTexel(ic + ivec2(-1, 0), iBounds, maxTex);\n"
+	"        vec4 n1 = fetchBoundedTexel(ic + ivec2( 1, 0), iBounds, maxTex);\n"
+	"        vec4 n2 = fetchBoundedTexel(ic + ivec2(0, -1), iBounds, maxTex);\n"
+	"        vec4 n3 = fetchBoundedTexel(ic + ivec2(0,  1), iBounds, maxTex);\n"
+	"        float nw0 = n0.a * (0.25 + 0.75 * smoothstep(0.10, 0.30, dot(n0.rgb, vec3(0.299, 0.587, 0.114))));\n"
+	"        float nw1 = n1.a * (0.25 + 0.75 * smoothstep(0.10, 0.30, dot(n1.rgb, vec3(0.299, 0.587, 0.114))));\n"
+	"        float nw2 = n2.a * (0.25 + 0.75 * smoothstep(0.10, 0.30, dot(n2.rgb, vec3(0.299, 0.587, 0.114))));\n"
+	"        float nw3 = n3.a * (0.25 + 0.75 * smoothstep(0.10, 0.30, dot(n3.rgb, vec3(0.299, 0.587, 0.114))));\n"
+	"        float nwSum = nw0 + nw1 + nw2 + nw3;\n"
+	"        if (nwSum > 0.25) {\n"
+	"            vec3 nRgb = (n0.rgb * nw0 + n1.rgb * nw1 + n2.rgb * nw2 + n3.rgb * nw3) / nwSum;\n"
+	"            float curLuma = dot(rgb, vec3(0.299, 0.587, 0.114));\n"
+	"            float blendAmt = (curLuma < 0.22) ? 0.52 : 0.28;\n"
+	"            rgb = mix(rgb, nRgb, blendAmt);\n"
+	"        }\n"
+	"    }\n"
+	"    return vec4(rgb, a);\n"
+	"}\n"
 	"void main() {\n"
+	"    float vDist = length(uCameraPos - vWorldPos);\n"
+	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
+	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
 	"    float d = 0.0;\n"
 	"    bool isSubmerged = false;\n"
 	"    if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 0.25) {\n"
 	"        d = (uSeaLevel - 0.25) - vLocalPos.z;\n"
 	"        isSubmerged = true;\n"
 	"    }\n"
+	"    /* 1. 3D Ground-Contact Drop Shadow Pass (vQuadUV.w < -0.5) */\n"
+	"    if (vQuadUV.w < -0.5) {\n"
+	"        if (isSubmerged && d > 4.0) discard;\n"
+	"        float r2 = dot(vQuadUV.xy, vQuadUV.xy);\n"
+	"        if (r2 >= 1.0) discard;\n"
+	"        vec3 shNoise = chaff_grad_noise2d(vLocalPos.xy * 0.28, 0x53484457u);\n"
+	"        float penumbra = pow(clamp(1.0 - r2, 0.0, 1.0), 1.65);\n"
+	"        float dapple = 0.86 + 0.28 * shNoise.x;\n"
+	"        vec2 umbraDelta = vQuadUV.xy + vec2(0.20, 0.16);\n"
+	"        float umbra = exp(-dot(umbraDelta, umbraDelta) * 3.2) * 0.16;\n"
+	"        float waterAtten = isSubmerged ? clamp(1.0 - d * 0.25, 0.0, 1.0) : 1.0;\n"
+	"        float distAtten = clamp((4200.0 - vDist) / 2200.0, 0.0, 1.0);\n"
+	"        float shadowAlpha = clamp((penumbra * 0.36 * dapple + umbra) * vTint.a * waterAtten * distAtten * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.48);\n"
+	"        if (shadowAlpha <= 0.005) discard;\n"
+	"        vec3 shadowRgb = mix(vec3(0.05, 0.07, 0.10), sky * 0.16, 0.45);\n"
+	"        FragColor = vec4(shadowRgb, shadowAlpha);\n"
+	"        return;\n"
+	"    }\n"
+	"    /* 2. Sub-Texel Anti-Aliased & Outline-Softened Sprite Sampling */\n"
+	"    float style = vQuadUV.w;\n"
+	"    bool isLambGlow = (style > 3.5);\n"
 	"    vec2 sampleUV = vUV;\n"
 	"    if (isSubmerged) {\n"
 	"        float distortStrength = clamp(d * 0.25, 0.0, 1.0);\n"
@@ -1315,37 +1447,133 @@ static const char *s_fs_billboard =
 	"        ) * (vec2(1.2 / 512.0, 1.2 / 328.0) * distortStrength);\n"
 	"        sampleUV = vUV + waveOffset;\n"
 	"    }\n"
-	"    vec4 baseCol = texture(uAtlasTex, vUV);\n"
-	"    if (baseCol.a < 0.1) discard;\n"
-	"    vec4 subSample = isSubmerged ? texture(uAtlasTex, sampleUV) : baseCol;\n"
-	"    if (subSample.a < 0.1) subSample = baseCol;\n"
-	"    vec4 col = subSample * vTint;\n"
-	"    if (col.a <= 0.001) discard;\n"
-	"    vec3 lit = col.rgb;\n"
+	"    vec4 baseCol = sampleAtlasSmooth(vUV, vSpriteBounds, style);\n"
+	"    float edgeAlpha = smoothstep(0.12, 0.46, baseCol.a);\n"
+	"    float auraAlpha = 0.0;\n"
+	"    if (isLambGlow && edgeAlpha < 0.99) {\n"
+	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.46) * 2.0);\n"
+	"        float r2 = dot(qc, qc);\n"
+	"        auraAlpha = exp(-r2 * 2.8) * 0.16 * (1.0 - edgeAlpha);\n"
+	"    }\n"
+	"    if (edgeAlpha <= 0.01 && auraAlpha <= 0.005) discard;\n"
+	"    vec4 subSample = isSubmerged ? sampleAtlasSmooth(sampleUV, vSpriteBounds, style) : baseCol;\n"
+	"    if (subSample.a < 0.12) subSample = baseCol;\n"
+	"    /* 3. Leaf-Selective Plant Tinting & Natural Palette Harmonization */\n"
+	"    vec3 albedo = subSample.rgb;\n"
+	"    if (style > 0.5 && style < 1.5) {\n"
+	"        float leafDom = subSample.g - max(subSample.r, subSample.b);\n"
+	"        float leafMask = smoothstep(0.015, 0.065, leafDom);\n"
+	"        vec3 plantScale = vTint.rgb * (255.0 / 128.0);\n"
+	"        albedo = clamp(albedo * mix(vec3(1.0), plantScale, leafMask), 0.0, 1.0);\n"
+	"    } else {\n"
+	"        albedo *= vTint.rgb;\n"
+	"    }\n"
+	"    float outAlpha = clamp(edgeAlpha + auraAlpha, 0.0, 1.0) * vTint.a;\n"
+	"    if (outAlpha <= 0.001) discard;\n"
+	"    /* Soften dark 1px retro ink outlines toward natural surface chroma */\n"
+	"    float rawLuma = dot(albedo, vec3(0.299, 0.587, 0.114));\n"
+	"    if (rawLuma < 0.22 && style > 0.5 && !isLambGlow) {\n"
+	"        float inkLift = smoothstep(0.22, 0.04, rawLuma) * 0.48;\n"
+	"        vec3 liftedTone = (style > 2.5) ? vec3(0.32, 0.31, 0.29) : vec3(0.22, 0.28, 0.18);\n"
+	"        albedo = mix(albedo, liftedTone, inkLift);\n"
+	"    }\n"
+	"    /* 4. 3D Volumetric Canopy/Body Normals, Micro-Relief & Directional Sun Lighting */\n"
+	"    float qx = clamp(vQuadUV.x, -1.0, 1.0);\n"
+	"    float qy = clamp(vQuadUV.y, 0.0, 1.0);\n"
+	"    float distFade = clamp(1.0 - (vDist - 900.0) / 2400.0, 0.0, 1.0);\n"
+	"    float closeZoom = clamp((820.0 - vDist) / 480.0, 0.0, 1.0);\n"
+	"    vec2 surfPos = vec2(vLocalPos.x, vLocalPos.z);\n"
+	"    vec3 g1 = chaff_grad_noise2d(surfPos * 0.24, 0xA341316Cu);\n"
+	"    vec3 g2 = (distFade > 0.01) ? chaff_grad_noise2d(surfPos * 0.78 + vec2(17.3, -29.1), 0xC8013EA4u) : vec3(0.5, 0.0, 0.0);\n"
+	"    float microH = (g1.x - 0.5) * 0.26 + (g2.x - 0.5) * 0.16 * distFade;\n"
+	"    vec2 microGrad = g1.yz * 0.22 + g2.yz * (0.32 * distFade);\n"
+	"    float microCavity = clamp(max(0.0, 0.48 - g1.x) * 0.42 + max(0.0, 0.48 - g2.x) * 0.32 * distFade, 0.0, 0.34);\n"
+	"    bool isFoliage = !isLambGlow && ((style > 0.5 && style < 2.5) || (albedo.g > max(albedo.r, albedo.b) * 1.06));\n"
+	"    bool isMineral = !isLambGlow && (style > 2.5);\n"
+	"    if (isFoliage && distFade > 0.01) {\n"
+	"        /* Harmonize foliage palette with terrain vegetation (deepMoss / lushTurf / warmClover) */\n"
+	"        vec3 warmFoliage = albedo * vec3(1.06, 1.02, 0.84);\n"
+	"        vec3 deepLeaf    = albedo * vec3(0.84, 0.96, 0.80);\n"
+	"        albedo = mix(deepLeaf, warmFoliage, smoothstep(0.28, 0.72, g1.x));\n"
+	"        float leafRelief = (g1.x - 0.5) * 0.16 * distFade + (g2.x - 0.5) * 0.14 * closeZoom;\n"
+	"        albedo *= clamp(1.0 + leafRelief, 0.80, 1.22);\n"
+	"    } else if (isMineral && distFade > 0.01) {\n"
+	"        /* Harmonize mineral sprites with terrain slate/granite strata & fracture crevices */\n"
+	"        vec3 slateWarm   = vec3(0.42, 0.39, 0.35);\n"
+	"        vec3 graniteCool = vec3(0.34, 0.36, 0.38);\n"
+	"        vec3 rockBase    = mix(slateWarm, graniteCool, clamp(g1.x, 0.0, 1.0)) * (0.75 + 0.65 * rawLuma);\n"
+	"        albedo = mix(albedo, rockBase, 0.38 * distFade);\n"
+	"        float rockCrevice = smoothstep(0.11, 0.015, abs(g2.x - 0.5)) * distFade;\n"
+	"        albedo *= (1.0 - rockCrevice * 0.28);\n"
+	"    }\n"
+	"    vec3 proxyN = normalize(vec3(qx * 0.65, 0.55 - 0.15 * qy, 0.22 + 0.68 * qy));\n"
+	"    vec3 N_bb = normalize(proxyN - vec3(microGrad.x * 0.38, 0.0, microGrad.y * 0.38));\n"
+	"    vec3 L_sun = normalize(vec3(-0.577, -0.577, 0.816));\n"
+	"    float sunDiff = max(0.0, dot(N_bb, L_sun));\n"
+	"    float cavityAO = clamp(1.0 + microH * 0.28 - microCavity, 0.68, 1.15);\n"
+	"    float hAboveGround = max(0.0, vLocalPos.z - vQuadUV.z);\n"
+	"    float contactAO = isLambGlow ? 1.0 : mix(0.68, 1.0, smoothstep(0.0, 5.5, hAboveGround));\n"
+	"    float hemiSky = 0.5 + 0.5 * N_bb.z;\n"
+	"    vec3 ambCol = mix(vec3(0.50, 0.55, 0.62), vec3(0.68, 0.74, 0.82), hemiSky);\n"
+	"    vec3 sunCol = vec3(1.06, 1.02, 0.95);\n"
+	"    vec3 lightTerm = (ambCol * 0.52 + sunCol * (0.58 * sunDiff)) * (cavityAO * contactAO);\n"
+	"    vec3 lit = albedo * mix(vec3(1.0), lightTerm, isLambGlow ? 0.32 : 0.78);\n"
+	"    if (isLambGlow) {\n"
+	"        /* Subtle self-luminance: slightly brighter than the environment with a soft warm rim */\n"
+	"        float rimGlow = smoothstep(0.85, 0.25, baseCol.a) * edgeAlpha;\n"
+	"        vec3 bodyLit = clamp(lit * 1.16 + vec3(0.11, 0.10, 0.07) + vec3(0.14, 0.12, 0.08) * rimGlow, 0.0, 1.0);\n"
+	"        lit = mix(vec3(1.0, 0.96, 0.84), bodyLit, edgeAlpha / max(1e-4, edgeAlpha + auraAlpha));\n"
+	"    } else {\n"
+	"        /* Upward terrain bounce light near ground contact line */\n"
+	"        float bounceMask = (1.0 - smoothstep(0.0, 4.5, hAboveGround)) * (1.0 - qy) * distFade;\n"
+	"        lit = mix(lit, lit * vec3(0.86, 0.94, 0.78), bounceMask * 0.35);\n"
+	"        /* Subsurface foliage rim scattering & mineral/leaf micro-specular sheen */\n"
+	"        vec3 H_half = normalize(L_sun + vec3(0.0, 0.57, 0.82));\n"
+	"        float specAngle = max(0.0, dot(N_bb, H_half));\n"
+	"        if (isFoliage) {\n"
+	"            float rim = clamp(qx * (-0.55) + qy * 0.45, 0.0, 1.0) * smoothstep(0.95, 0.35, baseCol.a);\n"
+	"            lit += albedo * vec3(0.32, 0.42, 0.12) * (rim * 0.45 + pow(specAngle, 20.0) * 0.14) * distFade;\n"
+	"        } else if (isMineral) {\n"
+	"            lit += vec3(pow(specAngle, 28.0) * 0.16 * distFade);\n"
+	"        }\n"
+	"        /* Subtle point-light illumination from the glowing lamb onto nearby billboards */\n"
+	"        if (uLambLight.w > 0.001) {\n"
+	"            vec3 toLamb = vec3(uLambLight.x - vLocalPos.x, uLambLight.y - vLocalPos.y, uLambLight.z + 10.0 - vLocalPos.z);\n"
+	"            float d2 = dot(toLamb, toLamb);\n"
+	"            float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
+	"            float dirFactor = (d2 > 1e-4) ? clamp(0.45 + 0.55 * dot(N_bb, toLamb * inversesqrt(d2)), 0.25, 1.0) : 1.0;\n"
+	"            vec3 warmGlow = vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.24 * atten * dirFactor);\n"
+	"            lit += (albedo * 0.72 + vec3(0.28)) * warmGlow;\n"
+	"        }\n"
+	"    }\n"
+	"    /* 5. Physical Volumetric Water Submersion Optics */\n"
 	"    if (isSubmerged) {\n"
 	"        float c1 = chaff_sample_3d(vec3(vLocalPos.xy * 2.0, uAnimTime * 3.5), 3u, 0x1337u);\n"
 	"        float c2 = chaff_sample_3d(vec3((vLocalPos.xy + vec2(37.0, -23.0)) * 2.0, uAnimTime * 2.5), 3u, 0xBEEFu);\n"
 	"        float diff = abs(c1 - c2);\n"
 	"        float caustic = pow(clamp(1.0 - diff * 6.0, 0.0, 1.0), 3.0);\n"
 	"        float causticCoherence = exp(-0.12 * d);\n"
-	"        vec3 submergedCaustic = vec3(0.55, 0.90, 1.0) * (caustic * 0.60 * causticCoherence);\n"
+	"        vec3 submergedCaustic = vec3(0.48, 0.82, 0.94) * (caustic * 0.45 * causticCoherence);\n"
 	"        vec3 viewDir = normalize(uCameraPos - vWorldPos);\n"
 	"        float cosView = max(0.25, dot(vec3(0.0, 0.0, 1.0), viewDir));\n"
 	"        float shallowFactor = smoothstep(0.0, 16.0, d);\n"
-	"        float effectiveOpticalPath = (d * (0.25 + 0.75 * shallowFactor)) / cosView;\n"
-	"        float submergedBlend = clamp(0.22 + 0.14 * smoothstep(0.0, 8.0, d), 0.0, 0.50);\n"
-	"        vec3 shallowWash = vec3(0.25, 0.85, 0.92);\n"
-	"        vec3 tintedSurface = mix(lit + submergedCaustic, shallowWash * (0.75 + 0.25 * lit), submergedBlend);\n"
-	"        vec3 waterAbsorption = exp(-vec3(0.020, 0.008, 0.002) * effectiveOpticalPath);\n"
+	"        float effectiveOpticalPath = (d * (0.20 + 0.80 * shallowFactor)) / cosView;\n"
+	"        float submergedBlend = clamp(0.16 + 0.18 * smoothstep(0.0, 8.0, d), 0.0, 0.46);\n"
+	"        vec3 shallowWash = vec3(0.14, 0.48, 0.54);\n"
+	"        vec3 tintedSurface = mix(lit + submergedCaustic, shallowWash * (0.65 + 0.35 * lit), submergedBlend);\n"
+	"        vec3 waterAbsorption = exp(-vec3(0.042, 0.016, 0.005) * effectiveOpticalPath);\n"
 	"        vec3 waterColor = tintedSurface * waterAbsorption;\n"
-	"        vec3 deepOceanScattered = vec3(0.005, 0.035, 0.12) * shallowFactor *\n"
-	"                                  (1.0 - exp(-vec3(0.010, 0.018, 0.030) * effectiveOpticalPath));\n"
+	"        vec3 deepOceanScattered = vec3(0.018, 0.085, 0.20) * shallowFactor *\n"
+	"                                  (1.0 - exp(-vec3(0.014, 0.022, 0.036) * effectiveOpticalPath));\n"
 	"        lit = waterColor + deepOceanScattered;\n"
-	"        float meniscus = smoothstep(0.0, 0.35, d) * smoothstep(1.8, 0.35, d);\n"
-	"        vec3 meniscusColor = vec3(0.95, 0.98, 1.0);\n"
-	"        lit = mix(lit, meniscusColor, meniscus * 0.70);\n"
+	"        float meniscus = smoothstep(0.0, 0.35, d) * smoothstep(1.6, 0.35, d);\n"
+	"        vec3 meniscusColor = vec3(0.90, 0.95, 0.99);\n"
+	"        lit = mix(lit, meniscusColor, meniscus * 0.55);\n"
 	"    }\n"
-	"    FragColor = vec4(lit, col.a);\n"
+	"    /* 6. Atmospheric Distance Fog & Planetary Limb Scattering Parity with Terrain */\n"
+	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95), 0.22 * uAtmoIntensity);\n"
+	"    vec3 finalRgb = mix(surfaceLit, sky, fogFactor * uAtmoIntensity);\n"
+	"    FragColor = vec4(finalRgb, outAlpha);\n"
 	"}\n";
 
 const char *nd_seven_gl_vs_terrain(void) { return s_vs_terrain; }
@@ -1561,11 +1789,17 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 		(float)(b->tint_rgba & 0xFF) / 255.0f
 	};
 
-	struct { float dx, dy, u, v, loc_z; } c[4] = {
-		{ -half_w, -ay,     b->u0, b->v1, b->z - wz_off },       /* BL (0) */
-		{  half_w, -ay,     b->u1, b->v1, b->z - wz_off },       /* BR (1) */
-		{ -half_w, h - ay,  b->u0, b->v0, b->z + h - wz_off },   /* TL (2) */
-		{  half_w, h - ay,  b->u1, b->v0, b->z + h - wz_off }    /* TR (3) */
+	float u_min = fminf(b->u0, b->u1);
+	float u_max = fmaxf(b->u0, b->u1);
+	float v_min = fminf(b->v0, b->v1);
+	float v_max = fmaxf(b->v0, b->v1);
+	float style_f = (float)b->style;
+
+	struct { float dx, dy, u, v, loc_z, qx, qy; } c[4] = {
+		{ -half_w, -ay,     b->u0, b->v1, b->z - wz_off,     -1.0f, 0.0f }, /* BL (0) */
+		{  half_w, -ay,     b->u1, b->v1, b->z - wz_off,      1.0f, 0.0f }, /* BR (1) */
+		{ -half_w, h - ay,  b->u0, b->v0, b->z + h - wz_off, -1.0f, 1.0f }, /* TL (2) */
+		{  half_w, h - ay,  b->u1, b->v0, b->z + h - wz_off,  1.0f, 1.0f }  /* TR (3) */
 	};
 
 	/* Triangle 1: BL, BR, TL (indices 0, 1, 2) */
@@ -1586,9 +1820,19 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 		out_verts[i].tint[2] = tint[2];
 		out_verts[i].tint[3] = tint[3];
 
-		out_verts[i].local_pos[0] = b->x;
+		out_verts[i].local_pos[0] = b->x + c[k].dx;
 		out_verts[i].local_pos[1] = b->y;
 		out_verts[i].local_pos[2] = c[k].loc_z;
+
+		out_verts[i].quad_uv[0] = c[k].qx;
+		out_verts[i].quad_uv[1] = c[k].qy;
+		out_verts[i].quad_uv[2] = b->z;
+		out_verts[i].quad_uv[3] = style_f;
+
+		out_verts[i].sprite_bounds[0] = u_min;
+		out_verts[i].sprite_bounds[1] = v_min;
+		out_verts[i].sprite_bounds[2] = u_max;
+		out_verts[i].sprite_bounds[3] = v_max;
 	}
 }
 
@@ -1598,6 +1842,79 @@ void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
                                      nd_seven_gl_bb_vert_t out_verts[6])
 {
 	eval_billboard_quad_with_origin(b, pitch_deg, pdef, NULL, out_verts);
+}
+
+static void eval_billboard_shadow_quad_with_origin(const lam_billboard_gpu_t *b,
+                                                   const nd_planet_def_t *pdef,
+                                                   const double ref_origin[3],
+                                                   nd_seven_gl_bb_vert_t out_verts[6])
+{
+	if (!b || !out_verts) return;
+
+	double pos_d[3];
+	float E[3], S[3], N[3];
+	torus_frame_double((double)b->x, (double)b->y, (double)b->z, pdef, pos_d, E, S, N);
+
+	float base_pos[3] = {
+		(float)(pos_d[0] - (ref_origin ? ref_origin[0] : 0.0)),
+		(float)(pos_d[1] - (ref_origin ? ref_origin[1] : 0.0)),
+		(float)(pos_d[2] - (ref_origin ? ref_origin[2] : 0.0))
+	};
+
+	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(3.5f, b->width * 0.34f);
+	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(2.0f, rx * 0.45f);
+
+	/* Shift shadow slightly Southeast (+E, +S) away from the Northwest directional sun */
+	float off_x = rx * 0.22f;
+	float off_y = ry * 0.18f;
+	float lift_z = 0.22f;
+
+	float alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
+
+	struct { float dx, dy, qx, qy; } c[4] = {
+		{ off_x - rx, off_y - ry, -1.0f, -1.0f }, /* NW (0) */
+		{ off_x + rx, off_y - ry,  1.0f, -1.0f }, /* NE (1) */
+		{ off_x - rx, off_y + ry, -1.0f,  1.0f }, /* SW (2) */
+		{ off_x + rx, off_y + ry,  1.0f,  1.0f }  /* SE (3) */
+	};
+
+	int idx[6] = { 0, 1, 2, 1, 3, 2 };
+
+	for (int i = 0; i < 6; i++) {
+		int k = idx[i];
+		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * E[0] + c[k].dy * S[0] + lift_z * N[0];
+		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * E[1] + c[k].dy * S[1] + lift_z * N[1];
+		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * E[2] + c[k].dy * S[2] + lift_z * N[2];
+
+		out_verts[i].uv[0] = 0.0f;
+		out_verts[i].uv[1] = 0.0f;
+
+		out_verts[i].tint[0] = 0.0f;
+		out_verts[i].tint[1] = 0.0f;
+		out_verts[i].tint[2] = 0.0f;
+		out_verts[i].tint[3] = alpha;
+
+		out_verts[i].local_pos[0] = b->x + c[k].dx;
+		out_verts[i].local_pos[1] = b->y + c[k].dy;
+		out_verts[i].local_pos[2] = b->z;
+
+		out_verts[i].quad_uv[0] = c[k].qx;
+		out_verts[i].quad_uv[1] = c[k].qy;
+		out_verts[i].quad_uv[2] = b->z;
+		out_verts[i].quad_uv[3] = -1.0f; /* -1.0f marks 3D ground contact shadow quad */
+
+		out_verts[i].sprite_bounds[0] = 0.0f;
+		out_verts[i].sprite_bounds[1] = 0.0f;
+		out_verts[i].sprite_bounds[2] = 1.0f;
+		out_verts[i].sprite_bounds[3] = 1.0f;
+	}
+}
+
+void nd_seven_gl_eval_billboard_shadow_quad(const lam_billboard_gpu_t *b,
+                                            const nd_planet_def_t *pdef,
+                                            nd_seven_gl_bb_vert_t out_verts[6])
+{
+	eval_billboard_shadow_quad_with_origin(b, pdef, NULL, out_verts);
 }
 
 static inline float get_h16(const int16_t *buf, int px, int py, int w, int h)
@@ -1749,6 +2066,7 @@ typedef struct {
 	GLint uAnimTime;
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
+	GLint uLambLight;
 	GLint aGridUV;
 } gl_terrain_pipe_t;
 
@@ -1772,6 +2090,7 @@ typedef struct {
 	GLint uAnimTime;
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
+	GLint uLambLight;
 	GLint aGridUV;
 } gl_water_pipe_t;
 
@@ -1786,10 +2105,13 @@ typedef struct {
 	GLint uFogEnd;
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
+	GLint uLambLight;
 	GLint aPos;
 	GLint aUV;
 	GLint aTint;
 	GLint aLocalPos;
+	GLint aQuadUV;
+	GLint aSpriteBounds;
 } gl_billboard_pipe_t;
 
 typedef struct {
@@ -1853,6 +2175,7 @@ static struct {
 	float cur_pitch_deg;
 	float cur_anim_time;
 	float cur_sea_level;
+	float cur_lamb_light[4];
 	nd_planet_def_t cur_pdef;
 } s_gl;
 
@@ -1986,6 +2309,7 @@ static void init_pipelines(void)
 		s_gl.terrain_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
 		s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 		s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+		s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
 		s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 	}
 
@@ -2011,6 +2335,7 @@ static void init_pipelines(void)
 		s_gl.water_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
 		s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 		s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+		s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
 		s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 	}
 
@@ -2027,14 +2352,45 @@ static void init_pipelines(void)
 		s_gl.bb_pipe.uFogEnd        = glGetUniformLocation(p, "uFogEnd", 7);
 		s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
 		s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
+		s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
 		s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
 		s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
 		s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
 		s_gl.bb_pipe.aLocalPos      = glGetAttribLocation(p, "a_local_pos", 11);
+		s_gl.bb_pipe.aQuadUV        = glGetAttribLocation(p, "a_quad_uv", 9);
+		s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
 	}
 
 	init_grid_buffers();
 	s_gl.initialized = true;
+}
+
+void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
+{
+	s_gl.cur_lamb_light[0] = wx;
+	s_gl.cur_lamb_light[1] = wy;
+	s_gl.cur_lamb_light[2] = wz;
+	s_gl.cur_lamb_light[3] = (intensity > 0.0f) ? intensity : 0.0f;
+}
+
+float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
+                                  float lamb_wx, float lamb_wy, float lamb_wz,
+                                  float intensity)
+{
+	if (intensity <= 0.001f)
+		return 0.0f;
+	float dx = lamb_wx - frag_wx;
+	float dy = lamb_wy - frag_wy;
+	float dz = (lamb_wz + 10.0f) - frag_wz;
+	float d2 = dx * dx + dy * dy + dz * dz;
+	float r_max2 = 220.0f * 220.0f;
+	float r_min2 = 28.0f * 28.0f;
+	float t = (d2 - r_max2) / (r_min2 - r_max2);
+	if (t < 0.0f) t = 0.0f;
+	if (t > 1.0f) t = 1.0f;
+	float smooth_falloff = t * t * (3.0f - 2.0f * t);
+	float atten = (1.0f / (1.0f + d2 * 0.00055f)) * smooth_falloff;
+	return intensity * 0.24f * atten;
 }
 
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
@@ -2400,12 +2756,25 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	}
 
 	static nd_seven_gl_bb_vert_t bb_verts[MAX_BB_VERTS];
-	uint32_t n_quads = (count * 6 > MAX_BB_VERTS) ? (MAX_BB_VERTS / 6) : count;
+	uint32_t out_verts_count = 0;
+	bool emit_shadows = (s_gl.cur_dist < 4500.0f);
 
-	for (uint32_t i = 0; i < n_quads; i++) {
+	for (uint32_t i = 0; i < count; i++) {
+		bool want_shadow = emit_shadows && (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
+		uint32_t needed = want_shadow ? 12u : 6u;
+		if (out_verts_count + needed > MAX_BB_VERTS)
+			break;
+		if (want_shadow) {
+			eval_billboard_shadow_quad_with_origin(&batch[i], &s_gl.cur_pdef,
+			                                       s_gl.cur_origin, &bb_verts[out_verts_count]);
+			out_verts_count += 6u;
+		}
 		eval_billboard_quad_with_origin(&batch[i], s_gl.cur_pitch_deg, &s_gl.cur_pdef,
-		                                s_gl.cur_origin, &bb_verts[i * 6]);
+		                                s_gl.cur_origin, &bb_verts[out_verts_count]);
+		out_verts_count += 6u;
 	}
+	if (out_verts_count == 0)
+		return;
 
 	glUseProgram(s_gl.bb_pipe.prog);
 	glEnable(GL_DEPTH_TEST);
@@ -2435,7 +2804,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glUniform1f(s_gl.bb_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
-	glBufferData(GL_ARRAY_BUFFER, bb_verts, n_quads * 6 * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, bb_verts, out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), 0);
@@ -2449,11 +2818,19 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glEnableVertexAttribArray(3);
 	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)36);
 
-	glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(n_quads * 6));
+	glEnableVertexAttribArray(4);
+	glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)48);
+
+	glEnableVertexAttribArray(5);
+	glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)64);
+
+	glDrawArrays(GL_TRIANGLES, 0, (GLsizei)out_verts_count);
 
 	glDisableVertexAttribArray(1);
 	glDisableVertexAttribArray(2);
 	glDisableVertexAttribArray(3);
+	glDisableVertexAttribArray(4);
+	glDisableVertexAttribArray(5);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
 }
@@ -2767,5 +3144,77 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
 	if (out_crest) *out_crest = crest;
 	return h;
 }
+
+float nd_seven_gl_eval_billboard_lighting(float qx, float qy,
+                                          float wx, float wz, float ground_z,
+                                          float cam_dist,
+                                          float out_normal[3],
+                                          float *out_contact_ao)
+{
+	float c_qx = qx < -1.0f ? -1.0f : (qx > 1.0f ? 1.0f : qx);
+	float c_qy = qy <  0.0f ?  0.0f : (qy > 1.0f ? 1.0f : qy);
+
+	float dist_fade = 1.0f - (cam_dist - 900.0f) / 2400.0f;
+	if (dist_fade < 0.0f) dist_fade = 0.0f;
+	if (dist_fade > 1.0f) dist_fade = 1.0f;
+
+	float g1_v = 0.5f, g1_x = 0.0f, g1_y = 0.0f;
+	float g2_v = 0.5f, g2_x = 0.0f, g2_y = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.24f, wz * 0.24f, 0xA341316Cu, &g1_v, &g1_x, &g1_y);
+	if (dist_fade > 0.01f) {
+		gl_chaff_grad_noise2d(wx * 0.78f + 17.3f, wz * 0.78f - 29.1f, 0xC8013EA4u, &g2_v, &g2_x, &g2_y);
+	}
+
+	float micro_h = (g1_v - 0.5f) * 0.26f + (g2_v - 0.5f) * 0.16f * dist_fade;
+	float mg_x = g1_x * 0.22f + g2_x * (0.32f * dist_fade);
+	float mg_y = g1_y * 0.22f + g2_y * (0.32f * dist_fade);
+
+	float cav1 = (0.48f - g1_v) > 0.0f ? (0.48f - g1_v) * 0.42f : 0.0f;
+	float cav2 = (0.48f - g2_v) > 0.0f ? (0.48f - g2_v) * 0.32f * dist_fade : 0.0f;
+	float micro_cavity = cav1 + cav2;
+	if (micro_cavity > 0.34f) micro_cavity = 0.34f;
+
+	float pnx = c_qx * 0.65f;
+	float pny = 0.55f - 0.15f * c_qy;
+	float pnz = 0.22f + 0.68f * c_qy;
+	float plen = sqrtf(pnx * pnx + pny * pny + pnz * pnz);
+	if (plen > 1e-6f) {
+		pnx /= plen; pny /= plen; pnz /= plen;
+	}
+
+	float nx = pnx - mg_x * 0.38f;
+	float ny = pny;
+	float nz = pnz - mg_y * 0.38f;
+	float nlen = sqrtf(nx * nx + ny * ny + nz * nz);
+	if (nlen > 1e-6f) {
+		nx /= nlen; ny /= nlen; nz /= nlen;
+	}
+	if (out_normal) {
+		out_normal[0] = nx;
+		out_normal[1] = ny;
+		out_normal[2] = nz;
+	}
+
+	/* Northwest directional sun: normalize(-0.577, -0.577, 0.816) */
+	const float lx = -0.509184f;
+	const float ly = -0.509184f;
+	const float lz =  0.693954f;
+	float sun_diff = nx * lx + ny * ly + nz * lz;
+	if (sun_diff < 0.0f) sun_diff = 0.0f;
+
+	float cavity_ao = 1.0f + micro_h * 0.28f - micro_cavity;
+	if (cavity_ao < 0.68f) cavity_ao = 0.68f;
+	if (cavity_ao > 1.15f) cavity_ao = 1.15f;
+
+	float h_above = (wz - ground_z) > 0.0f ? (wz - ground_z) : 0.0f;
+	float contact_ao = 0.68f + 0.32f * gl_smoothstep(0.0f, 5.5f, h_above);
+	if (out_contact_ao) *out_contact_ao = contact_ao;
+
+	float hemi_sky = 0.5f + 0.5f * nz;
+	float amb_luma = 0.55f + 0.18f * hemi_sky;
+	float light_scalar = (amb_luma * 0.52f + 1.01f * (0.58f * sun_diff)) * (cavity_ao * contact_ao);
+	return 0.22f + 0.78f * light_scalar;
+}
+
 
 
