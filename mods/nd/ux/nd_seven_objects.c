@@ -405,6 +405,8 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 			}
 		}
 	}
+	if (ND_PLANT_UNPACK_PRESENT(o->plant_id))
+		return s_nd_plant_specs[ND_PLANT_UNPACK_IDX(o->plant_id)].name;
 	const nd_scenery_def_t *def = nd_seven_get_scenery_def(o->kind);
 	if (def && def->default_name)
 		return def->default_name;
@@ -959,10 +961,15 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 		so->big = raw_objs[i].big;
 		so->is_entity = 0;
 		so->harvested = 0;
+		so->plant_id = raw_objs[i].plant_id;
+		so->col_mask = raw_objs[i].col_mask;
+		so->hw = raw_objs[i].hw;
+		so->hh = raw_objs[i].hh;
 		so->entity_ref = 0;
 		so->flip = 0;
 		so->sprite_id = 0;
 		so->name[0] = '\0';
+		so->art[0] = '\0';
 
 		if (ti == 0 && tj == 0) {
 			const room_tracker_t *tr = nd_seven_get_tracker();
@@ -972,6 +979,14 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 					so->harvested = 1;
 				if (tr->objs[i].name[0])
 					snprintf(so->name, sizeof(so->name), "%s", tr->objs[i].name);
+				if (so->entity_ref && ents) {
+					for (size_t ei = 0; ei < ent_count; ei++) {
+						if (ents[ei].ref == so->entity_ref && ents[ei].art[0]) {
+							snprintf(so->art, sizeof(so->art), "%s", ents[ei].art);
+							break;
+						}
+					}
+				}
 			} else {
 				if (!is_tracked_obj_present(st, i))
 					so->harvested = 1;
@@ -1075,10 +1090,15 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 			so->big = 0;
 			so->is_entity = 1;
 			so->harvested = 0;
+			so->plant_id = 0;
+			so->col_mask = 0;
+			so->hw = 0;
+			so->hh = 0;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);
 			snprintf(so->name, sizeof(so->name), "%s", e->name);
+			snprintf(so->art, sizeof(so->art), "%s", e->art);
 			out->obj_count++;
 		}
 	}
@@ -1134,10 +1154,15 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 		so->big = raw_objs[i].big;
 		so->is_entity = 0;
 		so->harvested = 0;
+		so->plant_id = raw_objs[i].plant_id;
+		so->col_mask = raw_objs[i].col_mask;
+		so->hw = raw_objs[i].hw;
+		so->hh = raw_objs[i].hh;
 		so->entity_ref = 0;
 		so->flip = 0;
 		so->sprite_id = 0;
 		so->name[0] = '\0';
+		so->art[0] = '\0';
 
 		if (is_player_tile && tr && i < tr->count) {
 			so->entity_ref = tr->objs[i].entity_ref;
@@ -1206,10 +1231,15 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 			so->big = 0;
 			so->is_entity = 1;
 			so->harvested = 0;
+			so->plant_id = 0;
+			so->col_mask = 0;
+			so->hw = 0;
+			so->hh = 0;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);
 			snprintf(so->name, sizeof(so->name), "%s", e->name);
+			snprintf(so->art, sizeof(so->art), "%s", e->art);
 			out->obj_count++;
 		}
 	}

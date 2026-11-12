@@ -155,6 +155,10 @@ ndw_tile_t nd_seven_convert_tile(const nd_map_tile_t *m)
 	if ((m->flags & ND_MAP_FLAG_WATER) || m->bio_idx == 0) t.flags |= NDW_F_WATER;
 	t.glyph[0] = m->side_l; t.glyph[1] = m->symbol; t.glyph[2] = m->side_r;
 	t.fg[0] = m->fg_l & 15; t.fg[1] = m->fg & 15; t.fg[2] = m->fg_r & 15;
+	for (int s = 0; s < 3; s++) {
+		t.plant_id[s] = m->plant_id[s];
+		t.col_mask[s] = m->col_mask[s];
+	}
 	return t;
 }
 
@@ -187,7 +191,13 @@ static void centre_remember(const nd_client_state_t *st, const int16_t pos[4], n
 	centre_ent_t *e = centre_find(set, pos);
 
 	if (t->glyph[1] == '!') {
-		if (e) {
+		if (ND_PLANT_UNPACK_PRESENT(t->plant_id[1])) {
+			unsigned sp_idx = ND_PLANT_UNPACK_IDX(t->plant_id[1]);
+			unsigned is_big = ND_PLANT_UNPACK_BIG(t->plant_id[1]);
+			const nd_plant_spec_t *sp = &s_nd_plant_specs[sp_idx];
+			t->glyph[1] = (uint8_t)(is_big ? sp->big : sp->small);
+			t->fg[1] = sp->fg;
+		} else if (e) {
 			t->glyph[1] = e->glyph;
 			t->fg[1] = e->fg;
 		} else {

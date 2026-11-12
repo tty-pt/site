@@ -97,22 +97,7 @@ bud_node *render_action_bar(const nd_client_state_t *st)
 	nd_ui_glue_contribute(ND_UI_SLOT_ACTIONS, dock, st);
 
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
-	bud_append(dock, make_btn("👁", "Look", on_action_look));
-
-	int allow_choice = !st || !(st->pres_flags & ND_REGION_LOCKED);
-	if (g_driver_count > 1 && allow_choice) {
-		int next_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
-		const char *icon = "📺";
-		if (g_viewport_drivers[next_idx].id) {
-			if (strstr(g_viewport_drivers[next_idx].id, "lamina"))
-				icon = "🎮";
-			else if (strstr(g_viewport_drivers[next_idx].id, "webgl") || strstr(g_viewport_drivers[next_idx].id, "3d"))
-				icon = "🧊";
-		}
-		bud_node *vbtn = make_btn(icon, "Switch Viewport", on_cycle_viewport);
-		bud_set_attr(vbtn, "data-bud-action", "cycle-viewport");
-		bud_append(dock, vbtn);
-	}
+	bud_append(dock, make_btn("👁️", "Look", on_action_look));
 
 	return dock;
 }

@@ -151,47 +151,254 @@ nd-stage,
 
 #map-overlay {
     z-index: 30 !important;
+    inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    padding: 28px 12px 76px 12px !important;
+    overflow: visible !important;
+}
+
+#map-overlay [data-bud-key="contents"] {
+    flex: 0 1 auto !important;
+    max-height: 36vh;
+    overflow: visible !important;
+}
+
+#map-overlay [data-bud-key="gauges-dock"] {
+    position: absolute !important;
+    bottom: 76px;
+    right: 16px;
+    width: 228px !important;
+    max-width: 228px !important;
+}
+
+#map-overlay .hud-win[style*="left:"] {
+    position: absolute !important;
+    z-index: 35 !important;
+}
+
+#map-overlay .hud-win[style*="height:"] {
+    max-height: none !important;
+}
+
+/* Unified Floating HUD Windows & Auto-Hiding Hover Toolbars */
+.hud-win {
+    position: relative;
+    display: flex !important;
+    flex-direction: column !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.hud-win:hover,
+.hud-win.hud-win-dragging {
+    border-color: rgba(194, 179, 255, 0.65) !important;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45) !important;
+}
+
+.hud-win-toolbar {
+    position: absolute !important;
+    top: -24px !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: 24px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    padding: 0 8px !important;
+    opacity: 0;
+    overflow: hidden !important;
+    pointer-events: none;
+    background: rgba(14, 16, 24, 0.72) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.32) !important;
+    border-bottom: none !important;
+    border-radius: 6px 6px 0 0 !important;
+    font-size: 11px !important;
+    user-select: none !important;
+    cursor: move !important;
+    transition: opacity 0.14s ease !important;
+    box-sizing: border-box !important;
+    z-index: 45 !important;
+}
+
+.hud-win:hover > .hud-win-toolbar,
+.hud-win.hud-win-dragging > .hud-win-toolbar {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+.hud-win.hud-win-minimized,
+.hud-win.chat-minimized {
+    display: none !important;
 }
 
 /* Floating RPG Chat Terminal */
 .rpg-chat {
     position: absolute !important;
-    bottom: 16px !important;
-    left: 16px !important;
+    bottom: 16px;
+    left: 16px;
     z-index: 20 !important;
     display: flex !important;
     flex-direction: column !important;
     pointer-events: auto !important;
-    background: rgba(12, 14, 20, 0.75) !important;
-    backdrop-filter: blur(8px) !important;
-    -webkit-backdrop-filter: blur(8px) !important;
-    border: 1px solid rgba(149, 137, 197, 0.4) !important;
+    background: rgba(10, 12, 18, 0.22) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.24) !important;
     border-radius: 8px !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
-    overflow: hidden !important;
-    width: 480px !important;
-    max-width: calc(100vw - 32px) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+    overflow: visible !important;
+    resize: both;
+    width: 50vw;
+    min-width: 260px !important;
+    max-width: 95vw !important;
 }
 
 .rpg-chat.chat-compact {
-    height: 180px !important;
+    height: 180px;
+    min-height: 110px !important;
+    max-height: calc(100vh - 80px) !important;
 }
 
 .rpg-chat.chat-expanded {
-    height: 420px !important;
-    max-height: calc(100vh - 100px) !important;
+    height: 420px;
+    min-height: 140px !important;
+    max-height: calc(100vh - 80px) !important;
 }
 
-.chat-header {
+/* 8-Way Edge & Corner Resize Handles (active on window hover or drag) */
+.chat-resize-handle {
+    position: absolute !important;
+    z-index: 34 !important;
+    user-select: none !important;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.hud-win:hover > .chat-resize-handle,
+.hud-win.hud-win-dragging > .chat-resize-handle {
+    pointer-events: auto !important;
+    opacity: 1;
+}
+
+.chat-resize-n {
+    top: 0 !important;
+    left: 10px !important;
+    right: 10px !important;
+    height: 6px !important;
+    cursor: ns-resize !important;
+}
+
+.chat-resize-s {
+    bottom: 0 !important;
+    left: 10px !important;
+    right: 10px !important;
+    height: 6px !important;
+    cursor: ns-resize !important;
+}
+
+.chat-resize-e {
+    top: 10px !important;
+    right: 0 !important;
+    bottom: 10px !important;
+    width: 6px !important;
+    cursor: ew-resize !important;
+}
+
+.chat-resize-w {
+    top: 10px !important;
+    left: 0 !important;
+    bottom: 10px !important;
+    width: 6px !important;
+    cursor: ew-resize !important;
+}
+
+.chat-resize-ne {
+    top: 0 !important;
+    right: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nesw-resize !important;
+}
+
+.chat-resize-nw {
+    top: 0 !important;
+    left: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nwse-resize !important;
+}
+
+.chat-resize-se {
+    bottom: 0 !important;
+    right: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nwse-resize !important;
+}
+
+.chat-resize-sw {
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 10px !important;
+    height: 10px !important;
+    z-index: 36 !important;
+    cursor: nesw-resize !important;
+}
+
+.hud-win.hud-win-dragging,
+.hud-win.hud-win-dragging *,
+.rpg-chat.chat-resizing,
+.rpg-chat.chat-resizing * {
+    user-select: none !important;
+}
+
+.hud-win.hud-win-dragging #term,
+.rpg-chat.chat-resizing #term {
+    pointer-events: none !important;
+}
+
+.chat-controls {
     display: flex !important;
     align-items: center !important;
-    justify-content: space-between !important;
-    padding: 4px 8px !important;
-    background: rgba(25, 27, 36, 0.85) !important;
-    border-bottom: 1px solid rgba(149, 137, 197, 0.3) !important;
+    gap: 4px !important;
+}
+
+.chat-ctrl-btn {
+    width: 20px !important;
+    height: 20px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 4px !important;
+    background: rgba(35, 38, 55, 0.85) !important;
+    color: #e2e8f0 !important;
+    border: 1px solid rgba(149, 137, 197, 0.38) !important;
     font-size: 11px !important;
+    line-height: 1 !important;
     cursor: pointer !important;
-    user-select: none !important;
+    transition: all 0.15s ease !important;
+    padding: 0 !important;
+}
+
+.chat-ctrl-btn:hover {
+    background: rgba(58, 62, 90, 0.98) !important;
+    border-color: rgba(194, 179, 255, 0.9) !important;
+    color: #ffffff !important;
 }
 
 #rpg-chat #term {
@@ -201,52 +408,212 @@ nd-stage,
     height: 100% !important;
     position: relative !important;
     background: transparent !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
 }
 
-/* Floating RPG HUD Panels */
+#rpg-chat .xterm-viewport {
+    background-color: transparent !important;
+}
+
+#rpg-chat .xterm-rows {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 4px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* Top-Center High-Contrast Room Header Window (Seven Mode) */
+#room-header.seven-room-header {
+    position: absolute !important;
+    top: 26px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25 !important;
+    pointer-events: auto !important;
+    font-family: "Lucida Console", Monaco, monospace !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.03em !important;
+    color: #f8fafc !important;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.85), 0 1px 2px #000000 !important;
+    background: rgba(10, 12, 18, 0.16) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.20) !important;
+    border-radius: 14px !important;
+    padding: 0 !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+}
+
+.seven-room-title-body {
+    padding: 4px 14px !important;
+    text-align: center !important;
+}
+
+/* Floating RPG HUD Panels (Look-At, Room Contents, Gauges) */
 .rpg-hud-panel {
-    background: rgba(10, 10, 15, 0.75) !important;
-    backdrop-filter: blur(6px) !important;
-    -webkit-backdrop-filter: blur(6px) !important;
-    border: 1px solid rgba(149, 137, 197, 0.4) !important;
+    background: rgba(10, 12, 18, 0.20) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
     border-radius: 6px !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28) !important;
     box-sizing: border-box !important;
 }
 
-/* Floating Bottom-Right Actions Dock */
+/* Unified Minimap / Look-At Window: Transparent background by default, swaps to Look-At target card */
+#hud-win-map,
+#hud-win-map.rpg-hud-panel {
+    position: absolute !important;
+    top: 28px;
+    right: 12px;
+    width: 220px;
+    height: 220px;
+    min-width: 140px !important;
+    min-height: 140px !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+}
+
+#hud-win-map:hover,
+#hud-win-map.hud-win-dragging {
+    border-color: rgba(194, 179, 255, 0.45) !important;
+    box-shadow: none !important;
+}
+
+#hud-win-map > .hud-win-body {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    border-radius: 6px !important;
+}
+
+#hud-win-map #room-map {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+#hud-win-map #room-map,
+#hud-win-map #room-map-canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+}
+
+#hud-win-map #room-map-canvas {
+    opacity: 0.78 !important;
+    border-radius: 6px !important;
+}
+
+#hud-win-map #target-card,
+#hud-win-map #target-card .target-art {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    aspect-ratio: auto !important;
+    border-radius: 6px !important;
+    overflow: hidden !important;
+}
+
+#hud-win-map #target-card .target-close {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: absolute !important;
+    top: 6px !important;
+    right: 6px !important;
+    width: 24px !important;
+    height: 24px !important;
+    border-radius: 9999px !important;
+    background: rgba(12, 14, 22, 0.78) !important;
+    border: 1px solid rgba(194, 179, 255, 0.55) !important;
+    color: #f8fafc !important;
+    font-size: 12px !important;
+    line-height: 1 !important;
+    z-index: 5 !important;
+    cursor: pointer !important;
+}
+
+#hud-win-map #target-card .target-close:hover {
+    background: rgba(189, 74, 106, 0.85) !important;
+    border-color: #ffffff !important;
+}
+
+/* Permanent Toolbar-Free Bottom-Right Actions Dock & Bottom-Left Closed-Windows Launcher Dock */
 #bottom-right-actions {
     position: absolute !important;
     bottom: 16px !important;
     right: 16px !important;
     z-index: 25 !important;
     display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 0 !important;
+    background: rgba(10, 12, 18, 0.18) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+    pointer-events: auto !important;
+    overflow: visible !important;
+}
+
+#bottom-left-windows {
+    position: absolute !important;
+    bottom: 16px;
+    left: 16px;
+    z-index: 26 !important;
+    display: flex !important;
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     align-items: center !important;
     gap: 8px !important;
-    padding: 0 !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
+    padding: 6px 10px !important;
+    background: rgba(10, 12, 18, 0.18) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
     pointer-events: auto !important;
+}
+
+#bottom-left-windows.hidden {
+    display: none !important;
+}
+
+#holder:has(#bottom-left-windows:not(.hidden)) .rpg-chat:not([style*="top:"]) {
+    bottom: 72px;
+}
+
+#bottom-right-actions > .hud-win-body {
+    padding: 6px 10px !important;
 }
 
 #bottom-right-actions #g-actions {
     display: flex !important;
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     gap: 8px !important;
     align-items: center !important;
     justify-content: center !important;
 }
 
 #bottom-right-actions .btn,
-#bottom-right-actions button,
-#bottom-right-actions nd-button {
-    background: linear-gradient(135deg, rgba(35, 38, 55, 0.95), rgba(20, 22, 32, 0.95)) !important;
+#bottom-right-actions button.nd-pad,
+#bottom-right-actions nd-button,
+#bottom-left-windows .btn,
+#bottom-left-windows button.nd-pad {
+    background: linear-gradient(135deg, rgba(35, 38, 55, 0.85), rgba(20, 22, 32, 0.85)) !important;
     color: #f3f4f6 !important;
-    border: 1px solid rgba(149, 137, 197, 0.4) !important;
+    border: 1px solid rgba(149, 137, 197, 0.36) !important;
     width: 38px !important;
     height: 38px !important;
     min-width: 38px !important;
@@ -256,16 +623,20 @@ nd-stage,
     align-items: center !important;
     justify-content: center !important;
     font-size: 18px !important;
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Lucida Console", Monaco, monospace !important;
+    font-variant-emoji: emoji !important;
     cursor: pointer !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
     transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
     user-select: none !important;
 }
 
 #bottom-right-actions .btn:hover,
-#bottom-right-actions button:hover,
-#bottom-right-actions nd-button:hover {
-    background: linear-gradient(135deg, rgba(58, 62, 90, 1), rgba(30, 34, 52, 1)) !important;
+#bottom-right-actions button.nd-pad:hover,
+#bottom-right-actions nd-button:hover,
+#bottom-left-windows .btn:hover,
+#bottom-left-windows button.nd-pad:hover {
+    background: linear-gradient(135deg, rgba(58, 62, 90, 0.98), rgba(30, 34, 52, 0.98)) !important;
     border-color: rgba(194, 179, 255, 0.85) !important;
     transform: translateY(-2px) scale(1.05) !important;
     box-shadow: 0 4px 14px rgba(149, 137, 197, 0.45) !important;
@@ -273,22 +644,421 @@ nd-stage,
 }
 
 #bottom-right-actions .btn:active,
-#bottom-right-actions button:active,
-#bottom-right-actions nd-button:active {
+#bottom-right-actions button.nd-pad:active,
+#bottom-right-actions nd-button:active,
+#bottom-left-windows .btn:active,
+#bottom-left-windows button.nd-pad:active {
     transform: translateY(0) scale(0.96) !important;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Allow room contents to grow vertically in 2D mode and in RPG HUD panels */
+/* Room Contents HUD Window: Larger Default Size, Scrollable Body, Round Avatars & Unclipped Popper-Style Action Dropdown */
+#hud-win-contents {
+    position: absolute !important;
+    top: 256px;
+    right: 12px;
+    width: 300px;
+    height: 240px;
+    min-width: 200px !important;
+    max-width: 90vw !important;
+    min-height: 120px !important;
+    max-height: 36vh;
+    padding: 8px 10px !important;
+    flex: 0 1 auto !important;
+    overflow: visible !important;
+    z-index: 32 !important;
+}
+
+#hud-win-contents:hover,
+#hud-win-contents:has(.nd-item-popper) {
+    z-index: 48 !important;
+}
+
+#hud-win-contents > .hud-win-body {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+}
+
+#hud-win-contents[style*="height:"] {
+    max-height: none !important;
+}
+
 .game-2d-mode nd-contents,
 .game-2d-mode .nd-contents,
 .rpg-hud-panel nd-contents,
 .rpg-hud-panel .nd-contents,
 #holder.game-2d-mode nd-contents,
-#holder.game-2d-mode .nd-contents {
-    max-height: none !important;
-    flex: 1 1 auto !important;
-    height: auto !important;
-    overflow-y: visible !important;
+#holder.game-2d-mode .nd-contents,
+#hud-win-contents nd-contents,
+#hud-win-contents .nd-contents {
+    min-height: 0 !important;
+    max-height: 100% !important;
+    flex: 1 1 0% !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    gap: 5px !important;
 }
+
+#contents nd-item,
+#hud-win-contents nd-item {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 6px 8px !important;
+    border-radius: 8px !important;
+    font-size: 12px !important;
+    line-height: 1.3 !important;
+    min-height: 54px !important;
+    flex-shrink: 0 !important;
+    position: relative !important;
+    overflow: hidden !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease !important;
+    border: 1px solid transparent !important;
+}
+
+#contents nd-item:hover,
+#hud-win-contents nd-item:hover {
+    background-color: rgba(25, 28, 42, 0.45) !important;
+    border-color: rgba(149, 137, 197, 0.28) !important;
+}
+
+#contents nd-item.ctb,
+#hud-win-contents nd-item.ctb {
+    background-color: rgba(35, 38, 58, 0.72) !important;
+    border-color: rgba(194, 179, 255, 0.65) !important;
+    z-index: 40 !important;
+}
+
+#contents nd-avatar,
+#hud-win-contents nd-avatar {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: relative !important;
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    border-radius: 9999px !important;
+    overflow: hidden !important;
+    flex-shrink: 0 !important;
+    background: radial-gradient(circle at 35% 35%, #232638 0%, #0d0f17 75%, #05060a 100%) !important;
+    border: 1.5px solid rgba(149, 137, 197, 0.48) !important;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.85), 0 2px 6px rgba(0, 0, 0, 0.5) !important;
+}
+
+#contents nd-avatar .nd-glyph,
+#hud-win-contents nd-avatar .nd-glyph {
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    z-index: 1 !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95) !important;
+}
+
+#contents nd-avatar img,
+#hud-win-contents nd-avatar img {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    border-radius: 9999px !important;
+    z-index: 2 !important;
+}
+
+.nd-item-caret {
+    font-size: 11px !important;
+    color: rgba(194, 179, 255, 0.78) !important;
+    margin-left: auto !important;
+    padding-left: 4px !important;
+}
+
+/* Popper-style Floating Per-Item Action Dropdown Menu (Mounted directly on #hud-win-contents outside scrollport) */
+.nd-item-popup.nd-item-popper {
+    position: absolute !important;
+    right: 10px !important;
+    min-width: 124px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 3px !important;
+    padding: 5px !important;
+    background: rgba(14, 16, 26, 0.96) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    border: 1px solid rgba(168, 155, 224, 0.65) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.82), 0 0 0 1px rgba(0, 0, 0, 0.55) !important;
+    z-index: 95 !important;
+}
+
+.nd-item-popup.nd-item-popper::before {
+    content: "" !important;
+    position: absolute !important;
+    top: -5px !important;
+    right: 14px !important;
+    width: 8px !important;
+    height: 8px !important;
+    background: rgba(14, 16, 26, 0.96) !important;
+    border-top: 1px solid rgba(168, 155, 224, 0.65) !important;
+    border-left: 1px solid rgba(168, 155, 224, 0.65) !important;
+    transform: rotate(45deg) !important;
+    pointer-events: none !important;
+}
+
+.nd-popper-item {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 6px !important;
+    width: 100% !important;
+    padding: 5px 10px !important;
+    border-radius: 5px !important;
+    background: transparent !important;
+    color: #f1f5f9 !important;
+    border: 1px solid transparent !important;
+    font-family: "Lucida Console", Monaco, monospace, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji" !important;
+    font-variant-emoji: emoji !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
+    box-shadow: none !important;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease !important;
+}
+
+.nd-popper-item:hover {
+    background: rgba(149, 137, 197, 0.25) !important;
+    border-color: rgba(194, 179, 255, 0.55) !important;
+    color: #ffffff !important;
+}
+
+#hud-win-contents .nd-empty {
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    opacity: 0.78 !important;
+}
+
+/* Redesigned RPG Modals: Equipment (Round Recessed Black-Hole Sockets), Character Sheet (Stats), and Grimoire (Spellbook) */
+.modal {
+    backdrop-filter: blur(3px) !important;
+    -webkit-backdrop-filter: blur(3px) !important;
+}
+
+#equipment,
+#stats,
+#spell {
+    background: linear-gradient(160deg, rgba(24, 26, 38, 0.96) 0%, rgba(12, 14, 22, 0.98) 100%) !important;
+    border: 1px solid #9589c5 !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 24px rgba(149, 137, 197, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    color: #f1f5f9 !important;
+    box-sizing: border-box !important;
+}
+
+#spell {
+    border-radius: 0px !important;
+    padding: 14px 16px !important;
+    min-width: 310px !important;
+}
+
+#equipment,
+#stats {
+    border-radius: 10px !important;
+    padding: 16px 20px !important;
+    width: max-content !important;
+    height: auto !important;
+}
+
+#equipment {
+    min-width: 230px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+}
+
+/* Override legacy #equipment>*>* { width: 24px; height: 24px; padding: 8px } rule from line 1 */
+#equipment > *,
+#equipment > * > *,
+#equipment .rpg-modal-header,
+#equipment .rpg-modal-header > * {
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+#equipment .rpg-modal-header {
+    width: 100% !important;
+    padding-bottom: 8px !important;
+}
+
+/* Equipment Paper-Doll: Round Recessed Black-Hole Sockets */
+#equipment .equip-doll-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 4px 0 !important;
+}
+
+#equipment .equip-doll-row {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 12px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 52px !important;
+    padding: 0 !important;
+}
+
+#equipment .equip-socket,
+#equipment [data-slot] {
+    flex: 0 0 52px !important;
+    width: 52px !important;
+    height: 52px !important;
+    min-width: 52px !important;
+    min-height: 52px !important;
+    padding: 0 !important;
+    border-radius: 9999px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    background: radial-gradient(circle at 50% 50%, #010103 0%, #05060b 52%, #121422 82%, #242842 100%) !important;
+    border: 1.5px solid rgba(149, 137, 197, 0.35) !important;
+    box-shadow: inset 0 5px 12px rgba(0, 0, 0, 0.98), inset 0 0 10px rgba(0, 0, 0, 0.95), 0 2px 6px rgba(0, 0, 0, 0.65) !important;
+    transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease !important;
+}
+
+#equipment .equip-socket:hover,
+#equipment [data-slot]:hover {
+    border-color: rgba(194, 179, 255, 0.9) !important;
+    transform: scale(1.06) !important;
+    box-shadow: inset 0 5px 12px rgba(0, 0, 0, 0.98), 0 0 14px rgba(149, 137, 197, 0.55) !important;
+}
+
+#equipment .equip-socket-filled {
+    background: radial-gradient(circle at 40% 35%, #2d2654 0%, #15122b 62%, #070610 100%) !important;
+    border: 1.5px solid #c2b3ff !important;
+    box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.85), 0 0 12px rgba(149, 137, 197, 0.5) !important;
+    color: #ffffff !important;
+}
+
+#equipment .equip-socket-hint {
+    font-size: 16px !important;
+    opacity: 0.28 !important;
+    filter: grayscale(40%) !important;
+    user-select: none !important;
+}
+
+#equipment .equip-socket-ref {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    color: #e9d5ff !important;
+    text-shadow: 0 1px 3px #000000 !important;
+}
+
+#equipment .equip-socket-spacer {
+    flex: 0 0 52px !important;
+    width: 52px !important;
+    height: 52px !important;
+    min-width: 52px !important;
+    min-height: 52px !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+}
+
+/* Character Sheet (#stats) Styling */
+#stats .stats-cols-wrap {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 20px !important;
+    width: 100% !important;
+}
+
+#stats .rpg-stat-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    flex: 1 1 0% !important;
+    min-width: 125px !important;
+}
+
+#stats .rpg-stat-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    padding: 4px 8px !important;
+    background: rgba(10, 12, 20, 0.55) !important;
+    border: 1px solid rgba(149, 137, 197, 0.20) !important;
+    border-radius: 6px !important;
+}
+
+#stats .rpg-stat-label {
+    color: #cbd5e1 !important;
+    font-size: 11px !important;
+}
+
+#stats .rpg-stat-val {
+    background: rgba(149, 137, 197, 0.20) !important;
+    border: 1px solid rgba(194, 179, 255, 0.35) !important;
+    color: #f8fafc !important;
+    padding: 1px 7px !important;
+    border-radius: 9999px !important;
+    font-size: 11px !important;
+    min-width: 24px !important;
+    text-align: center !important;
+}
+
+/* Grimoire (#spell) Arcane Spellbook Styling */
+#spell [data-spell-slot]:not(.hidden) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+    padding: 7px 10px !important;
+    margin-bottom: 2px !important;
+    background: rgba(14, 16, 26, 0.65) !important;
+    border: 1px solid rgba(149, 137, 197, 0.24) !important;
+    border-radius: 6px !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease !important;
+}
+
+#spell [data-spell-slot]:not(.hidden):not([data-disabled="1"]):hover {
+    background: rgba(45, 40, 78, 0.72) !important;
+    border-color: rgba(194, 179, 255, 0.75) !important;
+    transform: translateX(2px) !important;
+}
+
+#spell [data-spell-slot] > span:last-child {
+    background: rgba(20, 24, 38, 0.85) !important;
+    border: 1px solid rgba(115, 137, 189, 0.45) !important;
+    padding: 2px 8px !important;
+    border-radius: 9999px !important;
+    font-size: 11px !important;
+}
+
+nd-avatar img,
+#target-card img {
+    image-rendering: pixelated;
+    object-fit: contain;
+}
+
 

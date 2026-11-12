@@ -80,12 +80,12 @@ defaults to `all: dirs $(TARGET) $(WASM_TARGETS)`. `VERSION_GEN`
 
 `PROFILE` (`dev` default, `release` → `-O2 -DNDEBUG`) in `Makefile:8` + `build.mk:22` (`CFLAGS` + `WASM_CFLAGS`). `make PROFILE=release`. Top-level `make all` bootstraps `external/liblemma`, `hyle`, `hyle-source`, `bud`, `hyle-bud`, `axil`, `corm`, `libxylem` (`axil-lib`/`corm-lib`/`xylem-lib`) before `mods`. Deploy uses allowlist `Makefile:173 PROD_ASSETS`.
 
-WASM allowlist `scripts/wasm-allowed-imports.lst` (`env.bud_host_*`) wired via `build.mk:37 WASM_LDFLAGS += -Wl,--allow-undefined-file=...` and enforced by `scripts/check-wasm-imports.sh` (blocking in `make all`).
+WASM import boundary is enforced by `scripts/check-wasm-imports.sh` (blocking in `make all`).
 
 ## CSS cache bust
 
 `mods/common/ux/version.gen.h` is content-hashed from `htdocs/styles.css` +
-`hyle.css` + `bud-client.js` + `bud-hydrate.js` + `hyle-fragments.js` via
+`hyle.css` + `stele-client.js` + `bud-hydrate.js` + `hyle-fragments.js` via
 `scripts/gen-asset-version.sh` (separate hashes for CSS, client, and fragments). 
 `mods/common/ux/site_page.c:108` includes it via `__has_include` fallback
 (`SITE_CSS_V`/`SITE_CLIENT_V`/`SITE_FRAGMENTS_V`). Editing CSS/JS updates the hash on next

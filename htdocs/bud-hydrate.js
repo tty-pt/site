@@ -172,7 +172,114 @@ function buildEventPayload(info, event) {
 		}
 		return event.key || '';
 	}
+	if (event && (info.event === 'mousedown' || info.event === 'mousemove' || info.event === 'mouseup' ||
+	    info.event === 'pointerdown' || info.event === 'pointermove' || info.event === 'pointerup')) {
+		if (info.event === 'mousedown' && !info.bubbles && typeof event.preventDefault === 'function') {
+			event.preventDefault();
+		}
+		const doc = getDocumentForNode(info.node);
+		const view = doc && doc.defaultView;
+		let vw = view && view.innerWidth ? view.innerWidth : 0;
+		let vh = view && view.innerHeight ? view.innerHeight : 0;
+		const root = info.root || (info.node && info.node.ownerDocument);
+		const holder = root && typeof root.querySelector === 'function' ? root.querySelector('#holder') : null;
+		if (holder && holder.clientWidth > 0 && holder.clientHeight > 0) {
+			vw = holder.clientWidth;
+			vh = holder.clientHeight;
+		}
+		let wx = -1, wy = -1, ww = 0, wh = 0;
+		if ((info.event === 'mousedown' || info.event === 'pointerdown') && info.node && typeof info.node.closest === 'function') {
+			const winEl = info.node.closest('[data-bud-persist-key]') || info.node.closest('[data-win-id]:not([data-win-drag])');
+			if (winEl && typeof winEl.getBoundingClientRect === 'function') {
+				const r = winEl.getBoundingClientRect();
+				const isFixed = view && typeof view.getComputedStyle === 'function' && view.getComputedStyle(winEl).position === 'fixed';
+				const cEl = isFixed ? null : ((winEl.offsetParent && (!holder || holder.contains(winEl.offsetParent))) ? winEl.offsetParent : holder);
+				const cRect = cEl && typeof cEl.getBoundingClientRect === 'function' ? cEl.getBoundingClientRect() : { left: 0, top: 0 };
+				if (r && r.width > 0 && r.height > 0) {
+					wx = Math.round(r.left - (cRect.left || 0) - (cEl && cEl.clientLeft ? cEl.clientLeft : 0));
+					wy = Math.round(r.top - (cRect.top || 0) - (cEl && cEl.clientTop ? cEl.clientTop : 0));
+					ww = Math.round(r.width);
+					wh = Math.round(r.height);
+				}
+			}
+		}
+		return `${Math.round(event.clientX || 0)},${Math.round(event.clientY || 0)},${vw},${vh},${wx},${wy},${ww},${wh}`;
+	}
+	if (event && info.event === 'click' && info.node && typeof info.node.getAttribute === 'function' && info.node.getAttribute('data-item-ref')) {
+		const winEl = typeof info.node.closest === 'function'
+			? (info.node.closest('[data-bud-persist-key]') || info.node.closest('[data-win-id]:not([data-win-drag])'))
+			: null;
+		if (winEl && typeof winEl.getBoundingClientRect === 'function' && typeof info.node.getBoundingClientRect === 'function') {
+			const rowRect = info.node.getBoundingClientRect();
+			const winRect = winEl.getBoundingClientRect();
+			if (rowRect && winRect && winRect.height > 0) {
+				return String(Math.round(rowRect.bottom - winRect.top + 4));
+			}
+		}
+	}
 	return buildControlValue(event && event.target);
+}
+
+function hydratePersistNodes(root, wasm = null, memory = null) {
+	if (!root || typeof window === 'undefined' || !window.localStorage) return;
+	const list = typeof root.querySelectorAll === 'function' ? root.querySelectorAll('[data-bud-persist-key]') : [];
+	for (const el of list) {
+		const key = el.getAttribute('data-bud-persist-key');
+		if (!key) continue;
+		try {
+			const raw = window.localStorage.getItem(`bud:layout:${key}`);
+			if (!raw) continue;
+			const saved = JSON.parse(raw);
+			if (saved && typeof saved === 'object') {
+				if (typeof saved.style === 'string' && saved.style) {
+					el.setAttribute('style', saved.style);
+					el.setAttribute('data-bud-persisted-style', saved.style);
+				}
+				if (typeof saved.class === 'string' && saved.class) {
+					el.setAttribute('class', saved.class);
+					el.setAttribute('data-bud-persisted-class', saved.class);
+				}
+				const dispatchFn = getWasmExport(wasm, ['bud_app_dispatch']);
+				const malloc = getWasmExport(wasm, ['malloc']);
+				const free = getWasmExport(wasm, ['free']);
+				if (dispatchFn && malloc && memory) {
+					const nameBytes = new TextEncoder().encode('restore-persist\0');
+					const vStr = `${key}|${saved.style || ''}|${saved.class || ''}`;
+					const vBytes = new TextEncoder().encode(vStr + '\0');
+					const namePtr = malloc(nameBytes.length);
+					const vPtr = malloc(vBytes.length);
+					if (namePtr && vPtr) {
+						new Uint8Array(memory.buffer, namePtr, nameBytes.length).set(nameBytes);
+						new Uint8Array(memory.buffer, vPtr, vBytes.length).set(vBytes);
+						dispatchFn(0, namePtr, 1, vPtr);
+					}
+					if (free) {
+						if (namePtr) free(namePtr);
+						if (vPtr) free(vPtr);
+					}
+				}
+			}
+		} catch (_) {}
+	}
+}
+
+function persistNodeState(node) {
+	if (!node || node.nodeType !== Node.ELEMENT_NODE || typeof window === 'undefined' || !window.localStorage) return;
+	const key = node.getAttribute('data-bud-persist-key');
+	if (!key) return;
+	const style = node.getAttribute('style') || '';
+	const cls = node.getAttribute('class') || '';
+	try {
+		if (!style) {
+			window.localStorage.removeItem(`bud:layout:${key}`);
+			node.removeAttribute('data-bud-persisted-style');
+			node.removeAttribute('data-bud-persisted-class');
+		} else {
+			window.localStorage.setItem(`bud:layout:${key}`, JSON.stringify({ style, class: cls }));
+			node.setAttribute('data-bud-persisted-style', style);
+			node.setAttribute('data-bud-persisted-class', cls);
+		}
+	} catch (_) {}
 }
 
 function getListenerSpec(node, event) {
@@ -365,7 +472,7 @@ class BudHostBase {
 				options: spec.event === 'scroll' ? { passive: true } : false,
 				frameId: 0, lastEvent: null };
 			boundHandler = handler;
-			if (spec.event === 'scroll') {
+			if (spec.event === 'scroll' || spec.event === 'mousemove' || spec.event === 'pointermove') {
 				boundHandler = (event) => {
 					record.lastEvent = event;
 					if (record.frameId) return;
@@ -617,6 +724,9 @@ class BudHostBase {
 					if (node.getAttribute(attrName) !== attrVal) {
 						node.setAttribute(attrName, attrVal);
 					}
+					if (attrName === 'style' || attrName === 'class') {
+						persistNodeState(node);
+					}
 				}
 			}
 			return true;
@@ -730,6 +840,9 @@ class BudHostBase {
 			}
 			return true;
 		case 'patch-close':
+			if (this._currentParent && this._currentParent.nodeType === Node.ELEMENT_NODE) {
+				persistNodeState(this._currentParent);
+			}
 			this._currentParent = this._parentStack.pop() || this.root;
 			return true;
 		case 'patch-innerhtml':
@@ -737,14 +850,19 @@ class BudHostBase {
 			if (id !== null) {
 				node = this.getNode(id);
 				if (node && node.nodeType === Node.ELEMENT_NODE) {
-					walkNodes(node, (child) => {
-						if (child === node || child.nodeType !== Node.ELEMENT_NODE)
-							return;
-						const childId = parseNodeId(child.getAttribute('data-bud-id'));
-						if (childId !== null) this.unbindNode(childId);
-					});
-					node.innerHTML = op.b || '';
-					this.refreshTrackedSubtree(node);
+					if (node.querySelector && node.querySelector('[data-bud-id]')) {
+						walkNodes(node, (child) => {
+							if (child === node || child.nodeType !== Node.ELEMENT_NODE)
+								return;
+							const childId = parseNodeId(child.getAttribute('data-bud-id'));
+							if (childId !== null) this.unbindNode(childId);
+						});
+					}
+					const htmlStr = op.b || '';
+					node.innerHTML = htmlStr;
+					if (htmlStr.includes('data-bud-') || htmlStr.includes('bud-text:') || htmlStr.includes('bud-fragment:')) {
+						this.refreshTrackedSubtree(node);
+					}
 				}
 			}
 			return true;
@@ -946,6 +1064,9 @@ export class BudWasmBridge {
 	}
 
 	mount() {
+		if (this.root) {
+			hydratePersistNodes(this.root, this.wasm, this.memory);
+		}
 		const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
 		if (fn) {
 			fn();

@@ -20,17 +20,18 @@ Maintains long-lived quest state on disk (`.pi/quest/future/<qid>.md`), auto-inj
 
 ### Commands
 
-All operator commands are unified under `/quest` (with interactive tab-completion for subcommands and quest names) plus the `Alt+Q` session toggle shortcut:
+All operator commands are unified under `/quest` (with interactive tab-completion for subcommands and quest names) plus the `Alt+J` session toggle shortcut:
 
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/quest` | `/quest` | Shows the self-explaining quest status card (active quest, phase, plan path, next action, and subcommand reference), or auto-resumes a lone draft when idle. |
 | `/quest <name\|qid>` | `/quest [resume] <name\|qid>` | Switches to or resumes a quest by its readable draft name or QID. |
-| `/quest new` | `/quest new [goal]` (or `/quest chain\|next`) | Retires the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enables `pi-quest`, and starts a new quest on top of that slot's work. |
+| `/quest new` | `/quest new [goal]` (or `/quest chain\|next`) | Retires the current quest while keeping its scratch slot (`.pi/scratch/slot-N`) and branch intact, re-enables `pi-quest`, and starts a new quest on top of that slot's work (inferring the goal from prior conversation when `[goal]` is omitted or referential). |
+| `/quest finish` | `/quest finish [--keep-slot]` (or `/quest merge\|integrate`) | Completes and integrates the active quest, or squash-merges a retained scratch slot (`.pi/scratch/slot-N`) into `main` after manual testing (`--keep-slot` to keep the slot attached after squash-merging). |
 | `/quest edit` | `/quest edit` (or `/quest plan`) | Opens the active quest plan file (`.pi/quest/future/<qid>.md`) in `$EDITOR` (or `planEditor`). |
 | `/quest list` | `/quest list` (or `/quest ls`) | Lists active & draft quests in `.pi/quest/future/` with triage verdicts (`active`, `fresh`, `stale`, `orphan`, `empty-shell`), age, requirement progress, and active worktree slot. |
 | `/quest pick` | `/quest pick` (or `/quest switch`) | Interactively selects a quest to resume. |
-| `/quest pause` / `/quest on` | `/quest pause\|off\|on\|toggle` (`Alt+Q`) | Pauses, re-enables, or toggles `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). |
+| `/quest pause` / `/quest on` | `/quest pause\|off\|on [goal]\|toggle` (`Alt+J`) | Pauses, re-enables, or toggles `pi-quest` for the current session (`⏸️` in status bar; starts disabled by default unless `"enabled": true` is set in `.pi/settings.json`). Passing `/quest on [goal]` (or activating after brainstorming) starts a quest immediately using the prior conversation context. |
 | `/quest cancel` | `/quest cancel` (or `/quest cancel-review`) | Cancels any currently running in-flight review or validation and unblocks tool execution. |
 | `/quest del` | `/quest del [qid\|flags]` (or `/quest drop`) | Deletes/abandons the active quest (`--keep-slot` / `-s` to keep slot work intact, `--integrate` / `-i`, `--keep` / `-k`, `--discard` / `-d`), a named draft quest, or batch-prunes drafts (`--all`, `--stale`, `--empty`, `--orphans`, `--days N`, `--dry-run`) without creating `.zip` files. |
 | `/quest handoff` | `/quest handoff [qid]` | Generates a deterministic, honest handoff document to `.pi/quest/handoffs/<qid>-<stamp>.md` and displays it. Auto-runs on compaction. |
@@ -42,19 +43,28 @@ All operator commands are unified under `/quest` (with interactive tab-completio
 
 ### Common Operator Workflows
 
-1. **Toggle or pause quest enforcement (`Alt+Q` / `/quest off` / `/quest on`)**:
-   - Press **`Alt+Q`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation.
-   - Press **`Alt+Q`** again (or run `/quest on`) to resume the paused quest.
-2. **Continue work in the same scratch slot under a new quest (`/quest new`)**:
+1. **Brainstorm with Argon First, Then Activate a Quest (`/quest on`, `"quest: Go for it."`, `/quest new`)**:
+   - Sessions start in `idle` (or paused `⏸️`) routed to **`antigravity-acp/gemini-4-argon:high`** so you can discuss architecture, explore files, and agree on a plan conversationally without premature quest gates.
+   - Once you are happy with the understanding/plan, activate a quest with `"quest: Go for it."`, `/quest on`, `/quest on [goal]`, or `/quest new [goal]`.
+   - `pi-quest` automatically extracts the substantive objective from the prior conversation transcript (`extractPriorConversationObjective`) rather than recording `"Go for it."` literally, transitions directly into plan authoring (`.pi/quest/future/<qid>.md`), and runs the `[Drafter–Reviewer Dialogue]` in the background while you continue chatting.
+2. **Toggle or pause quest enforcement (`Alt+J` / `/quest off` / `/quest on`)**:
+   - Press **`Alt+J`** (or run `/quest off` / `/quest pause`) to pause `pi-quest` at any time and work freely without draft gates or automatic quest creation (while keeping the router on the `idle` Argon rule).
+   - Press **`Alt+J`** again (or run `/quest on`) to resume the paused quest.
+3. **Test in the scratch worktree before or after merging (`keep-slot`, `squash-keep-slot`, `/quest finish`)**:
+   - When completing a quest (`quest_archive` or interactive archive prompt), choose:
+     - **`keep-slot` (Leave in worktree slot for manual testing before merge)**: Keeps the completed quest unmerged in `.pi/scratch/slot-N` so you can test or inspect it manually before integrating into `main`.
+     - **`squash-keep-slot` (Squash-merge into main AND keep worktree slot alive)**: Squash-merges into `main` while keeping `slot-N` checked out at the new `main` HEAD.
+   - Once manual testing in a retained slot is finished, run **`/quest finish`** (or `/quest merge` / `/quest integrate`, optionally with `--keep-slot`) to squash-merge the branch into `main` and release the slot.
+4. **Continue work in the same scratch slot under a new quest (`/quest new`)**:
    - When an active or paused quest is getting in the way and you want to plan a new quest on top of the current `.pi/scratch/slot-N` worktree without merging or resetting the slot:
      ```text
      /quest new <new objective>
      ```
    - Or run bare `/quest new` (or `/quest del --keep-slot`) to retire the old quest while keeping `slot-N` attached, then describe your next task in chat.
-3. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
+5. **Delete a quest without freeing or resetting its slot (`/quest del --keep-slot`)**:
    - Run `/quest del --keep-slot` (or `/quest del -s`, or select `"Keep work in slot (do not reset or free slot)"` in `/quest del`) to delete the quest record while keeping `.pi/scratch/slot-N` and its uncommitted/committed changes intact.
    - Run `/quest del --discard` while idle to release and reset a retained slot.
-4. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
+6. **Stay in-quest during validation or archive (`decline` / `Cancel archive`)**:
    - Reply **`decline`** (or give corrective feedback) during `validating`, or select **`"Cancel archive (stay in quest)"`** (or press `Escape`) at the branch integration prompt to demote back to `implementing` with tools unlocked.
 
 ### Custom Tools
@@ -63,18 +73,19 @@ All operator commands are unified under `/quest` (with interactive tab-completio
 - **`quest_subquest`**: Create a sequential child sub-quest (`goal`, `brief`, `allowedPaths`, `requiredTestCommands`) on the LIFO stack, inheriting the parent's worktree slot.
 - **`quest_recover`**: Rebuild quest state from the transcript after context resets or compaction.
 - **`quest_handoff`**: Write a deterministic, honest handoff for the next agent into `.pi/quest/handoffs/` including verbatim operator requests, deduped directives, Asked-vs-Accomplished checklist with UNVERIFIED markers, approved plan, git diffstat, last verification, blockers, and agent notes.
-- **`quest_archive`**: Conclude and archive the active quest (`outcome: "completed"` requires validation PASS), integrating the worktree branch (or staying in-quest if cancelled) and cleaning up `.pi/quest/future/<qid>.md` directly without `.zip` files.
+- **`quest_archive`**: Conclude and archive the active quest (`outcome: "completed"` requires validation PASS; optional `action: "integrate" | "keep" | "keep-slot" | "discard"` controls worktree disposition), integrating or retaining the worktree branch and cleaning up `.pi/quest/future/<qid>.md` directly without `.zip` files.
 - **`quest_scratches`**: Inspect scratch workspace slots (`.pi/scratch/slot-N`): view lease status, assigned quests, process health, git status, and what each quest is currently doing.
 - **`quest_run_test`**: Safely execute a verification test command inside the active worktree (or primary repository root). Records the verification test receipt.
 - **`quest_rebut`**: Answer an adversarial review with file:line evidence; a successful rebuttal reopens the question and boots a fresh review.
 - **`quest_ask_human`**: Ask the user with a recommended default and timeout; never blocks.
 
-### Autonomous Quest Management & Epistemic Memory
+### Autonomous Quest Management, Drafter–Reviewer Dialogue & Epistemic Memory
 
-1. **Research-Grounded Formation**: When substantive requests arrive, the assistant investigates the codebase first, infers a semantic identity, and calls `quest_update_state` to establish durable epistemic memory before writing code.
-2. **LIFO Sub-Quest Stack**: Deep work or multi-phase tasks use nested sub-quests (`quest_subquest`). When child sub-quests finish and archive (`quest_archive`), findings pop back to the parent quest for seamless continuation.
-3. **Dynamic Epistemic Reassessment**: If unexpected complexity, failed tests, or contradictory evidence occurs, the assistant dynamically challenges its assumptions, updates `planRevisions` and `rejectedApproaches`, and updates the quest state before continuing.
-4. **Autonomous Continuation**: Following compaction or context reset, the assistant immediately re-reads `.pi/quest/future/<qid>.md` to resume without manual user commands.
+1. **Research-Grounded Formation & Earlier Plan Authoring**: When substantive requests arrive (or when a quest is activated after a conversation with Argon), the assistant authors `.pi/quest/future/<qid>.md` immediately. Editing `.pi/quest/future/<qid>.md` while in `provisional` automatically promotes the quest to `drafting` with `planAuthored: true`.
+2. **Turn-Coalesced Reviews & `[Drafter–Reviewer Dialogue]`**: Passive file edits to the draft plan coalesce within a turn and boot a single adversarial reviewer at `turn_end` (preventing mid-turn self-aborts). Resolved review rounds are recorded in `reviewHistory` and injected as structured `[Drafter–Reviewer Dialogue]` blocks so the drafter and reviewer converge while the operator can continue chatting concurrently.
+3. **LIFO Sub-Quest Stack**: Deep work or multi-phase tasks use nested sub-quests (`quest_subquest`). When child sub-quests finish and archive (`quest_archive`), findings pop back to the parent quest for seamless continuation.
+4. **Dynamic Epistemic Reassessment**: If unexpected complexity, failed tests, or contradictory evidence occurs, the assistant dynamically challenges its assumptions, updates `planRevisions` and `rejectedApproaches`, and updates the quest state before continuing.
+5. **Autonomous Continuation**: Following compaction or context reset, the assistant immediately re-reads `.pi/quest/future/<qid>.md` to resume without manual user commands.
 
 ### Session Awareness & Context Injection
 
@@ -177,7 +188,7 @@ You can create or edit `.pi/context.md` at any time to give Pi standing facts or
 
 | Extension File | Primary Hooks | Key Commands / Tools | Responsibility |
 |----------------|---------------|----------------------|----------------|
-| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest [edit\|list\|pick\|pause\|on\|toggle\|cancel\|del\|handoff\|slots\|doctor\|policy\|router\|ratings]`, `quest_update_state`, `quest_subquest`, `quest_archive`, `quest_handoff`, `quest_scratches`, `quest_run_test`, `quest_rebut`, `quest_ask_human`, `quest_recover` | Unified quest persistence, worktree slot isolation, session awareness, prompt capture, compaction handoffs, TDD workflow enforcement |
+| `.pi/extensions/pi-quest/` | `before_agent_start`, `turn_end`, `session_before_compact`, `session_compact`, `session_before_switch`, `session_shutdown`, `tool_result` | `/quest [edit\|list\|pick\|new\|finish\|pause\|on\|toggle\|cancel\|del\|handoff\|slots\|doctor\|policy\|router\|ratings]`, `quest_update_state`, `quest_subquest`, `quest_archive`, `quest_handoff`, `quest_scratches`, `quest_run_test`, `quest_rebut`, `quest_ask_human`, `quest_recover` | Unified quest persistence, Argon-first routing, turn-coalesced Drafter–Reviewer dialogue, worktree slot isolation & manual test retention, compaction handoffs, TDD workflow enforcement |
 | `.pi/extensions/pi-mm/` | `before_agent_start`, `turn_end`, `agent_settled`, `session_start`, `session_shutdown`, `message_end`, `tool_result` | `/mm doctor`, `/mm overview`, `/mm timeline`, `memory_recall`, `memory_record`, `memory_review` | Hierarchical memory mipmaps, epistemic lifecycle verification, standing directive reinforcement, automated L0-L3 consolidation |
 
 ---

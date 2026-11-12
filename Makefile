@@ -118,9 +118,11 @@ stage-assets:
 			cp -u -R "$$d/htdocs/." htdocs/ 2>/dev/null || true; \
 		fi; \
 	done
-	@if [ -d external/axil-nd/art ]; then \
-		mkdir -p htdocs/nd/art && cp -u -R external/axil-nd/art/. htdocs/nd/art/; \
-	fi
+	@for d in external/axil-nd external/nd-*; do \
+		if [ -d "$$d/art" ]; then \
+			mkdir -p htdocs/nd/art && cp -u -R "$$d/art/." htdocs/nd/art/; \
+		fi; \
+	done
 	@missing=""; \
 	for a in $(DEPLOY_ASSETS); do \
 		if [ ! -f "htdocs/$$a" ]; then missing="$$missing htdocs/$$a"; fi; \
@@ -196,7 +198,7 @@ axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib stele-lib
 
 nd-libs: axil-nd-lib chaff-lib areole-lib
 	@for d in external/nd-*; do \
-		if [ -f "$$d/Makefile" ]; then $(MAKE) -C "$$d" add-prefix-glob="../nd-*" || exit 1; fi; \
+		if [ -f "$$d/Makefile" ]; then $(MAKE) -C "$$d" add-prefix-glob="../axil-nd ../nd-*" || exit 1; fi; \
 	done
 
 corm-lib:

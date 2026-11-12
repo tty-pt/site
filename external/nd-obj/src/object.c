@@ -9,6 +9,7 @@
 #include <ttypt/corm.h>
 #include <nd/xy.h>
 #include <nd/world-events.h>
+#include <nd/core.h>
 
 #define NUMBER_TOKEN '#'
 #define ESCAPE_CHAR 27
@@ -243,6 +244,9 @@ eng_object_art(unsigned thing_ref)
 
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
 		return void_art;
+	art[0] = '\0';
+	if (core_art_resolve(thing_ref, thing.type, art, sizeof(art)) && art[0])
+		return art;
 	switch (thing.type) {
 	case TYPE_ENTITY:
 		type = "entity";

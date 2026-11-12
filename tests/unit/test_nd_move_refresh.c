@@ -80,6 +80,28 @@ static char *render_view(void)
 	return out;
 }
 
+struct diff_stats {
+	int clear_count;
+	int replace_count;
+	int text_count;
+	int listener_count;
+};
+
+static int count_diff_ops(void *user, const char *op, const char *a, const char *b, const char *c)
+{
+	(void)a; (void)b; (void)c;
+	struct diff_stats *ds = (struct diff_stats *)user;
+	if (strcmp(op, "patch-clear") == 0)
+		ds->clear_count++;
+	else if (strcmp(op, "patch-replace") == 0)
+		ds->replace_count++;
+	else if (strcmp(op, "patch-text") == 0)
+		ds->text_count++;
+	else if (strcmp(op, "patch-listener") == 0)
+		ds->listener_count++;
+	return 0;
+}
+
 int main(void)
 {
 	memset(&st, 0, sizeof(st));
@@ -91,13 +113,23 @@ int main(void)
 	snprintf(name0, sizeof(name0), "%s", st.room.name);
 	char *view0 = render_view();
 	assert(strstr(view0, "!"));
+	bud_node *tree0 = nd_ui_render(&st);
 
 	assert(replay("move-k") > 3);
 	uint32_t room1 = st.room.ref;
 	char *view1 = render_view();
 	assert(room1 != room0);
 	assert(strcmp(view0, view1) != 0);
-	printf("PASS: map and room header changed after moving north (#%u -> #%u)\n", room0, room1);
+	bud_node *tree1 = nd_ui_render(&st);
+
+	struct diff_stats ds = {0};
+	assert(bud_vdom_diff(tree0, tree1, count_diff_ops, &ds) == 0);
+	assert(ds.clear_count == 0);
+	assert(ds.replace_count == 0);
+	assert(ds.text_count >= 1);
+	bud_free(tree0);
+	bud_free(tree1);
+	printf("PASS: map and room header changed after moving north (#%u -> #%u) with surgical VDOM diff (0 clear, 0 replace)\n", room0, room1);
 
 	assert(replay("move-j") > 3);
 	char *view2 = render_view();

@@ -18,12 +18,14 @@ function getExport(exports, names) {
 
 export function createAxilTtyBridge(root, getWasm) {
 	let term = null;
+	let attachedEl = null;
 	let fit = null;
 	let busUnsub = null;
 	let will_echo = true;
 	let line_buf = "";
 	const LINE_MAX = 1024;
 	let resizeRaf = 0;
+	let resizeObs = null;
 	let pendingWriteBuf = [];
 
 	function flushPendingWrites() {
@@ -87,6 +89,7 @@ export function createAxilTtyBridge(root, getWasm) {
 		}
 
 		term.open(termEl);
+		attachedEl = termEl;
 		flushPendingWrites();
 		if (fit && typeof requestAnimationFrame === 'function') {
 			requestAnimationFrame(() => {
@@ -94,17 +97,30 @@ export function createAxilTtyBridge(root, getWasm) {
 			});
 		}
 
+		function scheduleFit() {
+			if (resizeRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(resizeRaf);
+			if (typeof requestAnimationFrame === 'function') {
+				resizeRaf = requestAnimationFrame(() => {
+					resizeRaf = 0;
+					if (fit) {
+						try { fit.fit(); } catch (_) {}
+					}
+				});
+			}
+		}
+
 		if (typeof window !== 'undefined' && window.addEventListener) {
-			window.addEventListener('resize', () => {
-				if (resizeRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(resizeRaf);
-				if (typeof requestAnimationFrame === 'function') {
-					resizeRaf = requestAnimationFrame(() => {
-						if (fit) {
-							try { fit.fit(); } catch (_) {}
-						}
-					});
-				}
-			});
+			window.addEventListener('resize', scheduleFit);
+		}
+
+		if (typeof ResizeObserver !== 'undefined') {
+			try {
+				resizeObs = new ResizeObserver(() => scheduleFit());
+				resizeObs.observe(termEl);
+				if (termEl.parentElement) resizeObs.observe(termEl.parentElement);
+			} catch (_) {
+				resizeObs = null;
+			}
 		}
 
 		term.onResize(() => sendNaws());
@@ -181,6 +197,10 @@ export function createAxilTtyBridge(root, getWasm) {
 	}
 
 	function destroyInternal() {
+		if (resizeObs) {
+			try { resizeObs.disconnect(); } catch (_) {}
+			resizeObs = null;
+		}
 		if (resizeRaf) {
 			cancelAnimationFrame(resizeRaf);
 			resizeRaf = 0;
@@ -192,6 +212,10 @@ export function createAxilTtyBridge(root, getWasm) {
 		if (term) {
 			try { term.dispose(); } catch (_) {}
 			term = null;
+		}
+		if (attachedEl) {
+			delete attachedEl.__attached;
+			attachedEl = null;
 		}
 		fit = null;
 		line_buf = "";
@@ -213,14 +237,18 @@ export function createAxilTtyBridge(root, getWasm) {
 			}
 
 			if (term) {
-				if (term.element === termEl && (!document.contains || document.contains(termEl))) {
+				const isSameHost = (attachedEl === termEl) ||
+					(term.element === termEl) ||
+					(term.element && term.element.parentElement === termEl);
+				if (isSameHost && (!document.contains || document.contains(termEl))) {
 					return;
 				}
 				destroyInternal();
 			}
 
-			if (termEl.__attached && termEl.querySelector && termEl.querySelector('.xterm')) return;
+			if (termEl.__attached) return;
 			termEl.__attached = true;
+			attachedEl = termEl;
 
 			function loadScript(src, fallbackSrc, cb) {
 				const s = document.createElement('script');
