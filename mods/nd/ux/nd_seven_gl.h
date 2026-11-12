@@ -16,6 +16,7 @@ extern "C" {
 #define ND_BB_STYLE_FLORA     2u  /* Flora with full-sprite tint */
 #define ND_BB_STYLE_MINERAL   3u  /* Rock / stone / boulder mineral scenery */
 #define ND_BB_STYLE_GLOW      4u  /* Subtle emissive universe-owner lamb glow */
+#define ND_BB_STYLE_PARTICLE  5u  /* Volumetric sunlit water droplet / sea-spray mist particle */
 
 typedef struct {
 	float x, y, z;
@@ -184,6 +185,62 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
                                    float cam_dist, float pixel_footprint,
                                    float *out_grad_x, float *out_grad_y,
                                    float *out_crest);
+
+/* 4x Real-Life Astronomical Solar & Lunar Cycle Constants:
+ * - Solar Day (1/4 real day = 4x real speed): 86,400 / 4 = 21,600 seconds (6.0 real hours)
+ * - Sidereal Lunar Month (4x real speed): 27.321661 * 21,600 = 590,147.88 seconds (~6.83 real days)
+ * - Synodic Lunar Month (4x real speed):  29.530589 * 21,600 = 637,860.72 seconds (~7.38 real days)
+ * - Lunar Tidal Day (meridian transit to transit): 24h50m / 4 = 22,356.86 seconds (~6.21 real hours) */
+#define ND_ASTRO_SOLAR_DAY_SEC      21600.0f
+#define ND_ASTRO_SIDEREAL_MONTH_SEC 590147.88f
+#define ND_ASTRO_SYNODIC_MONTH_SEC  637860.72f
+#define ND_ASTRO_LUNAR_DAY_SEC      22356.86f
+
+/* Evaluate 3D unit vectors toward the Sun and Moon in the planet's frame at time `t_sec` (4x real-life clock):
+ *   out_sun_dir[3]  = (cos(lambda_sun), sin(lambda_sun), sin(obliquity) * sin(lambda_sun)) normalized
+ *   out_moon_dir[3] = (cos(lambda_moon)*cos(inc), sin(lambda_moon)*cos(inc), sin(lambda_moon)*sin(inc)) normalized */
+void nd_seven_gl_eval_celestial_dirs(float t_sec,
+                                     float out_sun_dir[3],
+                                     float out_moon_dir[3]);
+
+/* Laplace / Equilibrium Astronomical Ocean Tide on the Torus:
+ * Evaluates second-order Legendre tidal potential P_2(cos gamma) = 0.5 * (3 * (N . D)^2 - 1)
+ * from the Moon and Sun (with realistic Earth-Moon-Sun 1 : 0.46 amplitude ratio) against
+ * the local torus surface normal N(wx, wy). Returns 0 on perched mountain lakes
+ * (sea_level > base_sea_level + 0.5). */
+float nd_seven_gl_eval_astronomical_tide(float wx, float wy,
+                                         float sea_level, float base_sea_level,
+                                         float t_sec,
+                                         const nd_planet_def_t *pdef);
+
+/* Asymmetric Shoreline Wave Run-Up & Backwash (Swash) + Intertidal Wet-Sand Hysteresis:
+ * Evaluates instantaneous vertical water surface excursion (tide + wave-group run-up/backwash),
+ * recent high-water mark (out_high_water_z) for wet-sand memory, and rocky/surf splash foam. */
+float nd_seven_gl_eval_shore_swash(float wx, float wy,
+                                   float sea_level, float base_sea_level,
+                                   float terrain_z,
+                                   float slope_gx, float slope_gy,
+                                   float t_sec,
+                                   const nd_planet_def_t *pdef,
+                                   float *out_high_water_z,
+                                   float *out_splash_foam);
+
+/* Real-Life Path-Ribbon Lamb Wake Trail in Water (Lakes & Oceans):
+ * Records a breadcrumb ring buffer of recent water-contact path nodes (x_k, y_k, vx_k, vy_k, t_k)
+ * so turns and curves leave a lingering dispersive Kelvin/viscous wake along the actual path walked. */
+#define ND_LAMB_WAKE_NODES 8
+
+void nd_seven_gl_set_lamb_wake(float wx, float wy, float ground_z,
+                               int dir, int walking, float anim_time);
+
+void nd_seven_gl_get_lamb_wake(float out_head[4],
+                               float out_nodes_xy_t[ND_LAMB_WAKE_NODES][4],
+                               float out_nodes_vel[ND_LAMB_WAKE_NODES][4]);
+
+float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
+                                 float anim_time,
+                                 float *out_grad_x, float *out_grad_y,
+                                 float *out_foam);
 
 #ifdef __cplusplus
 }
