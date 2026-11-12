@@ -302,8 +302,10 @@ static const char *s_fs_terrain =
 	"uniform vec3 uSunDir;\n"
 	"uniform vec3 uMoonDir;\n"
 	"uniform vec4 uLambWakeHead;\n"
-	"uniform vec4 uLambWakeXYT[8];\n"
-	"uniform vec4 uLambWakeVel[8];\n"
+	"uniform mat4 uLambWakeXYT0;\n"
+	"uniform mat4 uLambWakeXYT1;\n"
+	"uniform mat4 uLambWakeVel0;\n"
+	"uniform mat4 uLambWakeVel1;\n"
 	"uniform int uWorldId;\n"
 	"uniform int uSeaOffsetQ12_4;\n"
 	"out vec4 FragColor;\n"
@@ -969,8 +971,8 @@ static const char *s_fs_terrain =
 	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.95, 256.0), -mod(anim_time * 0.75, 256.0)), 0x57414B45u);\n"
 	"    vec2 warpOffset = (wakeTurb.yz) * 1.35;\n"
 	"    for (int i = 0; i < 8; i++) {\n"
-	"        vec4 nodeXYT = uLambWakeXYT[i];\n"
-	"        vec4 nodeVel = uLambWakeVel[i];\n"
+	"        vec4 nodeXYT = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
+	"        vec4 nodeVel = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
 	"        float nodeEnergy = nodeVel.z;\n"
 	"        if (nodeEnergy <= 0.002) continue;\n"
 	"        float age = clamp(anim_time - nodeXYT.z, 0.0, 6.0);\n"
@@ -1488,9 +1490,9 @@ static const char *s_vs_water =
 	"    float dsv = -2.0 * shdv * shdv * sv0 + sdv * cv0;\n"
 	"    float cu = cu0 + dcu, su = su0 + dsu;\n"
 	"    float cv = cv0 + dcv, sv = sv0 + dsv;\n"
-	"    /* Raise effWz slightly above uSeaLevel near shore to prevent linearly interpolated terrain triangles from depth-clipping per-fragment water */\n"
-	"    bool nearWater = (depth > -3.0) || (minNeighborWz < uSeaLevel + 3.0);\n"
-	"    float effWz = nearWater ? (max(uSeaLevel, wz) + 0.12) : (min(wz, uSeaLevel) - 2.0);\n"
+	"    /* Raise effWz above max tidal/swash water level near shore to prevent linearly interpolated terrain triangles from depth-clipping per-fragment water */\n"
+	"    bool nearWater = (depth > -4.5) || (minNeighborWz < uSeaLevel + 4.5);\n"
+	"    float effWz = nearWater ? (max(uSeaLevel + 1.85, wz) + 0.16) : (min(wz, uSeaLevel) - 2.0);\n"
 	"    float Rv0 = R + r0 * cv0;\n"
 	"    float dRv = r0 * dcv + effWz * cv;\n"
 	"    vec3 worldPos = uPlanetCenter + vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + effWz * sv);\n"
@@ -1532,8 +1534,10 @@ static const char *s_fs_water =
 	"uniform vec3 uSunDir;\n"
 	"uniform vec3 uMoonDir;\n"
 	"uniform vec4 uLambWakeHead;\n"
-	"uniform vec4 uLambWakeXYT[8];\n"
-	"uniform vec4 uLambWakeVel[8];\n"
+	"uniform mat4 uLambWakeXYT0;\n"
+	"uniform mat4 uLambWakeXYT1;\n"
+	"uniform mat4 uLambWakeVel0;\n"
+	"uniform mat4 uLambWakeVel1;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -1831,8 +1835,8 @@ static const char *s_fs_water =
 	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.95, 256.0), -mod(anim_time * 0.75, 256.0)), 0x57414B45u);\n"
 	"    vec2 warpOffset = (wakeTurb.yz) * 1.35;\n"
 	"    for (int i = 0; i < 8; i++) {\n"
-	"        vec4 nodeXYT = uLambWakeXYT[i];\n"
-	"        vec4 nodeVel = uLambWakeVel[i];\n"
+	"        vec4 nodeXYT = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
+	"        vec4 nodeVel = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
 	"        float nodeEnergy = nodeVel.z;\n"
 	"        if (nodeEnergy <= 0.002) continue;\n"
 	"        float age = clamp(anim_time - nodeXYT.z, 0.0, 6.0);\n"
@@ -2332,6 +2336,23 @@ static const char *s_fs_billboard =
 	"    }\n"
 	"    /* 2. Sub-Texel Anti-Aliased, Snell-Refracted & Outline-Softened Sprite Sampling */\n"
 	"    float style = vQuadUV.w;\n"
+	"    if (style > 4.5) {\n"
+	"        /* ND_BB_STYLE_PARTICLE (5.0): Volumetric sunlit water droplet & sea-spray mist puff */\n"
+	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0);\n"
+	"        float r2 = dot(qc, qc);\n"
+	"        if (r2 >= 1.0) discard;\n"
+	"        vec3 pNoise = chaff_grad_noise2d(vLocalPos.xy * 0.55 + qc * 1.4, 0x53505259u);\n"
+	"        float radial = clamp(1.0 - r2, 0.0, 1.0);\n"
+	"        float softCore = radial * radial * (0.72 + 0.56 * pNoise.x);\n"
+	"        float pAlpha = clamp(softCore * vTint.a * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.92);\n"
+	"        if (pAlpha <= 0.008) discard;\n"
+	"        float rim = smoothstep(0.18, 0.88, r2) * radial;\n"
+	"        vec3 sunHighlight = vec3(1.0, 0.99, 0.95) * (0.68 + 0.32 * max(0.0, -qc.x * 0.55 + qc.y * 0.65));\n"
+	"        vec3 mistBody = mix(sky * 0.88 + vec3(0.12, 0.16, 0.18), sunHighlight, 0.58 + 0.34 * rim);\n"
+	"        vec3 dropCol = clamp(mistBody * vTint.rgb, 0.0, 1.0);\n"
+	"        FragColor = vec4(dropCol, pAlpha);\n"
+	"        return;\n"
+	"    }\n"
 	"    bool isLambGlow = (style > 3.5);\n"
 	"    vec2 sampleUV = vUV;\n"
 	"    if (isSubmerged) {\n"
@@ -3052,6 +3073,14 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uLambLight;
+	GLint uBaseSeaLevel;
+	GLint uSunDir;
+	GLint uMoonDir;
+	GLint uLambWakeHead;
+	GLint uLambWakeXYT0;
+	GLint uLambWakeXYT1;
+	GLint uLambWakeVel0;
+	GLint uLambWakeVel1;
 	GLint uWorldId;
 	GLint uSeaOffsetQ12_4;
 	GLint aGridUV;
@@ -3078,6 +3107,14 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uLambLight;
+	GLint uBaseSeaLevel;
+	GLint uSunDir;
+	GLint uMoonDir;
+	GLint uLambWakeHead;
+	GLint uLambWakeXYT0;
+	GLint uLambWakeXYT1;
+	GLint uLambWakeVel0;
+	GLint uLambWakeVel1;
 	GLint aGridUV;
 } gl_water_pipe_t;
 
@@ -3165,7 +3202,17 @@ static struct {
 	float cur_pitch_deg;
 	float cur_anim_time;
 	float cur_sea_level;
+	float cur_base_sea_level;
+	float cur_sun_dir[3];
+	float cur_moon_dir[3];
 	float cur_lamb_light[4];
+	float cur_wake_head[4];
+	float cur_wake_xyt[ND_LAMB_WAKE_NODES][4];
+	float cur_wake_vel[ND_LAMB_WAKE_NODES][4];
+	uint32_t cur_wake_cursor;
+	float cur_wake_last_x;
+	float cur_wake_last_y;
+	float cur_wake_last_t;
 	nd_planet_def_t cur_pdef;
 } s_gl;
 
@@ -3300,6 +3347,14 @@ static void init_pipelines(void)
 		s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 		s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 		s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+		s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+		s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+		s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
+		s_gl.terrain_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
+		s_gl.terrain_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+		s_gl.terrain_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+		s_gl.terrain_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
+		s_gl.terrain_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
 		s_gl.terrain_pipe.uWorldId        = glGetUniformLocation(p, "uWorldId", 8);
 		s_gl.terrain_pipe.uSeaOffsetQ12_4 = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
 		s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
@@ -3328,6 +3383,14 @@ static void init_pipelines(void)
 		s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 		s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 		s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+		s_gl.water_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+		s_gl.water_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+		s_gl.water_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
+		s_gl.water_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
+		s_gl.water_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+		s_gl.water_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+		s_gl.water_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
+		s_gl.water_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
 		s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 	}
 
@@ -3394,6 +3457,8 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.frame_count++;
 	s_gl.water_count = 0;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
+	s_gl.cur_base_sea_level = s_gl.cur_sea_level;
+	nd_seven_gl_eval_celestial_dirs(anim_time, s_gl.cur_sun_dir, s_gl.cur_moon_dir);
 	s_gl.cur_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
 	s_gl.cur_pitch_deg = pitch_deg;
 	s_gl.cur_anim_time = anim_time;
@@ -3637,6 +3702,16 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glUniform4f(s_gl.terrain_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
 	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
+	glUniform1f(s_gl.terrain_pipe.uBaseSeaLevel, s_gl.cur_base_sea_level);
+	glUniform3fv(s_gl.terrain_pipe.uSunDir, 1, s_gl.cur_sun_dir);
+	glUniform3fv(s_gl.terrain_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
+	glUniform4f(s_gl.terrain_pipe.uLambWakeHead,
+	            s_gl.cur_wake_head[0], s_gl.cur_wake_head[1],
+	            s_gl.cur_wake_head[2], s_gl.cur_wake_head[3]);
+	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeXYT0, 1, GL_FALSE, &s_gl.cur_wake_xyt[0][0]);
+	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeXYT1, 1, GL_FALSE, &s_gl.cur_wake_xyt[4][0]);
+	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeVel0, 1, GL_FALSE, &s_gl.cur_wake_vel[0][0]);
+	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeVel1, 1, GL_FALSE, &s_gl.cur_wake_vel[4][0]);
 
 	/* Pass canonical world ID and sea_offset_q12_4 for GPU canonical field evaluation */
 	{
@@ -3706,6 +3781,16 @@ void nd_seven_gl_flush_water(void)
 	glUniform4f(s_gl.water_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
 	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
+	glUniform1f(s_gl.water_pipe.uBaseSeaLevel, s_gl.cur_base_sea_level);
+	glUniform3fv(s_gl.water_pipe.uSunDir, 1, s_gl.cur_sun_dir);
+	glUniform3fv(s_gl.water_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
+	glUniform4f(s_gl.water_pipe.uLambWakeHead,
+	            s_gl.cur_wake_head[0], s_gl.cur_wake_head[1],
+	            s_gl.cur_wake_head[2], s_gl.cur_wake_head[3]);
+	glUniformMatrix4fv(s_gl.water_pipe.uLambWakeXYT0, 1, GL_FALSE, &s_gl.cur_wake_xyt[0][0]);
+	glUniformMatrix4fv(s_gl.water_pipe.uLambWakeXYT1, 1, GL_FALSE, &s_gl.cur_wake_xyt[4][0]);
+	glUniformMatrix4fv(s_gl.water_pipe.uLambWakeVel0, 1, GL_FALSE, &s_gl.cur_wake_vel[0][0]);
+	glUniformMatrix4fv(s_gl.water_pipe.uLambWakeVel1, 1, GL_FALSE, &s_gl.cur_wake_vel[4][0]);
 
 	for (uint32_t i = 0; i < s_gl.water_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.water_queue[i];
@@ -3771,6 +3856,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 	for (uint32_t i = 0; i < count; i++) {
 		bool want_shadow = emit_shadows && (batch[i].style != ND_BB_STYLE_GLOW) &&
+		                   (batch[i].style != ND_BB_STYLE_PARTICLE) &&
 		                   (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
 		uint32_t needed = want_shadow ? 12u : 6u;
 		if (out_verts_count + needed > MAX_BB_VERTS)
@@ -4228,6 +4314,298 @@ float nd_seven_gl_eval_billboard_lighting(float qx, float qy,
 	float amb_luma = 0.55f + 0.18f * hemi_sky;
 	float light_scalar = (amb_luma * 0.52f + 1.01f * (0.58f * sun_diff)) * (cavity_ao * contact_ao);
 	return 0.22f + 0.78f * light_scalar;
+}
+
+void nd_seven_gl_eval_celestial_dirs(float t_sec,
+                                     float out_sun_dir[3],
+                                     float out_moon_dir[3])
+{
+	/* Solar ecliptic longitude (21,600s = 6h real day, 23.44 deg axial obliquity) */
+	float lambda_sun = TWO_PI_F * (t_sec / ND_ASTRO_SOLAR_DAY_SEC);
+	float obliq = 23.43928f * (PI_F / 180.0f);
+	float sx = cosf(lambda_sun);
+	float sy = sinf(lambda_sun);
+	float sz = sinf(obliq) * sy;
+	float slen = sqrtf(sx * sx + sy * sy + sz * sz + 1e-8f);
+	if (out_sun_dir) {
+		out_sun_dir[0] = sx / slen;
+		out_sun_dir[1] = sy / slen;
+		out_sun_dir[2] = sz / slen;
+	}
+
+	/* Lunar orbital longitude (22,356.86s lunar tidal day, 5.145 deg orbital inclination) */
+	float lambda_moon = TWO_PI_F * (t_sec / ND_ASTRO_LUNAR_DAY_SEC) + 0.785398f;
+	float inc = (23.43928f + 5.145f) * (PI_F / 180.0f);
+	float mx = cosf(lambda_moon) * cosf(inc);
+	float my = sinf(lambda_moon) * cosf(inc);
+	float mz = sinf(lambda_moon) * sinf(inc);
+	float mlen = sqrtf(mx * mx + my * my + mz * mz + 1e-8f);
+	if (out_moon_dir) {
+		out_moon_dir[0] = mx / mlen;
+		out_moon_dir[1] = my / mlen;
+		out_moon_dir[2] = mz / mlen;
+	}
+}
+
+float nd_seven_gl_eval_astronomical_tide(float wx, float wy,
+                                         float sea_level, float base_sea_level,
+                                         float t_sec,
+                                         const nd_planet_def_t *pdef)
+{
+	if (sea_level <= -900.0f)
+		return 0.0f;
+	float is_ocean = 1.0f - gl_smoothstep(0.25f, 0.75f, fabsf(sea_level - base_sea_level));
+	if (is_ocean <= 0.001f)
+		return 0.0f;
+
+	float N[3], sun_dir[3], moon_dir[3];
+	nd_seven_gl_torus_frame(wx, wy, 0.0f, pdef, NULL, NULL, NULL, N);
+	nd_seven_gl_eval_celestial_dirs(t_sec, sun_dir, moon_dir);
+
+	float cos_moon = N[0] * moon_dir[0] + N[1] * moon_dir[1] + N[2] * moon_dir[2];
+	float cos_sun  = N[0] * sun_dir[0]  + N[1] * sun_dir[1]  + N[2] * sun_dir[2];
+	float p2_moon  = 0.5f * (3.0f * cos_moon * cos_moon - 1.0f);
+	float p2_sun   = 0.5f * (3.0f * cos_sun  * cos_sun  - 1.0f);
+	return is_ocean * (0.68f * p2_moon + 0.31f * p2_sun);
+}
+
+float nd_seven_gl_eval_shore_swash(float wx, float wy,
+                                   float sea_level, float base_sea_level,
+                                   float terrain_z,
+                                   float slope_gx, float slope_gy,
+                                   float t_sec,
+                                   const nd_planet_def_t *pdef,
+                                   float *out_high_water_z,
+                                   float *out_splash_foam)
+{
+	float astro_tide = nd_seven_gl_eval_astronomical_tide(wx, wy, sea_level, base_sea_level, t_sec, pdef);
+	float base_tide_z = sea_level + astro_tide;
+	float is_ocean = 1.0f - gl_smoothstep(0.25f, 0.75f, fabsf(sea_level - base_sea_level));
+	float slope_mag = sqrtf(slope_gx * slope_gx + slope_gy * slope_gy);
+	float near_shore = gl_smoothstep(5.5f, 0.0f, fabsf(terrain_z - base_tide_z));
+
+	if (near_shore <= 0.001f) {
+		float tide_high = sea_level + is_ocean * 0.99f;
+		if (out_high_water_z) *out_high_water_z = fmaxf(base_tide_z, tide_high);
+		if (out_splash_foam) *out_splash_foam = 0.0f;
+		return base_tide_z;
+	}
+
+	float sdx = (slope_mag > 1e-4f) ? (slope_gx / slope_mag) : 0.7071f;
+	float sdy = (slope_mag > 1e-4f) ? (slope_gy / slope_mag) : -0.7071f;
+	float na_v = 0.5f, na_x = 0.0f, na_y = 0.0f;
+	float nm_v = 0.5f, nm_x = 0.0f, nm_y = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.045f + 13.7f, wy * 0.045f - 9.2f, 0x53574153u, &na_v, &na_x, &na_y);
+	gl_chaff_grad_noise2d(wx * 0.190f + na_x * 0.45f, wy * 0.190f + na_y * 0.45f, 0x53574132u, &nm_v, &nm_x, &nm_y);
+
+	float group_env = 0.58f + 0.42f * sinf(fmodf(t_sec * 0.23f, 628.3185f) + (na_v - 0.5f) * 3.2f);
+	float cross_coord = (wx * sdx + wy * sdy) * 0.14f + (na_v - 0.5f) * 1.65f + (nm_v - 0.5f) * 0.55f;
+	float wave_arg = fmodf(t_sec * 1.18f, 628.3185f) - cross_coord;
+	float raw_wave = sinf(wave_arg) + 0.32f * sinf(2.0f * wave_arg - 0.45f) + 0.10f * cosf(3.0f * wave_arg);
+	float swash_amp = (0.06f + 0.52f * is_ocean) * group_env * gl_smoothstep(0.015f, 0.18f, slope_mag);
+	float swash_surf_z = base_tide_z + raw_wave * swash_amp;
+	float recent_top = base_tide_z + (0.08f + 0.68f * is_ocean) * (0.75f + 0.25f * group_env) * gl_smoothstep(0.015f, 0.18f, slope_mag);
+	float high_water_z = fmaxf(swash_surf_z, recent_top + is_ocean * 0.35f);
+
+	float bore_front = gl_smoothstep(-0.20f, 0.55f, cosf(wave_arg - 0.35f));
+	float edge_prox = gl_smoothstep(0.55f, 0.0f, fabsf(terrain_z - swash_surf_z));
+	float rock_impact = gl_smoothstep(0.10f, 0.28f, slope_mag) * gl_smoothstep(-0.1f, 0.7f, raw_wave);
+	float ln_v = 0.5f, ln_x = 0.0f, ln_y = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.85f + sdx * (raw_wave * 0.6f), wy * 0.85f + sdy * (raw_wave * 0.6f), 0x464F414Du, &ln_v, &ln_x, &ln_y);
+	float cell_lace = gl_smoothstep(0.42f, 0.74f, ln_v * 0.65f + nm_v * 0.35f);
+	float foam = (edge_prox * (0.35f + 0.65f * bore_front) + rock_impact * 0.55f) * cell_lace * is_ocean;
+	if (foam > 0.68f) foam = 0.68f;
+	if (foam < 0.0f) foam = 0.0f;
+
+	if (out_high_water_z) *out_high_water_z = high_water_z;
+	if (out_splash_foam) *out_splash_foam = foam;
+	return swash_surf_z;
+}
+
+void nd_seven_gl_set_lamb_wake(float wx, float wy, float ground_z,
+                               int dir, int walking, float anim_time)
+{
+	/* Direction unit vector: 0=North(0,-1), 1=East(1,0), 2=South(0,1), 3=West(-1,0) */
+	float dir_vx = 0.0f, dir_vy = 1.0f;
+	if (dir == 0) { dir_vx = 0.0f; dir_vy = -1.0f; }
+	else if (dir == 1) { dir_vx = 1.0f; dir_vy = 0.0f; }
+	else if (dir == 2) { dir_vx = 0.0f; dir_vy = 1.0f; }
+	else if (dir == 3) { dir_vx = -1.0f; dir_vy = 0.0f; }
+
+	/* Determine if lamb is in water (ground_z < local water level + 0.65) */
+	float sea_lvl = s_gl.cur_sea_level;
+	bool in_water = (sea_lvl > -900.0f && ground_z < sea_lvl + 0.65f);
+
+	float dt = anim_time - s_gl.cur_wake_last_t;
+	float dx = wx - s_gl.cur_wake_last_x;
+	float dy = wy - s_gl.cur_wake_last_y;
+	float dist_moved = sqrtf(dx * dx + dy * dy);
+
+	if (in_water) {
+		s_gl.cur_wake_head[0] = wx;
+		s_gl.cur_wake_head[1] = wy;
+		s_gl.cur_wake_head[2] = ground_z;
+		s_gl.cur_wake_head[3] = 1.0f;
+
+		/* Spawn a new path-ribbon breadcrumb node when moving >= 3.2 world units or every 0.18s while wading */
+		bool should_record = (s_gl.cur_wake_last_t <= 0.0f) ||
+		                     (dist_moved >= 3.2f && dt > 0.02f) ||
+		                     (walking && dt >= 0.16f) ||
+		                     (!walking && dt >= 0.45f);
+		if (should_record) {
+			uint32_t slot = s_gl.cur_wake_cursor % ND_LAMB_WAKE_NODES;
+			s_gl.cur_wake_cursor = (slot + 1) % ND_LAMB_WAKE_NODES;
+
+			float spd = (dt > 0.01f && dist_moved > 0.1f) ? fminf(64.0f, dist_moved / dt) : (walking ? 38.0f : 6.5f);
+			float vx = (dist_moved > 0.25f) ? (dx / dist_moved) * spd : dir_vx * spd;
+			float vy = (dist_moved > 0.25f) ? (dy / dist_moved) * spd : dir_vy * spd;
+			float water_depth = fmaxf(0.15f, sea_lvl - ground_z);
+			float energy = fminf(1.0f, 0.35f + 0.65f * fminf(1.0f, water_depth / 2.5f)) * (walking ? 1.0f : 0.42f);
+
+			s_gl.cur_wake_xyt[slot][0] = wx;
+			s_gl.cur_wake_xyt[slot][1] = wy;
+			s_gl.cur_wake_xyt[slot][2] = anim_time;
+			s_gl.cur_wake_xyt[slot][3] = water_depth;
+
+			s_gl.cur_wake_vel[slot][0] = vx;
+			s_gl.cur_wake_vel[slot][1] = vy;
+			s_gl.cur_wake_vel[slot][2] = energy;
+			s_gl.cur_wake_vel[slot][3] = (float)dir;
+
+			s_gl.cur_wake_last_x = wx;
+			s_gl.cur_wake_last_y = wy;
+			s_gl.cur_wake_last_t = anim_time;
+		}
+	} else {
+		/* Smoothly decay head energy over 5.5 seconds after leaving water so existing trail lingers naturally */
+		float time_since_water = anim_time - s_gl.cur_wake_last_t;
+		s_gl.cur_wake_head[3] = (time_since_water < 5.5f && s_gl.cur_wake_last_t > 0.0f)
+		                        ? fmaxf(0.0f, 1.0f - time_since_water / 5.5f)
+		                        : 0.0f;
+	}
+}
+
+void nd_seven_gl_get_lamb_wake(float out_head[4],
+                               float out_nodes_xy_t[ND_LAMB_WAKE_NODES][4],
+                               float out_nodes_vel[ND_LAMB_WAKE_NODES][4])
+{
+	if (out_head)
+		memcpy(out_head, s_gl.cur_wake_head, sizeof(s_gl.cur_wake_head));
+	if (out_nodes_xy_t)
+		memcpy(out_nodes_xy_t, s_gl.cur_wake_xyt, sizeof(s_gl.cur_wake_xyt));
+	if (out_nodes_vel)
+		memcpy(out_nodes_vel, s_gl.cur_wake_vel, sizeof(s_gl.cur_wake_vel));
+}
+
+float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
+                                 float anim_time,
+                                 float *out_grad_x, float *out_grad_y,
+                                 float *out_foam)
+{
+	if (out_grad_x) *out_grad_x = 0.0f;
+	if (out_grad_y) *out_grad_y = 0.0f;
+	if (out_foam) *out_foam = 0.0f;
+
+	if (s_gl.cur_wake_head[3] <= 0.001f)
+		return 0.0f;
+
+	float dhx = frag_wx - s_gl.cur_wake_head[0];
+	float dhy = frag_wy - s_gl.cur_wake_head[1];
+	if (dhx * dhx + dhy * dhy > 190.0f * 190.0f)
+		return 0.0f;
+
+	float wt_v = 0.5f, wt_x = 0.0f, wt_y = 0.0f;
+	gl_chaff_grad_noise2d(frag_wx * 0.42f + fmodf(anim_time * 0.95f, 256.0f),
+	                      frag_wy * 0.42f - fmodf(anim_time * 0.75f, 256.0f),
+	                      0x57414B45u, &wt_v, &wt_x, &wt_y);
+	float warp_x = wt_x * 1.35f;
+	float warp_y = wt_y * 1.35f;
+
+	float total_h = 0.0f;
+	float total_gx = 0.0f, total_gy = 0.0f;
+	float total_foam = 0.0f;
+
+	for (int i = 0; i < ND_LAMB_WAKE_NODES; i++) {
+		float nx = s_gl.cur_wake_xyt[i][0];
+		float ny = s_gl.cur_wake_xyt[i][1];
+		float nt = s_gl.cur_wake_xyt[i][2];
+		float vx = s_gl.cur_wake_vel[i][0];
+		float vy = s_gl.cur_wake_vel[i][1];
+		float node_energy = s_gl.cur_wake_vel[i][2];
+		if (node_energy <= 0.002f)
+			continue;
+
+		float age = anim_time - nt;
+		if (age < 0.0f) age = 0.0f;
+		if (age > 6.0f) continue;
+
+		float age_decay = expf(-0.72f * age) * gl_smoothstep(5.5f, 0.2f, age) * node_energy;
+		if (age_decay <= 0.002f)
+			continue;
+
+		float spd = sqrtf(vx * vx + vy * vy);
+		float fwd_x = (spd > 0.5f) ? (vx / spd) : 0.0f;
+		float fwd_y = (spd > 0.5f) ? (vy / spd) : 1.0f;
+		float right_x = -fwd_y;
+		float right_y = fwd_x;
+
+		float rx = (frag_wx + warp_x * (0.25f + 0.15f * age)) - nx;
+		float ry = (frag_wy + warp_y * (0.25f + 0.15f * age)) - ny;
+		float s = rx * fwd_x + ry * fwd_y;
+		float raw_u = rx * right_x + ry * right_y;
+		float u = fabsf(raw_u);
+		float sign_u = (raw_u >= 0.0f) ? 1.0f : -1.0f;
+
+		float packet_w = 3.2f + age * 4.2f;
+		float eff_back = fmaxf(0.0f, -s + 2.5f);
+		float kelvin_hw = 2.8f + eff_back * 0.42f + age * 6.5f;
+		float arm_dist = u - kelvin_hw * 0.68f;
+		float arm_env = expf(-(arm_dist * arm_dist) / fmaxf(1.5f, packet_w * packet_w)) *
+		                expf(-eff_back * 0.032f) * gl_smoothstep(5.5f, -1.5f, s);
+
+		if (i == 0 && spd > 4.0f) {
+			float bx = fmaxf(0.0f, s + 2.0f) * 1.25f;
+			float by = u * 0.85f;
+			float bow_r = sqrtf(bx * bx + by * by);
+			float bow_env = expf(-((bow_r - 5.2f) * (bow_r - 5.2f)) / 6.5f) * gl_smoothstep(-6.0f, 2.0f, s);
+			if (bow_env * 0.85f > arm_env)
+				arm_env = bow_env * 0.85f;
+		}
+
+		if (arm_env > 0.002f) {
+			float k_freq = 0.92f / (1.0f + 0.18f * age);
+			float phase = (u - eff_back * 0.36f - age * 14.0f) * k_freq;
+			float w_sin = sinf(phase);
+			float w_cos = cosf(phase);
+			float spd_factor = fminf(1.15f, fmaxf(0.20f, spd / 42.0f));
+			float amp = 0.22f * age_decay * arm_env * spd_factor;
+			total_h += w_sin * amp;
+			float pg_scale = k_freq * w_cos * amp;
+			total_gx += (right_x * sign_u - fwd_x * 0.36f) * pg_scale;
+			total_gy += (right_y * sign_u - fwd_y * 0.36f) * pg_scale;
+		}
+
+		if (eff_back >= -2.0f) {
+			float stern_env = expf(-(u * u) / (9.0f + age * 10.0f)) *
+			                  expf(-(eff_back * eff_back) / (65.0f + age * 80.0f));
+			if (stern_env > 0.005f) {
+				float eddy = stern_env * age_decay * fminf(1.0f, fmaxf(0.15f, spd / 48.0f));
+				total_gx += wt_x * (0.42f * eddy);
+				total_gy += wt_y * (0.42f * eddy);
+				float bubble = gl_smoothstep(0.44f, 0.76f, wt_v) * expf(-age * 1.35f);
+				total_foam += eddy * bubble * 0.38f;
+			}
+		}
+	}
+
+	if (total_h < -0.45f) total_h = -0.45f;
+	if (total_h >  0.45f) total_h =  0.45f;
+	if (total_foam > 0.55f) total_foam = 0.55f;
+
+	if (out_grad_x) *out_grad_x = total_gx;
+	if (out_grad_y) *out_grad_y = total_gy;
+	if (out_foam) *out_foam = total_foam;
+	return total_h;
 }
 
 
