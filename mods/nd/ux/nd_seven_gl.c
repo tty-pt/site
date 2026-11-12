@@ -921,37 +921,82 @@ static const char *s_fs_terrain =
 	"    float p2Sun   = 0.5 * (3.0 * cosSun  * cosSun  - 1.0);\n"
 	"    return isOcean * (0.68 * p2Moon + 0.31 * p2Sun);\n"
 	"}\n"
+	"/* Low-frequency shoreline wave run-up sampler (octaves 0..2 only, wavelengths 4.5..42 units):\n"
+	" * Matches the visible travelling water wave pattern on both lakes and oceans while omitting\n"
+	" * high-frequency octaves 3..5 (wavelengths 0.14..1.47 units) that would jitter the shoreline edge. */\n"
+	"vec2 eval_shore_wave_swell(vec2 pos, float anim_time, float dist, float fw) {\n"
+	"    vec4 wind = eval_recursive_wind(pos, anim_time, fw, dist);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const float freqs[3] = float[3](0.024, 0.072, 0.220);\n"
+	"    const float amps[3]  = float[3](1.450, 0.680, 0.280);\n"
+	"    const float spds[3]  = float[3](0.180, 0.340, 0.620);\n"
+	"    const float dFar[3]  = float[3](65000.0, 18000.0, 4800.0);\n"
+	"    const float dNear[3] = float[3](14000.0,  3600.0, 1100.0);\n"
+	"    const uint  seeds[3] = uint[3](0x4F434530u, 0x5357454Cu, 0x57415645u);\n"
+	"    const vec2  dirs[3]  = vec2[3](\n"
+	"        vec2( 0.8575, -0.5145),\n"
+	"        vec2( 0.6402, -0.7682),\n"
+	"        vec2( 0.9285, -0.3714)\n"
+	"    );\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    float h = 0.0;\n"
+	"    float crest = 0.0;\n"
+	"    vec2 pRot = pos;\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
+	"        float wNyq  = smoothstep(0.55, 0.16, freqs[i] * fw);\n"
+	"        float w = wDist * wNyq * (0.85 + 0.20 * gust);\n"
+	"        if (w > 0.001) {\n"
+	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
+	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
+	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
+	"            float signedVal = g.x - 0.5;\n"
+	"            float ridge = 0.5 - abs(signedVal);\n"
+	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
+	"            h += shaped * amps[i] * w;\n"
+	"            crest += max(0.0, ridge - 0.22) * (w * 1.4);\n"
+	"            pRot += g.yz * (0.11 * w);\n"
+	"        }\n"
+	"        pRot = rot * pRot;\n"
+	"    }\n"
+	"    return vec2(h, clamp(crest, 0.0, 1.0));\n"
+	"}\n"
 	"/* Asymmetric Shoreline Wave Run-Up & Backwash (Swash) + Intertidal Wet-Sand Hysteresis:\n"
-	" * Driven directly by the travelling water wavelets (eval_zoom_water_waves) + smooth coastal surge\n"
-	" * with zero high-frequency cellular/lace noise static.\n"
+	" * Driven by the smooth travelling wave octaves (eval_shore_wave_swell) + gentle shoreward phase\n"
+	" * on both lakes and oceans, with zero high-frequency shoreline static.\n"
 	" * Returns vec4(swashSurfZ, highWaterZ, swashFoam, swashFilmMask). */\n"
 	"vec4 eval_shore_swash(vec2 pos, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw) {\n"
 	"    float isOcean = 1.0 - smoothstep(0.25, 0.75, abs(uSeaLevel - uBaseSeaLevel));\n"
 	"    float slopeMag = length(slopeGrad);\n"
 	"    float nearShore = smoothstep(6.0, 0.0, abs(terrainZ - baseTideZ));\n"
 	"    if (nearShore <= 0.001 || dist > 3800.0) {\n"
-	"        float tideHigh = uSeaLevel + isOcean * 0.99;\n"
+	"        float tideHigh = uSeaLevel + (0.28 + 0.71 * isOcean);\n"
 	"        return vec4(baseTideZ, max(baseTideZ, tideHigh), 0.0, 0.0);\n"
 	"    }\n"
 	"    float distFade = smoothstep(3800.0, 450.0, dist);\n"
 	"    vec2 shoreDir = (slopeMag > 1e-4) ? (slopeGrad / slopeMag) : vec2(0.7071, -0.7071);\n"
-	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.025 + vec2(13.7, -9.2), 0x53574153u);\n"
-	"    float groupEnv = 0.65 + 0.35 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.4);\n"
-	"    float crossCoord = dot(pos, shoreDir) * 0.08 + (nAlong.x - 0.5) * 1.15;\n"
-	"    float waveArg = mod(anim_time * 0.95, 628.3185) - crossCoord;\n"
-	"    float swellWave = sin(waveArg) + 0.25 * sin(2.0 * waveArg - 0.45);\n"
-	"    /* Couple shoreline water level directly to the actual travelling water wavelets (eval_zoom_water_waves) */\n"
-	"    vec4 shoreWaves = eval_zoom_water_waves(pos, anim_time, dist, fw);\n"
-	"    float slopeResponse = smoothstep(0.008, 0.14, slopeMag) * distFade;\n"
-	"    float waveletRunup = shoreWaves.x * (0.55 + 0.45 * isOcean) * (0.45 + 0.55 * slopeResponse);\n"
-	"    float swellRunup = swellWave * (0.08 + 0.38 * isOcean) * groupEnv * slopeResponse;\n"
-	"    float swashDisp = waveletRunup + swellRunup;\n"
+	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.018 + vec2(13.7, -9.2), 0x53574153u);\n"
+	"    float groupEnv = 0.72 + 0.28 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.0);\n"
+	"    float crossCoord = dot(pos, shoreDir) * 0.065 + (nAlong.x - 0.5) * 0.85;\n"
+	"    float waveArg = mod(anim_time * 0.88, 628.3185) - crossCoord;\n"
+	"    float swellWave = sin(waveArg) + 0.22 * sin(2.0 * waveArg - 0.45);\n"
+	"    vec2 shoreWaves = eval_shore_wave_swell(pos, anim_time, dist, fw);\n"
+	"    float slopeResponse = (0.38 + 0.62 * smoothstep(0.005, 0.12, slopeMag)) * distFade;\n"
+	"    /* Both lakes and oceans ebb and flow with the visible travelling water pattern */\n"
+	"    float waveletRunup = shoreWaves.x * (0.34 + 0.18 * isOcean) * slopeResponse;\n"
+	"    float swellRunup = swellWave * (0.14 + 0.24 * isOcean) * groupEnv * slopeResponse;\n"
+	"    float swashDisp = (waveletRunup + swellRunup) * nearShore;\n"
 	"    float swashSurfZ = baseTideZ + swashDisp;\n"
-	"    float recentSwashTop = baseTideZ + (0.28 + 0.72 * isOcean) * (0.75 + 0.25 * groupEnv) * slopeResponse;\n"
-	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.25);\n"
-	"    /* Smooth, low-frequency wavelet-crest lip at the water's edge (zero high-frequency laceNoise static) */\n"
-	"    float edgeLip = smoothstep(0.32, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.35, shoreWaves.x + swellWave * 0.25);\n"
-	"    float swashFoam = clamp(edgeLip * (0.16 + 0.34 * shoreWaves.w) * isOcean * distFade, 0.0, 0.36);\n"
+	"    float recentSwashTop = baseTideZ + (0.36 + 0.52 * isOcean) * (0.78 + 0.22 * groupEnv) * slopeResponse;\n"
+	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.20);\n"
+	"    /* Smooth low-frequency wavelet-crest lip at the water's edge (active on both lakes and oceans, zero noise static) */\n"
+	"    float edgeLip = smoothstep(0.55, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.04, 0.36, shoreWaves.x + swellWave * 0.28);\n"
+	"    float rockImpact = smoothstep(0.11, 0.26, slopeMag) * smoothstep(0.0, 0.52, shoreWaves.x + swellWave * 0.35);\n"
+	"    float bodyFoamScale = 0.45 + 0.55 * isOcean;\n"
+	"    float swashFoam = clamp((edgeLip * (0.12 + 0.22 * shoreWaves.y) + rockImpact * 0.16) * bodyFoamScale * distFade, 0.0, 0.30);\n"
 	"    float swashFilm = smoothstep(highWaterZ + 0.15, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
 	"}\n"
@@ -1806,31 +1851,73 @@ static const char *s_fs_water =
 	"    float p2Sun   = 0.5 * (3.0 * cosSun  * cosSun  - 1.0);\n"
 	"    return isOcean * (0.68 * p2Moon + 0.31 * p2Sun);\n"
 	"}\n"
+	"vec2 eval_shore_wave_swell(vec2 pos, float anim_time, float dist, float fw) {\n"
+	"    vec4 wind = eval_recursive_wind(pos, anim_time);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const float freqs[3] = float[3](0.024, 0.072, 0.220);\n"
+	"    const float amps[3]  = float[3](1.450, 0.680, 0.280);\n"
+	"    const float spds[3]  = float[3](0.180, 0.340, 0.620);\n"
+	"    const float dFar[3]  = float[3](65000.0, 18000.0, 4800.0);\n"
+	"    const float dNear[3] = float[3](14000.0,  3600.0, 1100.0);\n"
+	"    const uint  seeds[3] = uint[3](0x4F434530u, 0x5357454Cu, 0x57415645u);\n"
+	"    const vec2  dirs[3]  = vec2[3](\n"
+	"        vec2( 0.8575, -0.5145),\n"
+	"        vec2( 0.6402, -0.7682),\n"
+	"        vec2( 0.9285, -0.3714)\n"
+	"    );\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    float h = 0.0;\n"
+	"    float crest = 0.0;\n"
+	"    vec2 pRot = pos;\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), (i == 0) ? 0.35 : 0.0, 1.0);\n"
+	"        float wNyq  = smoothstep(0.55, 0.16, freqs[i] * fw);\n"
+	"        float w = wDist * wNyq * (0.85 + 0.20 * gust);\n"
+	"        if (w > 0.001) {\n"
+	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
+	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
+	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
+	"            float signedVal = g.x - 0.5;\n"
+	"            float ridge = 0.5 - abs(signedVal);\n"
+	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
+	"            h += shaped * amps[i] * w;\n"
+	"            crest += max(0.0, ridge - 0.22) * (w * 1.4);\n"
+	"            pRot += g.yz * (0.11 * w);\n"
+	"        }\n"
+	"        pRot = rot * pRot;\n"
+	"    }\n"
+	"    return vec2(h, clamp(crest, 0.0, 1.0));\n"
+	"}\n"
 	"vec4 eval_shore_swash(vec2 pos, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw) {\n"
 	"    float isOcean = 1.0 - smoothstep(0.25, 0.75, abs(uSeaLevel - uBaseSeaLevel));\n"
 	"    float slopeMag = length(slopeGrad);\n"
 	"    float nearShore = smoothstep(6.0, 0.0, abs(terrainZ - baseTideZ));\n"
 	"    if (nearShore <= 0.001 || dist > 3800.0) {\n"
-	"        float tideHigh = uSeaLevel + isOcean * 0.99;\n"
+	"        float tideHigh = uSeaLevel + (0.28 + 0.71 * isOcean);\n"
 	"        return vec4(baseTideZ, max(baseTideZ, tideHigh), 0.0, 0.0);\n"
 	"    }\n"
 	"    float distFade = smoothstep(3800.0, 450.0, dist);\n"
 	"    vec2 shoreDir = (slopeMag > 1e-4) ? (slopeGrad / slopeMag) : vec2(0.7071, -0.7071);\n"
-	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.025 + vec2(13.7, -9.2), 0x53574153u);\n"
-	"    float groupEnv = 0.65 + 0.35 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.4);\n"
-	"    float crossCoord = dot(pos, shoreDir) * 0.08 + (nAlong.x - 0.5) * 1.15;\n"
-	"    float waveArg = mod(anim_time * 0.95, 628.3185) - crossCoord;\n"
-	"    float swellWave = sin(waveArg) + 0.25 * sin(2.0 * waveArg - 0.45);\n"
-	"    vec4 shoreWaves = eval_zoom_water_waves(pos, anim_time, dist, fw);\n"
-	"    float slopeResponse = smoothstep(0.008, 0.14, slopeMag) * distFade;\n"
-	"    float waveletRunup = shoreWaves.x * (0.55 + 0.45 * isOcean) * (0.45 + 0.55 * slopeResponse);\n"
-	"    float swellRunup = swellWave * (0.08 + 0.38 * isOcean) * groupEnv * slopeResponse;\n"
-	"    float swashDisp = waveletRunup + swellRunup;\n"
+	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.018 + vec2(13.7, -9.2), 0x53574153u);\n"
+	"    float groupEnv = 0.72 + 0.28 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.0);\n"
+	"    float crossCoord = dot(pos, shoreDir) * 0.065 + (nAlong.x - 0.5) * 0.85;\n"
+	"    float waveArg = mod(anim_time * 0.88, 628.3185) - crossCoord;\n"
+	"    float swellWave = sin(waveArg) + 0.22 * sin(2.0 * waveArg - 0.45);\n"
+	"    vec2 shoreWaves = eval_shore_wave_swell(pos, anim_time, dist, fw);\n"
+	"    float slopeResponse = (0.38 + 0.62 * smoothstep(0.005, 0.12, slopeMag)) * distFade;\n"
+	"    float waveletRunup = shoreWaves.x * (0.34 + 0.18 * isOcean) * slopeResponse;\n"
+	"    float swellRunup = swellWave * (0.14 + 0.24 * isOcean) * groupEnv * slopeResponse;\n"
+	"    float swashDisp = (waveletRunup + swellRunup) * nearShore;\n"
 	"    float swashSurfZ = baseTideZ + swashDisp;\n"
-	"    float recentSwashTop = baseTideZ + (0.28 + 0.72 * isOcean) * (0.75 + 0.25 * groupEnv) * slopeResponse;\n"
-	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.25);\n"
-	"    float edgeLip = smoothstep(0.32, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.35, shoreWaves.x + swellWave * 0.25);\n"
-	"    float swashFoam = clamp(edgeLip * (0.16 + 0.34 * shoreWaves.w) * isOcean * distFade, 0.0, 0.36);\n"
+	"    float recentSwashTop = baseTideZ + (0.36 + 0.52 * isOcean) * (0.78 + 0.22 * groupEnv) * slopeResponse;\n"
+	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.20);\n"
+	"    float edgeLip = smoothstep(0.55, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.04, 0.36, shoreWaves.x + swellWave * 0.28);\n"
+	"    float rockImpact = smoothstep(0.11, 0.26, slopeMag) * smoothstep(0.0, 0.52, shoreWaves.x + swellWave * 0.35);\n"
+	"    float bodyFoamScale = 0.45 + 0.55 * isOcean;\n"
+	"    float swashFoam = clamp((edgeLip * (0.12 + 0.22 * shoreWaves.y) + rockImpact * 0.16) * bodyFoamScale * distFade, 0.0, 0.30);\n"
 	"    float swashFilm = smoothstep(highWaterZ + 0.15, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
 	"}\n"
@@ -2372,21 +2459,21 @@ static const char *s_fs_billboard =
 	"    /* 2. Sub-Texel Anti-Aliased, Snell-Refracted & Outline-Softened Sprite Sampling */\n"
 	"    float style = vQuadUV.w;\n"
 	"    if (style > 4.5) {\n"
-	"        /* ND_BB_STYLE_PARTICLE (5.0): Crisp sunlit ballistic water droplet bead with per-droplet color variation */\n"
-	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0);\n"
-	"        qc.x *= (1.0 + 0.15 * max(0.0, qc.y));\n"
+	"        /* ND_BB_STYLE_PARTICLE (5.0): Subtle, fine sunlit water droplet / mist bead with per-droplet color variation */\n"
+	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0) * 1.18;\n"
+	"        qc.x *= (1.0 + 0.14 * max(0.0, qc.y));\n"
 	"        float r2 = dot(qc, qc);\n"
 	"        if (r2 >= 1.0) discard;\n"
 	"        float radial = clamp(1.0 - r2, 0.0, 1.0);\n"
 	"        float nz = sqrt(radial);\n"
-	"        vec3 dropN = normalize(vec3(qc.x * 0.75, qc.y * 0.75, nz));\n"
+	"        vec3 dropN = normalize(vec3(qc.x * 0.72, qc.y * 0.72, nz));\n"
 	"        vec3 sunDir = normalize(vec3(-0.55, 0.62, 0.56));\n"
-	"        float specGlint = pow(max(0.0, dot(dropN, sunDir)), 4.0);\n"
+	"        float specGlint = pow(max(0.0, dot(dropN, sunDir)), 5.0);\n"
 	"        float fresnelRim = pow(1.0 - nz, 2.0) * radial;\n"
-	"        float coreMask = smoothstep(0.0, 0.72, radial);\n"
-	"        float pAlpha = clamp(coreMask * vTint.a * 1.35 * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.98);\n"
-	"        if (pAlpha <= 0.02) discard;\n"
-	"        vec3 dropCol = clamp(mix(vTint.rgb, vec3(1.0, 1.0, 1.0), specGlint * 0.65 + fresnelRim * 0.25), 0.0, 1.0);\n"
+	"        float coreMask = radial * radial * (0.65 + 0.35 * radial);\n"
+	"        float pAlpha = clamp(coreMask * vTint.a * 0.78 * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.78);\n"
+	"        if (pAlpha <= 0.015) discard;\n"
+	"        vec3 dropCol = clamp(mix(vTint.rgb, vec3(1.0, 1.0, 1.0), specGlint * 0.58 + fresnelRim * 0.22), 0.0, 1.0);\n"
 	"        FragColor = vec4(dropCol, pAlpha);\n"
 	"        return;\n"
 	"    }\n"
@@ -4444,10 +4531,10 @@ float nd_seven_gl_eval_shore_swash(float wx, float wy,
 	float base_tide_z = sea_level + astro_tide;
 	float is_ocean = 1.0f - gl_smoothstep(0.25f, 0.75f, fabsf(sea_level - base_sea_level));
 	float slope_mag = sqrtf(slope_gx * slope_gx + slope_gy * slope_gy);
-	float near_shore = gl_smoothstep(5.5f, 0.0f, fabsf(terrain_z - base_tide_z));
+	float near_shore = gl_smoothstep(6.0f, 0.0f, fabsf(terrain_z - base_tide_z));
 
 	if (near_shore <= 0.001f) {
-		float tide_high = sea_level + is_ocean * 0.99f;
+		float tide_high = sea_level + (0.28f + 0.71f * is_ocean);
 		if (out_high_water_z) *out_high_water_z = fmaxf(base_tide_z, tide_high);
 		if (out_splash_foam) *out_splash_foam = 0.0f;
 		return base_tide_z;
@@ -4456,27 +4543,30 @@ float nd_seven_gl_eval_shore_swash(float wx, float wy,
 	float sdx = (slope_mag > 1e-4f) ? (slope_gx / slope_mag) : 0.7071f;
 	float sdy = (slope_mag > 1e-4f) ? (slope_gy / slope_mag) : -0.7071f;
 	float na_v = 0.5f, na_x = 0.0f, na_y = 0.0f;
-	float nm_v = 0.5f, nm_x = 0.0f, nm_y = 0.0f;
-	gl_chaff_grad_noise2d(wx * 0.045f + 13.7f, wy * 0.045f - 9.2f, 0x53574153u, &na_v, &na_x, &na_y);
-	gl_chaff_grad_noise2d(wx * 0.190f + na_x * 0.45f, wy * 0.190f + na_y * 0.45f, 0x53574132u, &nm_v, &nm_x, &nm_y);
+	gl_chaff_grad_noise2d(wx * 0.018f + 13.7f, wy * 0.018f - 9.2f, 0x53574153u, &na_v, &na_x, &na_y);
 
-	float group_env = 0.58f + 0.42f * sinf(fmodf(t_sec * 0.23f, 628.3185f) + (na_v - 0.5f) * 3.2f);
-	float cross_coord = (wx * sdx + wy * sdy) * 0.14f + (na_v - 0.5f) * 1.65f + (nm_v - 0.5f) * 0.55f;
-	float wave_arg = fmodf(t_sec * 1.18f, 628.3185f) - cross_coord;
-	float raw_wave = sinf(wave_arg) + 0.32f * sinf(2.0f * wave_arg - 0.45f) + 0.10f * cosf(3.0f * wave_arg);
-	float swash_amp = (0.06f + 0.52f * is_ocean) * group_env * gl_smoothstep(0.015f, 0.18f, slope_mag);
-	float swash_surf_z = base_tide_z + raw_wave * swash_amp;
-	float recent_top = base_tide_z + (0.08f + 0.68f * is_ocean) * (0.75f + 0.25f * group_env) * gl_smoothstep(0.015f, 0.18f, slope_mag);
-	float high_water_z = fmaxf(swash_surf_z, recent_top + is_ocean * 0.35f);
+	float group_env = 0.72f + 0.28f * sinf(fmodf(t_sec * 0.23f, 628.3185f) + (na_v - 0.5f) * 2.0f);
+	float cross_coord = (wx * sdx + wy * sdy) * 0.065f + (na_v - 0.5f) * 0.85f;
+	float wave_arg = fmodf(t_sec * 0.88f, 628.3185f) - cross_coord;
+	float swell_wave = sinf(wave_arg) + 0.22f * sinf(2.0f * wave_arg - 0.45f);
 
-	float bore_front = gl_smoothstep(-0.20f, 0.55f, cosf(wave_arg - 0.35f));
-	float edge_prox = gl_smoothstep(0.55f, 0.0f, fabsf(terrain_z - swash_surf_z));
-	float rock_impact = gl_smoothstep(0.10f, 0.28f, slope_mag) * gl_smoothstep(-0.1f, 0.7f, raw_wave);
-	float ln_v = 0.5f, ln_x = 0.0f, ln_y = 0.0f;
-	gl_chaff_grad_noise2d(wx * 0.85f + sdx * (raw_wave * 0.6f), wy * 0.85f + sdy * (raw_wave * 0.6f), 0x464F414Du, &ln_v, &ln_x, &ln_y);
-	float cell_lace = gl_smoothstep(0.42f, 0.74f, ln_v * 0.65f + nm_v * 0.35f);
-	float foam = (edge_prox * (0.35f + 0.65f * bore_front) + rock_impact * 0.55f) * cell_lace * is_ocean;
-	if (foam > 0.68f) foam = 0.68f;
+	float wave_crest = 0.0f;
+	/* Pass pixel_footprint = 2.5f so only smooth low-frequency wave octaves 0..2 (wavelengths 4.5..42 units) contribute */
+	float wave_h = nd_seven_gl_eval_water_waves(wx, wy, t_sec, 280.0f, 2.5f, NULL, NULL, &wave_crest);
+	float slope_resp = 0.38f + 0.62f * gl_smoothstep(0.005f, 0.12f, slope_mag);
+	float wavelet_runup = wave_h * (0.34f + 0.18f * is_ocean) * slope_resp;
+	float swell_runup = swell_wave * (0.14f + 0.24f * is_ocean) * group_env * slope_resp;
+	float swash_surf_z = base_tide_z + (wavelet_runup + swell_runup) * near_shore;
+	float recent_top = base_tide_z + (0.36f + 0.52f * is_ocean) * (0.78f + 0.22f * group_env) * slope_resp;
+	float high_water_z = fmaxf(swash_surf_z, recent_top + is_ocean * 0.20f);
+
+	float edge_lip = gl_smoothstep(0.55f, 0.0f, fabsf(terrain_z - swash_surf_z)) *
+	                 gl_smoothstep(-0.04f, 0.36f, wave_h + swell_wave * 0.28f);
+	float rock_impact = gl_smoothstep(0.11f, 0.26f, slope_mag) *
+	                    gl_smoothstep(0.0f, 0.52f, wave_h + swell_wave * 0.35f);
+	float body_foam_scale = 0.45f + 0.55f * is_ocean;
+	float foam = (edge_lip * (0.12f + 0.22f * wave_crest) + rock_impact * 0.16f) * body_foam_scale;
+	if (foam > 0.30f) foam = 0.30f;
 	if (foam < 0.0f) foam = 0.0f;
 
 	if (out_high_water_z) *out_high_water_z = high_water_z;
@@ -4634,16 +4724,16 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 	/* Strict forward cutoff: never draw any wake stripe in front of the lamb */
 	if (s_head > 0.0f)
 		return 0.0f;
-	float front_gate = gl_smoothstep(0.0f, -1.2f, s_head) * head_energy;
+	float front_gate = gl_smoothstep(0.0f, -0.35f, s_head) * head_energy;
 	if (front_gate <= 0.001f)
 		return 0.0f;
 
 	float wt_v = 0.5f, wt_x = 0.0f, wt_y = 0.0f;
-	gl_chaff_grad_noise2d(frag_wx * 0.45f + fmodf(anim_time * 0.85f, 256.0f),
-	                      frag_wy * 0.45f - fmodf(anim_time * 0.65f, 256.0f),
+	gl_chaff_grad_noise2d(frag_wx * 0.42f + fmodf(anim_time * 0.85f, 256.0f),
+	                      frag_wy * 0.42f - fmodf(anim_time * 0.65f, 256.0f),
 	                      0x57414B45u, &wt_v, &wt_x, &wt_y);
-	float warp_x = wt_x * 0.95f;
-	float warp_y = wt_y * 0.95f;
+	float warp_x = wt_x * 1.05f;
+	float warp_y = wt_y * 1.05f;
 
 	float total_h = 0.0f;
 	float total_gx = 0.0f, total_gy = 0.0f;
@@ -4694,10 +4784,10 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 
 		float eb_eff = (energy_b > 0.002f) ? energy_b : (energy_a * 0.5f);
 		float seg_energy = eb_eff + (energy_a - eb_eff) * t_seg;
-		float age_decay = expf(-0.95f * age) * gl_smoothstep(4.0f, 0.15f, age) * seg_energy;
+		float age_decay = expf(-0.85f * age) * gl_smoothstep(4.0f, 0.15f, age) * seg_energy;
 		float long_win = (s_ahead > 0.0f) ? expf(-(s_ahead * s_ahead) * 0.65f) : 1.0f;
 		if (s_behind > 0.0f)
-			long_win *= expf(-(s_behind * s_behind) / (10.0f + age * 12.0f));
+			long_win *= expf(-(s_behind * s_behind) / (12.0f + age * 14.0f));
 		float env_base = age_decay * long_win * front_gate;
 		if (env_base <= 0.002f)
 			continue;
@@ -4709,41 +4799,42 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 		float bdy = s_gl.cur_wake_head[1] - closest_y;
 		float back_dist = sqrtf(bdx * bdx + bdy * bdy);
 
-		float wx_w = (frag_wx + warp_x * (0.18f + 0.12f * age)) - closest_x;
-		float wy_w = (frag_wy + warp_y * (0.18f + 0.12f * age)) - closest_y;
+		float wx_w = (frag_wx + warp_x * (0.20f + 0.14f * age)) - closest_x;
+		float wy_w = (frag_wy + warp_y * (0.20f + 0.14f * age)) - closest_y;
 		float raw_u = wx_w * ndir_x + wy_w * ndir_y;
 		float u = fabsf(raw_u);
 		float sign_u = (raw_u >= 0.0f) ? 1.0f : -1.0f;
 
-		float wake_hw = 1.4f + back_dist * 0.16f + age * 2.0f;
+		float wake_hw = 1.6f + back_dist * 0.18f + age * 2.2f;
 		float edge_sigma = 1.15f + age * 0.85f;
 		float d_edge = (u - wake_hw) / edge_sigma;
 
-		float rim_env = expf(-(d_edge * d_edge)) * expf(-back_dist * 0.04f) * env_base;
-		float spd_scale = fminf(1.0f, fmaxf(0.25f, spd_a / 42.0f));
+		float rim_env = expf(-(d_edge * d_edge)) * expf(-back_dist * 0.032f) * env_base;
+		float spd_scale = fminf(1.15f, fmaxf(0.35f, spd_a / 36.0f));
 		if (rim_env > 0.002f) {
-			float h_rim = 0.065f * rim_env * spd_scale;
+			float h_rim = 0.22f * rim_env * spd_scale;
 			total_h += h_rim;
-			float d_rim_du = (-2.0f * d_edge / edge_sigma) * h_rim;
-			total_gx += (ndir_x * sign_u - tdir_x * 0.16f) * d_rim_du;
-			total_gy += (ndir_y * sign_u - tdir_y * 0.16f) * d_rim_du;
+			float d_rim_du = (-2.4f * d_edge / edge_sigma) * h_rim;
+			total_gx += (ndir_x * sign_u - tdir_x * 0.22f) * d_rim_du;
+			total_gy += (ndir_y * sign_u - tdir_y * 0.22f) * d_rim_du;
+			total_foam += rim_env * spd_scale * expf(-age * 1.15f) * (0.20f + 0.26f * wt_v);
 		}
 
-		float core_env = gl_smoothstep(wake_hw + edge_sigma * 0.8f, wake_hw * 0.2f, u) *
-		                 expf(-back_dist * 0.045f) * env_base;
+		float core_env = gl_smoothstep(wake_hw + edge_sigma * 0.85f, wake_hw * 0.15f, u) *
+		                 expf(-back_dist * 0.038f) * env_base;
 		if (core_env > 0.003f) {
 			float eddy = core_env * spd_scale;
-			total_h -= 0.035f * eddy;
-			total_gx += wt_x * (0.14f * eddy);
-			total_gy += wt_y * (0.14f * eddy);
-			float bubble = gl_smoothstep(0.48f, 0.78f, wt_v) * expf(-age * 1.45f);
-			total_foam += eddy * bubble * 0.28f;
+			total_h -= 0.12f * eddy;
+			total_gx += wt_x * (0.48f * eddy) + ndir_x * (sign_u * 0.22f * eddy);
+			total_gy += wt_y * (0.48f * eddy) + ndir_y * (sign_u * 0.22f * eddy);
+			float bubble = gl_smoothstep(0.32f, 0.72f, wt_v) * expf(-age * 1.25f);
+			total_foam += eddy * (0.18f + bubble * 0.48f);
 		}
 	}
 
-	if (total_h < -0.18f) total_h = -0.18f;
-	if (total_h >  0.18f) total_h =  0.18f;
-	if (total_foam > 0.38f) total_foam = 0.38f;
+	if (total_h < -0.45f) total_h = -0.45f;
+	if (total_h >  0.45f) total_h =  0.45f;
+	if (total_foam > 0.72f) total_foam = 0.72f;
 
 	if (out_grad_x) *out_grad_x = total_gx;
 	if (out_grad_y) *out_grad_y = total_gy;
