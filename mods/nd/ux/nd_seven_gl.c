@@ -453,34 +453,28 @@ static const char *s_fs_terrain =
 	"    vec2 grad = vec2((k0 + k2 * u.y) * du.x, (k1 + k2 * u.x) * du.y);\n"
 	"    return vec3(val, grad.x, grad.y);\n"
 	"}\n"
-	"float nd_gpu_eval_coarse_unwrapped(uint seed, int rx, int ry, float fw, float dist) {\n"
+	"/* Unified Scale-Space Filter Function:\n"
+	" * Replaces discrete octave switch-cases and premature camera-distance cutoffs with a single\n"
+	" * continuous function of world wavelength and pixel footprint fw. Every feature (lake, island,\n"
+	" * peninsula, fjord, archipelago, mountain chain) remains at 100% strength down to OCTAVE_FULL_PX\n"
+	" * pixels on screen, and smoothly fades to 0% at the Nyquist limit OCTAVE_MIN_PX. */\n"
+	"const float OCTAVE_MIN_PX  = 1.35;\n"
+	"const float OCTAVE_FULL_PX = 4.50;\n"
+	"float nd_octave_weight(float wavelength, float fw) {\n"
+	"    return smoothstep(OCTAVE_MIN_PX, OCTAVE_FULL_PX, wavelength / max(fw, 1e-4));\n"
+	"}\n"
+	"float nd_gpu_eval_coarse_unwrapped(uint seed, int rx, int ry, float fw) {\n"
 	"    int cur_rx = rx;\n"
 	"    int cur_ry = ry;\n"
 	"    float coarse_q12_4 = 0.0;\n"
-	"    for (int s = 15; s >= 9; s--) {\n"
-	"        int amp = chaff_octave_amplitude_ex(s, 2, 1);\n"
-	"        uint oct_seed = seed ^ (uint(s) * 0x85EBCA77u + 1u);\n"
-	"        float raw = chaff_wpoint_periodic_2d_f(cur_rx, cur_ry, s, oct_seed) - 128.0;\n"
-	"        float w_oct = 1.0;\n"
-	"        if (s == 9) {\n"
-	"            float cell_w = float(1 << s) * 144.0;\n"
-	"            w_oct = smoothstep(0.85, 0.22, fw / cell_w) * smoothstep(2.6, 0.55, dist / (cell_w * 12.0));\n"
-	"        }\n"
-	"        coarse_q12_4 += (raw * float(amp)) * 0.125 * w_oct;\n"
-	"        int nx = (cur_rx * 29304 - cur_ry * 14652) >> 15;\n"
-	"        int ny = (cur_rx * 14652 + cur_ry * 29304) >> 15;\n"
-	"        cur_rx = nx;\n"
-	"        cur_ry = ny;\n"
-	"    }\n"
-	"    for (int s = 8; s >= 2; s--) {\n"
+	"    for (int s = 15; s >= 2; s--) {\n"
 	"        float cell_w = float(1 << s) * 144.0;\n"
-	"        float w_nyq = smoothstep(0.85, 0.22, fw / cell_w);\n"
-	"        float w_dist = smoothstep(2.6, 0.55, dist / (cell_w * 12.0));\n"
-	"        float w_oct = w_nyq * w_dist;\n"
+	"        float w_oct = nd_octave_weight(cell_w, fw);\n"
 	"        if (w_oct > 0.001) {\n"
 	"            int amp = chaff_octave_amplitude_ex(s, 2, 1);\n"
 	"            uint oct_seed = seed ^ (uint(s) * 0x85EBCA77u + 1u);\n"
-	"            float raw = chaff_wpoint_2d_f(cur_rx, cur_ry, s, oct_seed) - 128.0;\n"
+	"            float raw = ((s >= 9) ? chaff_wpoint_periodic_2d_f(cur_rx, cur_ry, s, oct_seed)\n"
+	"                                  : chaff_wpoint_2d_f(cur_rx, cur_ry, s, oct_seed)) - 128.0;\n"
 	"            coarse_q12_4 += (raw * float(amp)) * 0.125 * w_oct;\n"
 	"        }\n"
 	"        int nx = (cur_rx * 29304 - cur_ry * 14652) >> 15;\n"
@@ -490,16 +484,16 @@ static const char *s_fs_terrain =
 	"    }\n"
 	"    return coarse_q12_4;\n"
 	"}\n"
-	"float nd_gpu_eval_coarse_torus_x(uint seed, int rx_wrapped, int ry_unwrapped, float fw, float dist) {\n"
+	"float nd_gpu_eval_coarse_torus_x(uint seed, int rx_wrapped, int ry_unwrapped, float fw) {\n"
 	"    uint ux = (uint(rx_wrapped) - 32512u) & 0xFFFFu;\n"
 	"    if (ux < 512u) {\n"
 	"        int rx_hi = 32512 + int(ux);\n"
 	"        int rx_lo = rx_hi - 65536;\n"
-	"        float c_hi = nd_gpu_eval_coarse_unwrapped(seed, rx_hi, ry_unwrapped, fw, dist);\n"
-	"        float c_lo = nd_gpu_eval_coarse_unwrapped(seed, rx_lo, ry_unwrapped, fw, dist);\n"
+	"        float c_hi = nd_gpu_eval_coarse_unwrapped(seed, rx_hi, ry_unwrapped, fw);\n"
+	"        float c_lo = nd_gpu_eval_coarse_unwrapped(seed, rx_lo, ry_unwrapped, fw);\n"
 	"        return mix(c_hi, c_lo, float(ux) * (1.0 / 512.0));\n"
 	"    }\n"
-	"    return nd_gpu_eval_coarse_unwrapped(seed, rx_wrapped, ry_unwrapped, fw, dist);\n"
+	"    return nd_gpu_eval_coarse_unwrapped(seed, rx_wrapped, ry_unwrapped, fw);\n"
 	"}\n"
 	"float nd_gpu_bimodal_hypsometry(float elev) {\n"
 	"    if (elev < 0.0) {\n"
@@ -515,7 +509,7 @@ static const char *s_fs_terrain =
 	"        return min(peak, 1854.0);\n"
 	"    }\n"
 	"}\n"
-	"float nd_gpu_room_hyp_coarse(uint seed, int rx_unwrapped, int ry_unwrapped, float fw, float dist) {\n"
+	"float nd_gpu_room_hyp_coarse(uint seed, int rx_unwrapped, int ry_unwrapped, float fw) {\n"
 	"    int rx = ((rx_unwrapped + 32768) & 65535) - 32768;\n"
 	"    int ry = ((ry_unwrapped + 32768) & 65535) - 32768;\n"
 	"    uint uy = (uint(ry) - 32512u) & 0xFFFFu;\n"
@@ -523,16 +517,17 @@ static const char *s_fs_terrain =
 	"    if (uy < 512u) {\n"
 	"        int ry_hi = 32512 + int(uy);\n"
 	"        int ry_lo = ry_hi - 65536;\n"
-	"        float c_hi = nd_gpu_eval_coarse_torus_x(seed, rx, ry_hi, fw, dist);\n"
-	"        float c_lo = nd_gpu_eval_coarse_torus_x(seed, rx, ry_lo, fw, dist);\n"
+	"        float c_hi = nd_gpu_eval_coarse_torus_x(seed, rx, ry_hi, fw);\n"
+	"        float c_lo = nd_gpu_eval_coarse_torus_x(seed, rx, ry_lo, fw);\n"
 	"        c = mix(c_hi, c_lo, float(uy) * (1.0 / 512.0));\n"
 	"    } else {\n"
-	"        c = nd_gpu_eval_coarse_torus_x(seed, rx, ry, fw, dist);\n"
+	"        c = nd_gpu_eval_coarse_torus_x(seed, rx, ry, fw);\n"
 	"    }\n"
 	"    c -= float(uSeaOffsetQ12_4);\n"
-	"    return nd_gpu_bimodal_hypsometry(floor(c * 0.0625));\n"
+	"    return nd_gpu_bimodal_hypsometry(c * 0.0625);\n"
 	"}\n"
 	"vec3 nd_gpu_eval_canonical_field(vec2 worldPos, float fw, float dist, out float out_fine_elev) {\n"
+	"    (void)dist;\n"
 	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n"
 	"    float rx_f = (worldPos.x - 80.0) / 160.0;\n"
 	"    float ry_f = (64.0 - worldPos.y) / 128.0;\n"
@@ -541,18 +536,17 @@ static const char *s_fs_terrain =
 	"    vec2 f = vec2(rx_f - floor(rx_f), ry_f - floor(ry_f));\n"
 	"    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
 	"    vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n"
-	"    float h00 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0,     fw, dist);\n"
-	"    float h10 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0,     fw, dist);\n"
-	"    float h01 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0 + 1, fw, dist);\n"
-	"    float h11 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0 + 1, fw, dist);\n"
+	"    float h00 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0,     fw);\n"
+	"    float h10 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0,     fw);\n"
+	"    float h01 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0 + 1, fw);\n"
+	"    float h11 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0 + 1, fw);\n"
 	"    float k0 = h10 - h00;\n"
 	"    float k1 = h01 - h00;\n"
 	"    float k2 = h11 - h01 - k0;\n"
 	"    float coarseH = h00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n"
 	"    vec2 coarseGrad = vec2((k0 + k2 * u.y) * du.x / 160.0, -(k1 + k2 * u.x) * du.y / 128.0);\n"
-	"    /* Evaluate canonical rotated fBm fine octaves (s = 9..3) with Nyquist & distance band-limiting */\n"
-	"    float fineDistFade = smoothstep(26000.0, 7500.0, dist);\n"
-	"    if (fineDistFade <= 0.001) {\n"
+	"    /* Evaluate canonical rotated fBm fine octaves (s = 9..3) governed by the same nd_octave_weight law */\n"
+	"    if (nd_octave_weight(512.0, fw) <= 0.001) {\n"
 	"        out_fine_elev = 0.0;\n"
 	"        return vec3(coarseH, coarseGrad.x, coarseGrad.y);\n"
 	"    }\n"
@@ -571,7 +565,7 @@ static const char *s_fs_terrain =
 	"    float meso_ridge = 0.0;\n"
 	"    vec2 meso_grad = vec2(0.0);\n"
 	"    for (int s = 9; s >= 3; s--) {\n"
-	"        float wNyq = smoothstep(0.95, 0.25, fw / float(1 << s)) * fineDistFade;\n"
+	"        float wNyq = nd_octave_weight(float(1 << s), fw);\n"
 	"        if (wNyq > 0.001) {\n"
 	"            int amp_b = chaff_octave_amplitude_ex(s, 3, 1);\n"
 	"            uint b_seed = seed ^ (uint(s) * 0x85EBCA77u + 0xBEEFu);\n"
@@ -691,8 +685,8 @@ static const char *s_fs_terrain =
 	"vec3 eval_shore_micro_relief(vec2 worldPos, float depth, float fw) {\n"
 	"    float env = smoothstep(3.2, 0.25, abs(depth));\n"
 	"    if (env <= 0.001) return vec3(0.0);\n"
-	"    float wNyq1 = smoothstep(0.55, 0.18, 0.18 * fw);\n"
-	"    float wNyq2 = smoothstep(0.55, 0.18, 0.52 * fw);\n"
+	"    float wNyq1 = nd_octave_weight(1.0 / 0.18, fw);\n"
+	"    float wNyq2 = nd_octave_weight(1.0 / 0.52, fw);\n"
 	"    vec3 g1 = (wNyq1 > 0.001) ? chaff_grad_noise2d(worldPos * 0.18, 0xA341316Cu) : vec3(0.5, 0.0, 0.0);\n"
 	"    vec3 g2 = (wNyq2 > 0.001) ? chaff_grad_noise2d(worldPos * 0.52 + vec2(17.3, -29.1), 0xC8013EA4u) : vec3(0.5, 0.0, 0.0);\n"
 	"    float disp = ((g1.x - 0.5) * 0.38 * wNyq1 + (g2.x - 0.5) * 0.16 * wNyq2) * env;\n"
@@ -715,7 +709,7 @@ static const char *s_fs_terrain =
 	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
 	"    for (int i = 0; i < 4; i++) {\n"
 	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"        float wNyq  = smoothstep(0.92, 0.28, freqs[i] * fw);\n"
+	"        float wNyq  = nd_octave_weight(1.0 / freqs[i], fw);\n"
 	"        float w = wDist * wNyq;\n"
 	"        if (w > 0.001) {\n"
 	"            vec3 g = chaff_grad_noise2d(pRot * freqs[i], seeds[i]);\n"
@@ -735,18 +729,19 @@ static const char *s_fs_terrain =
 	"    out_octaves = vec4(oct[0], oct[1], oct[2], oct[3]);\n"
 	"    return vec4(h, grad.x, grad.y, clamp(cavity, 0.0, 0.45));\n"
 	"}\n"
-	"/* High-Definition Macro & Orbital Procedural Noise Image (atmosphere -> low orbit -> space):\n"
-	" * Replaces high-frequency polygon subdivision at altitude with a crisp, Nyquist band-limited\n"
-	" * 4-octave continental/orogenic noise image directly in world coordinates. */\n"
+	"/* High-Definition Macro & Orbital Procedural Noise Image (atmosphere -> low orbit -> full planet):\n"
+	" * Governed by the same continuous nd_octave_weight(wavelength, fw) scale law across 6 octaves\n"
+	" * spanning planetary cordilleras (200,000 units) down to local valleys (28 units), so full-planet\n"
+	" * continents retain crisp tectonic mountain chains, jagged coastlines, and natural relief at all zooms. */\n"
 	"vec4 eval_macro_planetary_detail(vec2 pos, float dist, float fw, out vec4 out_macro_oct) {\n"
-	"    float highAltWeight = smoothstep(1400.0, 4200.0, dist) * smoothstep(220000.0, 48000.0, dist);\n"
+	"    float highAltWeight = smoothstep(1400.0, 4200.0, dist);\n"
 	"    if (highAltWeight <= 0.001) {\n"
 	"        out_macro_oct = vec4(0.5);\n"
 	"        return vec4(0.0);\n"
 	"    }\n"
-	"    const float freqs[4] = float[4](0.00065, 0.00240, 0.00920, 0.03600);\n"
-	"    const float amps[4]  = float[4](3.20, 1.85, 0.95, 0.48);\n"
-	"    const uint  seeds[4] = uint[4](0x504C414Eu, 0x4F524231u, 0x41544D4Fu, 0x4D45534Fu);\n"
+	"    const float freqs[6] = float[6](0.000005, 0.000022, 0.00010, 0.00048, 0.00220, 0.01000);\n"
+	"    const float amps[6]  = float[6](16.00, 9.50, 5.20, 2.80, 1.50, 0.75);\n"
+	"    const uint  seeds[6] = uint[6](0x54454354u, 0x43524154u, 0x504C414Eu, 0x4F524231u, 0x41544D4Fu, 0x4D45534Fu);\n"
 	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
 	"    float h = 0.0;\n"
@@ -755,25 +750,26 @@ static const char *s_fs_terrain =
 	"    vec2 pRot = pos;\n"
 	"    mat2 curInvRot = mat2(1.0, 0.0, 0.0, 1.0);\n"
 	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
-	"    for (int i = 0; i < 4; i++) {\n"
-	"        float wNyq = smoothstep(0.62, 0.16, freqs[i] * fw) * highAltWeight;\n"
+	"    for (int i = 0; i < 6; i++) {\n"
+	"        float wNyq = nd_octave_weight(1.0 / freqs[i], fw) * highAltWeight;\n"
 	"        if (wNyq > 0.001) {\n"
 	"            vec3 g = chaff_grad_noise2d(pRot * freqs[i], seeds[i]);\n"
-	"            oct[i] = mix(0.5, g.x, wNyq);\n"
+	"            if (i >= 2) oct[i - 2] = mix(0.5, g.x, wNyq);\n"
+	"            else oct[0] = mix(oct[0], g.x, 0.5 * wNyq);\n"
 	"            float signedVal = g.x - 0.5;\n"
 	"            float ridge = 0.5 - abs(signedVal);\n"
-	"            float shaped = mix(signedVal, ridge - 0.16, 0.42);\n"
+	"            float shaped = mix(signedVal, ridge - 0.16, 0.48);\n"
 	"            vec2 worldG = curInvRot * g.yz;\n"
 	"            h += shaped * amps[i] * wNyq;\n"
 	"            grad += worldG * (freqs[i] * amps[i] * wNyq);\n"
-	"            ridgeAcc += max(0.0, ridge - 0.18) * (0.65 * wNyq);\n"
+	"            ridgeAcc += max(0.0, ridge - 0.16) * (0.55 * wNyq);\n"
 	"            pRot += g.yz * (0.14 * wNyq);\n"
 	"        }\n"
 	"        pRot = rot * pRot;\n"
 	"        curInvRot = curInvRot * irot;\n"
 	"    }\n"
 	"    out_macro_oct = vec4(oct[0], oct[1], oct[2], oct[3]);\n"
-	"    return vec4(h, grad.x, grad.y, clamp(ridgeAcc, 0.0, 0.65));\n"
+	"    return vec4(h, grad.x, grad.y, clamp(ridgeAcc, 0.0, 0.75));\n"
 	"}\n"
 	"/* Multi-octave moving recursive wind field: synoptic wind -> meso gusts (cat's paws) -> micro eddies.\n"
 	" * Uses spatial domain warping + constant-direction phase advection so temporal velocity is invariant over time. */\n"
@@ -2421,7 +2417,7 @@ void nd_seven_gl_compute_mvp(uint32_t vp_w, uint32_t vp_h,
 		float fov_rad = fov_deg * (PI_F / 180.0f);
 		float aspect = (vp_h > 0) ? ((float)vp_w / (float)vp_h) : 1.333333f;
 		float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
-		float far_z = (d * 20.0f > 200000.0f) ? (d * 20.0f) : 200000.0f;
+		float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
 
 		ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
 		ar_mat4_multiply(out_mvp, proj, modelview);
@@ -2448,7 +2444,7 @@ void nd_seven_gl_compute_flat_mvp(uint32_t vp_w, uint32_t vp_h,
 	float fov_rad = fov_deg * (PI_F / 180.0f);
 	float aspect = (vp_h > 0) ? ((float)vp_w / (float)vp_h) : 1.333333f;
 	float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
-	float far_z = (d * 20.0f > 200000.0f) ? (d * 20.0f) : 200000.0f;
+	float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
 
 	ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
 	ar_mat4_multiply(out_mvp, proj, modelview);
@@ -3187,7 +3183,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	float fov_rad = fov_deg * (PI_F / 180.0f);
 	float aspect = (stage_h > 0) ? ((float)stage_w / (float)stage_h) : 1.333333f;
 	float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
-	float far_z = (d * 20.0f > 200000.0f) ? (d * 20.0f) : 200000.0f;
+	float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
 	ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
 	ar_mat4_multiply(s_gl.cur_mvp, proj, modelview);
 
@@ -3374,11 +3370,14 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glUniform2f(s_gl.terrain_pipe.uTorusRadii, eff_pdef->major_r, eff_pdef->minor_r);
 	glUniform2f(s_gl.terrain_pipe.uWorldDim, ND_SEVEN_WORLD_DIM_W, ND_SEVEN_WORLD_DIM_H);
 
-	glUniform1f(s_gl.terrain_pipe.uFogStart, s_gl.cur_dist * 1.5f);
-	glUniform1f(s_gl.terrain_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
+	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+	/* In deep space (space_t -> 1), push distance fog out to infinity so distant celestial bodies
+	 * (like the Moon behind the main planet) remain crisp and un-fogged against space */
+	float fog_scale = 1.0f + space_t * 250.0f;
+	glUniform1f(s_gl.terrain_pipe.uFogStart, s_gl.cur_dist * 1.5f * fog_scale);
+	glUniform1f(s_gl.terrain_pipe.uFogEnd, s_gl.cur_dist * 4.0f * fog_scale);
 	glUniform1f(s_gl.terrain_pipe.uAnimTime, s_gl.cur_anim_time);
 
-	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 	glUniform3f(s_gl.terrain_pipe.uSkyColor,
 	            0.55f * (1.0f - space_t) + 0.012f * space_t,
 	            0.70f * (1.0f - space_t) + 0.016f * space_t,
