@@ -92,6 +92,40 @@ int main(void)
 		printf("  [PASS] High-altitude 3D view (0.01x) and 2D minimap render simultaneously without LOD conflict\n");
 	}
 
+	/* Phase 3: Horizontal Movement Stability at Atmosphere, Low Orbit, and Space Altitudes
+	 * Verify that moving the player room-by-room at high altitude maintains a stable, uniform
+	 * macro LOD level without split/merge thrashing or elevation popping. */
+	printf("--- Phase 3: Horizontal Movement Stability at Atmosphere, Low Orbit, and Space ---\n");
+	{
+		const float alt_zooms[3] = { 0.04f, 0.015f, 0.005f }; /* Atmosphere, Low Orbit, Space */
+		for (int a = 0; a < 3; a++) {
+			nd_seven_set_zoom(alt_zooms[a]);
+			int16_t probe_elev_0 = 0;
+
+			for (int step = 0; step < 8; step++) {
+				client_st.map_data.pos[0] = (int16_t)step;
+				client_st.map_data.pos[1] = (int16_t)(step / 2);
+				nd_seven_render(1280, 720, &client_st);
+
+				ar_stats_t st_stats;
+				ar_system_get_stats(cs, &st_stats);
+				/* At atmosphere/orbit/space, active leaves stay compact (<= 64) */
+				assert(st_stats.active_chunks_last_frame > 0 && st_stats.active_chunks_last_frame <= 64);
+
+				/* World-space elevation at fixed point (320, 256) remains invariant across steps */
+				ar_sample_t fixed_pt;
+				assert(ar_probe_view(cs, 0, 0, 320, 256, &fixed_pt));
+				if (step == 0) {
+					probe_elev_0 = fixed_pt.val;
+				} else {
+					assert(fixed_pt.val == probe_elev_0);
+				}
+			}
+			printf("  [PASS] Zoom %6.4fx: 8 horizontal steps maintained invariant world elevation (%d) and compact macro mesh\n",
+			       alt_zooms[a], (int)probe_elev_0);
+		}
+	}
+
 	nd_seven_ground_cache_forget();
 	ar_stats_t final_stats;
 	ar_system_get_stats(cs, &final_stats);

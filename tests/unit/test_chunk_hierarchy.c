@@ -41,12 +41,17 @@ static bool field_sparsity_binding(void *user_ctx, uint16_t world, uint8_t level
 	return overlap;
 }
 
+#define TEST_GRID_DIM      32
+#define TEST_POOL_CAP      128
+#define TEST_MAX_ACTIVE    64
+#define TEST_MAX_LEVELS    17
+
 int main(void)
 {
 	printf("=== Testing Generic Multi-Scale Chunk Hierarchy with Canonical Field ===\n");
 
-	ar_system_t *cs = ar_system_create(160, 128, field_sampler_binding,
-	                                         field_sparsity_binding, NULL);
+	ar_system_t *cs = ar_system_create(160, 128, TEST_GRID_DIM, TEST_POOL_CAP, TEST_MAX_ACTIVE, TEST_MAX_LEVELS,
+	                                   field_sampler_binding, field_sparsity_binding, NULL);
 	assert(cs != NULL);
 	printf("PASS: ar_system_create with canonical nd_field_sample binding\n");
 
@@ -71,17 +76,17 @@ int main(void)
 			.eff_cam_dist = 400.0f
 		};
 
-		const ar_node_t *out_chunks[AR_DEFAULT_MAX_ACTIVE];
-		size_t n = ar_system_update(cs, 1, &view, out_chunks, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *out_chunks[TEST_MAX_ACTIVE];
+		size_t n = ar_system_update(cs, 1, &view, out_chunks, TEST_MAX_ACTIVE);
 
 		assert(n > 0);
-		assert(n <= AR_DEFAULT_MAX_ACTIVE);
+		assert(n <= TEST_MAX_ACTIVE);
 
 		ar_stats_t stats;
 		ar_system_get_stats(cs, &stats);
 
 		printf("PASS: Zoom %9.4fx -> Active Chunks: %2zu <= %d limit | Levels [%u..%u] | Pool In-Use: %zu\n",
-		       zoom, n, AR_DEFAULT_MAX_ACTIVE, stats.min_level_observed, stats.max_level_observed, stats.pool_in_use);
+		       zoom, n, TEST_MAX_ACTIVE, stats.min_level_observed, stats.max_level_observed, stats.pool_in_use);
 	}
 
 	/* 2. Hierarchical Spatial Scaling Invariant */
@@ -93,8 +98,8 @@ int main(void)
 			.viewport_w = 1280.0f, .viewport_h = 720.0f,
 			.eff_cam_dist = 400.0f
 		};
-		const ar_node_t *macro_chunks[AR_DEFAULT_MAX_ACTIVE];
-		size_t n_macro = ar_system_update(cs, 1, &view_macro, macro_chunks, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *macro_chunks[TEST_MAX_ACTIVE];
+		size_t n_macro = ar_system_update(cs, 1, &view_macro, macro_chunks, TEST_MAX_ACTIVE);
 		assert(n_macro > 0);
 
 		/* Verify chunk physical extents scale exponentially with level */
@@ -154,19 +159,19 @@ int main(void)
 				.viewport_h = 720.0f,
 				.eff_cam_dist = 400.0f
 			};
-			const ar_node_t *orb_chunks[AR_DEFAULT_MAX_ACTIVE];
-			size_t n = ar_system_update(cs, 1, &orb_view, orb_chunks, AR_DEFAULT_MAX_ACTIVE);
-			assert(n > 0 && n <= AR_DEFAULT_MAX_ACTIVE);
+			const ar_node_t *orb_chunks[TEST_MAX_ACTIVE];
+			size_t n = ar_system_update(cs, 1, &orb_view, orb_chunks, TEST_MAX_ACTIVE);
+			assert(n > 0 && n <= TEST_MAX_ACTIVE);
 		}
 
 		ar_stats_t s1;
 		ar_system_get_stats(cs, &s1);
 
-		assert(s1.pool_in_use <= AR_DEFAULT_POOL_CAPACITY);
+		assert(s1.pool_in_use <= TEST_POOL_CAP);
 		assert(s1.cache_misses_total >= initial_misses);
 		assert(s1.cache_hits_total > s1.cache_misses_total);
 		printf("PASS: Zero heap allocations during orbit: %zu cache hits, pool bounded to %zu/%d\n",
-		       s1.cache_hits_total, s1.pool_in_use, AR_DEFAULT_POOL_CAPACITY);
+		       s1.cache_hits_total, s1.pool_in_use, TEST_POOL_CAP);
 	}
 
 	/* 5. Sparsity Mask Accuracy */
@@ -178,8 +183,8 @@ int main(void)
 			.viewport_w = 1280.0f, .viewport_h = 720.0f,
 			.eff_cam_dist = 400.0f
 		};
-		const ar_node_t *origin_chunks[AR_DEFAULT_MAX_ACTIVE];
-		size_t n_orig = ar_system_update(cs, 1, &view_origin, origin_chunks, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *origin_chunks[TEST_MAX_ACTIVE];
+		size_t n_orig = ar_system_update(cs, 1, &view_origin, origin_chunks, TEST_MAX_ACTIVE);
 
 		bool town_detected = false;
 		for (size_t i = 0; i < n_orig; i++) {
@@ -196,8 +201,8 @@ int main(void)
 			.viewport_w = 1280.0f, .viewport_h = 720.0f,
 			.eff_cam_dist = 400.0f
 		};
-		const ar_node_t *wild_chunks[AR_DEFAULT_MAX_ACTIVE];
-		size_t n_wild = ar_system_update(cs, 1, &view_wild, wild_chunks, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *wild_chunks[TEST_MAX_ACTIVE];
+		size_t n_wild = ar_system_update(cs, 1, &view_wild, wild_chunks, TEST_MAX_ACTIVE);
 
 		bool any_wild_structures = false;
 		for (size_t i = 0; i < n_wild; i++) {
@@ -223,8 +228,8 @@ int main(void)
 
 		for (int i = 0; i < BENCH_FRAMES; i++) {
 			b_view.cam_x += 1.0f;
-			const ar_node_t *bench_chunks[AR_DEFAULT_MAX_ACTIVE];
-			ar_system_update(cs, 1, &b_view, bench_chunks, AR_DEFAULT_MAX_ACTIVE);
+			const ar_node_t *bench_chunks[TEST_MAX_ACTIVE];
+			ar_system_update(cs, 1, &b_view, bench_chunks, TEST_MAX_ACTIVE);
 		}
 
 		clock_t t1 = clock();
@@ -255,16 +260,16 @@ int main(void)
 				.viewport_h = 720.0f,
 				.eff_cam_dist = 400.0f
 			};
-			const ar_node_t *osc_chunks[AR_DEFAULT_MAX_ACTIVE];
-			size_t n = ar_system_update(cs, 1, &osc_view, osc_chunks, AR_DEFAULT_MAX_ACTIVE);
-			assert(n > 0 && n <= AR_DEFAULT_MAX_ACTIVE);
+			const ar_node_t *osc_chunks[TEST_MAX_ACTIVE];
+			size_t n = ar_system_update(cs, 1, &osc_view, osc_chunks, TEST_MAX_ACTIVE);
+			assert(n > 0 && n <= TEST_MAX_ACTIVE);
 		}
 
 		ar_stats_t s_osc;
 		ar_system_get_stats(cs, &s_osc);
-		assert(s_osc.pool_in_use <= AR_DEFAULT_POOL_CAPACITY);
+		assert(s_osc.pool_in_use <= TEST_POOL_CAP);
 		printf("PASS: Extreme zoom oscillations (1.0x <-> 0.0001x): Pool bounded at %zu/%d\n",
-		       s_osc.pool_in_use, AR_DEFAULT_POOL_CAPACITY);
+		       s_osc.pool_in_use, TEST_POOL_CAP);
 	}
 
 	ar_system_destroy(cs);

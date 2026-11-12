@@ -33,9 +33,11 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
                                      int32_t wx, int32_t wy, ar_sample_t *out)
 {
 	(void)user_ctx;
-	/* Keep lod=3 for levels 0..3 so near/mid chunks evaluate the exact same heightmap function */
-	uint8_t lod = (level >= 8) ? 0 : ((level >= 6) ? 1 : ((level >= 4) ? 2 : 3));
-	nd_field_sample_t fs = nd_field_sample(world, lod, wx, wy);
+	(void)level;
+	/* Always evaluate canonical full-precision field (lod=3) so that parent and child
+	 * quadtree levels agree 100% on world elevation, coastlines, and water depth
+	 * (zero elevation/shoreline popping when chunks split or merge). */
+	nd_field_sample_t fs = nd_field_sample(world, 3, wx, wy);
 	uint8_t water_depth = fs.is_water ? (uint8_t)(fs.depth > 255 ? 255 : fs.depth) : 0;
 
 	out->val = fs.elevation_q12_4;
@@ -48,11 +50,19 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	out->attr[6] = 0;
 	out->attr[7] = 0;
 	/* Include shoreline micro-relief envelope (wz <= water_level + 4.0 units) so any chunk
-	 * where sub-texel shoreline relief or capillary wet sand can reach sea level sets flag bit 0. */
-	int32_t shore_ceil_q12_4 = ((int32_t)fs.water_level + 4) << 4;
-	out->flags = (water_depth > 0 || (int32_t)fs.elevation_q12_4 <= shore_ceil_q12_4) ? 1 : 0;
+	 * where sub-texel shoreline relief or capillary wet sand can reach sea level sets flag bit 0.
+	 * On coarse chunks (level >= 2), ignore perched mountain-lake water overrides (fs.water_level > base_wl)
+	 * so a single isolated mountain lake sample does not raise the sea level of an entire continental chunk. */
+	int16_t base_wl = nd_field_water_level(world);
+	int16_t eff_wl = (level <= 1) ? fs.water_level : base_wl;
+	bool eff_is_water = (level <= 1) ? fs.is_water : ((fs.elevation_q12_4 >> 4) < base_wl);
+	int32_t eff_depth = eff_is_water ? ((int32_t)eff_wl - (fs.elevation_q12_4 >> 4)) : 0;
+	if (eff_depth < 0) eff_depth = 0;
+	out->attr[3] = (uint8_t)(eff_depth > 255 ? 255 : eff_depth);
+	int32_t shore_ceil_q12_4 = ((int32_t)eff_wl + 4) << 4;
+	out->flags = (eff_depth > 0 || (int32_t)fs.elevation_q12_4 <= shore_ceil_q12_4) ? 1 : 0;
 	if (out->flags) {
-		uint16_t wl_u16 = (uint16_t)fs.water_level;
+		uint16_t wl_u16 = (uint16_t)eff_wl;
 		out->attr[4] = (uint8_t)(wl_u16 & 0xFFu);
 		out->attr[5] = (uint8_t)(wl_u16 >> 8);
 	}
@@ -98,6 +108,8 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.sampler = seven_macro_chunk_sampler;
 		cfg.max_active = 160;
 		cfg.pool_capacity = 384;
+		cfg.max_levels = 17;
+		cfg.default_rgba = 0xFF3C804Eu;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;
@@ -330,12 +342,24 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 	float target_quad_px = 2.0f * (32.0f / 48.0f);
 	size_t max_leaves = SEVEN_MAX_VISIBLE_LEAVES;
-	if (dist >= 5000.0f) {
-		float low_zoom_t = (dist - 5000.0f) / 35000.0f;
-		if (low_zoom_t < 0.0f) low_zoom_t = 0.0f;
-		if (low_zoom_t > 1.0f) low_zoom_t = 1.0f;
-		target_quad_px = 1.80f + 0.80f * low_zoom_t;
-		max_leaves = (size_t)(112.0f - 24.0f * low_zoom_t);
+	uint8_t min_lvl = 0;
+
+	/* From atmosphere, low orbit, and space (dist >= 2500), polygons are no longer needed
+	 * at high frequency; visual fidelity comes from the GPU high-definition procedural noise
+	 * image. Raise target_quad_px and min_level with altitude so visible chunks stay coarse,
+	 * lightweight, and uniform (zero split/merge flickering when moving). */
+	if (dist >= 2500.0f) {
+		float atmo_t = (dist - 2500.0f) / 42000.0f;
+		if (atmo_t < 0.0f) atmo_t = 0.0f;
+		if (atmo_t > 1.0f) atmo_t = 1.0f;
+		target_quad_px = 1.80f + 10.20f * atmo_t;
+		max_leaves = (size_t)(96.0f - 56.0f * atmo_t);
+		if (dist >= 64000.0f)      min_lvl = 6;
+		else if (dist >= 32000.0f) min_lvl = 5;
+		else if (dist >= 16000.0f) min_lvl = 4;
+		else if (dist >= 8000.0f)  min_lvl = 3;
+		else if (dist >= 4000.0f)  min_lvl = 2;
+		else                       min_lvl = 1;
 	}
 
 	ar_cull_opts_t opts = {
@@ -348,9 +372,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.target_quad_px = target_quad_px,
 		.viewport_w = (float)w,
 		.viewport_h = (float)h,
-		.min_level = 0,
-		.max_level = 16,
-		.view_id = 0
+		.min_level = min_lvl,
+		.max_level = 14,
+		.view_id = 0,
+		.split_hysteresis = 0.14f
 	};
 
 	s_visible_leaf_count = ar_system_query_matrix(cs, world, mvp, &opts, s_visible_leaves, max_leaves);
@@ -373,7 +398,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
-		if ((node->flags & 1) != 0 && node->samples && node->min_val > ((int32_t)(w_lvl_i + 8) << 4)) {
+		if (node->level <= 1 && (node->flags & 1) != 0 && node->samples &&
+		    node->min_val > ((int32_t)(w_lvl_i + 8) << 4)) {
 			uint32_t vcnt = node->vert_count;
 			for (uint32_t vi = 0; vi < vcnt; vi++) {
 				if (node->samples[vi].flags & 1) {
@@ -387,7 +413,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			}
 		}
 		float sea_lvl = has_water ? (float)w_lvl_i : ND_SEVEN_SEA_LEVEL_NONE;
-		uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
+		uint32_t vdim = node->vert_dim;
 
 		nd_seven_gl_flush_terrain_chunk(world, node->level, node->rev,
 		                                node->ox, node->oy, node->w, node->h,
@@ -399,27 +425,26 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 	/* Multi-Planet Rendering: When in high-altitude/orbit space view, dispatch secondary celestial bodies */
 	if (zoom <= 0.05f) {
-		uint16_t alt_world = (world == 1) ? 2 : 1;
+		uint16_t alt_world = (world == 2) ? 1 : 2;
 		const nd_planet_def_t *alt_pdef = nd_seven_get_planet(alt_world);
 		if (alt_pdef) {
 			ar_cull_opts_t alt_opts = opts;
 			alt_opts.view_id = 2;
-			const ar_node_t *alt_visible[AR_DEFAULT_MAX_ACTIVE];
+			const ar_node_t *alt_visible[16];
 			size_t alt_count = ar_system_query_matrix(cs, alt_world, mvp, &alt_opts, alt_visible, 16);
-			int16_t alt_w_lvl = nd_field_water_level(alt_world);
 			for (size_t m = 0; m < alt_count; m++) {
 				const ar_node_t *node = alt_visible[m];
 				if (!node) continue;
-				bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(alt_w_lvl + 8) << 4));
-				float sea_lvl = has_water ? (float)alt_w_lvl : ND_SEVEN_SEA_LEVEL_NONE;
-				uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
+				uint32_t vdim = node->vert_dim;
 
+				/* Pass ND_SEVEN_SEA_LEVEL_NONE for secondary celestial body in deep space
+				 * so it does not push tangent-space water chunks into the primary planet's water queue */
 				nd_seven_gl_flush_terrain_chunk(alt_world, node->level, node->rev,
 				                                node->ox, node->oy, node->w, node->h,
 				                                node->rgba, node->values,
 				                                vdim, vdim,
 				                                (uint32_t)w, (uint32_t)h,
-				                                sea_lvl, alt_pdef);
+				                                ND_SEVEN_SEA_LEVEL_NONE, alt_pdef);
 			}
 		}
 	}
@@ -499,8 +524,8 @@ static void seven_apply_obj_billboard_style(const ndw_obj_t *o,
 static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, int32_t wy,
                                             int16_t default_wl, int16_t *out_elev_q, int16_t *out_wl)
 {
-	int gdim = node->grid_dim ? (int)node->grid_dim : AR_DEFAULT_GRID_DIM;
-	int vdim = node->vert_dim ? (int)node->vert_dim : AR_DEFAULT_VERT_DIM;
+	int gdim = (int)node->grid_dim;
+	int vdim = (int)node->vert_dim;
 
 	float fx = ((float)(wx - node->ox) / (float)node->w) * (float)gdim;
 	float fy = ((float)(wy - node->oy) / (float)node->h) * (float)gdim;
