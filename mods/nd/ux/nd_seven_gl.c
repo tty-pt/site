@@ -494,6 +494,16 @@ static const char *s_fs_terrain =
 	"    h ^= h >> 16u;\n"
 	"    return h;\n"
 	"}\n"
+	"vec4 chaff_grad4(ivec4 c, uint seed) {\n"
+	"    uint h = chaff_hash4(c, seed);\n"
+	"    vec4 g = vec4(\n"
+	"        float(int( h        & 0xFFu) - 128),\n"
+	"        float(int((h >> 8u)  & 0xFFu) - 128),\n"
+	"        float(int((h >> 16u) & 0xFFu) - 128),\n"
+	"        float(int((h >> 24u) & 0xFFu) - 128)\n"
+	"    );\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
 	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
 	"    vec4 ip = floor(p);\n"
 	"    vec4 fp = p - ip;\n"
@@ -502,8 +512,10 @@ static const char *s_fs_terrain =
 	"    float d[8];\n"
 	"    for (int i = 0; i < 8; i++) {\n"
 	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
-	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        vec4 g0 = chaff_grad4(c + ivec4(off, 0), seed);\n"
+	"        vec4 g1 = chaff_grad4(c + ivec4(off, 1), seed);\n"
+	"        float v0 = dot(g0, fp - vec4(vec3(off), 0.0));\n"
+	"        float v1 = dot(g1, fp - vec4(vec3(off), 1.0));\n"
 	"        d[i] = mix(v0, v1, u.w);\n"
 	"    }\n"
 	"    float c0 = mix(d[0], d[4], u.z);\n"
@@ -512,7 +524,7 @@ static const char *s_fs_terrain =
 	"    float c3 = mix(d[3], d[7], u.z);\n"
 	"    float b0 = mix(c0, c2, u.y);\n"
 	"    float b1 = mix(c1, c3, u.y);\n"
-	"    return mix(b0, b1, u.x);\n"
+	"    return clamp(0.5 + 0.72 * mix(b0, b1, u.x), 0.0, 1.0);\n"
 	"}\n"
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
@@ -538,9 +550,12 @@ static const char *s_fs_terrain =
 	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
+	"float cloud_remap(float v, float l0, float h0, float l1, float h1) {\n"
+	"    return l1 + (v - l0) * (h1 - l1) / max(1e-5, h0 - l0);\n"
+	"}\n"
 	"float eval_zoom_cloud_density(vec3 worldPos, float anim_time, float humidity, float dist, float fw) {\n"
 	"    float z = worldPos.z;\n"
-	"    if (z <= 88.0 || z >= 176.0) return 0.0;\n"
+	"    if (z <= 92.0 || z >= 232.0) return 0.0;\n"
 	"    const float freqs[8] = float[8](\n"
 	"        0.000018, 0.000075, 0.000280, 0.000950,\n"
 	"        0.003100, 0.009800, 0.031000, 0.096000\n"
@@ -550,12 +565,12 @@ static const char *s_fs_terrain =
 	"        0.105, 0.165, 0.250, 0.360\n"
 	"    );\n"
 	"    const float dFar[8] = float[8](\n"
-	"        12000000.0, 4500000.0, 950000.0, 180000.0,\n"
-	"           36000.0,    8500.0,   2400.0,    980.0\n"
+	"        12000000.0, 12000000.0, 12000000.0, 240000.0,\n"
+	"           42000.0,    10000.0,     2600.0,   1050.0\n"
 	"    );\n"
 	"    const float dNear[8] = float[8](\n"
-	"         3000000.0,  900000.0, 180000.0,  36000.0,\n"
-	"            7200.0,    1800.0,    540.0,    220.0\n"
+	"         3000000.0,  3000000.0,  3000000.0,  48000.0,\n"
+	"            8400.0,     2000.0,      560.0,    230.0\n"
 	"    );\n"
 	"    const uint seeds[8] = uint[8](\n"
 	"        0x434C4430u, 0x434C4431u, 0x434C4432u, 0x434C4433u,\n"
@@ -564,82 +579,82 @@ static const char *s_fs_terrain =
 	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
 	"    float wBoil = mod(anim_time * 0.072, 512.0);\n"
-	"    float zBaseSlice = (z - 88.0) * 0.032;\n"
-	"    /* Stage 1: Coarse Planetary & Synoptic Weather + Big Cloud Masses (Octaves 0..3) */\n"
+	"    float zBaseSlice = (z - 92.0) * 0.024;\n"
+	"    const float zScales[8] = float[8](0.18, 0.32, 0.55, 0.90, 1.40, 2.10, 3.05, 4.30);\n"
+	"    const float wScales[8] = float[8](0.16, 0.28, 0.48, 0.78, 1.18, 1.72, 2.45, 3.45);\n"
+	"    /* Stage 1: Scale-Invariant Planetary & Synoptic Weather Envelope (Octaves 0..2)\n"
+	"     * Evaluated un-attenuated with phase-space curl so ~60-65% of the planet stays crystal-clear */\n"
 	"    vec2 pRot = worldPos.xy;\n"
-	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
-	"    const float warpSpan[4] = float[4](4200.0, 1100.0, 280.0, 75.0);\n"
-	"    const float zScales[8]  = float[8](0.20, 0.35, 0.60, 0.95, 1.45, 2.15, 3.10, 4.40);\n"
-	"    const float wScales[8]  = float[8](0.18, 0.30, 0.50, 0.80, 1.20, 1.75, 2.50, 3.50);\n"
-	"    for (int i = 0; i < 4; i++) {\n"
-	"        float minW = (i == 0) ? 1.0 : ((i == 1) ? 0.45 : 0.0);\n"
-	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), minW, 1.0);\n"
-	"        float wNyq  = smoothstep(0.82, 0.22, freqs[i] * fw);\n"
-	"        float w = wDist * wNyq;\n"
-	"        if (w > 0.001) {\n"
-	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"            vec2 q = pRot * freqs[i] - prevDir * phase;\n"
-	"            float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
-	"            oct[i] = mix(0.5, n, w);\n"
-	"            pRot += vec2(n - 0.5) * (warpSpan[i] * w);\n"
-	"        }\n"
+	"    vec2 phaseCurl = vec2(0.0);\n"
+	"    float oct[3] = float[3](0.5, 0.5, 0.5);\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"        vec2 q = pRot * freqs[i] + phaseCurl - prevDir * phase;\n"
+	"        float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
+	"        oct[i] = n;\n"
+	"        phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * 0.42;\n"
 	"        pRot = rot * pRot;\n"
 	"    }\n"
-	"    float synFront = oct[0] * 0.44 + oct[1] * 0.56;\n"
-	"    float b2 = mix(oct[2], 1.0 - abs(2.0 * oct[2] - 1.0), 0.35);\n"
-	"    float b3 = mix(oct[3], 1.0 - abs(2.0 * oct[3] - 1.0), 0.42);\n"
-	"    float bigCloud = oct[1] * 0.20 + b2 * 0.44 + b3 * 0.36;\n"
-	"    float synBias = (0.50 - synFront) * 0.42;\n"
-	"    float thresh = clamp(0.53 - 0.16 * humidity + synBias, 0.36, 0.68);\n"
-	"    float macroMargin = bigCloud - thresh;\n"
-	"    /* Clear-sky quantum early-out: ~60% of the planet skips wind & fine octaves 4..7 */\n"
-	"    if (macroMargin < -0.095) return 0.0;\n"
-	"    float coreStrength = clamp((macroMargin + 0.06) / 0.24, 0.0, 1.0);\n"
-	"    float cloudTop = mix(118.0, 174.0, coreStrength);\n"
-	"    float hLocal = (z - 88.0) / max(12.0, cloudTop - 88.0);\n"
+	"    float synFront = oct[0] * 0.46 + oct[1] * 0.54;\n"
+	"    float synGate  = smoothstep(0.52 - 0.11 * humidity, 0.72 - 0.07 * humidity, synFront);\n"
+	"    float cellBillow = 1.0 - abs(2.0 * oct[2] - 1.0);\n"
+	"    float macroCell = mix(oct[2], cellBillow, 0.42);\n"
+	"    float macroCoverage = synGate * smoothstep(0.41 - 0.05 * humidity, 0.74 - 0.04 * humidity, macroCell);\n"
+	"    if (macroCoverage <= 0.015) return 0.0;\n"
+	"    float coreStrength = smoothstep(0.08, 0.78, macroCoverage);\n"
+	"    float cloudTop = mix(132.0, 232.0, coreStrength);\n"
+	"    float hLocal = (z - 92.0) / max(16.0, cloudTop - 92.0);\n"
 	"    if (hLocal <= 0.0 || hLocal >= 1.0) return 0.0;\n"
-	"    float vProf = smoothstep(0.0, 0.18, hLocal) * smoothstep(1.0, 0.38, hLocal);\n"
-	"    if (vProf <= 0.001) return 0.0;\n"
-	"    /* Stage 2: Quantum Observer-Gated Fractal Detail Cascade (Octaves 4..7, only when dist < 36000) */\n"
-	"    float fractalDetail = 0.0;\n"
-	"    if (dist < dFar[4]) {\n"
-	"        vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    /* 3D Cumulus / Anvil Height-Fraction Profile: crisp flat condensation base at z=92, rounded dome top */\n"
+	"    float baseRound = smoothstep(0.0, 0.15, hLocal);\n"
+	"    float topRound  = smoothstep(1.0, 0.42, hLocal);\n"
+	"    float vProf     = baseRound * topRound;\n"
+	"    float baseCloud = clamp(cloud_remap(macroCoverage * vProf, 0.12 * (1.0 - 0.45 * coreStrength), 0.86, 0.0, 1.0), 0.0, 1.0);\n"
+	"    if (baseCloud <= 0.002) return 0.0;\n"
+	"    /* Stage 2: Quantum Observer-Gated 4D Billow Cauliflower Erosion (Octaves 3..7) */\n"
+	"    float billowFbm = 0.0;\n"
+	"    float billowWeightSum = 0.0;\n"
+	"    if (dist < dFar[3]) {\n"
+	"        vec4 wind = (dist < dFar[4]) ? eval_recursive_wind(worldPos.xy, anim_time) : vec4(prevDir, 0.75, 0.50);\n"
 	"        vec2 wDir = wind.xy;\n"
 	"        vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
-	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 88.0) * 0.014);\n"
-	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.48 + shear;\n"
-	"        const float amps[4] = float[4](0.200, 0.125, 0.078, 0.046);\n"
-	"        const float fineWarp[4] = float[4](18.0, 6.0, 2.0, 0.0);\n"
-	"        for (int j = 0; j < 4; j++) {\n"
-	"            int i = j + 4;\n"
+	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 92.0) * 0.012);\n"
+	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.42 + shear;\n"
+	"        const float amps[5] = float[5](0.38, 0.25, 0.16, 0.12, 0.09);\n"
+	"        for (int j = 0; j < 5; j++) {\n"
+	"            int i = j + 3;\n"
 	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"            float wNyq  = smoothstep(0.78, 0.22, freqs[i] * fw);\n"
+	"            float wNyq  = smoothstep(0.80, 0.20, freqs[i] * fw);\n"
 	"            float w = wDist * wNyq;\n"
 	"            if (w > 0.001) {\n"
 	"                float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"                vec2 q = pRot * freqs[i] + windWarp * (0.35 + 0.28 * float(j)) - prevDir * phase;\n"
+	"                vec2 q = pRot * freqs[i] + phaseCurl + windWarp * (0.22 + 0.20 * float(j)) - prevDir * phase;\n"
 	"                float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
 	"                float billow = 1.0 - abs(2.0 * n - 1.0);\n"
-	"                float shaped = mix(n, billow, 0.62) - 0.5;\n"
-	"                fractalDetail += shaped * amps[j] * w;\n"
-	"                pRot += vec2(n - 0.5) * (fineWarp[j] * w);\n"
+	"                float cauliflower = mix(billow, n, 0.28);\n"
+	"                billowFbm += cauliflower * amps[j] * w;\n"
+	"                billowWeightSum += amps[j] * w;\n"
+	"                phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * (0.32 * w);\n"
 	"            }\n"
 	"            pRot = rot * pRot;\n"
 	"        }\n"
 	"    }\n"
-	"    float sculptScale = 0.72 + 0.38 * (1.0 - coreStrength) + 0.22 * hLocal;\n"
-	"    float totalMacro = macroMargin + fractalDetail * sculptScale - 0.035 * hLocal;\n"
-	"    return smoothstep(-0.025, 0.145, totalMacro) * vProf;\n"
+	"    if (billowWeightSum > 0.001) {\n"
+	"        float normErode = (1.0 - (billowFbm / max(0.32, billowWeightSum))) * clamp(billowWeightSum * 1.35, 0.0, 1.0);\n"
+	"        float erodeAmt = normErode * 0.58 * (1.0 - 0.52 * coreStrength) * (0.35 + 0.65 * hLocal);\n"
+	"        baseCloud = clamp(cloud_remap(baseCloud, erodeAmt, 1.0, 0.0, 1.0), 0.0, 1.0);\n"
+	"    }\n"
+	"    return smoothstep(0.0, 0.72, baseCloud) * vProf;\n"
 	"}\n"
 	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
 	"    return eval_zoom_cloud_density(worldPos, anim_time, humidity, 450.0, 0.25);\n"
 	"}\n"
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n"
-	"    /* Single-ray Northwest directional sun projection to cloud base (z = 108.0) with observer-gated octaves */\n"
-	"    float dz = max(8.0, 108.0 - fragZ);\n"
+	"    /* Single-ray Northwest directional sun projection to cloud core (z = 124.0) with observer-gated octaves */\n"
+	"    float dz = max(8.0, 124.0 - fragZ);\n"
 	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
-	"    float d = eval_zoom_cloud_density(vec3(projXY, 108.0), anim_time, humidity, dist, fw);\n"
-	"    return clamp(d * 0.82, 0.0, 0.52);\n"
+	"    float d = eval_zoom_cloud_density(vec3(projXY, 124.0), anim_time, humidity, dist, fw);\n"
+	"    return clamp(d * 0.85, 0.0, 0.54);\n"
 	"}\n"
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
@@ -1195,6 +1210,25 @@ static const char *s_fs_water =
 	"    h ^= h >> 16u;\n"
 	"    return h;\n"
 	"}\n"
+	"vec4 sampleSubstrateSmooth(vec2 uv) {\n"
+	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
+	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
+	"    vec2 p = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
+	"    vec2 ip = floor(p);\n"
+	"    vec2 fp = p - ip;\n"
+	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    return texture(uSubstrateTex, (ip + u + 0.5) / texSize);\n"
+	"}\n"
+	"vec4 chaff_grad4(ivec4 c, uint seed) {\n"
+	"    uint h = chaff_hash4(c, seed);\n"
+	"    vec4 g = vec4(\n"
+	"        float(int( h        & 0xFFu) - 128),\n"
+	"        float(int((h >> 8u)  & 0xFFu) - 128),\n"
+	"        float(int((h >> 16u) & 0xFFu) - 128),\n"
+	"        float(int((h >> 24u) & 0xFFu) - 128)\n"
+	"    );\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
 	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
 	"    vec4 ip = floor(p);\n"
 	"    vec4 fp = p - ip;\n"
@@ -1203,8 +1237,10 @@ static const char *s_fs_water =
 	"    float d[8];\n"
 	"    for (int i = 0; i < 8; i++) {\n"
 	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
-	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        vec4 g0 = chaff_grad4(c + ivec4(off, 0), seed);\n"
+	"        vec4 g1 = chaff_grad4(c + ivec4(off, 1), seed);\n"
+	"        float v0 = dot(g0, fp - vec4(vec3(off), 0.0));\n"
+	"        float v1 = dot(g1, fp - vec4(vec3(off), 1.0));\n"
 	"        d[i] = mix(v0, v1, u.w);\n"
 	"    }\n"
 	"    float c0 = mix(d[0], d[4], u.z);\n"
@@ -1213,11 +1249,14 @@ static const char *s_fs_water =
 	"    float c3 = mix(d[3], d[7], u.z);\n"
 	"    float b0 = mix(c0, c2, u.y);\n"
 	"    float b1 = mix(c1, c3, u.y);\n"
-	"    return mix(b0, b1, u.x);\n"
+	"    return clamp(0.5 + 0.72 * mix(b0, b1, u.x), 0.0, 1.0);\n"
+	"}\n"
+	"float cloud_remap(float v, float l0, float h0, float l1, float h1) {\n"
+	"    return l1 + (v - l0) * (h1 - l1) / max(1e-5, h0 - l0);\n"
 	"}\n"
 	"float eval_zoom_cloud_density(vec3 worldPos, float anim_time, float humidity, float dist, float fw) {\n"
 	"    float z = worldPos.z;\n"
-	"    if (z <= 88.0 || z >= 176.0) return 0.0;\n"
+	"    if (z <= 92.0 || z >= 232.0) return 0.0;\n"
 	"    const float freqs[8] = float[8](\n"
 	"        0.000018, 0.000075, 0.000280, 0.000950,\n"
 	"        0.003100, 0.009800, 0.031000, 0.096000\n"
@@ -1227,12 +1266,12 @@ static const char *s_fs_water =
 	"        0.105, 0.165, 0.250, 0.360\n"
 	"    );\n"
 	"    const float dFar[8] = float[8](\n"
-	"        12000000.0, 4500000.0, 950000.0, 180000.0,\n"
-	"           36000.0,    8500.0,   2400.0,    980.0\n"
+	"        12000000.0, 12000000.0, 12000000.0, 240000.0,\n"
+	"           42000.0,    10000.0,     2600.0,   1050.0\n"
 	"    );\n"
 	"    const float dNear[8] = float[8](\n"
-	"         3000000.0,  900000.0, 180000.0,  36000.0,\n"
-	"            7200.0,    1800.0,    540.0,    220.0\n"
+	"         3000000.0,  3000000.0,  3000000.0,  48000.0,\n"
+	"            8400.0,     2000.0,      560.0,    230.0\n"
 	"    );\n"
 	"    const uint seeds[8] = uint[8](\n"
 	"        0x434C4430u, 0x434C4431u, 0x434C4432u, 0x434C4433u,\n"
@@ -1241,78 +1280,77 @@ static const char *s_fs_water =
 	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
 	"    float wBoil = mod(anim_time * 0.072, 512.0);\n"
-	"    float zBaseSlice = (z - 88.0) * 0.032;\n"
+	"    float zBaseSlice = (z - 92.0) * 0.024;\n"
+	"    const float zScales[8] = float[8](0.18, 0.32, 0.55, 0.90, 1.40, 2.10, 3.05, 4.30);\n"
+	"    const float wScales[8] = float[8](0.16, 0.28, 0.48, 0.78, 1.18, 1.72, 2.45, 3.45);\n"
 	"    vec2 pRot = worldPos.xy;\n"
-	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
-	"    const float warpSpan[4] = float[4](4200.0, 1100.0, 280.0, 75.0);\n"
-	"    const float zScales[8]  = float[8](0.20, 0.35, 0.60, 0.95, 1.45, 2.15, 3.10, 4.40);\n"
-	"    const float wScales[8]  = float[8](0.18, 0.30, 0.50, 0.80, 1.20, 1.75, 2.50, 3.50);\n"
-	"    for (int i = 0; i < 4; i++) {\n"
-	"        float minW = (i == 0) ? 1.0 : ((i == 1) ? 0.45 : 0.0);\n"
-	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), minW, 1.0);\n"
-	"        float wNyq  = smoothstep(0.82, 0.22, freqs[i] * fw);\n"
-	"        float w = wDist * wNyq;\n"
-	"        if (w > 0.001) {\n"
-	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"            vec2 q = pRot * freqs[i] - prevDir * phase;\n"
-	"            float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
-	"            oct[i] = mix(0.5, n, w);\n"
-	"            pRot += vec2(n - 0.5) * (warpSpan[i] * w);\n"
-	"        }\n"
+	"    vec2 phaseCurl = vec2(0.0);\n"
+	"    float oct[3] = float[3](0.5, 0.5, 0.5);\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"        vec2 q = pRot * freqs[i] + phaseCurl - prevDir * phase;\n"
+	"        float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
+	"        oct[i] = n;\n"
+	"        phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * 0.42;\n"
 	"        pRot = rot * pRot;\n"
 	"    }\n"
-	"    float synFront = oct[0] * 0.44 + oct[1] * 0.56;\n"
-	"    float b2 = mix(oct[2], 1.0 - abs(2.0 * oct[2] - 1.0), 0.35);\n"
-	"    float b3 = mix(oct[3], 1.0 - abs(2.0 * oct[3] - 1.0), 0.42);\n"
-	"    float bigCloud = oct[1] * 0.20 + b2 * 0.44 + b3 * 0.36;\n"
-	"    float synBias = (0.50 - synFront) * 0.42;\n"
-	"    float thresh = clamp(0.53 - 0.16 * humidity + synBias, 0.36, 0.68);\n"
-	"    float macroMargin = bigCloud - thresh;\n"
-	"    if (macroMargin < -0.095) return 0.0;\n"
-	"    float coreStrength = clamp((macroMargin + 0.06) / 0.24, 0.0, 1.0);\n"
-	"    float cloudTop = mix(118.0, 174.0, coreStrength);\n"
-	"    float hLocal = (z - 88.0) / max(12.0, cloudTop - 88.0);\n"
+	"    float synFront = oct[0] * 0.46 + oct[1] * 0.54;\n"
+	"    float synGate  = smoothstep(0.52 - 0.11 * humidity, 0.72 - 0.07 * humidity, synFront);\n"
+	"    float cellBillow = 1.0 - abs(2.0 * oct[2] - 1.0);\n"
+	"    float macroCell = mix(oct[2], cellBillow, 0.42);\n"
+	"    float macroCoverage = synGate * smoothstep(0.41 - 0.05 * humidity, 0.74 - 0.04 * humidity, macroCell);\n"
+	"    if (macroCoverage <= 0.015) return 0.0;\n"
+	"    float coreStrength = smoothstep(0.08, 0.78, macroCoverage);\n"
+	"    float cloudTop = mix(132.0, 232.0, coreStrength);\n"
+	"    float hLocal = (z - 92.0) / max(16.0, cloudTop - 92.0);\n"
 	"    if (hLocal <= 0.0 || hLocal >= 1.0) return 0.0;\n"
-	"    float vProf = smoothstep(0.0, 0.18, hLocal) * smoothstep(1.0, 0.38, hLocal);\n"
-	"    if (vProf <= 0.001) return 0.0;\n"
-	"    float fractalDetail = 0.0;\n"
-	"    if (dist < dFar[4]) {\n"
-	"        vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    float baseRound = smoothstep(0.0, 0.15, hLocal);\n"
+	"    float topRound  = smoothstep(1.0, 0.42, hLocal);\n"
+	"    float vProf     = baseRound * topRound;\n"
+	"    float baseCloud = clamp(cloud_remap(macroCoverage * vProf, 0.12 * (1.0 - 0.45 * coreStrength), 0.86, 0.0, 1.0), 0.0, 1.0);\n"
+	"    if (baseCloud <= 0.002) return 0.0;\n"
+	"    float billowFbm = 0.0;\n"
+	"    float billowWeightSum = 0.0;\n"
+	"    if (dist < dFar[3]) {\n"
+	"        vec4 wind = (dist < dFar[4]) ? eval_recursive_wind(worldPos.xy, anim_time) : vec4(prevDir, 0.75, 0.50);\n"
 	"        vec2 wDir = wind.xy;\n"
 	"        vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
-	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 88.0) * 0.014);\n"
-	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.48 + shear;\n"
-	"        const float amps[4] = float[4](0.200, 0.125, 0.078, 0.046);\n"
-	"        const float fineWarp[4] = float[4](18.0, 6.0, 2.0, 0.0);\n"
-	"        for (int j = 0; j < 4; j++) {\n"
-	"            int i = j + 4;\n"
+	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 92.0) * 0.012);\n"
+	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.42 + shear;\n"
+	"        const float amps[5] = float[5](0.38, 0.25, 0.16, 0.12, 0.09);\n"
+	"        for (int j = 0; j < 5; j++) {\n"
+	"            int i = j + 3;\n"
 	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"            float wNyq  = smoothstep(0.78, 0.22, freqs[i] * fw);\n"
+	"            float wNyq  = smoothstep(0.80, 0.20, freqs[i] * fw);\n"
 	"            float w = wDist * wNyq;\n"
 	"            if (w > 0.001) {\n"
 	"                float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"                vec2 q = pRot * freqs[i] + windWarp * (0.35 + 0.28 * float(j)) - prevDir * phase;\n"
+	"                vec2 q = pRot * freqs[i] + phaseCurl + windWarp * (0.22 + 0.20 * float(j)) - prevDir * phase;\n"
 	"                float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
 	"                float billow = 1.0 - abs(2.0 * n - 1.0);\n"
-	"                float shaped = mix(n, billow, 0.62) - 0.5;\n"
-	"                fractalDetail += shaped * amps[j] * w;\n"
-	"                pRot += vec2(n - 0.5) * (fineWarp[j] * w);\n"
+	"                float cauliflower = mix(billow, n, 0.28);\n"
+	"                billowFbm += cauliflower * amps[j] * w;\n"
+	"                billowWeightSum += amps[j] * w;\n"
+	"                phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * (0.32 * w);\n"
 	"            }\n"
 	"            pRot = rot * pRot;\n"
 	"        }\n"
 	"    }\n"
-	"    float sculptScale = 0.72 + 0.38 * (1.0 - coreStrength) + 0.22 * hLocal;\n"
-	"    float totalMacro = macroMargin + fractalDetail * sculptScale - 0.035 * hLocal;\n"
-	"    return smoothstep(-0.025, 0.145, totalMacro) * vProf;\n"
+	"    if (billowWeightSum > 0.001) {\n"
+	"        float normErode = (1.0 - (billowFbm / max(0.32, billowWeightSum))) * clamp(billowWeightSum * 1.35, 0.0, 1.0);\n"
+	"        float erodeAmt = normErode * 0.58 * (1.0 - 0.52 * coreStrength) * (0.35 + 0.65 * hLocal);\n"
+	"        baseCloud = clamp(cloud_remap(baseCloud, erodeAmt, 1.0, 0.0, 1.0), 0.0, 1.0);\n"
+	"    }\n"
+	"    return smoothstep(0.0, 0.72, baseCloud) * vProf;\n"
 	"}\n"
 	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
 	"    return eval_zoom_cloud_density(worldPos, anim_time, humidity, 450.0, 0.25);\n"
 	"}\n"
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n"
-	"    float dz = max(8.0, 108.0 - fragZ);\n"
+	"    float dz = max(8.0, 124.0 - fragZ);\n"
 	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
-	"    float d = eval_zoom_cloud_density(vec3(projXY, 108.0), anim_time, humidity, dist, fw);\n"
-	"    return clamp(d * 0.82, 0.0, 0.52);\n"
+	"    float d = eval_zoom_cloud_density(vec3(projXY, 124.0), anim_time, humidity, dist, fw);\n"
+	"    return clamp(d * 0.85, 0.0, 0.54);\n"
 	"}\n"
 	"/* Height-model basin & upwind fetch classifier: distinguishes quiet lakes/sheltered coves from deep open sea\n"
 	" * using purely local continuous depth and shoreline slope (zero fixed chunk-UV probes, zero chunk seams) */\n"
@@ -1426,7 +1464,7 @@ static const char *s_fs_water =
 	"    vec3 tangentV = normalize(vTangentV);\n"
 	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    /* Biome-aware water optics derived from uSubstrateTex (populated via ndw_biome_base_rgb) */\n"
-	"    vec3 rawBiome = texture(uSubstrateTex, vUV).rgb;\n"
+	"    vec3 rawBiome = sampleSubstrateSmooth(vUV).rgb;\n"
 	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
 	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
 	"    float wVolcanic = smoothstep(0.32, 0.14, maxBio);\n"
@@ -1515,8 +1553,8 @@ static const char *s_fs_water =
 	"    vec3 waveRefl = reflect(-viewDir, waveNormal);\n"
 	"    float reflUp = max(0.18, dot(waveRefl, torusN));\n"
 	"    vec2 reflHoriz = vec2(dot(waveRefl, tangentU), dot(waveRefl, tangentV));\n"
-	"    vec2 reflCloudXY = vWorldPos + reflHoriz * (max(12.0, 110.0 - uSeaLevel) / reflUp);\n"
-	"    float reflCloudDens = eval_zoom_cloud_density(vec3(reflCloudXY, 110.0), uAnimTime, bioHumidity, vDistance, fw * 1.4);\n"
+	"    vec2 reflCloudXY = vWorldPos + reflHoriz * (max(12.0, 124.0 - uSeaLevel) / reflUp);\n"
+	"    float reflCloudDens = eval_zoom_cloud_density(vec3(reflCloudXY, 124.0), uAnimTime, bioHumidity, vDistance, fw * 1.4);\n"
 	"    vec3 reflCloudCol = mix(vec3(0.76, 0.82, 0.90), vec3(0.98, 0.97, 0.95), clamp(0.55 + facetTilt * 1.4, 0.0, 1.0));\n"
 	"    reflSkyCol = mix(reflSkyCol * (1.0 - cloudShadow * 0.22), reflCloudCol, clamp(reflCloudDens * 0.65, 0.0, 0.72));\n"
 	"    vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
@@ -1733,6 +1771,16 @@ static const char *s_fs_billboard =
 	"    h ^= h >> 16u;\n"
 	"    return h;\n"
 	"}\n"
+	"vec4 chaff_grad4(ivec4 c, uint seed) {\n"
+	"    uint h = chaff_hash4(c, seed);\n"
+	"    vec4 g = vec4(\n"
+	"        float(int( h        & 0xFFu) - 128),\n"
+	"        float(int((h >> 8u)  & 0xFFu) - 128),\n"
+	"        float(int((h >> 16u) & 0xFFu) - 128),\n"
+	"        float(int((h >> 24u) & 0xFFu) - 128)\n"
+	"    );\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
 	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
 	"    vec4 ip = floor(p);\n"
 	"    vec4 fp = p - ip;\n"
@@ -1741,8 +1789,10 @@ static const char *s_fs_billboard =
 	"    float d[8];\n"
 	"    for (int i = 0; i < 8; i++) {\n"
 	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
-	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        vec4 g0 = chaff_grad4(c + ivec4(off, 0), seed);\n"
+	"        vec4 g1 = chaff_grad4(c + ivec4(off, 1), seed);\n"
+	"        float v0 = dot(g0, fp - vec4(vec3(off), 0.0));\n"
+	"        float v1 = dot(g1, fp - vec4(vec3(off), 1.0));\n"
 	"        d[i] = mix(v0, v1, u.w);\n"
 	"    }\n"
 	"    float c0 = mix(d[0], d[4], u.z);\n"
@@ -1751,7 +1801,7 @@ static const char *s_fs_billboard =
 	"    float c3 = mix(d[3], d[7], u.z);\n"
 	"    float b0 = mix(c0, c2, u.y);\n"
 	"    float b1 = mix(c1, c3, u.y);\n"
-	"    return mix(b0, b1, u.x);\n"
+	"    return clamp(0.5 + 0.72 * mix(b0, b1, u.x), 0.0, 1.0);\n"
 	"}\n"
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
@@ -1777,9 +1827,12 @@ static const char *s_fs_billboard =
 	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
+	"float cloud_remap(float v, float l0, float h0, float l1, float h1) {\n"
+	"    return l1 + (v - l0) * (h1 - l1) / max(1e-5, h0 - l0);\n"
+	"}\n"
 	"float eval_zoom_cloud_density(vec3 worldPos, float anim_time, float humidity, float dist, float fw) {\n"
 	"    float z = worldPos.z;\n"
-	"    if (z <= 88.0 || z >= 176.0) return 0.0;\n"
+	"    if (z <= 92.0 || z >= 232.0) return 0.0;\n"
 	"    const float freqs[8] = float[8](\n"
 	"        0.000018, 0.000075, 0.000280, 0.000950,\n"
 	"        0.003100, 0.009800, 0.031000, 0.096000\n"
@@ -1789,12 +1842,12 @@ static const char *s_fs_billboard =
 	"        0.105, 0.165, 0.250, 0.360\n"
 	"    );\n"
 	"    const float dFar[8] = float[8](\n"
-	"        12000000.0, 4500000.0, 950000.0, 180000.0,\n"
-	"           36000.0,    8500.0,   2400.0,    980.0\n"
+	"        12000000.0, 12000000.0, 12000000.0, 240000.0,\n"
+	"           42000.0,    10000.0,     2600.0,   1050.0\n"
 	"    );\n"
 	"    const float dNear[8] = float[8](\n"
-	"         3000000.0,  900000.0, 180000.0,  36000.0,\n"
-	"            7200.0,    1800.0,    540.0,    220.0\n"
+	"         3000000.0,  3000000.0,  3000000.0,  48000.0,\n"
+	"            8400.0,     2000.0,      560.0,    230.0\n"
 	"    );\n"
 	"    const uint seeds[8] = uint[8](\n"
 	"        0x434C4430u, 0x434C4431u, 0x434C4432u, 0x434C4433u,\n"
@@ -1803,75 +1856,74 @@ static const char *s_fs_billboard =
 	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
 	"    float wBoil = mod(anim_time * 0.072, 512.0);\n"
-	"    float zBaseSlice = (z - 88.0) * 0.032;\n"
+	"    float zBaseSlice = (z - 92.0) * 0.024;\n"
+	"    const float zScales[8] = float[8](0.18, 0.32, 0.55, 0.90, 1.40, 2.10, 3.05, 4.30);\n"
+	"    const float wScales[8] = float[8](0.16, 0.28, 0.48, 0.78, 1.18, 1.72, 2.45, 3.45);\n"
 	"    vec2 pRot = worldPos.xy;\n"
-	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
-	"    const float warpSpan[4] = float[4](4200.0, 1100.0, 280.0, 75.0);\n"
-	"    const float zScales[8]  = float[8](0.20, 0.35, 0.60, 0.95, 1.45, 2.15, 3.10, 4.40);\n"
-	"    const float wScales[8]  = float[8](0.18, 0.30, 0.50, 0.80, 1.20, 1.75, 2.50, 3.50);\n"
-	"    for (int i = 0; i < 4; i++) {\n"
-	"        float minW = (i == 0) ? 1.0 : ((i == 1) ? 0.45 : 0.0);\n"
-	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), minW, 1.0);\n"
-	"        float wNyq  = smoothstep(0.82, 0.22, freqs[i] * fw);\n"
-	"        float w = wDist * wNyq;\n"
-	"        if (w > 0.001) {\n"
-	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"            vec2 q = pRot * freqs[i] - prevDir * phase;\n"
-	"            float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
-	"            oct[i] = mix(0.5, n, w);\n"
-	"            pRot += vec2(n - 0.5) * (warpSpan[i] * w);\n"
-	"        }\n"
+	"    vec2 phaseCurl = vec2(0.0);\n"
+	"    float oct[3] = float[3](0.5, 0.5, 0.5);\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"        vec2 q = pRot * freqs[i] + phaseCurl - prevDir * phase;\n"
+	"        float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
+	"        oct[i] = n;\n"
+	"        phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * 0.42;\n"
 	"        pRot = rot * pRot;\n"
 	"    }\n"
-	"    float synFront = oct[0] * 0.44 + oct[1] * 0.56;\n"
-	"    float b2 = mix(oct[2], 1.0 - abs(2.0 * oct[2] - 1.0), 0.35);\n"
-	"    float b3 = mix(oct[3], 1.0 - abs(2.0 * oct[3] - 1.0), 0.42);\n"
-	"    float bigCloud = oct[1] * 0.20 + b2 * 0.44 + b3 * 0.36;\n"
-	"    float synBias = (0.50 - synFront) * 0.42;\n"
-	"    float thresh = clamp(0.53 - 0.16 * humidity + synBias, 0.36, 0.68);\n"
-	"    float macroMargin = bigCloud - thresh;\n"
-	"    if (macroMargin < -0.095) return 0.0;\n"
-	"    float coreStrength = clamp((macroMargin + 0.06) / 0.24, 0.0, 1.0);\n"
-	"    float cloudTop = mix(118.0, 174.0, coreStrength);\n"
-	"    float hLocal = (z - 88.0) / max(12.0, cloudTop - 88.0);\n"
+	"    float synFront = oct[0] * 0.46 + oct[1] * 0.54;\n"
+	"    float synGate  = smoothstep(0.52 - 0.11 * humidity, 0.72 - 0.07 * humidity, synFront);\n"
+	"    float cellBillow = 1.0 - abs(2.0 * oct[2] - 1.0);\n"
+	"    float macroCell = mix(oct[2], cellBillow, 0.42);\n"
+	"    float macroCoverage = synGate * smoothstep(0.41 - 0.05 * humidity, 0.74 - 0.04 * humidity, macroCell);\n"
+	"    if (macroCoverage <= 0.015) return 0.0;\n"
+	"    float coreStrength = smoothstep(0.08, 0.78, macroCoverage);\n"
+	"    float cloudTop = mix(132.0, 232.0, coreStrength);\n"
+	"    float hLocal = (z - 92.0) / max(16.0, cloudTop - 92.0);\n"
 	"    if (hLocal <= 0.0 || hLocal >= 1.0) return 0.0;\n"
-	"    float vProf = smoothstep(0.0, 0.18, hLocal) * smoothstep(1.0, 0.38, hLocal);\n"
-	"    if (vProf <= 0.001) return 0.0;\n"
-	"    float fractalDetail = 0.0;\n"
-	"    if (dist < dFar[4]) {\n"
-	"        vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    float baseRound = smoothstep(0.0, 0.15, hLocal);\n"
+	"    float topRound  = smoothstep(1.0, 0.42, hLocal);\n"
+	"    float vProf     = baseRound * topRound;\n"
+	"    float baseCloud = clamp(cloud_remap(macroCoverage * vProf, 0.12 * (1.0 - 0.45 * coreStrength), 0.86, 0.0, 1.0), 0.0, 1.0);\n"
+	"    if (baseCloud <= 0.002) return 0.0;\n"
+	"    float billowFbm = 0.0;\n"
+	"    float billowWeightSum = 0.0;\n"
+	"    if (dist < dFar[3]) {\n"
+	"        vec4 wind = (dist < dFar[4]) ? eval_recursive_wind(worldPos.xy, anim_time) : vec4(prevDir, 0.75, 0.50);\n"
 	"        vec2 wDir = wind.xy;\n"
 	"        vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
-	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 88.0) * 0.014);\n"
-	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.48 + shear;\n"
-	"        const float amps[4] = float[4](0.200, 0.125, 0.078, 0.046);\n"
-	"        const float fineWarp[4] = float[4](18.0, 6.0, 2.0, 0.0);\n"
-	"        for (int j = 0; j < 4; j++) {\n"
-	"            int i = j + 4;\n"
+	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 92.0) * 0.012);\n"
+	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.42 + shear;\n"
+	"        const float amps[5] = float[5](0.38, 0.25, 0.16, 0.12, 0.09);\n"
+	"        for (int j = 0; j < 5; j++) {\n"
+	"            int i = j + 3;\n"
 	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"            float wNyq  = smoothstep(0.78, 0.22, freqs[i] * fw);\n"
+	"            float wNyq  = smoothstep(0.80, 0.20, freqs[i] * fw);\n"
 	"            float w = wDist * wNyq;\n"
 	"            if (w > 0.001) {\n"
 	"                float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"                vec2 q = pRot * freqs[i] + windWarp * (0.35 + 0.28 * float(j)) - prevDir * phase;\n"
+	"                vec2 q = pRot * freqs[i] + phaseCurl + windWarp * (0.22 + 0.20 * float(j)) - prevDir * phase;\n"
 	"                float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
 	"                float billow = 1.0 - abs(2.0 * n - 1.0);\n"
-	"                float shaped = mix(n, billow, 0.62) - 0.5;\n"
-	"                fractalDetail += shaped * amps[j] * w;\n"
-	"                pRot += vec2(n - 0.5) * (fineWarp[j] * w);\n"
+	"                float cauliflower = mix(billow, n, 0.28);\n"
+	"                billowFbm += cauliflower * amps[j] * w;\n"
+	"                billowWeightSum += amps[j] * w;\n"
+	"                phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * (0.32 * w);\n"
 	"            }\n"
 	"            pRot = rot * pRot;\n"
 	"        }\n"
 	"    }\n"
-	"    float sculptScale = 0.72 + 0.38 * (1.0 - coreStrength) + 0.22 * hLocal;\n"
-	"    float totalMacro = macroMargin + fractalDetail * sculptScale - 0.035 * hLocal;\n"
-	"    return smoothstep(-0.025, 0.145, totalMacro) * vProf;\n"
+	"    if (billowWeightSum > 0.001) {\n"
+	"        float normErode = (1.0 - (billowFbm / max(0.32, billowWeightSum))) * clamp(billowWeightSum * 1.35, 0.0, 1.0);\n"
+	"        float erodeAmt = normErode * 0.58 * (1.0 - 0.52 * coreStrength) * (0.35 + 0.65 * hLocal);\n"
+	"        baseCloud = clamp(cloud_remap(baseCloud, erodeAmt, 1.0, 0.0, 1.0), 0.0, 1.0);\n"
+	"    }\n"
+	"    return smoothstep(0.0, 0.72, baseCloud) * vProf;\n"
 	"}\n"
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n"
-	"    float dz = max(8.0, 108.0 - fragZ);\n"
+	"    float dz = max(8.0, 124.0 - fragZ);\n"
 	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n"
-	"    float d = eval_zoom_cloud_density(vec3(projXY, 108.0), anim_time, humidity, dist, fw);\n"
-	"    return clamp(d * 0.82, 0.0, 0.52);\n"
+	"    float d = eval_zoom_cloud_density(vec3(projXY, 124.0), anim_time, humidity, dist, fw);\n"
+	"    return clamp(d * 0.85, 0.0, 0.54);\n"
 	"}\n"
 	"void main() {\n"
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
@@ -2062,15 +2114,94 @@ static const char *s_vs_cloud =
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform vec2 uTorusRadii;\n"
 	"uniform vec2 uWorldDim;\n"
+	"uniform float uAnimTime;\n"
 	"uniform vec4 uCloudDeck;\n"
 	"out vec2 vUV;\n"
 	"out vec2 vWorldPos;\n"
 	"out vec2 vRelXY;\n"
 	"out float vDistance;\n"
+	"out float vShellZ;\n"
 	"out vec3 vViewDir;\n"
 	"out vec3 vTorusNormal;\n"
 	"out vec3 vTangentU;\n"
 	"out vec3 vTangentV;\n"
+	"uint chaff_rotl32(uint x, int r) {\n"
+	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
+	"}\n"
+	"uint chaff_hash4(ivec4 p, uint seed) {\n"
+	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
+	"    uint v2 = (uint(p.z) & 0xFFFFu) | ((uint(p.w) & 0xFFFFu) << 16u);\n"
+	"    uint h = seed + 0x165667B1u + 8u;\n"
+	"    h += v1 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h += v2 * 0xC2B2AE3Du;\n"
+	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
+	"    h ^= h >> 15u;\n"
+	"    h *= 0x85EBCA77u;\n"
+	"    h ^= h >> 13u;\n"
+	"    h *= 0xC2B2AE3Du;\n"
+	"    h ^= h >> 16u;\n"
+	"    return h;\n"
+	"}\n"
+	"vec4 chaff_grad4(ivec4 c, uint seed) {\n"
+	"    uint h = chaff_hash4(c, seed);\n"
+	"    vec4 g = vec4(\n"
+	"        float(int( h        & 0xFFu) - 128),\n"
+	"        float(int((h >> 8u)  & 0xFFu) - 128),\n"
+	"        float(int((h >> 16u) & 0xFFu) - 128),\n"
+	"        float(int((h >> 24u) & 0xFFu) - 128)\n"
+	"    );\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
+	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
+	"    vec4 ip = floor(p);\n"
+	"    vec4 fp = p - ip;\n"
+	"    vec4 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    ivec4 c = ivec4(ip);\n"
+	"    float d[8];\n"
+	"    for (int i = 0; i < 8; i++) {\n"
+	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
+	"        vec4 g0 = chaff_grad4(c + ivec4(off, 0), seed);\n"
+	"        vec4 g1 = chaff_grad4(c + ivec4(off, 1), seed);\n"
+	"        float v0 = dot(g0, fp - vec4(vec3(off), 0.0));\n"
+	"        float v1 = dot(g1, fp - vec4(vec3(off), 1.0));\n"
+	"        d[i] = mix(v0, v1, u.w);\n"
+	"    }\n"
+	"    float c0 = mix(d[0], d[4], u.z);\n"
+	"    float c1 = mix(d[1], d[5], u.z);\n"
+	"    float c2 = mix(d[2], d[6], u.z);\n"
+	"    float c3 = mix(d[3], d[7], u.z);\n"
+	"    float b0 = mix(c0, c2, u.y);\n"
+	"    float b1 = mix(c1, c3, u.y);\n"
+	"    return clamp(0.5 + 0.72 * mix(b0, b1, u.x), 0.0, 1.0);\n"
+	"}\n"
+	"float eval_vertex_cloud_dome(vec2 worldXY, float anim_time) {\n"
+	"    const float freqs[3] = float[3](0.000018, 0.000075, 0.000280);\n"
+	"    const float spds[3]  = float[3](0.012, 0.022, 0.038);\n"
+	"    const uint  seeds[3] = uint[3](0x434C4430u, 0x434C4431u, 0x434C4432u);\n"
+	"    const float zScales[3] = float[3](0.18, 0.32, 0.55);\n"
+	"    const float wScales[3] = float[3](0.16, 0.28, 0.48);\n"
+	"    const mat2  rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    const vec2  prevDir = vec2(0.741, -0.671);\n"
+	"    float wBoil = mod(anim_time * 0.072, 512.0);\n"
+	"    float zBaseSlice = (132.0 - 92.0) * 0.024;\n"
+	"    vec2 pRot = worldXY;\n"
+	"    vec2 phaseCurl = vec2(0.0);\n"
+	"    float oct[3] = float[3](0.5, 0.5, 0.5);\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"        vec2 q = pRot * freqs[i] + phaseCurl - prevDir * phase;\n"
+	"        float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
+	"        oct[i] = n;\n"
+	"        phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * 0.42;\n"
+	"        pRot = rot * pRot;\n"
+	"    }\n"
+	"    float synFront = oct[0] * 0.46 + oct[1] * 0.54;\n"
+	"    float synGate  = smoothstep(0.40, 0.66, synFront);\n"
+	"    float cellBillow = 1.0 - abs(2.0 * oct[2] - 1.0);\n"
+	"    float macroCell = mix(oct[2], cellBillow, 0.42);\n"
+	"    return synGate * smoothstep(0.32, 0.70, macroCell);\n"
+	"}\n"
 	"void main() {\n"
 	"    vUV = a_grid_uv;\n"
 	"    vec2 worldXY = vec2(uChunkOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
@@ -2090,7 +2221,10 @@ static const char *s_vs_cloud =
 	"    float dsv = -2.0 * shdv * shdv * sv0 + sdv * cv0;\n"
 	"    float cu = cu0 + dcu, su = su0 + dsu;\n"
 	"    float cv = cv0 + dcv, sv = sv0 + dsv;\n"
-	"    float effWz = 114.0;\n"
+	"    /* True 3D GPU Vertex Dome Displacement: cloud deck rises from z=104 in clear troughs up to z=188 over cumulus towers */\n"
+	"    float macroDome = eval_vertex_cloud_dome(worldXY, uAnimTime);\n"
+	"    float effWz = 104.0 + 84.0 * macroDome;\n"
+	"    vShellZ = effWz;\n"
 	"    float Rv0 = R + r0 * cv0;\n"
 	"    float dRv = r0 * dcv + effWz * cv;\n"
 	"    vec3 worldPos = uPlanetCenter + vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + effWz * sv);\n"
@@ -2113,6 +2247,7 @@ static const char *s_fs_cloud =
 	"in vec2 vWorldPos;\n"
 	"in vec2 vRelXY;\n"
 	"in float vDistance;\n"
+	"in float vShellZ;\n"
 	"in vec3 vViewDir;\n"
 	"in vec3 vTorusNormal;\n"
 	"in vec3 vTangentU;\n"
@@ -2127,6 +2262,15 @@ static const char *s_fs_cloud =
 	"uniform float uCamDist;\n"
 	"uniform vec4 uCloudDeck;\n"
 	"out vec4 FragColor;\n"
+	"vec4 sampleSubstrateSmooth(vec2 uv) {\n"
+	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
+	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
+	"    vec2 p = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
+	"    vec2 ip = floor(p);\n"
+	"    vec2 fp = p - ip;\n"
+	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
+	"    return texture(uSubstrateTex, (ip + u + 0.5) / texSize);\n"
+	"}\n"
 	"uint chaff_rotl32(uint x, int r) {\n"
 	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
 	"}\n"
@@ -2187,6 +2331,16 @@ static const char *s_fs_cloud =
 	"    h ^= h >> 16u;\n"
 	"    return h;\n"
 	"}\n"
+	"vec4 chaff_grad4(ivec4 c, uint seed) {\n"
+	"    uint h = chaff_hash4(c, seed);\n"
+	"    vec4 g = vec4(\n"
+	"        float(int( h        & 0xFFu) - 128),\n"
+	"        float(int((h >> 8u)  & 0xFFu) - 128),\n"
+	"        float(int((h >> 16u) & 0xFFu) - 128),\n"
+	"        float(int((h >> 24u) & 0xFFu) - 128)\n"
+	"    );\n"
+	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
+	"}\n"
 	"float chaff_grad_noise4d(vec4 p, uint seed) {\n"
 	"    vec4 ip = floor(p);\n"
 	"    vec4 fp = p - ip;\n"
@@ -2195,8 +2349,10 @@ static const char *s_fs_cloud =
 	"    float d[8];\n"
 	"    for (int i = 0; i < 8; i++) {\n"
 	"        ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);\n"
-	"        float v0 = float(chaff_hash4(c + ivec4(off, 0), seed) >> 24u) * (1.0 / 255.0);\n"
-	"        float v1 = float(chaff_hash4(c + ivec4(off, 1), seed) >> 24u) * (1.0 / 255.0);\n"
+	"        vec4 g0 = chaff_grad4(c + ivec4(off, 0), seed);\n"
+	"        vec4 g1 = chaff_grad4(c + ivec4(off, 1), seed);\n"
+	"        float v0 = dot(g0, fp - vec4(vec3(off), 0.0));\n"
+	"        float v1 = dot(g1, fp - vec4(vec3(off), 1.0));\n"
 	"        d[i] = mix(v0, v1, u.w);\n"
 	"    }\n"
 	"    float c0 = mix(d[0], d[4], u.z);\n"
@@ -2205,7 +2361,7 @@ static const char *s_fs_cloud =
 	"    float c3 = mix(d[3], d[7], u.z);\n"
 	"    float b0 = mix(c0, c2, u.y);\n"
 	"    float b1 = mix(c1, c3, u.y);\n"
-	"    return mix(b0, b1, u.x);\n"
+	"    return clamp(0.5 + 0.72 * mix(b0, b1, u.x), 0.0, 1.0);\n"
 	"}\n"
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
@@ -2231,9 +2387,12 @@ static const char *s_fs_cloud =
 	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
 	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
 	"}\n"
+	"float cloud_remap(float v, float l0, float h0, float l1, float h1) {\n"
+	"    return l1 + (v - l0) * (h1 - l1) / max(1e-5, h0 - l0);\n"
+	"}\n"
 	"float eval_zoom_cloud_density(vec3 worldPos, float anim_time, float humidity, float dist, float fw) {\n"
 	"    float z = worldPos.z;\n"
-	"    if (z <= 88.0 || z >= 176.0) return 0.0;\n"
+	"    if (z <= 92.0 || z >= 232.0) return 0.0;\n"
 	"    const float freqs[8] = float[8](\n"
 	"        0.000018, 0.000075, 0.000280, 0.000950,\n"
 	"        0.003100, 0.009800, 0.031000, 0.096000\n"
@@ -2243,12 +2402,12 @@ static const char *s_fs_cloud =
 	"        0.105, 0.165, 0.250, 0.360\n"
 	"    );\n"
 	"    const float dFar[8] = float[8](\n"
-	"        12000000.0, 4500000.0, 950000.0, 180000.0,\n"
-	"           36000.0,    8500.0,   2400.0,    980.0\n"
+	"        12000000.0, 12000000.0, 12000000.0, 240000.0,\n"
+	"           42000.0,    10000.0,     2600.0,   1050.0\n"
 	"    );\n"
 	"    const float dNear[8] = float[8](\n"
-	"         3000000.0,  900000.0, 180000.0,  36000.0,\n"
-	"            7200.0,    1800.0,    540.0,    220.0\n"
+	"         3000000.0,  3000000.0,  3000000.0,  48000.0,\n"
+	"            8400.0,     2000.0,      560.0,    230.0\n"
 	"    );\n"
 	"    const uint seeds[8] = uint[8](\n"
 	"        0x434C4430u, 0x434C4431u, 0x434C4432u, 0x434C4433u,\n"
@@ -2257,85 +2416,104 @@ static const char *s_fs_cloud =
 	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n"
 	"    float wBoil = mod(anim_time * 0.072, 512.0);\n"
-	"    float zBaseSlice = (z - 88.0) * 0.032;\n"
+	"    float zBaseSlice = (z - 92.0) * 0.024;\n"
+	"    const float zScales[8] = float[8](0.18, 0.32, 0.55, 0.90, 1.40, 2.10, 3.05, 4.30);\n"
+	"    const float wScales[8] = float[8](0.16, 0.28, 0.48, 0.78, 1.18, 1.72, 2.45, 3.45);\n"
 	"    vec2 pRot = worldPos.xy;\n"
-	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
-	"    const float warpSpan[4] = float[4](4200.0, 1100.0, 280.0, 75.0);\n"
-	"    const float zScales[8]  = float[8](0.20, 0.35, 0.60, 0.95, 1.45, 2.15, 3.10, 4.40);\n"
-	"    const float wScales[8]  = float[8](0.18, 0.30, 0.50, 0.80, 1.20, 1.75, 2.50, 3.50);\n"
-	"    for (int i = 0; i < 4; i++) {\n"
-	"        float minW = (i == 0) ? 1.0 : ((i == 1) ? 0.45 : 0.0);\n"
-	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), minW, 1.0);\n"
-	"        float wNyq  = smoothstep(0.82, 0.22, freqs[i] * fw);\n"
-	"        float w = wDist * wNyq;\n"
-	"        if (w > 0.001) {\n"
-	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"            vec2 q = pRot * freqs[i] - prevDir * phase;\n"
-	"            float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
-	"            oct[i] = mix(0.5, n, w);\n"
-	"            pRot += vec2(n - 0.5) * (warpSpan[i] * w);\n"
-	"        }\n"
+	"    vec2 phaseCurl = vec2(0.0);\n"
+	"    float oct[3] = float[3](0.5, 0.5, 0.5);\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"        vec2 q = pRot * freqs[i] + phaseCurl - prevDir * phase;\n"
+	"        float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
+	"        oct[i] = n;\n"
+	"        phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * 0.42;\n"
 	"        pRot = rot * pRot;\n"
 	"    }\n"
-	"    float synFront = oct[0] * 0.44 + oct[1] * 0.56;\n"
-	"    float b2 = mix(oct[2], 1.0 - abs(2.0 * oct[2] - 1.0), 0.35);\n"
-	"    float b3 = mix(oct[3], 1.0 - abs(2.0 * oct[3] - 1.0), 0.42);\n"
-	"    float bigCloud = oct[1] * 0.20 + b2 * 0.44 + b3 * 0.36;\n"
-	"    float synBias = (0.50 - synFront) * 0.42;\n"
-	"    float thresh = clamp(0.53 - 0.16 * humidity + synBias, 0.36, 0.68);\n"
-	"    float macroMargin = bigCloud - thresh;\n"
-	"    if (macroMargin < -0.095) return 0.0;\n"
-	"    float coreStrength = clamp((macroMargin + 0.06) / 0.24, 0.0, 1.0);\n"
-	"    float cloudTop = mix(118.0, 174.0, coreStrength);\n"
-	"    float hLocal = (z - 88.0) / max(12.0, cloudTop - 88.0);\n"
+	"    float synFront = oct[0] * 0.46 + oct[1] * 0.54;\n"
+	"    float synGate  = smoothstep(0.52 - 0.11 * humidity, 0.72 - 0.07 * humidity, synFront);\n"
+	"    float cellBillow = 1.0 - abs(2.0 * oct[2] - 1.0);\n"
+	"    float macroCell = mix(oct[2], cellBillow, 0.42);\n"
+	"    float macroCoverage = synGate * smoothstep(0.41 - 0.05 * humidity, 0.74 - 0.04 * humidity, macroCell);\n"
+	"    if (macroCoverage <= 0.015) return 0.0;\n"
+	"    float coreStrength = smoothstep(0.08, 0.78, macroCoverage);\n"
+	"    float cloudTop = mix(132.0, 232.0, coreStrength);\n"
+	"    float hLocal = (z - 92.0) / max(16.0, cloudTop - 92.0);\n"
 	"    if (hLocal <= 0.0 || hLocal >= 1.0) return 0.0;\n"
-	"    float vProf = smoothstep(0.0, 0.18, hLocal) * smoothstep(1.0, 0.38, hLocal);\n"
-	"    if (vProf <= 0.001) return 0.0;\n"
-	"    float fractalDetail = 0.0;\n"
-	"    if (dist < dFar[4]) {\n"
-	"        vec4 wind = eval_recursive_wind(worldPos.xy, anim_time);\n"
+	"    float baseRound = smoothstep(0.0, 0.15, hLocal);\n"
+	"    float topRound  = smoothstep(1.0, 0.42, hLocal);\n"
+	"    float vProf     = baseRound * topRound;\n"
+	"    float baseCloud = clamp(cloud_remap(macroCoverage * vProf, 0.12 * (1.0 - 0.45 * coreStrength), 0.86, 0.0, 1.0), 0.0, 1.0);\n"
+	"    if (baseCloud <= 0.002) return 0.0;\n"
+	"    float billowFbm = 0.0;\n"
+	"    float billowWeightSum = 0.0;\n"
+	"    if (dist < dFar[3]) {\n"
+	"        vec4 wind = (dist < dFar[4]) ? eval_recursive_wind(worldPos.xy, anim_time) : vec4(prevDir, 0.75, 0.50);\n"
 	"        vec2 wDir = wind.xy;\n"
 	"        vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
-	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 88.0) * 0.014);\n"
-	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.48 + shear;\n"
-	"        const float amps[4] = float[4](0.200, 0.125, 0.078, 0.046);\n"
-	"        const float fineWarp[4] = float[4](18.0, 6.0, 2.0, 0.0);\n"
-	"        for (int j = 0; j < 4; j++) {\n"
-	"            int i = j + 4;\n"
+	"        vec2 shear = (wDir * 0.82 + wPerp * 0.34) * ((z - 92.0) * 0.012);\n"
+	"        vec2 windWarp = (wDir * (wind.z - 0.65) + wPerp * (wind.w - 0.50)) * 0.42 + shear;\n"
+	"        const float amps[5] = float[5](0.38, 0.25, 0.16, 0.12, 0.09);\n"
+	"        for (int j = 0; j < 5; j++) {\n"
+	"            int i = j + 3;\n"
 	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"            float wNyq  = smoothstep(0.78, 0.22, freqs[i] * fw);\n"
+	"            float wNyq  = smoothstep(0.80, 0.20, freqs[i] * fw);\n"
 	"            float w = wDist * wNyq;\n"
 	"            if (w > 0.001) {\n"
 	"                float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"                vec2 q = pRot * freqs[i] + windWarp * (0.35 + 0.28 * float(j)) - prevDir * phase;\n"
+	"                vec2 q = pRot * freqs[i] + phaseCurl + windWarp * (0.22 + 0.20 * float(j)) - prevDir * phase;\n"
 	"                float n = chaff_grad_noise4d(vec4(q, zBaseSlice * zScales[i], wBoil * wScales[i]), seeds[i]);\n"
 	"                float billow = 1.0 - abs(2.0 * n - 1.0);\n"
-	"                float shaped = mix(n, billow, 0.62) - 0.5;\n"
-	"                fractalDetail += shaped * amps[j] * w;\n"
-	"                pRot += vec2(n - 0.5) * (fineWarp[j] * w);\n"
+	"                float cauliflower = mix(billow, n, 0.28);\n"
+	"                billowFbm += cauliflower * amps[j] * w;\n"
+	"                billowWeightSum += amps[j] * w;\n"
+	"                phaseCurl = rot * phaseCurl * 0.55 + vec2(n - 0.5, 0.5 - n) * (0.32 * w);\n"
 	"            }\n"
 	"            pRot = rot * pRot;\n"
 	"        }\n"
 	"    }\n"
-	"    float sculptScale = 0.72 + 0.38 * (1.0 - coreStrength) + 0.22 * hLocal;\n"
-	"    float totalMacro = macroMargin + fractalDetail * sculptScale - 0.035 * hLocal;\n"
-	"    return smoothstep(-0.025, 0.145, totalMacro) * vProf;\n"
+	"    if (billowWeightSum > 0.001) {\n"
+	"        float normErode = (1.0 - (billowFbm / max(0.32, billowWeightSum))) * clamp(billowWeightSum * 1.35, 0.0, 1.0);\n"
+	"        float erodeAmt = normErode * 0.58 * (1.0 - 0.52 * coreStrength) * (0.35 + 0.65 * hLocal);\n"
+	"        baseCloud = clamp(cloud_remap(baseCloud, erodeAmt, 1.0, 0.0, 1.0), 0.0, 1.0);\n"
+	"    }\n"
+	"    return smoothstep(0.0, 0.72, baseCloud) * vProf;\n"
 	"}\n"
 	"float eval_planetary_cloud_density(vec3 worldPos, float anim_time, float humidity) {\n"
 	"    return eval_zoom_cloud_density(worldPos, anim_time, humidity, 450.0, 0.25);\n"
 	"}\n"
 	"void main() {\n"
-	"    /* Below-cloud & close-up quantum gating: when camera is below the clouds, only cast shadows on the lamb/ground;\n"
-	"     * as camera climbs into/above the cloud deck, part the focal aperture smoothly */\n"
-	"    float shellFade = smoothstep(880.0, 1380.0, uCamDist);\n"
-	"    if (shellFade <= 0.005) discard;\n"
-	"    float closeFactor = clamp((1500.0 - uCamDist) / 620.0, 0.0, 1.0);\n"
-	"    float focalDist = length(vRelXY);\n"
-	"    float apertureRadius = mix(0.0, 360.0, closeFactor);\n"
-	"    float apertureMask = mix(1.0, smoothstep(apertureRadius * 0.45, apertureRadius + 260.0, focalDist), closeFactor) * shellFade;\n"
-	"    if (apertureMask <= 0.005) discard;\n"
+	"    /* True 3D Ray-Slab Intersection & Airplane-Descent Fly-Through:\n"
+	"     * vViewDir = uCameraPos - worldPos, where worldPos is on the displaced cloud shell at altitude vShellZ.\n"
+	"     * Compute the camera eye's local torus altitude camAlt and 3D ray direction rayDir from camera eye through fragment. */\n"
+	"    vec3 torusN = normalize(vTorusNormal);\n"
+	"    vec3 tangentU = normalize(vTangentU);\n"
+	"    vec3 tangentV = normalize(vTangentV);\n"
+	"    float fragDist = max(1e-3, length(vViewDir));\n"
+	"    vec3 viewDir = vViewDir / fragDist;\n"
+	"    vec3 rayDir  = -viewDir;\n"
+	"    float camAlt = vShellZ + dot(vViewDir, torusN);\n"
+	"    vec2  camXY  = vWorldPos + vec2(dot(vViewDir, tangentU), dot(vViewDir, tangentV));\n"
+	"    float dz     = dot(rayDir, torusN);\n"
+	"    vec2  dxy    = vec2(dot(rayDir, tangentU), dot(rayDir, tangentV));\n"
+	"    const float zBase = 92.0;\n"
+	"    const float zTop  = 232.0;\n"
+	"    /* When the camera eye has descended below the cloud base (camAlt < zBase) and is looking downward (dz <= 0),\n"
+	"     * the entire 3D cloud slab is behind/above the camera lens — natural airplane breakout with zero fake circular hole! */\n"
+	"    float shellFade = smoothstep(235.0, 320.0, uCamDist);\n"
+	"    if (shellFade <= 0.005 || (camAlt < zBase && dz <= 0.0)) discard;\n"
+	"    float invDz = 1.0 / ((abs(dz) > 1e-3) ? dz : (dz >= 0.0 ? 1e-3 : -1e-3));\n"
+	"    float t0 = (zBase - camAlt) * invDz;\n"
+	"    float t1 = (zTop  - camAlt) * invDz;\n"
+	"    float tEnter = max(0.0, min(t0, t1));\n"
+	"    float maxRay = min(fragDist * 2.4 + 240.0, tEnter + 460.0);\n"
+	"    float tExit  = min(maxRay, max(t0, t1));\n"
+	"    /* Near-clip perspective parting: as the camera flies right through a cloud at [92..232], wisps within 18 units\n"
+	"     * of the lens part smoothly around the periphery of the viewport */\n"
+	"    tEnter = max(tEnter, 18.0 * smoothstep(260.0, 92.0, camAlt));\n"
+	"    if (tExit <= tEnter + 0.5) discard;\n"
 	"    float fw = max(1e-4, max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos))));\n"
-	"    vec3 rawBiome = texture(uSubstrateTex, vUV).rgb;\n"
+	"    vec3 rawBiome = sampleSubstrateSmooth(vUV).rgb;\n"
 	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
 	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
 	"    float wVolcanic = smoothstep(0.32, 0.14, maxBio);\n"
@@ -2343,51 +2521,58 @@ static const char *s_fs_cloud =
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
 	"    float bioHumidity = clamp(0.58 * wTemperate + 0.85 * wTropical + 0.50 * wPolar + 0.22 * wVolcanic + ((uSeaLevel > -900.0) ? 0.12 : 0.0), 0.18, 0.95);\n"
-	"    vec3 viewDir = normalize(vViewDir);\n"
-	"    vec3 torusN = normalize(vTorusNormal);\n"
-	"    vec3 tangentU = normalize(vTangentU);\n"
-	"    vec3 tangentV = normalize(vTangentV);\n"
 	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    float viewUp = max(0.22, abs(dot(viewDir, torusN)));\n"
-	"    vec2 rayHoriz = vec2(dot(-viewDir, tangentU), dot(-viewDir, tangentV)) / viewUp;\n"
-	"    const float refShellZ = 114.0;\n"
-	"    /* Observer-adaptive 3-step volumetric slab integration with clear-sky early-out */\n"
-	"    const float slabZ[3] = float[3](98.0, 114.0, 142.0);\n"
-	"    const float slabH[3] = float[3](0.18, 0.45, 0.82);\n"
-	"    const float slabW[3] = float[3](0.34, 0.40, 0.26);\n"
-	"    int maxSteps = (vDistance > 8500.0) ? 2 : 3;\n"
+	"    /* Observer-adaptive 4-to-6 step jittered 3D volumetric raymarch with early opacity termination (alpha >= 0.98) */\n"
+	"    int numSteps = (vDistance > 16000.0) ? 4 : ((vDistance > 3800.0) ? 5 : 6);\n"
+	"    float marchSpan = tExit - tEnter;\n"
+	"    float stepLen   = marchSpan / float(numSteps);\n"
+	"    float jitter    = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n"
 	"    float trans = 1.0;\n"
 	"    vec3 accumLight = vec3(0.0);\n"
-	"    float cosTheta = dot(-viewDir, sunDir);\n"
-	"    float hgPhase = 0.65 + 0.55 * pow(clamp(0.5 + 0.5 * cosTheta, 0.0, 1.0), 3.0);\n"
-	"    for (int s = 0; s < 3; s++) {\n"
-	"        if (s >= maxSteps) break;\n"
-	"        float z = slabZ[s];\n"
-	"        float hFrac = slabH[s];\n"
-	"        vec2 sampleXY = vWorldPos + rayHoriz * (z - refShellZ);\n"
-	"        float dens = eval_zoom_cloud_density(vec3(sampleXY, z), uAnimTime, bioHumidity, vDistance, fw);\n"
+	"    float cosTheta = dot(rayDir, sunDir);\n"
+	"    float hgForward = 0.58 + 0.62 * pow(clamp(0.5 + 0.5 * cosTheta, 0.0, 1.0), 3.2);\n"
+	"    float hgBack    = 0.18 * pow(clamp(0.5 - 0.5 * cosTheta, 0.0, 1.0), 2.0);\n"
+	"    float hgPhase   = hgForward + hgBack;\n"
+	"    for (int s = 0; s < 6; s++) {\n"
+	"        if (s >= numSteps || (1.0 - trans) >= 0.98) break;\n"
+	"        float tStep = tEnter + (float(s) + 0.25 + 0.50 * jitter) * stepLen;\n"
+	"        float z = clamp(camAlt + dz * tStep, zBase + 0.5, zTop - 0.5);\n"
+	"        vec2 sampleXY = camXY + dxy * tStep;\n"
+	"        float stepDist = max(120.0, tStep);\n"
+	"        float dens = eval_zoom_cloud_density(vec3(sampleXY, z), uAnimTime, bioHumidity, stepDist, fw);\n"
 	"        if (dens > 0.002) {\n"
-	"            float sunProbe = eval_zoom_cloud_density(vec3(sampleXY + vec2(-12.0, -12.0), z + 14.0), uAnimTime, bioHumidity, vDistance + 4500.0, fw * 2.5);\n"
-	"            float tauSun = sunProbe * 2.35 + (1.0 - hFrac) * 0.42;\n"
-	"            /* Beer-Powder silver-lining optical scattering */\n"
-	"            float beer = exp(-tauSun);\n"
-	"            float powder = 1.0 - exp(-tauSun * 2.35);\n"
-	"            float lightEnergy = mix(beer, beer * (0.42 + 0.98 * powder), 0.68) * hgPhase;\n"
-	"            vec3 baseShadow = mix(vec3(0.54, 0.62, 0.74), vec3(0.80, 0.86, 0.93), hFrac);\n"
-	"            vec3 sunLit = vec3(1.03, 1.00, 0.96);\n"
-	"            vec3 stepCol = mix(baseShadow, sunLit, clamp(lightEnergy, 0.0, 1.0));\n"
-	"            float stepTau = dens * slabW[s] * 3.25;\n"
-	"            float stepAlpha = 1.0 - exp(-stepTau);\n"
+	"            float hFrac = clamp((z - zBase) / (zTop - zBase), 0.0, 1.0);\n"
+	"            /* 3D solar optical depth probe + 3D vertical/sunward cauliflower self-shading gradient */\n"
+	"            float dSun1 = eval_zoom_cloud_density(vec3(sampleXY + vec2(-14.0, -14.0), min(zTop - 1.0, z + 18.0)), uAnimTime, bioHumidity, stepDist + 2400.0, fw * 1.8);\n"
+	"            float dTop  = eval_zoom_cloud_density(vec3(sampleXY, min(zTop - 1.0, z + 12.0)), uAnimTime, bioHumidity, stepDist + 3200.0, fw * 2.0);\n"
+	"            float tauSun = dSun1 * 2.25 + dTop * 0.65 + (1.0 - hFrac) * 0.36;\n"
+	"            /* 3D surface normal approximation from density gradient for crisp 3D dome relief */\n"
+	"            vec3 cloudGradN = normalize(vec3((dens - dSun1) * 0.7071, (dens - dSun1) * 0.7071, (dens - dTop) + 0.35 + 0.45 * hFrac));\n"
+	"            float domeLambert = clamp(0.52 + 0.48 * dot(cloudGradN, vec3(-0.509, -0.509, 0.694)), 0.32, 1.08);\n"
+	"            /* Beer-Powder multi-scattering silver-lining approximation (Horizon Zero Dawn Nubis) */\n"
+	"            float beer   = exp(-tauSun);\n"
+	"            float powder = 1.0 - exp(-tauSun * 2.45);\n"
+	"            float multiScatter = beer * (0.44 + 0.96 * powder) + 0.22 * exp(-tauSun * 0.35);\n"
+	"            float lightEnergy  = multiScatter * hgPhase * domeLambert;\n"
+	"            vec3 deepBaseAmb   = vec3(0.50, 0.59, 0.72);\n"
+	"            vec3 crownSkyAmb   = vec3(0.82, 0.88, 0.95);\n"
+	"            vec3 groundBounce  = vec3(0.58, 0.64, 0.68) * (1.0 - hFrac) * 0.18;\n"
+	"            vec3 ambientCol    = mix(deepBaseAmb, crownSkyAmb, smoothstep(0.0, 0.85, hFrac)) + groundBounce;\n"
+	"            vec3 sunLitCol     = vec3(1.04, 1.01, 0.97);\n"
+	"            vec3 stepCol       = mix(ambientCol, sunLitCol, clamp(lightEnergy, 0.0, 1.0));\n"
+	"            float stepTau      = dens * (stepLen * 0.052);\n"
+	"            float stepAlpha    = 1.0 - exp(-stepTau);\n"
 	"            accumLight += trans * stepCol * stepAlpha;\n"
 	"            trans *= (1.0 - stepAlpha);\n"
-	"        } else if (s == 1 && trans > 0.999) {\n"
-	"            /* Both base (98) and core (114) are in clear sky — skip upper crown step */\n"
+	"        } else if (s == 2 && trans > 0.999) {\n"
+	"            /* First 3 samples are completely clear sky — early exit */\n"
 	"            break;\n"
 	"        }\n"
 	"    }\n"
-	"    float cloudAlpha = clamp((1.0 - trans) * apertureMask, 0.0, 0.88);\n"
+	"    float rawAlpha = 1.0 - trans;\n"
+	"    float cloudAlpha = clamp(rawAlpha * shellFade, 0.0, 0.92);\n"
 	"    if (cloudAlpha <= 0.005) discard;\n"
-	"    vec3 cloudRgb = accumLight / max(1e-4, 1.0 - trans);\n"
+	"    vec3 cloudRgb = accumLight / max(1e-4, rawAlpha);\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
@@ -3627,9 +3812,10 @@ void nd_seven_gl_flush_water(void)
 
 void nd_seven_gl_flush_clouds(void)
 {
-	/* Below-cloud quantum gating: when camera is close-up below the cloud deck (cur_dist < 880),
-	 * only the cloud shadows and reflections cast onto the lamb, terrain, and water are needed. */
-	if (!s_gl.initialized || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0 || s_gl.cur_dist < 880.0f) {
+	/* Below-cloud quantum gating: when camera has descended below the cloud deck into normal game view (cur_dist < 235),
+	 * the overhead cloud shell is completely above/behind the camera lens, so only the cloud shadows and reflections
+	 * cast onto the lamb, terrain, and water are needed. */
+	if (!s_gl.initialized || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0 || s_gl.cur_dist < 235.0f) {
 		s_gl.cloud_count = 0;
 		return;
 	}
@@ -3657,7 +3843,7 @@ void nd_seven_gl_flush_clouds(void)
 	glUniform1f(s_gl.cloud_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
 	glUniform1f(s_gl.cloud_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.cloud_pipe.uCamDist, s_gl.cur_dist);
-	glUniform4f(s_gl.cloud_pipe.uCloudDeck, 88.0f, 86.0f, 0.0f, 1.0f);
+	glUniform4f(s_gl.cloud_pipe.uCloudDeck, 92.0f, 140.0f, 0.0f, 1.0f);
 
 	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 	glUniform3f(s_gl.cloud_pipe.uSkyColor,
@@ -3666,13 +3852,16 @@ void nd_seven_gl_flush_clouds(void)
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.cloud_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_macro);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
-
 	for (uint32_t i = 0; i < s_gl.cloud_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.cloud_queue[i];
+		GLuint c_vbo = 0, c_ibo = 0;
+		GLsizei c_indices = 0;
+		select_grid_buffers(chk->level, chk->ox, chk->oy, chk->span_w, chk->span_h, &c_vbo, &c_ibo, &c_indices);
+
+		glBindBuffer(GL_ARRAY_BUFFER, c_vbo);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c_ibo);
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, chk->substrate_tex);
@@ -3685,7 +3874,7 @@ void nd_seven_gl_flush_clouds(void)
 		glUniform2f(s_gl.cloud_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
 		glUniform1f(s_gl.cloud_pipe.uSeaLevel, chk->sea_level);
 
-		glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES_MACRO, GL_UNSIGNED_SHORT, 0);
+		glDrawElements(GL_TRIANGLES, c_indices, GL_UNSIGNED_SHORT, 0);
 	}
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -4197,6 +4386,21 @@ static inline uint32_t gl_chaff_hash4(int32_t px, int32_t py, int32_t pz, int32_
 	return h;
 }
 
+static inline void gl_chaff_grad4(int32_t cx, int32_t cy, int32_t cz, int32_t cw, uint32_t seed,
+                                  float *gx, float *gy, float *gz, float *gw)
+{
+	uint32_t h = gl_chaff_hash4(cx, cy, cz, cw, seed);
+	float x = (float)((int32_t)( h         & 0xFFu) - 128);
+	float y = (float)((int32_t)((h >> 8u)  & 0xFFu) - 128);
+	float z = (float)((int32_t)((h >> 16u) & 0xFFu) - 128);
+	float w = (float)((int32_t)((h >> 24u) & 0xFFu) - 128);
+	float inv = 1.0f / sqrtf(x * x + y * y + z * z + w * w + 1e-6f);
+	*gx = x * inv;
+	*gy = y * inv;
+	*gz = z * inv;
+	*gw = w * inv;
+}
+
 static inline void gl_chaff_grad_noise4d(float px, float py, float pz, float pw, uint32_t seed,
                                          float *out_val,
                                          float *out_gx, float *out_gy,
@@ -4218,15 +4422,24 @@ static inline void gl_chaff_grad_noise4d(float px, float py, float pz, float pw,
 	int32_t cz = (int32_t)ipz;
 	int32_t cw = (int32_t)ipw;
 
-	float d[8], ddw[8];
+	float d[8], ddw[8], gx_w[8], gy_w[8], gz_w[8];
 	for (int i = 0; i < 8; i++) {
 		int32_t ox = i & 1;
 		int32_t oy = (i >> 1) & 1;
 		int32_t oz = (i >> 2) & 1;
-		float v0 = (float)(gl_chaff_hash4(cx + ox, cy + oy, cz + oz, cw,     seed) >> 24u) * (1.0f / 255.0f);
-		float v1 = (float)(gl_chaff_hash4(cx + ox, cy + oy, cz + oz, cw + 1, seed) >> 24u) * (1.0f / 255.0f);
-		d[i]   = v0 + (v1 - v0) * uw;
-		ddw[i] = v1 - v0;
+		float g0x, g0y, g0z, g0w, g1x, g1y, g1z, g1w;
+		gl_chaff_grad4(cx + ox, cy + oy, cz + oz, cw,     seed, &g0x, &g0y, &g0z, &g0w);
+		gl_chaff_grad4(cx + ox, cy + oy, cz + oz, cw + 1, seed, &g1x, &g1y, &g1z, &g1w);
+		float dx = fpx - (float)ox;
+		float dy = fpy - (float)oy;
+		float dz = fpz - (float)oz;
+		float v0 = g0x * dx + g0y * dy + g0z * dz + g0w * fpw;
+		float v1 = g1x * dx + g1y * dy + g1z * dz + g1w * (fpw - 1.0f);
+		d[i]    = v0 + (v1 - v0) * uw;
+		ddw[i]  = (g0w + (g1w - g0w) * uw) + (v1 - v0) * duw;
+		gx_w[i] = g0x + (g1x - g0x) * uw;
+		gy_w[i] = g0y + (g1y - g0y) * uw;
+		gz_w[i] = g0z + (g1z - g0z) * uw;
 	}
 
 	float c0 = d[0] + (d[4] - d[0]) * uz;
@@ -4236,20 +4449,46 @@ static inline void gl_chaff_grad_noise4d(float px, float py, float pz, float pw,
 
 	float b0 = c0 + (c2 - c0) * uy;
 	float b1 = c1 + (c3 - c1) * uy;
-	if (out_val) *out_val = b0 + (b1 - b0) * ux;
+	float raw = 0.5f + 0.72f * (b0 + (b1 - b0) * ux);
+	if (raw < 0.0f) raw = 0.0f;
+	if (raw > 1.0f) raw = 1.0f;
+	if (out_val) *out_val = raw;
 
-	if (out_gx) *out_gx = (b1 - b0) * dux;
+	if (out_gx) {
+		float gx_z0 = gx_w[0] + (gx_w[4] - gx_w[0]) * uz;
+		float gx_z1 = gx_w[1] + (gx_w[5] - gx_w[1]) * uz;
+		float gx_z2 = gx_w[2] + (gx_w[6] - gx_w[2]) * uz;
+		float gx_z3 = gx_w[3] + (gx_w[7] - gx_w[3]) * uz;
+		float gx_y0 = gx_z0 + (gx_z2 - gx_z0) * uy;
+		float gx_y1 = gx_z1 + (gx_z3 - gx_z1) * uy;
+		float gx_interp = gx_y0 + (gx_y1 - gx_y0) * ux;
+		*out_gx = 0.72f * (gx_interp + (b1 - b0) * dux);
+	}
 	if (out_gy) {
+		float gy_z0 = gy_w[0] + (gy_w[4] - gy_w[0]) * uz;
+		float gy_z1 = gy_w[1] + (gy_w[5] - gy_w[1]) * uz;
+		float gy_z2 = gy_w[2] + (gy_w[6] - gy_w[2]) * uz;
+		float gy_z3 = gy_w[3] + (gy_w[7] - gy_w[3]) * uz;
+		float gy_y0 = gy_z0 + (gy_z2 - gy_z0) * uy;
+		float gy_y1 = gy_z1 + (gy_z3 - gy_z1) * uy;
+		float gy_interp = gy_y0 + (gy_y1 - gy_y0) * ux;
 		float dy0 = c2 - c0;
 		float dy1 = c3 - c1;
-		*out_gy = (dy0 + (dy1 - dy0) * ux) * duy;
+		*out_gy = 0.72f * (gy_interp + (dy0 + (dy1 - dy0) * ux) * duy);
 	}
 	if (out_gz) {
+		float gz_z0 = gz_w[0] + (gz_w[4] - gz_w[0]) * uz;
+		float gz_z1 = gz_w[1] + (gz_w[5] - gz_w[1]) * uz;
+		float gz_z2 = gz_w[2] + (gz_w[6] - gz_w[2]) * uz;
+		float gz_z3 = gz_w[3] + (gz_w[7] - gz_w[3]) * uz;
+		float gz_y0 = gz_z0 + (gz_z2 - gz_z0) * uy;
+		float gz_y1 = gz_z1 + (gz_z3 - gz_z1) * uy;
+		float gz_interp = gz_y0 + (gz_y1 - gz_y0) * ux;
 		float dz00 = d[4] - d[0], dz10 = d[5] - d[1];
 		float dz01 = d[6] - d[2], dz11 = d[7] - d[3];
 		float dz0  = dz00 + (dz10 - dz00) * ux;
 		float dz1  = dz01 + (dz11 - dz01) * ux;
-		*out_gz = (dz0 + (dz1 - dz0) * uy) * duz;
+		*out_gz = 0.72f * (gz_interp + (dz0 + (dz1 - dz0) * uy) * duz);
 	}
 	if (out_gw) {
 		float dw0 = ddw[0] + (ddw[4] - ddw[0]) * uz;
@@ -4258,8 +4497,14 @@ static inline void gl_chaff_grad_noise4d(float px, float py, float pz, float pw,
 		float dw3 = ddw[3] + (ddw[7] - ddw[3]) * uz;
 		float dwb0 = dw0 + (dw2 - dw0) * uy;
 		float dwb1 = dw1 + (dw3 - dw1) * uy;
-		*out_gw = (dwb0 + (dwb1 - dwb0) * ux) * duw;
+		*out_gw = 0.72f * (dwb0 + (dwb1 - dwb0) * ux);
 	}
+}
+
+static inline float gl_cloud_remap(float v, float l0, float h0, float l1, float h1)
+{
+	float denom = (h0 - l0) > 1e-5f ? (h0 - l0) : 1e-5f;
+	return l1 + (v - l0) * (h1 - l1) / denom;
 }
 
 float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
@@ -4273,7 +4518,7 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 	if (out_grad_y) *out_grad_y = 0.0f;
 	if (out_grad_z) *out_grad_z = 0.0f;
 	if (out_grad_t) *out_grad_t = 0.0f;
-	if (wz <= 88.0f || wz >= 176.0f)
+	if (wz <= 92.0f || wz >= 232.0f)
 		return 0.0f;
 
 	static const float freqs[8] = {
@@ -4285,58 +4530,53 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 		0.105f, 0.165f, 0.250f, 0.360f
 	};
 	static const float dFar[8] = {
-		12000000.0f, 4500000.0f, 950000.0f, 180000.0f,
-		   36000.0f,    8500.0f,   2400.0f,    980.0f
+		12000000.0f, 12000000.0f, 12000000.0f, 240000.0f,
+		   42000.0f,    10000.0f,     2600.0f,   1050.0f
 	};
 	static const float dNear[8] = {
-		 3000000.0f,  900000.0f, 180000.0f,  36000.0f,
-		    7200.0f,    1800.0f,    540.0f,    220.0f
+		 3000000.0f,  3000000.0f,  3000000.0f,  48000.0f,
+		    8400.0f,     2000.0f,      560.0f,    230.0f
 	};
 	static const uint32_t seeds[8] = {
 		0x434C4430u, 0x434C4431u, 0x434C4432u, 0x434C4433u,
 		0x434C4434u, 0x434C4435u, 0x434C4436u, 0x434C4437u
 	};
-	static const float warpSpan[4] = { 4200.0f, 1100.0f, 280.0f, 75.0f };
-	static const float zScales[8]  = { 0.20f, 0.35f, 0.60f, 0.95f, 1.45f, 2.15f, 3.10f, 4.40f };
-	static const float wScales[8]  = { 0.18f, 0.30f, 0.50f, 0.80f, 1.20f, 1.75f, 2.50f, 3.50f };
+	static const float zScales[8]  = { 0.18f, 0.32f, 0.55f, 0.90f, 1.40f, 2.10f, 3.05f, 4.30f };
+	static const float wScales[8]  = { 0.16f, 0.28f, 0.48f, 0.78f, 1.18f, 1.72f, 2.45f, 3.45f };
 
 	const float prevDirX = 0.741f, prevDirY = -0.671f;
 	float fw = (pixel_footprint > 1e-4f) ? pixel_footprint : 1e-4f;
 	float raw_wBoil = anim_time * 0.072f;
 	float wBoil = raw_wBoil - 512.0f * floorf(raw_wBoil / 512.0f);
-	float zBaseSlice = (wz - 88.0f) * 0.032f;
+	float zBaseSlice = (wz - 92.0f) * 0.024f;
 
 	float prx = wx, pry = wy;
 	float ir00 = 1.0f, ir01 = 0.0f, ir10 = 0.0f, ir11 = 1.0f;
-	float oct[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
-	float gx_coarse[4] = { 0 }, gy_coarse[4] = { 0 }, gz_coarse[4] = { 0 }, gt_coarse[4] = { 0 };
+	float phaseCurlX = 0.0f, phaseCurlY = 0.0f;
+	float oct[3] = { 0.5f, 0.5f, 0.5f };
+	float gx_coarse[3] = { 0 }, gy_coarse[3] = { 0 }, gz_coarse[3] = { 0 }, gt_coarse[3] = { 0 };
 
-	for (int i = 0; i < 4; i++) {
-		float minW = (i == 0) ? 1.0f : ((i == 1) ? 0.45f : 0.0f);
-		float span = dFar[i] - dNear[i];
-		float wDist = (dFar[i] - cam_dist) / (span > 1.0f ? span : 1.0f);
-		if (wDist < minW) wDist = minW;
-		if (wDist > 1.0f) wDist = 1.0f;
-		float wNyq = gl_smoothstep(0.82f, 0.22f, freqs[i] * fw);
-		float w = wDist * wNyq;
-		if (w > 0.001f) {
-			float raw_phase = anim_time * spds[i];
-			float phase = raw_phase - 1024.0f * floorf(raw_phase / 1024.0f);
-			float qx = prx * freqs[i] - prevDirX * phase;
-			float qy = pry * freqs[i] - prevDirY * phase;
-			float n = 0.5f, ogx = 0.0f, ogy = 0.0f, ogz = 0.0f, ogw = 0.0f;
-			gl_chaff_grad_noise4d(qx, qy, zBaseSlice * zScales[i], wBoil * wScales[i],
-			                      seeds[i], &n, &ogx, &ogy, &ogz, &ogw);
-			oct[i] = 0.5f + (n - 0.5f) * w;
-			float wgx = ir00 * ogx + ir10 * ogy;
-			float wgy = ir01 * ogx + ir11 * ogy;
-			gx_coarse[i] = wgx * (freqs[i] * w);
-			gy_coarse[i] = wgy * (freqs[i] * w);
-			gz_coarse[i] = ogz * (0.032f * zScales[i] * w);
-			gt_coarse[i] = (ogw * (0.072f * wScales[i]) - (ogx * prevDirX + ogy * prevDirY) * spds[i]) * w;
-			prx += (n - 0.5f) * (warpSpan[i] * w);
-			pry += (n - 0.5f) * (warpSpan[i] * w);
-		}
+	for (int i = 0; i < 3; i++) {
+		float raw_phase = anim_time * spds[i];
+		float phase = raw_phase - 1024.0f * floorf(raw_phase / 1024.0f);
+		float qx = prx * freqs[i] + phaseCurlX - prevDirX * phase;
+		float qy = pry * freqs[i] + phaseCurlY - prevDirY * phase;
+		float n = 0.5f, ogx = 0.0f, ogy = 0.0f, ogz = 0.0f, ogw = 0.0f;
+		gl_chaff_grad_noise4d(qx, qy, zBaseSlice * zScales[i], wBoil * wScales[i],
+		                      seeds[i], &n, &ogx, &ogy, &ogz, &ogw);
+		oct[i] = n;
+		float wgx = ir00 * ogx + ir10 * ogy;
+		float wgy = ir01 * ogx + ir11 * ogy;
+		gx_coarse[i] = wgx * freqs[i];
+		gy_coarse[i] = wgy * freqs[i];
+		gz_coarse[i] = ogz * (0.024f * zScales[i]);
+		gt_coarse[i] = ogw * (0.072f * wScales[i]) - (ogx * prevDirX + ogy * prevDirY) * spds[i];
+
+		float n_pcx = ( 0.8f * phaseCurlX + 0.6f * phaseCurlY) * 0.55f + (n - 0.5f) * 0.42f;
+		float n_pcy = (-0.6f * phaseCurlX + 0.8f * phaseCurlY) * 0.55f + (0.5f - n) * 0.42f;
+		phaseCurlX = n_pcx;
+		phaseCurlY = n_pcy;
+
 		float n_prx =  0.8f * prx + 0.6f * pry;
 		float n_pry = -0.6f * prx + 0.8f * pry;
 		prx = n_prx;
@@ -4348,88 +4588,85 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 		ir00 = nir00; ir01 = nir01; ir10 = nir10; ir11 = nir11;
 	}
 
-	float synFront = oct[0] * 0.44f + oct[1] * 0.56f;
-	float billow2 = 1.0f - fabsf(2.0f * oct[2] - 1.0f);
-	float billow3 = 1.0f - fabsf(2.0f * oct[3] - 1.0f);
-	float b2 = oct[2] * 0.65f + billow2 * 0.35f;
-	float b3 = oct[3] * 0.58f + billow3 * 0.42f;
-	float bigCloud = oct[1] * 0.20f + b2 * 0.44f + b3 * 0.36f;
-	float synBias = (0.50f - synFront) * 0.42f;
-	float thresh = 0.53f - 0.16f * climate_humidity + synBias;
-	if (thresh < 0.36f) thresh = 0.36f;
-	if (thresh > 0.68f) thresh = 0.68f;
-	float macroMargin = bigCloud - thresh;
-	if (macroMargin < -0.095f)
+	float synFront = oct[0] * 0.46f + oct[1] * 0.54f;
+	float synGate  = gl_smoothstep(0.52f - 0.11f * climate_humidity, 0.72f - 0.07f * climate_humidity, synFront);
+	float cellBillow = 1.0f - fabsf(2.0f * oct[2] - 1.0f);
+	float macroCell  = oct[2] * 0.58f + cellBillow * 0.42f;
+	float cellGate   = gl_smoothstep(0.41f - 0.05f * climate_humidity, 0.74f - 0.04f * climate_humidity, macroCell);
+	float macroCoverage = synGate * cellGate;
+	if (macroCoverage <= 0.015f)
 		return 0.0f;
 
-	float coreStrength = (macroMargin + 0.06f) / 0.24f;
-	if (coreStrength < 0.0f) coreStrength = 0.0f;
-	if (coreStrength > 1.0f) coreStrength = 1.0f;
-	float cloudTop = 118.0f + (174.0f - 118.0f) * coreStrength;
-	float spanZ = (cloudTop - 88.0f) > 12.0f ? (cloudTop - 88.0f) : 12.0f;
-	float hLocal = (wz - 88.0f) / spanZ;
+	float coreStrength = gl_smoothstep(0.08f, 0.78f, macroCoverage);
+	float cloudTop = 132.0f + (232.0f - 132.0f) * coreStrength;
+	float spanZ = (cloudTop - 92.0f) > 16.0f ? (cloudTop - 92.0f) : 16.0f;
+	float hLocal = (wz - 92.0f) / spanZ;
 	if (hLocal <= 0.0f || hLocal >= 1.0f)
 		return 0.0f;
-	float vProf = gl_smoothstep(0.0f, 0.18f, hLocal) * gl_smoothstep(1.0f, 0.38f, hLocal);
-	if (vProf <= 0.001f)
+	float baseRound = gl_smoothstep(0.0f, 0.15f, hLocal);
+	float topRound  = gl_smoothstep(1.0f, 0.42f, hLocal);
+	float vProf     = baseRound * topRound;
+	float baseCloud = gl_cloud_remap(macroCoverage * vProf, 0.12f * (1.0f - 0.45f * coreStrength), 0.86f, 0.0f, 1.0f);
+	if (baseCloud < 0.0f) baseCloud = 0.0f;
+	if (baseCloud > 1.0f) baseCloud = 1.0f;
+	if (baseCloud <= 0.002f)
 		return 0.0f;
 
-	float dB2 = 0.65f + 0.35f * ((oct[2] < 0.5f) ? 2.0f : -2.0f);
-	float dB3 = 0.58f + 0.42f * ((oct[3] < 0.5f) ? 2.0f : -2.0f);
-	float df_dx = gx_coarse[0] * (0.42f * 0.44f) + gx_coarse[1] * (0.20f + 0.42f * 0.56f)
-	            + gx_coarse[2] * (0.44f * dB2)   + gx_coarse[3] * (0.36f * dB3);
-	float df_dy = gy_coarse[0] * (0.42f * 0.44f) + gy_coarse[1] * (0.20f + 0.42f * 0.56f)
-	            + gy_coarse[2] * (0.44f * dB2)   + gy_coarse[3] * (0.36f * dB3);
-	float df_dz = gz_coarse[0] * (0.42f * 0.44f) + gz_coarse[1] * (0.20f + 0.42f * 0.56f)
-	            + gz_coarse[2] * (0.44f * dB2)   + gz_coarse[3] * (0.36f * dB3);
-	float df_dt = gt_coarse[0] * (0.42f * 0.44f) + gt_coarse[1] * (0.20f + 0.42f * 0.56f)
-	            + gt_coarse[2] * (0.44f * dB2)   + gt_coarse[3] * (0.36f * dB3);
+	float dMacro2 = 0.58f + 0.42f * ((oct[2] < 0.5f) ? 2.0f : -2.0f);
+	float df_dx = gx_coarse[0] * (0.46f * cellGate) + gx_coarse[1] * (0.54f * cellGate) + gx_coarse[2] * (dMacro2 * synGate);
+	float df_dy = gy_coarse[0] * (0.46f * cellGate) + gy_coarse[1] * (0.54f * cellGate) + gy_coarse[2] * (dMacro2 * synGate);
+	float df_dz = gz_coarse[0] * (0.46f * cellGate) + gz_coarse[1] * (0.54f * cellGate) + gz_coarse[2] * (dMacro2 * synGate);
+	float df_dt = gt_coarse[0] * (0.46f * cellGate) + gt_coarse[1] * (0.54f * cellGate) + gt_coarse[2] * (dMacro2 * synGate);
 
-	float fractalDetail = 0.0f;
-	float sculptScale = 0.72f + 0.38f * (1.0f - coreStrength) + 0.22f * hLocal;
-	if (cam_dist < dFar[4]) {
-		float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
-		gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
+	float billowFbm = 0.0f;
+	float billowWeightSum = 0.0f;
+	if (cam_dist < dFar[3]) {
+		float wDirX = prevDirX, wDirY = prevDirY, gust = 0.75f, catspaw = 0.50f;
+		if (cam_dist < dFar[4]) {
+			gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
+		}
 		float wPerpX = -wDirY, wPerpY = wDirX;
-		float shearX = (wDirX * 0.82f + wPerpX * 0.34f) * ((wz - 88.0f) * 0.014f);
-		float shearY = (wDirY * 0.82f + wPerpY * 0.34f) * ((wz - 88.0f) * 0.014f);
-		float windWarpX = (wDirX * (gust - 0.65f) + wPerpX * (catspaw - 0.50f)) * 0.48f + shearX;
-		float windWarpY = (wDirY * (gust - 0.65f) + wPerpY * (catspaw - 0.50f)) * 0.48f + shearY;
-		static const float amps[4] = { 0.200f, 0.125f, 0.078f, 0.046f };
-		static const float fineWarp[4] = { 18.0f, 6.0f, 2.0f, 0.0f };
+		float shearX = (wDirX * 0.82f + wPerpX * 0.34f) * ((wz - 92.0f) * 0.012f);
+		float shearY = (wDirY * 0.82f + wPerpY * 0.34f) * ((wz - 92.0f) * 0.012f);
+		float windWarpX = (wDirX * (gust - 0.65f) + wPerpX * (catspaw - 0.50f)) * 0.42f + shearX;
+		float windWarpY = (wDirY * (gust - 0.65f) + wPerpY * (catspaw - 0.50f)) * 0.42f + shearY;
+		static const float amps[5] = { 0.38f, 0.25f, 0.16f, 0.12f, 0.09f };
 
-		for (int j = 0; j < 4; j++) {
-			int i = j + 4;
+		for (int j = 0; j < 5; j++) {
+			int i = j + 3;
 			float span = dFar[i] - dNear[i];
 			float wDist = (dFar[i] - cam_dist) / (span > 1.0f ? span : 1.0f);
 			if (wDist < 0.0f) wDist = 0.0f;
 			if (wDist > 1.0f) wDist = 1.0f;
-			float wNyq = gl_smoothstep(0.78f, 0.22f, freqs[i] * fw);
+			float wNyq = gl_smoothstep(0.80f, 0.20f, freqs[i] * fw);
 			float w = wDist * wNyq;
 			if (w > 0.001f) {
 				float raw_phase = anim_time * spds[i];
 				float phase = raw_phase - 1024.0f * floorf(raw_phase / 1024.0f);
-				float wMul = 0.35f + 0.28f * (float)j;
-				float qx = prx * freqs[i] + windWarpX * wMul - prevDirX * phase;
-				float qy = pry * freqs[i] + windWarpY * wMul - prevDirY * phase;
+				float wMul = 0.22f + 0.20f * (float)j;
+				float qx = prx * freqs[i] + phaseCurlX + windWarpX * wMul - prevDirX * phase;
+				float qy = pry * freqs[i] + phaseCurlY + windWarpY * wMul - prevDirY * phase;
 				float n = 0.5f, ogx = 0.0f, ogy = 0.0f, ogz = 0.0f, ogw = 0.0f;
 				gl_chaff_grad_noise4d(qx, qy, zBaseSlice * zScales[i], wBoil * wScales[i],
 				                      seeds[i], &n, &ogx, &ogy, &ogz, &ogw);
 				float billow = 1.0f - fabsf(2.0f * n - 1.0f);
-				float shaped = (n * 0.38f + billow * 0.62f) - 0.5f;
-				float dShaped = 0.38f + 0.62f * ((n < 0.5f) ? 2.0f : -2.0f);
-				float effAmp = amps[j] * w * sculptScale;
-				fractalDetail += shaped * amps[j] * w;
+				float cauliflower = billow * 0.72f + n * 0.28f;
+				float dCaul = 0.28f + 0.72f * ((n < 0.5f) ? 2.0f : -2.0f);
+				float effAmp = amps[j] * w;
+				billowFbm += cauliflower * effAmp;
+				billowWeightSum += effAmp;
 
 				float wgx = ir00 * ogx + ir10 * ogy;
 				float wgy = ir01 * ogx + ir11 * ogy;
-				df_dx += wgx * (dShaped * freqs[i] * effAmp);
-				df_dy += wgy * (dShaped * freqs[i] * effAmp);
-				df_dz += ogz * (dShaped * 0.032f * zScales[i] * effAmp);
-				df_dt += (ogw * (0.072f * wScales[i]) - (ogx * prevDirX + ogy * prevDirY) * spds[i]) * (dShaped * effAmp);
+				df_dx += wgx * (dCaul * freqs[i] * effAmp);
+				df_dy += wgy * (dCaul * freqs[i] * effAmp);
+				df_dz += ogz * (dCaul * 0.024f * zScales[i] * effAmp);
+				df_dt += (ogw * (0.072f * wScales[i]) - (ogx * prevDirX + ogy * prevDirY) * spds[i]) * (dCaul * effAmp);
 
-				prx += (n - 0.5f) * (fineWarp[j] * w);
-				pry += (n - 0.5f) * (fineWarp[j] * w);
+				float n_pcx = ( 0.8f * phaseCurlX + 0.6f * phaseCurlY) * 0.55f + (n - 0.5f) * (0.32f * w);
+				float n_pcy = (-0.6f * phaseCurlX + 0.8f * phaseCurlY) * 0.55f + (0.5f - n) * (0.32f * w);
+				phaseCurlX = n_pcx;
+				phaseCurlY = n_pcy;
 			}
 			float n_prx =  0.8f * prx + 0.6f * pry;
 			float n_pry = -0.6f * prx + 0.8f * pry;
@@ -4443,8 +4680,18 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 		}
 	}
 
-	float totalMacro = macroMargin + fractalDetail * sculptScale - 0.035f * hLocal;
-	float dens = gl_smoothstep(-0.025f, 0.145f, totalMacro) * vProf;
+	if (billowWeightSum > 0.001f) {
+		float wSumDenom = billowWeightSum > 0.32f ? billowWeightSum : 0.32f;
+		float wClamp = billowWeightSum * 1.35f;
+		if (wClamp > 1.0f) wClamp = 1.0f;
+		float normErode = (1.0f - (billowFbm / wSumDenom)) * wClamp;
+		float erodeAmt = normErode * 0.58f * (1.0f - 0.52f * coreStrength) * (0.35f + 0.65f * hLocal);
+		baseCloud = gl_cloud_remap(baseCloud, erodeAmt, 1.0f, 0.0f, 1.0f);
+		if (baseCloud < 0.0f) baseCloud = 0.0f;
+		if (baseCloud > 1.0f) baseCloud = 1.0f;
+	}
+
+	float dens = gl_smoothstep(0.0f, 0.72f, baseCloud) * vProf;
 	if (out_grad_x) *out_grad_x = df_dx * vProf;
 	if (out_grad_y) *out_grad_y = df_dy * vProf;
 	if (out_grad_z) *out_grad_z = df_dz * vProf;

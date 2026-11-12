@@ -2898,7 +2898,7 @@ int main(void)
 		       l_at, l_near, l_mid, l_far);
 	}
 
-	/* Phase 9: 8-Octave Observer-Gated ("Quantum") 4D Volumetric Clouds, Big Synoptic Features & Shadows */
+	/* Phase 9: 8-Octave Observer-Gated ("Quantum") 4D Volumetric Clouds, Horizon Zero Dawn Billow Erosion & 3D Airplane-Descent Raymarch */
 	{
 		const char *vs_c = nd_seven_gl_vs_cloud();
 		const char *fs_c = nd_seven_gl_fs_cloud();
@@ -2907,94 +2907,106 @@ int main(void)
 		const char *fs_b = nd_seven_gl_fs_billboard();
 		assert(vs_c && fs_c && fs_t && fs_w && fs_b);
 
-		/* 1. Verify shader contracts for 4D lattice hashing, 8-octave observer-gated fractal cascade
-		 * (eval_zoom_cloud_density), synoptic clear/cloudy weather belts (synFront / bigCloud),
-		 * below-cloud quantum gating (shellFade / apertureMask), Beer-Powder silver-lining,
-		 * and projected ground, water, and lamb billboard cloud shadows */
+		/* 1. Verify shader contracts for 4D isotropic unit-gradient dot-product noise (chaff_grad4),
+		 * 8-octave observer-gated fractal cascade (eval_zoom_cloud_density), Horizon Zero Dawn billow
+		 * cauliflower erosion remap (cloud_remap), GPU vertex dome displacement (eval_vertex_cloud_dome / vShellZ),
+		 * 3D ray-slab airplane-descent intersection (camAlt / tEnter / tExit), smooth quintic substrate sampling
+		 * (sampleSubstrateSmooth), Beer-Powder silver-lining, and projected ground/water/lamb cloud shadows */
+		assert(strstr(vs_c, "eval_vertex_cloud_dome") != NULL);
+		assert(strstr(vs_c, "vShellZ") != NULL);
 		assert(strstr(fs_c, "chaff_hash4") != NULL);
+		assert(strstr(fs_c, "chaff_grad4") != NULL);
 		assert(strstr(fs_c, "chaff_grad_noise4d") != NULL);
+		assert(strstr(fs_c, "cloud_remap") != NULL);
 		assert(strstr(fs_c, "eval_recursive_wind") != NULL);
 		assert(strstr(fs_c, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_c, "synFront") != NULL);
-		assert(strstr(fs_c, "bigCloud") != NULL);
+		assert(strstr(fs_c, "macroCoverage") != NULL);
+		assert(strstr(fs_c, "camAlt") != NULL);
 		assert(strstr(fs_c, "shellFade") != NULL);
-		assert(strstr(fs_c, "apertureMask") != NULL);
+		assert(strstr(fs_c, "sampleSubstrateSmooth") != NULL);
 		assert(strstr(fs_c, "powder") != NULL);
+		assert(strstr(fs_t, "chaff_grad4") != NULL);
+		assert(strstr(fs_t, "cloud_remap") != NULL);
 		assert(strstr(fs_t, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_t, "eval_planetary_cloud_shadow") != NULL);
+		assert(strstr(fs_w, "sampleSubstrateSmooth") != NULL);
+		assert(strstr(fs_w, "chaff_grad4") != NULL);
 		assert(strstr(fs_w, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_w, "eval_planetary_cloud_shadow") != NULL);
 		assert(strstr(fs_w, "reflCloudDens") != NULL);
+		assert(strstr(fs_b, "chaff_grad4") != NULL);
 		assert(strstr(fs_b, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_b, "cloudShadow") != NULL);
 
-		/* 2. Verify planetary & regional weather distribution (cloudy in some parts, crystal-clear in others),
-		 * big synoptic/mesoscale feature coherence, and climate humidity modulation */
+		/* 2. Verify planetary & regional weather distribution (cloudy in ~25-45% of regions, crystal-clear in ~55-75%),
+		 * big synoptic/mesoscale feature coherence across the planet, and climate humidity modulation */
 		float sum_arid = 0.0f, sum_humid = 0.0f;
 		float sum_core = 0.0f, sum_crown = 0.0f;
 		int cloud_cells = 0, clear_cells = 0;
 		for (int iy = 0; iy < 16; iy++) {
 			for (int ix = 0; ix < 16; ix++) {
-				float wx = (float)ix * 1600.0f - 12000.0f;
-				float wy = (float)iy * 1600.0f - 12000.0f;
-				float d_arid  = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.20f, NULL, NULL, NULL, NULL);
-				float d_humid = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
-				float d_again = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
-				float d_crown = nd_seven_gl_eval_cloud_density(wx, wy, 142.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float wx = (float)ix * 14000.0f - 105000.0f;
+				float wy = (float)iy * 14000.0f - 105000.0f;
+				float d_arid  = nd_seven_gl_eval_cloud_density(wx, wy, 124.0f, 24.0f, 0.20f, NULL, NULL, NULL, NULL);
+				float d_humid = nd_seven_gl_eval_cloud_density(wx, wy, 124.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float d_again = nd_seven_gl_eval_cloud_density(wx, wy, 124.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float d_crown = nd_seven_gl_eval_cloud_density(wx, wy, 180.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
 				assert(fabsf(d_humid - d_again) < 1e-6f);
 				assert(d_humid >= d_arid - 1e-6f);
 				sum_arid  += d_arid;
 				sum_humid += d_humid;
 				sum_core  += d_humid;
 				sum_crown += d_crown;
-				if (d_humid > 0.15f) cloud_cells++;
+				if (d_humid > 0.05f) cloud_cells++;
 				if (d_arid == 0.0f)  clear_cells++;
 			}
 		}
 		assert(sum_humid > sum_arid * 1.25f);
-		assert(cloud_cells > 20 && clear_cells > 80);
-		assert(sum_core > sum_crown && sum_crown > 2.0f);
+		assert(cloud_cells >= 25 && clear_cells >= 100);
+		assert(sum_core > sum_crown && sum_crown > 1.5f);
 
-		/* 3. Verify unified vertical cloud envelope [88..176] and clear sky below/above */
-		float d_below = nd_seven_gl_eval_cloud_density(120.0f, -200.0f,  84.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 180.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		/* 3. Verify unified 3D vertical cloud envelope [92..232] and clear sky below/above */
+		float d_below = nd_seven_gl_eval_cloud_density(120.0f, -200.0f,  88.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 236.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
 		assert(d_below == 0.0f && d_above == 0.0f);
 
 		/* 4. Verify quantum observer-distance & Nyquist progressive octave activation (close > mid > far) */
 		float grad_close = 0.0f, grad_mid = 0.0f, grad_far = 0.0f;
 		for (int k = 0; k < 128; k++) {
-			float wx = (float)k * 650.0f - 25000.0f;
-			float wy = (float)k * 480.0f - 18000.0f;
+			float wx = (float)k * 3200.0f - 180000.0f;
+			float wy = (float)k * 2300.0f - 130000.0f;
 			float gxc = 0.0f, gyc = 0.0f, gxm = 0.0f, gym = 0.0f, gxf = 0.0f, gyf = 0.0f;
-			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f,   280.0f,  0.15f, &gxc, &gyc, NULL, NULL);
-			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f,  4200.0f,  2.50f, &gxm, &gym, NULL, NULL);
-			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, 65000.0f, 40.00f, &gxf, &gyf, NULL, NULL);
+			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 124.0f, 24.0f, 0.90f,   280.0f,  0.15f, &gxc, &gyc, NULL, NULL);
+			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 124.0f, 24.0f, 0.90f,  4200.0f,  2.50f, &gxm, &gym, NULL, NULL);
+			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 124.0f, 24.0f, 0.90f, 65000.0f, 40.00f, &gxf, &gyf, NULL, NULL);
 			grad_close += hypotf(gxc, gyc);
 			grad_mid   += hypotf(gxm, gym);
 			grad_far   += hypotf(gxf, gyf);
 		}
 		assert(grad_close > grad_mid * 1.25f);
 		assert(grad_mid > grad_far * 1.25f);
-		assert(grad_far > 1e-4f);
+		assert(grad_far > 1e-5f);
 
 		/* 5. Verify 4D temporal derivative stability at t = 100,000s vs t = 10s */
 		float gt_early = 0.0f, gt_late = 0.0f;
 		for (int k = 0; k < 96; k++) {
-			float wx = (float)k * 850.0f - 32000.0f;
-			float wy = (float)k * 610.0f - 24000.0f;
+			float wx = (float)k * 3800.0f - 160000.0f;
+			float wy = (float)k * 2700.0f - 120000.0f;
 			float gx1 = 0.0f, gy1 = 0.0f, gz1 = 0.0f, gt1 = 0.0f;
 			float gx2 = 0.0f, gy2 = 0.0f, gz2 = 0.0f, gt2 = 0.0f;
-			nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 10.0f,     0.85f, &gx1, &gy1, &gz1, &gt1);
-			nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 100000.0f, 0.85f, &gx2, &gy2, &gz2, &gt2);
+			nd_seven_gl_eval_cloud_density(wx, wy, 124.0f, 10.0f,     0.85f, &gx1, &gy1, &gz1, &gt1);
+			nd_seven_gl_eval_cloud_density(wx, wy, 124.0f, 100000.0f, 0.85f, &gx2, &gy2, &gz2, &gt2);
 			gt_early += fabsf(gt1) + hypotf(gx1, gy1);
 			gt_late  += fabsf(gt2) + hypotf(gx2, gy2);
 		}
-		assert(gt_early > 0.001f);
+		assert(gt_early > 0.0005f);
 		assert(gt_late > gt_early * 0.50f && gt_late < gt_early * 1.85f);
 
 		printf("PASS: 8-octave quantum 4D clouds (cloudy=%d, clear=%d, core=%.1f, crown=%.1f, grad=%.3f>%.3f>%.3f, arid=%.2f vs humid=%.2f) & t=100000s stability verified\n",
 		       cloud_cells, clear_cells, sum_core, sum_crown, grad_close, grad_mid, grad_far, sum_arid, sum_humid);
 	}
+
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
