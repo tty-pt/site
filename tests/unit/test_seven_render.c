@@ -2815,15 +2815,16 @@ int main(void)
 
 	/* Phase 9: Living Meadow Reactive Grass, Botanical Micro-Ecology & Elastic Footstep Wake */
 	{
-		/* 1. R1: Verify procedural botanical runtime atlas synthesis & non-empty opaque pixels */
+		/* 1. R1: Verify procedural botanical runtime atlas synthesis & dense multi-blade pixel coverage */
 		atlas_load();
 		const uint32_t *rgba = atlas_rgba();
 		assert(rgba != NULL);
+		assert(NDB_COUNT == 7);
 		for (int k = 0; k < NDB_COUNT; k++) {
 			nd_seven_sprite_rect_t br = { 0, 0, 0, 0 };
 			assert(nd_seven_botanical_rect(k, &br) == 1);
 			assert(br.y >= ND_SEVEN_ATLAS_H_PX);
-			assert(br.w > 0 && br.h > 0);
+			assert(br.w >= 16 && br.h >= 18);
 			int non_zero = 0;
 			for (uint16_t ry = 0; ry < br.h; ry++) {
 				for (uint16_t rx = 0; rx < br.w; rx++) {
@@ -2832,11 +2833,12 @@ int main(void)
 						non_zero++;
 				}
 			}
-			assert(non_zero >= 8);
+			assert(non_zero >= 60);
 		}
 
-		/* 2. R2: Verify deterministic micro-ecology zoning, anti-submersion, and tree-trunk suppression */
+		/* 2. R2: Verify deterministic micro-ecology zoning, anti-submersion, slope, and tree-trunk suppression */
 		int zone = 0, flip = 0;
+		float scale_m = 0.0f;
 		/* Submerged (elev_z <= water_level) must never place flora */
 		assert(nd_seven_eval_meadow_tuft(120, 140, -2.0f, 0.0f, 10, 9999.0f, &zone, &flip) == 0);
 		assert(zone == ND_MEADOW_NONE);
@@ -2844,12 +2846,16 @@ int main(void)
 		assert(nd_seven_eval_meadow_tuft(120, 140, 8.0f, 0.0f, 14, 9999.0f, &zone, &flip) == 0);
 		/* Inside a tree trunk footprint (near_tree_dist_sq < 81.0f) must suppress flora */
 		assert(nd_seven_eval_meadow_tuft(120, 140, 8.0f, 0.0f, 10, 16.0f, &zone, &flip) == 0);
+		/* Sheer cliff slope (slope_mag >= 0.58f) must suppress meadow flora */
+		assert(nd_seven_eval_meadow_area(120, 140, 6.0f, 0.0f, 0.65f, 10, 9999.0f, &zone, &scale_m, &flip) == 0);
 
-		/* Scan a 64x64 cell sample to verify littoral reeds, canopy understory, wildflowers, and grass tufts */
-		int reed_cnt = 0, under_cnt = 0, flower_cnt = 0, grass_cnt = 0;
+		/* Scan a 64x64 cell sample to verify littoral reeds, canopy understory, wildflowers, tall grass, and land coupling */
+		int reed_cnt = 0, under_cnt = 0, flower_cnt = 0, grass_cnt = 0, tall_cnt = 0;
+		int lowland_cnt = 0, high_steep_cnt = 0;
 		for (int y = 0; y < 64; y++) {
 			for (int x = 0; x < 64; x++) {
-				int z_reed = 0, z_under = 0, z_open = 0;
+				int z_reed = 0, z_under = 0, z_open = 0, z_area = 0;
+				float sc_area = 0.0f;
 				if (nd_seven_eval_meadow_tuft(x * 13, y * 17, 0.85f, 0.0f, 10, 9999.0f, &z_reed, NULL)) {
 					assert(z_reed == ND_MEADOW_REED);
 					reed_cnt++;
@@ -2858,9 +2864,17 @@ int main(void)
 					assert(z_under == ND_MEADOW_UNDERSTORY);
 					under_cnt++;
 				}
-				if (nd_seven_eval_meadow_tuft(x * 19, y * 23, 10.0f, 0.0f, 10, 9999.0f, &z_open, NULL)) {
+				if (nd_seven_eval_meadow_tuft(x * 19, y * 23, 5.0f, 0.0f, 10, 9999.0f, &z_open, NULL)) {
 					if (z_open == ND_MEADOW_WILDFLOWER) flower_cnt++;
 					else if (z_open == ND_MEADOW_GRASS) grass_cnt++;
+				}
+				if (nd_seven_eval_meadow_area(x * 19, y * 23, 5.0f, 0.0f, 0.02f, 10, 9999.0f, &z_area, &sc_area, NULL)) {
+					lowland_cnt++;
+					if (z_area == ND_MEADOW_TALL_GRASS)
+						tall_cnt++;
+				}
+				if (nd_seven_eval_meadow_area(x * 19, y * 23, 38.0f, 0.0f, 0.30f, 10, 9999.0f, NULL, NULL, NULL)) {
+					high_steep_cnt++;
 				}
 			}
 		}
@@ -2868,6 +2882,27 @@ int main(void)
 		assert(under_cnt > 100);
 		assert(flower_cnt > 10);
 		assert(grass_cnt > 100);
+		assert(tall_cnt > 50);
+		assert(lowland_cnt > high_steep_cnt * 2);
+
+		/* Verify contiguous area fill: inside a fertile meadow patch, a 5x5 local 8-unit grid fills >= 22/25 cells */
+		int max_patch_fill = 0;
+		for (int py = 0; py < 16; py++) {
+			for (int px = 0; px < 16; px++) {
+				int32_t bx = px * 48;
+				int32_t by = py * 48;
+				int fill = 0;
+				for (int dy = 0; dy < 5; dy++) {
+					for (int dx = 0; dx < 5; dx++) {
+						if (nd_seven_eval_meadow_area(bx + dx * 8, by + dy * 8, 4.0f, 0.0f, 0.01f, 10, 9999.0f, NULL, NULL, NULL))
+							fill++;
+					}
+				}
+				if (fill > max_patch_fill)
+					max_patch_fill = fill;
+			}
+		}
+		assert(max_patch_fill >= 23);
 
 		/* 3. R3: Verify radial ankle parting (West bends West, East bends East) & elastic wake trail decay */
 		nd_seven_clear_wake();
@@ -2922,8 +2957,8 @@ int main(void)
 		assert(v_grs[2].local_pos[0] > v_std[2].local_pos[0] + 1.5f);
 		assert(v_grs[2].local_pos[2] < v_std[2].local_pos[2] - 0.5f);
 
-		printf("PASS: Living Meadow botanical atlas (%d variants), micro-ecology (reeds=%d, understory=%d, flowers=%d, grass=%d), radial parting (W=%.2f, E=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
-		       NDB_COUNT, reed_cnt, under_cnt, flower_cnt, grass_cnt, sx_w, sx_e, dz_t0, dz_t1, dz_t2);
+		printf("PASS: Living Meadow botanical atlas (%d swatches), contiguous area fill (%d/25), land-coupling (lowland=%d vs steep_ridge=%d, reeds=%d, understory=%d, flowers=%d, tall=%d, grass=%d), radial parting (W=%.2f, E=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
+		       NDB_COUNT, max_patch_fill, lowland_cnt, high_steep_cnt, reed_cnt, under_cnt, flower_cnt, tall_cnt, grass_cnt, sx_w, sx_e, dz_t0, dz_t1, dz_t2);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

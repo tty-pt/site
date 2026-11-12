@@ -109,17 +109,22 @@ uint32_t nd_seven_last_mid_billboard_count(void);
 int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, float *w, float *h);
 
 /* Botanical Micro-Ecology & Living Meadow Classifier:
- * Evaluates deterministic botanical placement for a world sub-cell (wx, wy).
- * Returns 1 if a tuft/reed/flower is placed and populates out_rect (atlas rect)
- * and out_zone (1 = littoral reed, 2 = meadow wildflower, 3 = turf/tall grass, 4 = canopy understory).
- * Returns 0 when submerged (elev_z <= water_level), on non-vegetated substrates, or inside tree trunks. */
+ * Evaluates deterministic multi-octave noise + land-coupled botanical placement for (wx, wy).
+ * Returns 1 if a meadow swatch/reed/flower is placed and populates out_zone, out_scale, and out_flip.
+ * Returns 0 when submerged (elev_z <= water_level), on barren substrates, steep cliffs, or inside tree trunks. */
 enum {
 	ND_MEADOW_NONE       = 0,
 	ND_MEADOW_REED       = 1,
 	ND_MEADOW_WILDFLOWER = 2,
 	ND_MEADOW_GRASS      = 3,
-	ND_MEADOW_UNDERSTORY = 4
+	ND_MEADOW_UNDERSTORY = 4,
+	ND_MEADOW_TALL_GRASS = 5
 };
+
+int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
+                              float elev_z, float water_level, float slope_mag,
+                              unsigned biome, float near_tree_dist_sq,
+                              int *out_zone, float *out_scale, int *out_flip);
 
 int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
                               float elev_z, float water_level,
