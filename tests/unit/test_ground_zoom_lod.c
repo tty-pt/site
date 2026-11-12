@@ -8,15 +8,18 @@
 
 #include <nd/seven-world.h>
 #include <nd/field.h>
+#include <ttypt/areole.h>
 #include "nd_seven_ground.h"
 #include "nd_seven.h"
+#include "nd_lamina.h"
 
 int main(void)
 {
-	printf("=== Testing Ground-Level Chunk LOD Responsiveness & Zoom Calibration ===\n");
+	printf("=== Testing 3D Seven & 2D Minimap Multi-View LOD Responsiveness & Isolation ===\n");
 
 	nd_seven_ground_cache_forget();
-	assert(nd_seven_chunk_count() == 0);
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	assert(cs != NULL);
 
 	/* Initialize test map (7x7 room window with player centered at 3, 3) */
 	nd_map_data_t map;
@@ -34,264 +37,100 @@ int main(void)
 		map.tiles[i].bio_idx = (i % 7 == 0) ? 0 : 5; /* water on left, grassland elsewhere */
 		map.tiles[i].exits = 0x1B;
 	}
+	map.tiles[3 * 7 + 3].flags = ND_MAP_FLAG_PLAYER;
+
+	nd_client_state_t client_st;
+	memset(&client_st, 0, sizeof(client_st));
+	client_st.map_data = map;
 
 	/* -------------------------------------------------------------------------
-	 * Phase 1: 3D Mode Dynamic Zoom LOD Transitions & Buffer Preservation
+	 * Phase 1: Pure-3D Dynamic Zoom Sweep (2.0x -> 1.0x -> 0.25x -> 0.01x)
 	 * ------------------------------------------------------------------------- */
-	printf("--- Phase 1: 3D Mode Dynamic Zoom Sweep (1.0x -> 0.25x -> 2.0x) ---\n");
-	nd_seven_set_3d_mode(1);
-	nd_seven_set_zoom(1.0f);
+	printf("--- Phase 1: Pure-3D Dynamic Zoom Sweep (2.0x -> 1.0x -> 0.25x -> 0.01x) ---\n");
+	const float zoom_steps[] = { 2.0f, 1.0f, 0.35f, 0.25f, 0.10f, 0.02f, 0.005f };
+	for (size_t s = 0; s < sizeof(zoom_steps) / sizeof(zoom_steps[0]); s++) {
+		nd_seven_set_zoom(zoom_steps[s]);
+		nd_seven_render(1280, 720, &client_st);
 
-	/* 1. Initial population at spawn (zoom 1.0x) */
-	const nd_room_chunk_t *c_center = nd_seven_chunk_ensure(&map, 3, 3);
-	assert(c_center != NULL);
-	assert(c_center->lod == 2); /* At default 1.0x zoom, rooms evaluate at clean balanced LOD 2 */
+		ar_stats_t st_stats;
+		ar_system_get_stats(cs, &st_stats);
+		assert(st_stats.active_chunks_last_frame > 0);
+		assert(st_stats.pool_in_use <= st_stats.pool_capacity);
 
-	const nd_room_chunk_t *c_edge = nd_seven_chunk_ensure(&map, 0, 0);
-	assert(c_edge != NULL);
-	assert(c_edge->lod == 2);
-
-	const uint32_t *init_pixels = c_center->pixels;
-	const uint32_t *init_substrate = c_center->substrate;
-	const int16_t *init_height = c_center->height;
-	uint32_t init_rev = c_center->rev;
-
-	/* Populate all 49 rooms at 1.0x */
-	for (int r = 0; r < 7; r++) {
-		for (int c = 0; c < 7; c++) {
-			const nd_room_chunk_t *chk = nd_seven_chunk_ensure(&map, c, r);
-			assert(chk != NULL);
-			assert(chk->lod == 2); /* All 49 rooms evaluate at clean balanced LOD 2 (2560 tris/room) */
-		}
+		ar_sample_t probe0;
+		assert(ar_probe_view(cs, 0, 0, 80, 64, &probe0));
+		assert(probe0.rgba != 0);
+		printf("  [PASS] 3D Zoom %6.4fx -> Active Leaves: %zu | Pool In Use: %zu/%zu\n",
+		       zoom_steps[s], st_stats.active_chunks_last_frame,
+		       st_stats.pool_in_use, st_stats.pool_capacity);
 	}
-	assert(nd_seven_chunk_count() == 49);
-	printf("  [PASS] Initial spawn at 1.0x: 49 rooms populated at clean balanced LOD 2\n");
-
-	/* 2. Zoom out to 0.35x: All rooms maintain at least LOD 2 */
-	nd_seven_set_zoom(0.35f);
-	for (int r = 0; r < 7; r++) {
-		for (int c = 0; c < 7; c++) {
-			const nd_room_chunk_t *chk = nd_seven_chunk_ensure(&map, c, r);
-			assert(chk != NULL);
-			assert(chk->pixels != NULL);
-			assert(chk->substrate != NULL);
-			assert(chk->height != NULL);
-			assert(chk->lod >= 2);
-		}
-	}
-
-	assert(c_center->lod == 2);
-	assert(c_center->pixels != NULL);
-	assert(c_center->substrate != NULL);
-	assert(c_center->height != NULL);
-	printf("  [PASS] Zoom out to 0.35x: Rooms preserve balanced LOD 2\n");
-
-	/* 3. Zoom out to 0.25x: All 49 rooms adapt smoothly to step-4 LOD 2 / step-16 LOD 1 */
-	nd_seven_set_zoom(0.25f);
-	for (int r = 0; r < 7; r++) {
-		for (int c = 0; c < 7; c++) {
-			const nd_room_chunk_t *chk = nd_seven_chunk_ensure(&map, c, r);
-			assert(chk != NULL);
-			assert(chk->pixels != NULL);
-			assert(chk->substrate != NULL);
-			assert(chk->height != NULL);
-			assert(chk->lod >= 1);
-		}
-	}
-	assert(c_center->lod == 2);
-	assert(c_center->pixels != NULL);
-	assert(c_center->height != NULL);
-	printf("  [PASS] Zoom out to 0.25x: Center preserves LOD 2, outer rooms adapt to LOD 1/2\n");
-
-	/* Zoom out to 0.10x: Corner room adapts to LOD 1 (s_apparent = 0.091 < 0.15) */
-	nd_seven_set_zoom(0.10f);
-	for (int r = 0; r < 7; r++) {
-		for (int c = 0; c < 7; c++) {
-			const nd_room_chunk_t *chk = nd_seven_chunk_ensure(&map, c, r);
-			assert(chk != NULL);
-			assert(chk->lod >= 1);
-		}
-	}
-	assert(c_edge->lod == 1);
-	assert(c_edge->pixels != NULL);
-	assert(c_edge->height != NULL);
-	printf("  [PASS] Zoom out to 0.10x: Corner room adapts to LOD 1\n");
-
-	/* Zoom out to 0.05x: Distant corner adapts to LOD 1 */
-	nd_seven_set_zoom(0.05f);
-	for (int r = 0; r < 7; r++) {
-		for (int c = 0; c < 7; c++) {
-			const nd_room_chunk_t *chk = nd_seven_chunk_ensure(&map, c, r);
-			assert(chk != NULL);
-			assert(chk->lod >= 1);
-		}
-	}
-	assert(c_edge->lod == 1);
-	assert(c_edge->pixels != NULL);
-	assert(c_edge->height != NULL);
-	printf("  [PASS] Zoom out to 0.05x: Distant corner room adapts to LOD 1\n");
-
-	/* 4. Zoom in to inspection zoom 2.0x: Focal center refines to high-definition LOD 3 */
-	nd_seven_set_zoom(2.0f);
-	for (int r = 0; r < 7; r++) {
-		for (int c = 0; c < 7; c++) {
-			const nd_room_chunk_t *chk = nd_seven_chunk_ensure(&map, c, r);
-			assert(chk != NULL);
-			assert(chk->pixels != NULL);
-			assert(chk->substrate != NULL);
-			assert(chk->height != NULL);
-			assert(chk->lod >= 2);
-		}
-	}
-	assert(c_edge->lod >= 2);
-	assert(c_center->lod == 3); /* Focal center room refines to LOD 3 at inspection zoom */
-	assert(c_center->pixels != NULL);
-	assert(c_center->substrate != NULL);
-	assert(c_center->height != NULL);
-	printf("  [PASS] Zoom in to 2.0x: Focal center refines to high-definition LOD 3\n");
-
-	/* 5. Buffer Preservation Invariant: Verify zero heap reallocation */
-	assert(c_center->pixels == init_pixels);
-	assert(c_center->substrate == init_substrate);
-	assert(c_center->height == init_height);
-	assert(c_center->rev > init_rev); /* Revision incremented on in-place re-evaluation */
-	printf("  [PASS] In-place buffer preservation: heap buffer pointers remained 100%% stable across transitions\n");
 
 	/* -------------------------------------------------------------------------
-	 * Phase 2: Water Depth Buffer Zero-Leak Lifecycle
+	 * Phase 2: Simultaneous High-Altitude Seven 3D (View 0) + Lamina Minimap (View 1)
 	 * ------------------------------------------------------------------------- */
-	printf("--- Phase 2: Water Depth Buffer Lifecycle & Zero-Leak Verification ---\n");
+	printf("--- Phase 2: Simultaneous High-Altitude 3D View & 2D Minimap Isolation ---\n");
 	{
-		/* Room (0, 3) was set to biome 0 (water) */
-		const nd_room_chunk_t *c_water = nd_seven_chunk_ensure(&map, 0, 3);
-		assert(c_water != NULL);
-		assert(c_water->has_water == 1);
-		assert(c_water->depth != NULL);
-		const uint8_t *orig_depth = c_water->depth;
+		nd_seven_set_zoom(0.01f); /* High altitude macro LOD */
+		nd_seven_render(1280, 720, &client_st);
 
-		/* Re-evaluate water chunk at different zoom levels */
-		nd_seven_set_zoom(0.5f);
-		nd_seven_chunk_ensure(&map, 0, 3);
-		assert(c_water->has_water == 1);
-		assert(c_water->depth == orig_depth); /* Depth buffer preserved without reallocation */
+		static uint32_t minimap_fb[224 * 224];
+		memset(minimap_fb, 0, sizeof(minimap_fb));
+		nd_lamina_render_map_live(minimap_fb, 224, 224, &map, "lamina", 43200, 0, 80, 64, 0);
 
-		nd_seven_set_zoom(1.0f);
-		nd_seven_chunk_ensure(&map, 0, 3);
-		assert(c_water->depth == orig_depth);
-		printf("  [PASS] Water depth buffer reused in-place across zoom transitions (zero leak)\n");
-	}
-
-	/* -------------------------------------------------------------------------
-	 * Phase 3: 2D Mode Zoom Calibration & LOD 3 Preservation at 0.35x
-	 * ------------------------------------------------------------------------- */
-	printf("--- Phase 3: 2D Mode Zoom Calibration & LOD 3 Preservation ---\n");
-	{
-		nd_seven_set_3d_mode(0);
-
-		/* 2D Mode at 2.0x: inspection zoom activates LOD 3 */
-		nd_seven_set_zoom(2.0f);
-		assert(nd_seven_calc_target_lod(0, 0, 2.0f, 0) == 3);
-
-		/* 2D Mode at 1.0x: default initial zoom evaluates at balanced LOD 2 */
-		nd_seven_set_zoom(1.0f);
-		assert(nd_seven_calc_target_lod(0, 0, 1.0f, 0) == 2);
-
-		/* 2D Mode at 0.35x: preserves LOD 2 */
-		nd_seven_set_zoom(0.35f);
-		assert(nd_seven_calc_target_lod(0, 0, 0.35f, 0) == 2);
-
-		/* 2D Mode at 0.03x: adapts to LOD 0 */
-		assert(nd_seven_calc_target_lod(0, 0, 0.03f, 0) == 0);
-
-		printf("  [PASS] 2D mode evaluates at LOD 2 at default zoom, LOD 3 at inspection zoom\n");
-	}
-
-	/* -------------------------------------------------------------------------
-	 * Phase 4: 7-Step Zoom-Out Left-Side & Water Preservation Verification
-	 * ------------------------------------------------------------------------- */
-	printf("--- Phase 4: 7-Step Zoom-Out Left-Side & Water Preservation ---\n");
-	{
-		nd_seven_set_3d_mode(1);
-		float zoom_7x = 1.0f / powf(1.15f, 7.0f); /* ~0.3759x */
-		nd_seven_set_zoom(zoom_7x);
-
-		/* Render 3D frame into NULL fb (simulating WebGL client) */
-		nd_client_state_t client_st;
-		memset(&client_st, 0, sizeof(client_st));
-		client_st.map_data = map;
-		nd_seven_render(NULL, 1280, 720, &client_st);
-
-		/* Verify that rooms on the left side (negative ti) exist and are populated */
-		for (int ti = -5; ti <= -1; ti++) {
-			int16_t left_pos[4] = { (int16_t)ti, 0, 0, 0 };
-			const nd_room_chunk_t *chk = nd_seven_chunk_find(left_pos);
-			assert(chk != NULL);
-			assert(chk->pixels != NULL);
-			assert(chk->height != NULL);
-			assert(chk->lod >= 1); /* Rooms adapt smoothly according to distance */
+		int non_zero = 0;
+		for (int p = 0; p < 224 * 224; p++) {
+			if (minimap_fb[p] != 0)
+				non_zero++;
 		}
+		assert(non_zero > 18000); /* Circular live radar mask populated */
 
-		/* Verify water room on the left (col 0, row 3 -> pos[-3, 0, 0, 0]) retains water flags and depth */
-		int16_t water_pos[4] = { -3, 0, 0, 0 };
-		const nd_room_chunk_t *chk_water = nd_seven_chunk_find(water_pos);
-		assert(chk_water != NULL);
-		assert(chk_water->has_water == 1);
-		assert(chk_water->depth != NULL);
-
-		printf("  [PASS] 7 zoom-outs: Left-side rooms preserved (LOD >= 1) and water active\n");
+		/* Verify both View 0 (Seven 3D) and View 1 (Minimap 2D) probe cleanly */
+		ar_sample_t s_v0, s_v1;
+		assert(ar_probe_view(cs, 0, 0, 80, 64, &s_v0));
+		assert(ar_probe_view(cs, 1, 0, 80, 64, &s_v1));
+		assert(s_v0.rgba != 0 && s_v1.rgba != 0);
+		printf("  [PASS] High-altitude 3D view (0.01x) and 2D minimap render simultaneously without LOD conflict\n");
 	}
 
-	/* -------------------------------------------------------------------------
-	 * Phase 5: Continuous Zoom Image Rasterization & Visual Continuity (R4)
-	 * ------------------------------------------------------------------------- */
-	printf("--- Phase 5: Continuous Zoom Image Rasterization & Visual Continuity ---\n");
+	/* Phase 3: Horizontal Movement Stability at Atmosphere, Low Orbit, and Space Altitudes
+	 * Verify that moving the player room-by-room at high altitude maintains a stable, uniform
+	 * macro LOD level without split/merge thrashing or elevation popping. */
+	printf("--- Phase 3: Horizontal Movement Stability at Atmosphere, Low Orbit, and Space ---\n");
 	{
-		const float zoom_steps[] = { 2.0f, 1.0f, 0.5f, 0.25f, 0.10f };
-		const size_t num_steps = sizeof(zoom_steps) / sizeof(zoom_steps[0]);
+		const float alt_zooms[3] = { 0.04f, 0.015f, 0.005f }; /* Atmosphere, Low Orbit, Space */
+		for (int a = 0; a < 3; a++) {
+			nd_seven_set_zoom(alt_zooms[a]);
+			int16_t probe_elev_0 = 0;
 
-		static uint32_t fb_prev[640 * 480];
-		static uint32_t fb_curr[640 * 480];
+			for (int step = 0; step < 8; step++) {
+				client_st.map_data.pos[0] = (int16_t)step;
+				client_st.map_data.pos[1] = (int16_t)(step / 2);
+				nd_seven_render(1280, 720, &client_st);
 
-		for (size_t s = 0; s < num_steps; s++) {
-			float z = zoom_steps[s];
-			nd_seven_set_3d_mode(0);
-			nd_seven_set_zoom(z);
+				ar_stats_t st_stats;
+				ar_system_get_stats(cs, &st_stats);
+				/* At atmosphere/orbit/space, active leaves stay compact (<= 64) */
+				assert(st_stats.active_chunks_last_frame > 0 && st_stats.active_chunks_last_frame <= 64);
 
-			nd_client_state_t client_st;
-			memset(&client_st, 0, sizeof(client_st));
-			client_st.map_data = map;
-
-			memset(fb_curr, 0, sizeof(fb_curr));
-			nd_seven_render(fb_curr, 640, 480, &client_st);
-
-			/* Validate image rasterization:
-			 * 1. Output must not be blank or unrendered placeholder
-			 * 2. All 640x480 pixels must be populated with non-zero color
-			 * 3. Non-trivial pixel variance indicates authentic terrain features (not solid blank) */
-			int non_zero = 0;
-			uint32_t first_pixel = fb_curr[0];
-			int has_variance = 0;
-
-			for (int p = 0; p < 640 * 480; p++) {
-				if (fb_curr[p] != 0) non_zero++;
-				if (fb_curr[p] != first_pixel) has_variance = 1;
+				/* World-space elevation at fixed point (320, 256) remains invariant across steps */
+				ar_sample_t fixed_pt;
+				assert(ar_probe_view(cs, 0, 0, 320, 256, &fixed_pt));
+				if (step == 0) {
+					probe_elev_0 = fixed_pt.val;
+				} else {
+					assert(fixed_pt.val == probe_elev_0);
+				}
 			}
-
-			assert(non_zero == 640 * 480); /* 100% canvas coverage across all zoom altitudes */
-			assert(has_variance);          /* Rich multi-biome terrain detail present */
-
-			if (s > 0) {
-				/* Image must change meaningfully as zoom level changes */
-				assert(memcmp(fb_prev, fb_curr, sizeof(fb_curr)) != 0);
-			}
-			memcpy(fb_prev, fb_curr, sizeof(fb_prev));
-			printf("  [PASS] Zoom %4.2fx: 100%% canvas coverage (307,200 px), continuous terrain rasterized\n", z);
+			printf("  [PASS] Zoom %6.4fx: 8 horizontal steps maintained invariant world elevation (%d) and compact macro mesh\n",
+			       alt_zooms[a], (int)probe_elev_0);
 		}
 	}
 
 	nd_seven_ground_cache_forget();
-	assert(nd_seven_chunk_count() == 0);
+	ar_stats_t final_stats;
+	ar_system_get_stats(cs, &final_stats);
+	assert(final_stats.pool_in_use == 0);
 
-	printf("ALL GROUND-LEVEL ZOOM LOD TESTS PASSED SUCCESSFULLY\n");
+	printf("ALL MULTI-VIEW ZOOM LOD TESTS PASSED SUCCESSFULLY\n");
 	return 0;
 }

@@ -20,11 +20,15 @@ static void canonical_field_sampler(void *user_ctx, uint16_t world, uint8_t leve
 	out->flags = s.is_water ? 1 : 0;
 }
 
+#define TEST_GRID_DIM   32
+#define TEST_MAX_ACTIVE 64
+
 int main(void)
 {
 	printf("=== Testing Continuous Multi-Altitude LOD Zoom Consistency & Reasonability ===\n");
 
-	ar_system_t *cs = ar_create(ND_FIELD_ROOM_W, ND_FIELD_ROOM_H, canonical_field_sampler, NULL);
+	ar_system_t *cs = ar_create(ND_FIELD_ROOM_W, ND_FIELD_ROOM_H, TEST_GRID_DIM, 128, TEST_MAX_ACTIVE, 17,
+	                            canonical_field_sampler, NULL);
 	assert(cs != NULL);
 
 	const float viewport_w = 1280.0f;
@@ -59,11 +63,11 @@ int main(void)
 			.eff_cam_dist = eff_cam_dist
 		};
 
-		const ar_node_t *out_chunks[AR_DEFAULT_MAX_ACTIVE];
-		size_t count = ar_update(cs, 0, &view, out_chunks, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *out_chunks[TEST_MAX_ACTIVE];
+		size_t count = ar_update(cs, 0, &view, out_chunks, TEST_MAX_ACTIVE);
 
 		assert(count > 0);
-		assert(count <= AR_DEFAULT_MAX_ACTIVE);
+		assert(count <= TEST_MAX_ACTIVE);
 
 		/* Find focal chunk covering (cam_x, cam_y) */
 		const ar_node_t *focal_node = NULL;
@@ -85,7 +89,7 @@ int main(void)
 			float dist = sqrtf(v_dx * v_dx + v_dy * v_dy + v_dz * v_dz);
 			if (dist < 1.0f) dist = 1.0f;
 
-			float quad_w_world = (float)node->w / (float)AR_DEFAULT_GRID_DIM;
+			float quad_w_world = (float)node->w / (float)TEST_GRID_DIM;
 			float quad_px = (quad_w_world * f_px) / dist;
 
 			if (quad_px > max_quad_px)
@@ -108,7 +112,7 @@ int main(void)
 		/* Verify visual reasonability and continuous bounds across all altitude tiers */
 		assert(focal_quad_px <= 32.0f);
 		assert(max_quad_px <= 35.0f);
-		assert(count <= AR_DEFAULT_MAX_ACTIVE);
+		assert(count <= TEST_MAX_ACTIVE);
 	}
 
 	/* 2. Phase 2: Dynamic Zoom Responsiveness on Already Loaded Chunks */
@@ -121,8 +125,8 @@ int main(void)
 			.zoom = 0.05f, .viewport_w = viewport_w, .viewport_h = viewport_h,
 			.eff_cam_dist = eff_cam_dist
 		};
-		const ar_node_t *chunks_out[AR_DEFAULT_MAX_ACTIVE];
-		size_t count_out = ar_update(cs, 0, &view_out, chunks_out, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *chunks_out[TEST_MAX_ACTIVE];
+		size_t count_out = ar_update(cs, 0, &view_out, chunks_out, TEST_MAX_ACTIVE);
 		assert(count_out > 0);
 
 		/* Record max level at 0.05x */
@@ -136,8 +140,8 @@ int main(void)
 		ar_view_t view_in = view_out;
 		view_in.zoom = 0.20f;
 
-		const ar_node_t *chunks_in[AR_DEFAULT_MAX_ACTIVE];
-		size_t count_in = ar_update(cs, 0, &view_in, chunks_in, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *chunks_in[TEST_MAX_ACTIVE];
+		size_t count_in = ar_update(cs, 0, &view_in, chunks_in, TEST_MAX_ACTIVE);
 		assert(count_in > 0);
 
 		/* Find the focal chunk covering (500, -300) in both passes */
@@ -166,8 +170,8 @@ int main(void)
 		assert(focal_in->level <= focal_out->level);
 
 		/* Step C: Zoom back OUT to 0.05x */
-		const ar_node_t *chunks_out2[AR_DEFAULT_MAX_ACTIVE];
-		size_t count_out2 = ar_update(cs, 0, &view_out, chunks_out2, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *chunks_out2[TEST_MAX_ACTIVE];
+		size_t count_out2 = ar_update(cs, 0, &view_out, chunks_out2, TEST_MAX_ACTIVE);
 		assert(count_out2 == count_out);
 
 		printf("  [PASS] Zooming in and out dynamically updates LODs on cached chunks (L%d -> L%d -> L%d)\n",
@@ -185,8 +189,8 @@ int main(void)
 				.zoom = z, .viewport_w = viewport_w, .viewport_h = viewport_h,
 				.eff_cam_dist = eff_cam_dist
 			};
-			const ar_node_t *chunks[AR_DEFAULT_MAX_ACTIVE];
-			size_t count = ar_update(cs, 0, &view, chunks, AR_DEFAULT_MAX_ACTIVE);
+			const ar_node_t *chunks[TEST_MAX_ACTIVE];
+			size_t count = ar_update(cs, 0, &view, chunks, TEST_MAX_ACTIVE);
 			assert(count <= 64);
 		}
 		ar_stats_t s_osc;

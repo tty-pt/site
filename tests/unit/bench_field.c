@@ -9,6 +9,8 @@
 #include <nd/field.h>
 #include <nd/terrain.h>
 #include <nd/seven-world.h>
+#include <ttypt/areole.h>
+#include "nd_seven.h"
 #include "nd_seven_ground.h"
 #include "nd_lamina.h"
 
@@ -56,28 +58,25 @@ int main(void)
 	       chunk_ms, 1000.0 / chunk_ms);
 	fflush(stdout);
 
-	/* 2. Benchmark Seven ground tile render (320x256 pixels) */
-	static uint32_t fb[320 * 256];
+	/* 2. Benchmark libareole orthographic view evaluation (7x7 room window) */
 	nd_client_state_t st;
 	memset(&st, 0, sizeof(st));
 	st.map_data.width = 7;
 	st.map_data.height = 7;
 	st.map_data.player_x = 3;
 	st.map_data.player_y = 3;
-	int16_t pos[4] = { 0, 0, 0, 1 };
-	ndw_tile_t own = { .biome = 10, .flags = 0 };
 
 	nd_seven_ground_cache_forget();
+	ar_system_t *cs = nd_seven_get_chunk_sys();
 	const int SEVEN_ITERS = 50;
 	double t2 = now_sec();
 	for (int i = 0; i < SEVEN_ITERS; i++) {
-		pos[0] = (int16_t)i;
-		nd_seven_ground_tile_render(fb, 320, 256, &st, 0, 0, pos, &own, 0, 0);
+		ar_eval_ortho(cs, 1, 1, (float)(i * 160), 0.0f, 1120.0f, 896.0f, 224.0f, 224.0f);
 	}
 	double t3 = now_sec();
 	double seven_chunk_ms = ((t3 - t2) * 1000.0) / SEVEN_ITERS;
-	printf("BENCHMARK: Seven room ground chunk build + render: %.3f ms/chunk (%.1f chunks/sec)\n",
-	       seven_chunk_ms, 1000.0 / seven_chunk_ms);
+	printf("BENCHMARK: libareole ortho view evaluation: %.3f ms/eval (%.1f evals/sec)\n",
+	       seven_chunk_ms, 1000.0 / (seven_chunk_ms > 1e-6 ? seven_chunk_ms : 1e-6));
 	fflush(stdout);
 
 	/* 3. Benchmark Lamina minimap redraw (224x224 pixels) */

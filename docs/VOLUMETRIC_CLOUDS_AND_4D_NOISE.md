@@ -137,6 +137,10 @@ and interpolates the 16 directional dot products $v_k = \mathbf{g}_k \cdot (\mat
    - Marches `numSteps` (`4` when `vDistance > 16000`, `5` when `vDistance > 3800`, `6` when close) jittered 3D points along the ray slab with early opacity termination (`(1.0 - trans) >= 0.98`) and clear-sky early exit (`s == 2 && trans > 0.999`).
    - At each active sample, probes solar optical depth $\tau_{\odot}$ and vertical crown gradient (`dSun1`, `dTop`) to form a 3D cloud normal `cloudGradN` and evaluates Horizon Zero Dawn Beer-Powder multi-scattering + Henyey-Greenstein forward/back silver-lining phase:
      $$E_{\text{light}}(\tau_{\odot}) = \Bigl(e^{-\tau_{\odot}}\bigl(0.44 + 0.96(1 - e^{-2.45\tau_{\odot}})\bigr) + 0.22\,e^{-0.35\tau_{\odot}}\Bigr) \cdot \Phi_{\text{HG}}(\cos\theta) \cdot \text{domeLambert}$$
+4. **Seamless Cross-LOD Fading (`gpuFieldBlend`) Across Quadtree Boundaries**:
+   - Both `s_fs_cloud` and `s_fs_terrain` compute the dual-criteria cross-LOD blend weight:
+     $$\text{spanBlend} = \text{smoothstep}(3.3, 13.5, u_{\text{ChunkSpan},x} / 48.0), \qquad \text{distBlend} = \text{smoothstep}(1400.0, 4800.0, d_{\text{cam}}), \qquad \text{gpuFieldBlend} = \text{clamp}(\max(\text{spanBlend}, \text{distBlend}), 0, 1)$$
+   - As chunks transition from near-field server/quadtree tiles to coarser LOD rings, `gpuFieldBlend` smoothly cross-fades the per-chunk `uSubstrateTex` biome humidity (`texBioHumidity`) into a continuous chunk-independent world-space climate humidity field (`worldBioHumidity`), and cross-fades the screen-space derivative filter width `rawFw` into a continuous distance-proportional filter width `contFw`. Adjacent quadtree chunks of different LOD levels therefore evaluate identical cloud density, Nyquist octave weights, terrain cloud shadows, and single-pass water cloud reflections at their shared border with **zero LOD boundary seams or popping**.
 
 ---
 

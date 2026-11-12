@@ -122,7 +122,4 @@ int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz);
 int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 void nd_seven_action_cooldown_reset(void);
 
-void draw_object_name(uint32_t *fb, int w, int h, int cx, int top_y, const char *name);
-void draw_thinking_balloon(uint32_t *fb, int w, int h, int hx, int hy, const char *action);
-
 #endif /* ND_SEVEN_OBJECTS_H */

@@ -19,13 +19,15 @@ static void mock_planet_sampler(void *user_ctx, uint16_t world, uint8_t level,
 	out->rgba = 0xFF208020u;
 }
 
+#define TEST_MAX_ACTIVE 64
+
 int main(void)
 {
 	printf("=== Testing Minimized Zoom Full Planet Coverage (NeverDark Seven Orbit) ===\n");
 
 	const int32_t base_w = 160;
 	const int32_t base_h = 128;
-	ar_system_t *cs = ar_create(base_w, base_h, mock_planet_sampler, NULL);
+	ar_system_t *cs = ar_create(base_w, base_h, 32, 128, TEST_MAX_ACTIVE, 17, mock_planet_sampler, NULL);
 	assert(cs != NULL);
 
 	const float viewport_w = 1280.0f;
@@ -85,15 +87,15 @@ int main(void)
 			.max_level = 16
 		};
 
-		const ar_node_t *visible[AR_DEFAULT_MAX_ACTIVE];
-		size_t count = ar_system_query_matrix(cs, 1, mvp, &opts, visible, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *visible[TEST_MAX_ACTIVE];
+		size_t count = ar_system_query_matrix(cs, 1, mvp, &opts, visible, TEST_MAX_ACTIVE);
 
 		printf("--- Zoom %.4fx (dist=%.0f, req_span: W=%.0f, H=%.0f) ---\n",
 		       zoom, dist, 2.0f * hw, 2.0f * hh / sin_p);
-		printf("  Active chunks returned: %zu / %d\n", count, AR_DEFAULT_MAX_ACTIVE);
+		printf("  Active chunks returned: %zu / %d\n", count, TEST_MAX_ACTIVE);
 
 		assert(count > 0);
-		assert(count <= AR_DEFAULT_MAX_ACTIVE);
+		assert(count <= TEST_MAX_ACTIVE);
 
 		/* 3. Quadrant Coverage Check: All 4 quadrants around focal point must have chunks */
 		bool has_pos_x = false, has_neg_x = false;

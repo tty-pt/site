@@ -20,7 +20,6 @@
 
 extern nd_client_state_t client_state;
 extern nd_scene_t g_scene;
-extern uint32_t *g_lamina_fb;
 extern int g_stage_w, g_stage_h;
 extern int g_ui_initialized;
 extern char g_active_modal[32];

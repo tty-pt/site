@@ -134,7 +134,7 @@ static void test_multi_planet_definitions(void)
 static void test_libchunk_level16_coverage(void)
 {
 	printf("[4. libchunk Level 16 Auto-Tiling & Full Torus Coverage]\n");
-	ar_system_t *cs = ar_create(NDW_TILE_W, NDW_TILE_H, mock_planet_sampler, NULL);
+	ar_system_t *cs = ar_create(NDW_TILE_W, NDW_TILE_H, 32, 128, 64, 17, mock_planet_sampler, NULL);
 	assert(cs != NULL);
 
 	const float viewport_w = 1280.0f;
@@ -180,11 +180,11 @@ static void test_libchunk_level16_coverage(void)
 			.max_level = 16
 		};
 
-		const ar_node_t *visible[AR_DEFAULT_MAX_ACTIVE];
-		size_t count = ar_system_query_matrix(cs, 1, mvp, &opts, visible, AR_DEFAULT_MAX_ACTIVE);
+		const ar_node_t *visible[64];
+		size_t count = ar_system_query_matrix(cs, 1, mvp, &opts, visible, 64);
 
 		assert(count > 0);
-		assert(count <= AR_DEFAULT_MAX_ACTIVE);
+		assert(count <= 64);
 
 		bool has_pos_x = false, has_neg_x = false, has_pos_y = false, has_neg_y = false;
 		for (size_t i = 0; i < count; i++) {
