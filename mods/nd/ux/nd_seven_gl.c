@@ -2468,7 +2468,7 @@ static const char *s_fs_billboard =
 	"        if (isGrass) {\n"
 	"            vec4 gWind = eval_recursive_wind(vLocalPos.xy, uAnimTime);\n"
 	"            float tipSheen = smoothstep(0.28, 0.96, qy) * clamp((gWind.z - 0.48) * 0.58 + gWind.w * 0.48, 0.0, 1.0);\n"
-	"            vec3 groundTurf = mix(vec3(0.29, 0.49, 0.23), vec3(0.37, 0.60, 0.27), smoothstep(0.25, 0.75, g1.x));\n"
+	"            vec3 groundTurf = mix(vec3(0.29, 0.49, 0.23), vec3(0.37, 0.60, 0.27), smoothstep(0.25, 0.75, g1.x)) * vTint.rgb;\n"
 	"            vec3 bladeBody  = mix(albedo * vec3(0.98, 1.02, 0.92), albedo * vec3(1.16, 1.14, 0.88), smoothstep(0.18, 0.92, qy + tipSheen * 0.32));\n"
 	"            albedo = mix(groundTurf, bladeBody, smoothstep(0.0, 0.30, qy));\n"
 	"        }\n"
@@ -4433,18 +4433,19 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 	float phase = (float)(h & 0xFFFFu) * (TWO_PI_F / 65536.0f);
 	float stiff = 0.82f + 0.36f * ((float)((h >> 16u) & 0xFFu) / 255.0f);
 
-	float flutter = sinf(anim_time * 3.8f + wx * 0.08f + wy * 0.06f + phase) * (0.28f + 0.42f * catspaw);
-	float wind_mag = (1.15f * gust + 0.85f * catspaw + flutter) * stiff;
-	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.35f);
-	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.35f);
-	float dz = (wind_mag * wind_mag) * 0.08f;
-	float rustle = 0.15f * catspaw;
+	float flutter = sinf(anim_time * 3.2f + wx * 0.08f + wy * 0.06f + phase) * (0.18f + 0.28f * catspaw);
+	float wind_mag = (1.05f * gust + 0.70f * catspaw + flutter) * stiff;
+	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.30f);
+	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.30f);
+	float dz = (wind_mag * wind_mag) * 0.06f;
+	float rustle = 0.12f * catspaw;
 
-	/* 2. Immediate radial ankle parting around (lamb_wx, lamb_wy) within R = 18.0 world units */
+	/* 2. Calm physical hoof/ankle contact parting & trampling within R = 11.0 world units
+	 *    (no artificial high-frequency sine tremor so blades close to the Lamb never tremble) */
 	float dx = wx - lamb_wx;
 	float dy = wy - lamb_wy;
 	float d2 = dx * dx + dy * dy;
-	const float R_touch = 18.0f;
+	const float R_touch = 11.0f;
 	if (d2 < R_touch * R_touch) {
 		float dist = sqrtf(d2);
 		float t = 1.0f - (dist / R_touch);
@@ -4456,22 +4457,22 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 		} else {
 			/* Directly underfoot: part deterministically left or right based on tuft hash */
 			rx = ((h & 1u) != 0u) ? 1.0f : -1.0f;
-			ry = 0.25f;
+			ry = -0.25f;
 		}
-		/* Bias horizontal parting slightly wider so ankles clearly part blades left & right */
-		sx += rx * (5.6f * weight);
-		sy += ry * (3.8f * weight);
-		dz += 3.2f * weight;
-		float foot_flutter = sinf(anim_time * 18.0f + phase) * 0.85f * weight;
-		sx += (-ry) * foot_flutter;
-		rustle += 0.85f * weight;
+		sx += rx * (2.55f * weight);
+		sy += ry * (0.85f * weight);
+		dz += 2.25f * weight;
+		rustle += 0.50f * weight;
+		/* Prevent blades North of the Lamb from bending southward into the Lamb's body */
+		if (dy < 0.5f && sy > 0.35f)
+			sy = 0.35f;
 	}
 
-	/* 3. Elastic footstep wake trail recovery & underdamped harmonic rustle over 1.4s */
+	/* 3. Smooth viscoelastic footstep wake trail recovery over 1.4s */
 	int wake_n = 0;
 	const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
 	if (wake && wake_n > 0) {
-		const float R_wake = 16.0f;
+		const float R_wake = 11.5f;
 		const float tau_max = 1.40f;
 		for (int i = 0; i < wake_n; i++) {
 			if (!wake[i].valid)
@@ -4487,9 +4488,9 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 			float wdist = sqrtf(wd2);
 			float wt = 1.0f - (wdist / R_wake);
 			float w_spatial = wt * wt * (3.0f - 2.0f * wt);
-			float decay = expf(-2.8f * tau) * (1.0f - (tau / tau_max));
-			/* Underdamped spring-back oscillation: cos(15 * tau) */
-			float osc = cosf(15.0f * tau + phase * 0.25f);
+			float decay = expf(-2.6f * tau) * (1.0f - (tau / tau_max));
+			/* Gentle viscoelastic rebound curve without high-frequency ringing */
+			float rebound = cosf(3.2f * tau + phase * 0.15f);
 			float wrx = (wdist > 0.25f) ? (wdx / wdist) : (((h & 2u) != 0u) ? 1.0f : -1.0f);
 			float wry = (wdist > 0.25f) ? (wdy / wdist) : 0.0f;
 
@@ -4499,20 +4500,20 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 			float vny = (vlen > 1.0f) ? (wake[i].vy / vlen) : 0.0f;
 
 			float env = w_spatial * decay;
-			sx += (wrx * 3.2f + vnx * 1.4f * osc) * env;
-			sy += (wry * 2.2f + vny * 1.0f * osc) * env;
-			dz += 2.1f * env * (0.65f + 0.35f * fabsf(osc));
-			rustle += 0.65f * env * fabsf(osc);
+			sx += (wrx * 1.45f + vnx * 0.65f * rebound) * env;
+			sy += (wry * 0.85f + vny * 0.45f * rebound) * env;
+			dz += 1.85f * env;
+			rustle += 0.40f * env;
 		}
 	}
 
-	/* Clamp maximum tip shear & depression to preserve clean sprite proportions */
-	if (sx < -8.5f) sx = -8.5f;
-	if (sx >  8.5f) sx =  8.5f;
-	if (sy < -6.5f) sy = -6.5f;
-	if (sy >  6.5f) sy =  6.5f;
+	/* Clamp maximum tip shear & depression to preserve natural blade proportions */
+	if (sx < -4.2f) sx = -4.2f;
+	if (sx >  4.2f) sx =  4.2f;
+	if (sy < -3.2f) sy = -3.2f;
+	if (sy >  3.2f) sy =  3.2f;
 	if (dz <  0.0f) dz =  0.0f;
-	if (dz >  4.8f) dz =  4.8f;
+	if (dz >  3.4f) dz =  3.4f;
 	if (rustle > 1.0f) rustle = 1.0f;
 
 	if (out_shear_x)   *out_shear_x   = sx;

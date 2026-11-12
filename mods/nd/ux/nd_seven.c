@@ -818,7 +818,7 @@ static inline float meadow_noise_2d(float wx, float wy, float scale, uint32_t se
 	return a + (b - a) * uy;
 }
 
-static int meadow_lookup_rect(int zone, uint32_t h, nd_seven_sprite_rect_t *out_rect)
+static int meadow_lookup_rect(int zone, unsigned biome, uint32_t h, nd_seven_sprite_rect_t *out_rect)
 {
 	if (!out_rect)
 		return 0;
@@ -827,6 +827,24 @@ static int meadow_lookup_rect(int zone, uint32_t h, nd_seven_sprite_rect_t *out_
 		return nd_seven_botanical_rect(rk, out_rect);
 	}
 	if (zone == ND_MEADOW_WILDFLOWER) {
+		if (biome == 7u || biome == 15u) {
+			/* Shrubland & Savannah: warm sun-baked golden & amber blooms */
+			*out_rect = nd_seven_sprite_rects[(h & 1u) ? NDS_DECOR_ORG : NDS_DECOR_YEL];
+			return 1;
+		}
+		if (biome == 8u || biome == 9u) {
+			/* Coniferous & Boreal forests: pale woodland blooms */
+			*out_rect = nd_seven_sprite_rects[(h & 1u) ? NDS_DECOR_YEL2 : NDS_DECOR_PINK];
+			return 1;
+		}
+		if (biome == 13u || biome == 16u || biome == 17u) {
+			/* Temperate & Tropical rainforests: vibrant orchid-pink & gold blossoms */
+			static const int rf_flowers[4] = {
+				NDS_DECOR_PINK, NDS_DECOR_PINK, NDS_DECOR_ORG, NDS_DECOR_YEL
+			};
+			*out_rect = nd_seven_sprite_rects[rf_flowers[h & 3u]];
+			return 1;
+		}
 		static const int flowers[4] = {
 			NDS_DECOR_YEL, NDS_DECOR_YEL2, NDS_DECOR_ORG, NDS_DECOR_PINK
 		};
@@ -845,6 +863,89 @@ static int meadow_lookup_rect(int zone, uint32_t h, nd_seven_sprite_rect_t *out_
 		return nd_seven_botanical_rect(NDB_GRASS_TUFT_1 + (int)(h % 3u), out_rect);
 	}
 	return 0;
+}
+
+static uint32_t meadow_biome_tint(unsigned biome, int zone, uint32_t h, uint8_t alpha)
+{
+	if (zone == ND_MEADOW_WILDFLOWER)
+		return 0xFFFFFF00u | (uint32_t)alpha;
+
+	uint32_t rgb = 0xFAFFF400u;
+	uint32_t idx = h & 3u;
+	if (biome >= 2u && biome <= 5u) {
+		/* Tundra: frosted sage, lichen & russet sedge */
+		static const uint32_t tundra_tints[4] = {
+			0xC8D8CC00u, 0xD2CCC000u, 0xBECFCE00u, 0xC4D4C200u
+		};
+		rgb = tundra_tints[idx];
+	} else if (biome == 7u || biome == 15u) {
+		/* Shrubland & Savannah: sun-cured golden-ochre & warm straw */
+		static const uint32_t savanna_tints[4] = {
+			0xFFE6A400u, 0xF8DC9600u, 0xFFECA800u, 0xF2D48C00u
+		};
+		rgb = savanna_tints[idx];
+	} else if (biome == 8u || biome == 9u) {
+		/* Coniferous & Boreal forest: cool spruce & deep pine moss */
+		static const uint32_t boreal_tints[4] = {
+			0xB8DEC800u, 0xB0D8C400u, 0xC2E4CE00u, 0xA8D2BC00u
+		};
+		rgb = boreal_tints[idx];
+	} else if (biome == 11u || biome == 12u) {
+		/* Woodland & Temperate seasonal: warm clover & olive-emerald */
+		static const uint32_t woodland_tints[4] = {
+			0xE8F6D400u, 0xF2F4C800u, 0xE0F2CE00u, 0xFAF0C400u
+		};
+		rgb = woodland_tints[idx];
+	} else if (biome == 13u || biome == 16u || biome == 17u) {
+		/* Temperate & Tropical rainforests: rich saturated jungle emerald */
+		static const uint32_t jungle_tints[4] = {
+			0xC8F8D000u, 0xBEF4C600u, 0xD4FADC00u, 0xB6F0C000u
+		};
+		rgb = jungle_tints[idx];
+	} else {
+		/* Temperate grassland (10) & default: fresh sunlit meadow emerald */
+		static const uint32_t meadow_tints[4] = {
+			0xFAFFF400u, 0xF4FCEE00u, 0xFFFDF000u, 0xF0FAE800u
+		};
+		rgb = meadow_tints[idx];
+	}
+
+	if (zone == ND_MEADOW_UNDERSTORY) {
+		uint32_t r = (((rgb >> 24) & 0xFFu) * 228u) >> 8u;
+		uint32_t g = (((rgb >> 16) & 0xFFu) * 236u) >> 8u;
+		uint32_t b = (((rgb >>  8) & 0xFFu) * 224u) >> 8u;
+		rgb = (r << 24) | (g << 16) | (b << 8);
+	}
+	return rgb | (uint32_t)alpha;
+}
+
+/* Prevent grass tufts from poking through or drawing on top of the Lamb sprite:
+ * 1. Suppress spawning upright tufts inside the Lamb's hoof/body core footprint.
+ * 2. For tufts in the Lamb's upper-body screen overlap band (-11.0 <= dy <= 6.0, |dx| < 11.5),
+ *    clamp their painter's-order sort key y <= lwy - 0.5f so they strictly draw BEHIND the Lamb,
+ *    and attenuate their height so blades behind the Lamb never poke through its silhouette. */
+int nd_seven_eval_meadow_lamb_occlusion(float wx_f, float wy_f,
+                                        float lwx_f, float lwy_f,
+                                        float *io_sort_y, float *io_scale)
+{
+	float dx = wx_f - lwx_f;
+	float dy = wy_f - lwy_f;
+	float ell_y = dy * 1.35f;
+	if (dx * dx + ell_y * ell_y < 4.5f * 4.5f)
+		return 0;
+	float body_nx = dx * (1.0f / 7.2f);
+	float body_ny = (dy - 1.5f) * (1.0f / 6.0f);
+	if (body_nx * body_nx + body_ny * body_ny < 1.0f)
+		return 0;
+	if (dy >= -11.0f && dy <= 6.0f && fabsf(dx) < 11.5f) {
+		if (io_sort_y && *io_sort_y > lwy_f - 0.5f)
+			*io_sort_y = lwy_f - 0.5f;
+		if (io_scale) {
+			float h_atten = 0.45f + 0.40f * fminf(1.0f, fabsf(dx) * (1.0f / 11.5f));
+			*io_scale *= h_atten;
+		}
+	}
+	return 1;
 }
 
 int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
@@ -940,7 +1041,32 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 			ridge_pen = 0.35f;
 	}
 
-	float bio_mult = (g.kind == NDW_G_TUNDRA) ? 0.76f : 1.0f;
+	/* Biome-coupled fertility multiplier & structural profile */
+	float bio_mult = 1.0f;
+	float base_sc  = 0.40f;
+	float span_sc  = 0.22f;
+	if (g.kind == NDW_G_TUNDRA) {
+		/* Tundra (2..5): sparse, low-profile hardy sedge */
+		bio_mult = 0.78f;
+		base_sc  = 0.30f;
+		span_sc  = 0.12f;
+	} else if (biome == 7u || biome == 15u) {
+		/* Shrubland (7) & Savannah (15): sun-baked tall golden grass stands */
+		bio_mult = (biome == 15u) ? 0.94f : 0.88f;
+		base_sc  = 0.42f;
+		span_sc  = 0.24f;
+	} else if (biome == 8u || biome == 9u) {
+		/* Coniferous (8) & Boreal (9) forests: compact mossy forest-floor turf */
+		bio_mult = 0.86f;
+		base_sc  = 0.34f;
+		span_sc  = 0.14f;
+	} else if (biome == 13u || biome == 16u || biome == 17u) {
+		/* Temperate (13) & Tropical (16, 17) rainforests: lush, taller jungle groundcover */
+		bio_mult = 1.12f;
+		base_sc  = 0.44f;
+		span_sc  = 0.22f;
+	}
+
 	float fertility = bio_mult * (noise_env + moisture_bonus - ridge_pen - slope_pen);
 
 	/* Contiguous area threshold: outside meadow areas (fertility <= 0.42) is open ground;
@@ -952,19 +1078,57 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 	if (core_t > 1.0f)
 		core_t = 1.0f;
 
-	float sc = 0.40f + 0.22f * core_t + ((float)(int32_t)(h & 7u) - 3.5f) * 0.008f;
+	float sc = base_sc + span_sc * core_t + ((float)(int32_t)(h & 7u) - 3.5f) * 0.008f;
 	if (out_scale)
 		*out_scale = sc;
 
-	float flower_env = meadow_noise_2d(wx_f + 113.0f, wy_f - 79.0f, 52.0f, 0x424C4F4Du);
-	if (g.kind == NDW_G_GRASS && core_t > 0.25f && flower_env > 0.56f && ((h >> 8u) & 3u) == 0u) {
-		if (out_zone) *out_zone = ND_MEADOW_WILDFLOWER;
+	if (g.kind == NDW_G_TUNDRA) {
+		/* Tundra has hardy low sedge only — no summer wildflowers or tall seed-plumes */
+		if (out_zone) *out_zone = ND_MEADOW_GRASS;
 		return 1;
 	}
 
-	if (g.kind == NDW_G_GRASS && core_t > 0.46f && ((h >> 10u) & 3u) != 0u) {
-		if (out_zone) *out_zone = ND_MEADOW_TALL_GRASS;
-		return 1;
+	float flower_env = meadow_noise_2d(wx_f + 113.0f, wy_f - 79.0f, 52.0f, 0x424C4F4Du);
+	if (biome == 8u || biome == 9u) {
+		/* Boreal / Coniferous: rare forest blooms & mostly short moss/turf */
+		if (core_t > 0.45f && flower_env > 0.66f && ((h >> 8u) & 7u) == 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_WILDFLOWER;
+			return 1;
+		}
+		if (core_t > 0.68f && ((h >> 10u) & 3u) == 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_TALL_GRASS;
+			return 1;
+		}
+	} else if (biome == 7u || biome == 15u) {
+		/* Shrubland & Savannah: abundant tall golden seed-plume grass & warm blooms */
+		if (core_t > 0.30f && flower_env > 0.60f && ((h >> 8u) & 3u) == 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_WILDFLOWER;
+			return 1;
+		}
+		if (core_t > 0.26f && ((h >> 10u) & 3u) != 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_TALL_GRASS;
+			return 1;
+		}
+	} else if (biome == 13u || biome == 16u || biome == 17u) {
+		/* Rainforests: rich tropical blooms & dense tall jungle grass */
+		if (core_t > 0.22f && flower_env > 0.52f && ((h >> 8u) & 3u) == 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_WILDFLOWER;
+			return 1;
+		}
+		if (core_t > 0.36f && ((h >> 10u) & 3u) != 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_TALL_GRASS;
+			return 1;
+		}
+	} else {
+		/* Temperate Grassland (10), Woodland (11), Seasonal Forest (12) */
+		if (core_t > 0.25f && flower_env > 0.56f && ((h >> 8u) & 3u) == 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_WILDFLOWER;
+			return 1;
+		}
+		if (core_t > 0.46f && ((h >> 10u) & 3u) != 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_TALL_GRASS;
+			return 1;
+		}
 	}
 
 	if (out_zone) *out_zone = ND_MEADOW_GRASS;
@@ -1237,6 +1401,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		nd_seven_world_pos(st, &lwx64, &lwy64);
 		int32_t lwx = (int32_t)lwx64;
 		int32_t lwy = (int32_t)lwy64;
+		float lwx_f = (float)lwx;
+		float lwy_f = (float)lwy;
 
 		/* Cache near-field tree trunk positions for canopy understory zoning */
 		int32_t tree_wx[64], tree_wy[64];
@@ -1307,48 +1473,44 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					continue;
 
 				nd_seven_sprite_rect_t sr;
-				if (!meadow_lookup_rect(zone, jh >> 8u, &sr))
+				if (!meadow_lookup_rect(zone, bio, jh >> 8u, &sr))
 					continue;
 
 				float radial_fade = 1.0f - (sqrtf(r2) / (float)rad);
 				if (radial_fade < 0.0f) radial_fade = 0.0f;
 				float eff_alpha = meadow_fade * (0.40f + 0.60f * radial_fade);
-				uint32_t tint_m = seven_pack_white_alpha(eff_alpha);
-				if (tint_m == 0)
+				uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
+				if (base_alpha_pack == 0)
 					continue;
+				uint8_t alpha_u8 = (uint8_t)(base_alpha_pack & 0xFFu);
+				uint32_t tint_m = meadow_biome_tint(bio, zone, jh >> 12u, alpha_u8);
 
-				/* Understory tufts get a soft shaded forest-floor tint; open meadow tufts get subtle natural emerald/golden hue variation */
-				if (zone == ND_MEADOW_UNDERSTORY) {
-					tint_m = (0xE0F0DC00u) | (tint_m & 0xFFu);
-				} else if (zone == ND_MEADOW_GRASS || zone == ND_MEADOW_TALL_GRASS) {
-					static const uint32_t meadow_tints[4] = {
-						0xFAFFF400u, 0xF4FCEE00u, 0xFFFDF000u, 0xF0FAE800u
-					};
-					tint_m = meadow_tints[(jh >> 12u) & 3u] | (tint_m & 0xFFu);
+				float sort_y1 = (float)wy;
+				float sc1 = scale_m;
+				if (nd_seven_eval_meadow_lamb_occlusion((float)wx, (float)wy, lwx_f, lwy_f, &sort_y1, &sc1)) {
+					lam_billboard_gpu_t *bb = &s_all_gpu_batch[all_gpu_count++];
+					bb->x = (float)wx;
+					bb->y = sort_y1;
+					bb->z = z_f;
+					bb->width = (float)sr.w * sc1;
+					bb->height = (float)sr.h * sc1;
+					bb->anchor_y = 1.6f * sc1;
+					bb->water_z_off = 1.6f * sc1;
+					if (flip) {
+						bb->u0 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
+						bb->u1 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
+					} else {
+						bb->u0 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
+						bb->u1 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
+					}
+					bb->v0 = (float)sr.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+					bb->v1 = (float)(sr.y + sr.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+					bb->tint_rgba = tint_m;
+					bb->style = ND_BB_STYLE_GRASS;
+					bb->shadow_rx = 0;
+					bb->shadow_ry = 0;
+					bb->pad0 = (uint8_t)zone;
 				}
-
-				lam_billboard_gpu_t *bb = &s_all_gpu_batch[all_gpu_count++];
-				bb->x = (float)wx;
-				bb->y = (float)wy;
-				bb->z = z_f;
-				bb->width = (float)sr.w * scale_m;
-				bb->height = (float)sr.h * scale_m;
-				bb->anchor_y = 1.6f * scale_m;
-				bb->water_z_off = 1.6f * scale_m;
-				if (flip) {
-					bb->u0 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
-					bb->u1 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
-				} else {
-					bb->u0 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
-					bb->u1 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
-				}
-				bb->v0 = (float)sr.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-				bb->v1 = (float)(sr.y + sr.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-				bb->tint_rgba = tint_m;
-				bb->style = ND_BB_STYLE_GRASS;
-				bb->shadow_rx = 0;
-				bb->shadow_ry = 0;
-				bb->pad0 = (uint8_t)zone;
 
 				/* Layer 2nd companion micro-tuft in every fertile meadow cell for high blade frequency */
 				if ((zone == ND_MEADOW_GRASS || zone == ND_MEADOW_TALL_GRASS || zone == ND_MEADOW_UNDERSTORY) &&
@@ -1356,34 +1518,39 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					int zone2 = (zone == ND_MEADOW_TALL_GRASS && (((jh >> 14u) & 7u) == 0u))
 					            ? ND_MEADOW_WILDFLOWER : ND_MEADOW_GRASS;
 					nd_seven_sprite_rect_t sr2;
-					if (meadow_lookup_rect(zone2, jh >> 17u, &sr2)) {
+					if (meadow_lookup_rect(zone2, bio, jh >> 17u, &sr2)) {
 						int32_t ox2 = (int32_t)((jh >> 6u) % 5u) - 2;
 						int32_t oy2 = (int32_t)((jh >> 11u) % 5u) - 2;
 						if (ox2 == 0 && oy2 == 0) ox2 = 2;
+						float wx2 = (float)(wx + ox2);
+						float wy2 = (float)(wy + oy2);
+						float sort_y2 = wy2;
 						float sc2 = scale_m * 0.86f;
-						int flip2 = (int)((jh >> 21u) & 1u);
-						lam_billboard_gpu_t *bb2 = &s_all_gpu_batch[all_gpu_count++];
-						bb2->x = (float)(wx + ox2);
-						bb2->y = (float)(wy + oy2);
-						bb2->z = z_f + dz_dx * (float)ox2 + dz_dy * (float)oy2;
-						bb2->width = (float)sr2.w * sc2;
-						bb2->height = (float)sr2.h * sc2;
-						bb2->anchor_y = 1.6f * sc2;
-						bb2->water_z_off = 1.6f * sc2;
-						if (flip2) {
-							bb2->u0 = (float)(sr2.x + sr2.w) / (float)ND_SEVEN_ATLAS_W;
-							bb2->u1 = (float)sr2.x / (float)ND_SEVEN_ATLAS_W;
-						} else {
-							bb2->u0 = (float)sr2.x / (float)ND_SEVEN_ATLAS_W;
-							bb2->u1 = (float)(sr2.x + sr2.w) / (float)ND_SEVEN_ATLAS_W;
+						if (nd_seven_eval_meadow_lamb_occlusion(wx2, wy2, lwx_f, lwy_f, &sort_y2, &sc2)) {
+							int flip2 = (int)((jh >> 21u) & 1u);
+							lam_billboard_gpu_t *bb2 = &s_all_gpu_batch[all_gpu_count++];
+							bb2->x = wx2;
+							bb2->y = sort_y2;
+							bb2->z = z_f + dz_dx * (float)ox2 + dz_dy * (float)oy2;
+							bb2->width = (float)sr2.w * sc2;
+							bb2->height = (float)sr2.h * sc2;
+							bb2->anchor_y = 1.6f * sc2;
+							bb2->water_z_off = 1.6f * sc2;
+							if (flip2) {
+								bb2->u0 = (float)(sr2.x + sr2.w) / (float)ND_SEVEN_ATLAS_W;
+								bb2->u1 = (float)sr2.x / (float)ND_SEVEN_ATLAS_W;
+							} else {
+								bb2->u0 = (float)sr2.x / (float)ND_SEVEN_ATLAS_W;
+								bb2->u1 = (float)(sr2.x + sr2.w) / (float)ND_SEVEN_ATLAS_W;
+							}
+							bb2->v0 = (float)sr2.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+							bb2->v1 = (float)(sr2.y + sr2.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+							bb2->tint_rgba = meadow_biome_tint(bio, zone2, jh >> 18u, alpha_u8);
+							bb2->style = ND_BB_STYLE_GRASS;
+							bb2->shadow_rx = 0;
+							bb2->shadow_ry = 0;
+							bb2->pad0 = (uint8_t)zone2;
 						}
-						bb2->v0 = (float)sr2.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-						bb2->v1 = (float)(sr2.y + sr2.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-						bb2->tint_rgba = tint_m;
-						bb2->style = ND_BB_STYLE_GRASS;
-						bb2->shadow_rx = 0;
-						bb2->shadow_ry = 0;
-						bb2->pad0 = (uint8_t)zone2;
 					}
 				}
 
@@ -1391,34 +1558,39 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				if ((zone == ND_MEADOW_TALL_GRASS || (zone == ND_MEADOW_GRASS && scale_m > 0.48f)) &&
 				    all_gpu_count + 4 < ALL_GPU_MAX_DRAW) {
 					nd_seven_sprite_rect_t sr3;
-					if (meadow_lookup_rect(ND_MEADOW_GRASS, jh >> 23u, &sr3)) {
+					if (meadow_lookup_rect(ND_MEADOW_GRASS, bio, jh >> 23u, &sr3)) {
 						int32_t ox3 = (int32_t)((jh >> 15u) % 5u) - 2;
 						int32_t oy3 = (int32_t)((jh >> 19u) % 5u) - 2;
 						if (ox3 == 0 && oy3 == 0) oy3 = -2;
+						float wx3 = (float)(wx + ox3);
+						float wy3 = (float)(wy + oy3);
+						float sort_y3 = wy3;
 						float sc3 = scale_m * 0.74f;
-						int flip3 = (int)((jh >> 26u) & 1u);
-						lam_billboard_gpu_t *bb3 = &s_all_gpu_batch[all_gpu_count++];
-						bb3->x = (float)(wx + ox3);
-						bb3->y = (float)(wy + oy3);
-						bb3->z = z_f + dz_dx * (float)ox3 + dz_dy * (float)oy3;
-						bb3->width = (float)sr3.w * sc3;
-						bb3->height = (float)sr3.h * sc3;
-						bb3->anchor_y = 1.5f * sc3;
-						bb3->water_z_off = 1.5f * sc3;
-						if (flip3) {
-							bb3->u0 = (float)(sr3.x + sr3.w) / (float)ND_SEVEN_ATLAS_W;
-							bb3->u1 = (float)sr3.x / (float)ND_SEVEN_ATLAS_W;
-						} else {
-							bb3->u0 = (float)sr3.x / (float)ND_SEVEN_ATLAS_W;
-							bb3->u1 = (float)(sr3.x + sr3.w) / (float)ND_SEVEN_ATLAS_W;
+						if (nd_seven_eval_meadow_lamb_occlusion(wx3, wy3, lwx_f, lwy_f, &sort_y3, &sc3)) {
+							int flip3 = (int)((jh >> 26u) & 1u);
+							lam_billboard_gpu_t *bb3 = &s_all_gpu_batch[all_gpu_count++];
+							bb3->x = wx3;
+							bb3->y = sort_y3;
+							bb3->z = z_f + dz_dx * (float)ox3 + dz_dy * (float)oy3;
+							bb3->width = (float)sr3.w * sc3;
+							bb3->height = (float)sr3.h * sc3;
+							bb3->anchor_y = 1.5f * sc3;
+							bb3->water_z_off = 1.5f * sc3;
+							if (flip3) {
+								bb3->u0 = (float)(sr3.x + sr3.w) / (float)ND_SEVEN_ATLAS_W;
+								bb3->u1 = (float)sr3.x / (float)ND_SEVEN_ATLAS_W;
+							} else {
+								bb3->u0 = (float)sr3.x / (float)ND_SEVEN_ATLAS_W;
+								bb3->u1 = (float)(sr3.x + sr3.w) / (float)ND_SEVEN_ATLAS_W;
+							}
+							bb3->v0 = (float)sr3.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+							bb3->v1 = (float)(sr3.y + sr3.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+							bb3->tint_rgba = meadow_biome_tint(bio, ND_MEADOW_GRASS, jh >> 24u, alpha_u8);
+							bb3->style = ND_BB_STYLE_GRASS;
+							bb3->shadow_rx = 0;
+							bb3->shadow_ry = 0;
+							bb3->pad0 = (uint8_t)ND_MEADOW_GRASS;
 						}
-						bb3->v0 = (float)sr3.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-						bb3->v1 = (float)(sr3.y + sr3.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-						bb3->tint_rgba = tint_m;
-						bb3->style = ND_BB_STYLE_GRASS;
-						bb3->shadow_rx = 0;
-						bb3->shadow_ry = 0;
-						bb3->pad0 = (uint8_t)ND_MEADOW_GRASS;
 					}
 				}
 			}

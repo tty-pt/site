@@ -131,6 +131,10 @@ int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
                               unsigned biome, float near_tree_dist_sq,
                               int *out_zone, int *out_flip);
 
+int nd_seven_eval_meadow_lamb_occlusion(float wx_f, float wy_f,
+                                        float lwx_f, float lwy_f,
+                                        float *io_sort_y, float *io_scale);
+
 /* Viewport LOD & Macro Chunk Thresholds (zero magic numbers) */
 #define ND_SEVEN_STRATOSPHERE_ZOOM_THRESHOLD 0.25f  /* Camera zoom threshold below which macro quadtree LOD activates */
 #define ND_SEVEN_FOCAL_WINDOW_RADIUS_ROOMS   3      /* 7x7 focal room grid radius around the player (-3..+3) */

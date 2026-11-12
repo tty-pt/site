@@ -2900,6 +2900,58 @@ int main(void)
 		assert(tall_cnt > 50);
 		assert(lowland_cnt > high_steep_cnt * 2);
 
+		/* Verify biome-driven botanical variety across Tundra (2), Boreal (9), Grassland (10), Savannah (15), and Rainforest (17) */
+		int tundra_cnt = 0, tundra_tall_or_flw = 0;
+		int boreal_cnt = 0, savanna_tall = 0, savanna_cnt = 0, jungle_cnt = 0;
+		float tundra_sc_sum = 0.0f, boreal_sc_sum = 0.0f, savanna_sc_sum = 0.0f, jungle_sc_sum = 0.0f;
+		for (int y = 0; y < 48; y++) {
+			for (int x = 0; x < 48; x++) {
+				int zb = 0;
+				float scb = 0.0f;
+				if (nd_seven_eval_meadow_area(x * 19, y * 23, 5.0f, 0.0f, 0.02f, 2, 9999.0f, &zb, &scb, NULL)) {
+					tundra_cnt++;
+					tundra_sc_sum += scb;
+					if (zb == ND_MEADOW_TALL_GRASS || zb == ND_MEADOW_WILDFLOWER)
+						tundra_tall_or_flw++;
+				}
+				if (nd_seven_eval_meadow_area(x * 19, y * 23, 5.0f, 0.0f, 0.02f, 9, 9999.0f, &zb, &scb, NULL)) {
+					boreal_cnt++;
+					boreal_sc_sum += scb;
+				}
+				if (nd_seven_eval_meadow_area(x * 19, y * 23, 5.0f, 0.0f, 0.02f, 15, 9999.0f, &zb, &scb, NULL)) {
+					savanna_cnt++;
+					savanna_sc_sum += scb;
+					if (zb == ND_MEADOW_TALL_GRASS)
+						savanna_tall++;
+				}
+				if (nd_seven_eval_meadow_area(x * 19, y * 23, 5.0f, 0.0f, 0.02f, 17, 9999.0f, &zb, &scb, NULL)) {
+					jungle_cnt++;
+					jungle_sc_sum += scb;
+				}
+			}
+		}
+		assert(tundra_cnt > 20 && tundra_tall_or_flw == 0);
+		assert(boreal_cnt > tundra_cnt);
+		assert(jungle_cnt > boreal_cnt);
+		assert(savanna_tall * 3 > savanna_cnt);
+		float tundra_avg_sc  = tundra_sc_sum / (float)tundra_cnt;
+		float boreal_avg_sc  = boreal_sc_sum / (float)boreal_cnt;
+		float savanna_avg_sc = savanna_sc_sum / (float)savanna_cnt;
+		float jungle_avg_sc  = jungle_sc_sum / (float)jungle_cnt;
+		assert(tundra_avg_sc < boreal_avg_sc);
+		assert(boreal_avg_sc < savanna_avg_sc && boreal_avg_sc < jungle_avg_sc);
+
+		/* Verify Lamb occlusion helper: core hoof/body ellipse suppresses tufts; north overlap band clamps sort_y <= lwy - 0.5f */
+		{
+			float sy_core = 500.0f, sc_core = 0.5f;
+			assert(nd_seven_eval_meadow_lamb_occlusion(500.0f, 500.0f, 500.0f, 500.0f, &sy_core, &sc_core) == 0);
+			assert(nd_seven_eval_meadow_lamb_occlusion(502.0f, 503.0f, 500.0f, 500.0f, &sy_core, &sc_core) == 0);
+			float sy_overlap = 504.0f, sc_overlap = 0.50f;
+			assert(nd_seven_eval_meadow_lamb_occlusion(508.0f, 504.0f, 500.0f, 500.0f, &sy_overlap, &sc_overlap) == 1);
+			assert(sy_overlap <= 499.5f);
+			assert(sc_overlap < 0.50f);
+		}
+
 		/* Verify contiguous area fill: inside a fertile meadow patch, a 5x5 local 8-unit grid fills >= 22/25 cells */
 		int max_patch_fill = 0;
 		for (int py = 0; py < 16; py++) {
@@ -2919,19 +2971,31 @@ int main(void)
 		}
 		assert(max_patch_fill >= 23);
 
-		/* 3. R3: Verify radial ankle parting (West bends West, East bends East) & elastic wake trail decay */
+		/* 3. R3: Verify calm non-trembling contact parting (R_touch = 11.0) & smooth viscoelastic wake trail decay */
 		nd_seven_clear_wake();
 		float sx_w = 0.0f, sy_w = 0.0f, dz_w = 0.0f, r_w = 0.0f;
 		float sx_e = 0.0f, sy_e = 0.0f, dz_e = 0.0f, r_e = 0.0f;
 		float sx_far = 0.0f, sy_far = 0.0f, dz_far = 0.0f, r_far = 0.0f;
-		/* Lamb at (500, 500): tuft at (494, 500) is West; tuft at (506, 500) is East */
-		nd_seven_gl_eval_grass_displacement(494.0f, 500.0f, 10.0f, 500.0f, 500.0f, &sx_w, &sy_w, &dz_w, &r_w);
-		nd_seven_gl_eval_grass_displacement(506.0f, 500.0f, 10.0f, 500.0f, 500.0f, &sx_e, &sy_e, &dz_e, &r_e);
-		nd_seven_gl_eval_grass_displacement(494.0f, 500.0f, 10.0f, 900.0f, 900.0f, &sx_far, &sy_far, &dz_far, &r_far);
-		assert(sx_w < sx_far - 1.5f);
-		assert(sx_e > sx_far + 1.5f);
+		/* Lamb at (500, 500): tuft at (495, 500) is West (dist=5); tuft at (505, 500) is East (dist=5) */
+		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.0f, 500.0f, 500.0f, &sx_w, &sy_w, &dz_w, &r_w);
+		nd_seven_gl_eval_grass_displacement(505.0f, 500.0f, 10.0f, 500.0f, 500.0f, &sx_e, &sy_e, &dz_e, &r_e);
+		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.0f, 900.0f, 900.0f, &sx_far, &sy_far, &dz_far, &r_far);
+		assert(sx_w < sx_far - 0.9f);
+		assert(sx_e > sx_far + 0.9f);
 		assert(dz_w > dz_far + 0.8f && dz_e > dz_far + 0.8f);
-		assert(r_w > r_far + 0.25f);
+		assert(r_w > r_far + 0.15f);
+
+		/* Verify compact contact radius: at dist = 13.0 (> R_touch = 11.0), Lamb has zero static force-field push */
+		float sx_out1 = 0.0f, sx_out2 = 0.0f;
+		nd_seven_gl_eval_grass_displacement(487.0f, 500.0f, 10.0f, 500.0f, 500.0f, &sx_out1, NULL, NULL, NULL);
+		nd_seven_gl_eval_grass_displacement(487.0f, 500.0f, 10.0f, 900.0f, 900.0f, &sx_out2, NULL, NULL, NULL);
+		assert(fabsf(sx_out1 - sx_out2) < 1e-5f);
+
+		/* Verify no high-frequency trembling near the Lamb across a 0.08s frame interval */
+		float sx_t_a = 0.0f, sx_t_b = 0.0f;
+		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.00f, 500.0f, 500.0f, &sx_t_a, NULL, NULL, NULL);
+		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.08f, 500.0f, 500.0f, &sx_t_b, NULL, NULL, NULL);
+		assert(fabsf(sx_t_b - sx_t_a) < 0.25f);
 
 		/* Record a footstep wake at (600, 600) at t=20.0s and verify depression decays from t=20.1s to t=22.0s */
 		nd_seven_record_wake_step(600.0f, 600.0f, 72.0f, 0.0f, 20.0f);
@@ -2943,7 +3007,7 @@ int main(void)
 
 		/* 4. R4: Verify ND_BB_STYLE_GRASS ground-pinned bottom vertices (qy == 0) vs sheared top vertices (qy == 1) */
 		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
-		nd_seven_gl_set_lamb_light(494.0f, 500.0f, 12.0f, 1.0f);
+		nd_seven_gl_set_lamb_light(495.0f, 500.0f, 12.0f, 1.0f);
 		lam_billboard_gpu_t std_bb = {
 			.x = 500.0f, .y = 500.0f, .z = 12.0f,
 			.width = 16.0f, .height = 16.0f,
@@ -2967,13 +3031,13 @@ int main(void)
 			assert(fabsf(v_grs[1].world_pos[c] - v_std[1].world_pos[c]) < 1e-5f);
 			assert(fabsf(v_grs[0].local_pos[c] - v_std[0].local_pos[c]) < 1e-5f);
 		}
-		/* Top vertex TL (idx 2, qy == 1) must be sheared away from the Lamb (+x direction since Lamb is at 494 < 500) */
+		/* Top vertex TL (idx 2, qy == 1) must be sheared away from the Lamb (+x direction since Lamb is at 495 < 500) */
 		assert(fabsf(v_grs[2].quad_uv[1] - 1.0f) < 1e-5f);
-		assert(v_grs[2].local_pos[0] > v_std[2].local_pos[0] + 1.5f);
-		assert(v_grs[2].local_pos[2] < v_std[2].local_pos[2] - 0.5f);
+		assert(v_grs[2].local_pos[0] > v_std[2].local_pos[0] + 0.8f);
+		assert(v_grs[2].local_pos[2] < v_std[2].local_pos[2] - 0.4f);
 
-		printf("PASS: Living Meadow botanical atlas (%d swatches), contiguous area fill (%d/25), land-coupling (lowland=%d vs steep_ridge=%d, reeds=%d, understory=%d, flowers=%d, tall=%d, grass=%d), radial parting (W=%.2f, E=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
-		       NDB_COUNT, max_patch_fill, lowland_cnt, high_steep_cnt, reed_cnt, under_cnt, flower_cnt, tall_cnt, grass_cnt, sx_w, sx_e, dz_t0, dz_t1, dz_t2);
+		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
+		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, dz_t0, dz_t1, dz_t2);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
