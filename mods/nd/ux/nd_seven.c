@@ -385,6 +385,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.min_level = min_lvl,
 		.max_level = 14,
 		.view_id = 0,
+		.max_populates_per_query = 48,
 		.split_hysteresis = 0.14f
 	};
 
@@ -413,55 +414,56 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                          nd_seven_get_dir(), nd_seven_get_walking(), anim_t);
 
 		if (!s_water_particles)
-			s_water_particles = lam_particle_sys_create(512, 34.0f);
+			s_water_particles = lam_particle_sys_create(512, 42.0f);
 		if (s_water_particles) {
 			float dt = (s_prev_particle_time > 0.0f && anim_t >= s_prev_particle_time)
 			           ? (anim_t - s_prev_particle_time) : 0.033f;
 			if (dt > 0.12f) dt = 0.033f;
 			s_prev_particle_time = anim_t;
 
-			/* 1. Lamb wading/swimming splash emitter */
+			/* 1. Lamb wading/swimming ballistic droplet emitter */
 			if (lamb_in_water && dist < 1800.0f) {
 				float water_depth = (float)lamb_wl - lwz;
 				int walking = nd_seven_get_walking();
-				float interval = walking ? 0.09f : 0.42f;
+				float interval = walking ? 0.075f : 0.48f;
 				if (water_depth > 0.05f && (anim_t - s_last_splash_emit_time >= interval || anim_t < s_last_splash_emit_time)) {
 					s_last_splash_emit_time = anim_t;
 					int dir = nd_seven_get_dir();
-					float bvx = (dir == 1) ? -0.45f : (dir == 3 ? 0.45f : 0.0f);
-					float bvy = (dir == 2) ? -0.45f : (dir == 0 ? 0.45f : 0.0f);
+					/* Match DIR_DOWN=0(+Y), DIR_UP=1(-Y), DIR_LEFT=2(-X), DIR_RIGHT=3(+X): kick droplets backward */
+					float dir_vx = (dir == 3) ? 1.0f : (dir == 2 ? -1.0f : 0.0f);
+					float dir_vy = (dir == 0) ? 1.0f : (dir == 1 ? -1.0f : 0.0f);
 					lam_particle_emitter_t em;
 					memset(&em, 0, sizeof(em));
-					em.x = (float)lwx;
-					em.y = (float)lwy;
-					em.z = (float)lamb_wl + 0.35f;
-					em.spread_x = walking ? 4.5f : 3.2f;
-					em.spread_y = walking ? 4.5f : 3.2f;
-					em.spread_z = 0.25f;
-					em.dir_x = bvx;
-					em.dir_y = bvy;
-					em.dir_z = 1.0f;
-					em.speed_min = walking ? 11.0f : 5.5f;
-					em.speed_max = walking ? 21.0f : 9.5f;
-					em.cone_spread = 0.65f;
-					em.size0_min = 2.2f;
-					em.size0_max = 3.8f;
-					em.size1_min = 4.2f;
-					em.size1_max = 6.8f;
-					em.life_min = walking ? 0.38f : 0.32f;
-					em.life_max = walking ? 0.72f : 0.55f;
-					em.drag = 1.6f;
-					em.gravity_scale = 1.0f;
+					em.x = (float)lwx - dir_vx * (walking ? 1.8f : 0.0f);
+					em.y = (float)lwy - dir_vy * (walking ? 1.8f : 0.0f);
+					em.z = (float)lamb_wl + 0.25f;
+					em.spread_x = walking ? 2.2f : 1.6f;
+					em.spread_y = walking ? 2.2f : 1.6f;
+					em.spread_z = 0.15f;
+					em.dir_x = -dir_vx * 0.55f;
+					em.dir_y = -dir_vy * 0.55f;
+					em.dir_z = 0.88f;
+					em.speed_min = walking ? 14.0f : 6.5f;
+					em.speed_max = walking ? 26.0f : 11.5f;
+					em.cone_spread = 0.72f;
+					em.size0_min = 0.55f;
+					em.size0_max = 1.15f;
+					em.size1_min = 0.18f;
+					em.size1_max = 0.42f;
+					em.life_min = walking ? 0.24f : 0.20f;
+					em.life_max = walking ? 0.48f : 0.36f;
+					em.drag = 0.85f;
+					em.gravity_scale = 1.25f;
 					em.restitution = -1.0f;
-					em.rgba0 = 0xF4FAFFECu;
-					em.rgba1 = 0xDCEEFF00u;
-					em.count = walking ? 7u : 2u;
+					em.rgba0 = 0xF8FCFFF0u;
+					em.rgba1 = 0xE0F2FF00u;
+					em.count = walking ? 6u : 2u;
 					em.kind = 1;
 					lam_particle_emit(s_water_particles, &em);
 				}
 			}
 
-			/* 2. Shoreline wave-impact & surf-spray emitter on rocky/steep coasts */
+			/* 2. Shoreline wave-impact & spindrift droplet emitter on rocky/steep coasts */
 			if (dist < 1800.0f && (anim_t - s_last_spray_emit_time >= 0.14f || anim_t < s_last_spray_emit_time)) {
 				s_last_spray_emit_time = anim_t;
 				int16_t base_wl = nd_field_water_level(world);
@@ -491,26 +493,26 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 						memset(&em, 0, sizeof(em));
 						em.x = (float)sx;
 						em.y = (float)sy;
-						em.z = (float)loc_wl + 0.4f;
-						em.spread_x = 3.5f;
-						em.spread_y = 3.5f;
-						em.spread_z = 0.3f;
-						em.dir_x = (slope_mag > 1e-3f) ? (gx / slope_mag) * 0.45f : 0.35f;
-						em.dir_y = (slope_mag > 1e-3f) ? (gy / slope_mag) * 0.45f : -0.35f;
-						em.dir_z = 1.0f;
-						em.speed_min = 8.0f;
-						em.speed_max = 16.5f;
-						em.cone_spread = 0.55f;
-						em.size0_min = 2.8f;
-						em.size0_max = 4.6f;
-						em.size1_min = 5.5f;
-						em.size1_max = 9.0f;
-						em.life_min = 0.45f;
-						em.life_max = 0.85f;
-						em.drag = 2.2f;
-						em.gravity_scale = 0.65f;
+						em.z = (float)loc_wl + 0.3f;
+						em.spread_x = 2.4f;
+						em.spread_y = 2.4f;
+						em.spread_z = 0.2f;
+						em.dir_x = (slope_mag > 1e-3f) ? (gx / slope_mag) * 0.50f : 0.35f;
+						em.dir_y = (slope_mag > 1e-3f) ? (gy / slope_mag) * 0.50f : -0.35f;
+						em.dir_z = 0.92f;
+						em.speed_min = 12.0f;
+						em.speed_max = 23.0f;
+						em.cone_spread = 0.62f;
+						em.size0_min = 0.65f;
+						em.size0_max = 1.35f;
+						em.size1_min = 0.22f;
+						em.size1_max = 0.48f;
+						em.life_min = 0.28f;
+						em.life_max = 0.56f;
+						em.drag = 1.15f;
+						em.gravity_scale = 1.15f;
 						em.restitution = -1.0f;
-						em.rgba0 = 0xF0F8FFDCu;
+						em.rgba0 = 0xF4FAFFECu;
 						em.rgba1 = 0xE0F0FF00u;
 						em.count = 4u;
 						em.kind = 2;
@@ -1039,9 +1041,9 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			dst_bb->x = p_draw[pi].x;
 			dst_bb->y = p_draw[pi].y + 0.02f;
 			dst_bb->z = p_draw[pi].z;
-			dst_bb->width = p_draw[pi].size;
-			dst_bb->height = p_draw[pi].size;
-			dst_bb->anchor_y = p_draw[pi].size * 0.5f;
+			dst_bb->width = p_draw[pi].size * 0.85f;
+			dst_bb->height = p_draw[pi].size * 1.35f;
+			dst_bb->anchor_y = dst_bb->height * 0.5f;
 			dst_bb->water_z_off = 0.0f;
 			dst_bb->u0 = 0.0f;
 			dst_bb->v0 = 0.0f;
@@ -1077,6 +1079,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	float alt_fade = seven_smooth_fade(dist_scenery, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
 	uint32_t tint_scenery = seven_pack_white_alpha(alt_fade);
 	if (tint_scenery != 0) {
+		nd_seven_set_scenery_synth_budget(512);
 		uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t w_level = nd_field_water_level(world);
 		int16_t base_rx = st ? st->map_data.pos[0] : 0;
@@ -1193,6 +1196,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 		if (s_mid_batch_len > 0)
 			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+		nd_seven_set_scenery_synth_budget(0xFFFFFFFFu);
 	}
 	if (!near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());

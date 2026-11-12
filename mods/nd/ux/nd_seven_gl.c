@@ -492,17 +492,6 @@ static const char *s_fs_terrain =
 	"    }\n"
 	"    return coarse_q12_4;\n"
 	"}\n"
-	"float nd_gpu_eval_coarse_torus_x(uint seed, int rx_wrapped, int ry_unwrapped, float fw) {\n"
-	"    uint ux = (uint(rx_wrapped) - 32512u) & 0xFFFFu;\n"
-	"    if (ux < 512u) {\n"
-	"        int rx_hi = 32512 + int(ux);\n"
-	"        int rx_lo = rx_hi - 65536;\n"
-	"        float c_hi = nd_gpu_eval_coarse_unwrapped(seed, rx_hi, ry_unwrapped, fw);\n"
-	"        float c_lo = nd_gpu_eval_coarse_unwrapped(seed, rx_lo, ry_unwrapped, fw);\n"
-	"        return mix(c_hi, c_lo, float(ux) * (1.0 / 512.0));\n"
-	"    }\n"
-	"    return nd_gpu_eval_coarse_unwrapped(seed, rx_wrapped, ry_unwrapped, fw);\n"
-	"}\n"
 	"float nd_gpu_bimodal_hypsometry(float elev) {\n"
 	"    if (elev < 0.0) {\n"
 	"        if (elev > -8.0) return elev;\n"
@@ -520,17 +509,29 @@ static const char *s_fs_terrain =
 	"float nd_gpu_room_hyp_coarse(uint seed, int rx_unwrapped, int ry_unwrapped, float fw) {\n"
 	"    int rx = ((rx_unwrapped + 32768) & 65535) - 32768;\n"
 	"    int ry = ((ry_unwrapped + 32768) & 65535) - 32768;\n"
+	"    uint ux = (uint(rx) - 32512u) & 0xFFFFu;\n"
 	"    uint uy = (uint(ry) - 32512u) & 0xFFFFu;\n"
-	"    float c;\n"
-	"    if (uy < 512u) {\n"
-	"        int ry_hi = 32512 + int(uy);\n"
-	"        int ry_lo = ry_hi - 65536;\n"
-	"        float c_hi = nd_gpu_eval_coarse_torus_x(seed, rx, ry_hi, fw);\n"
-	"        float c_lo = nd_gpu_eval_coarse_torus_x(seed, rx, ry_lo, fw);\n"
-	"        c = mix(c_hi, c_lo, float(uy) * (1.0 / 512.0));\n"
-	"    } else {\n"
-	"        c = nd_gpu_eval_coarse_torus_x(seed, rx, ry, fw);\n"
+	"    bool wrap_x = (ux < 512u);\n"
+	"    bool wrap_y = (uy < 512u);\n"
+	"    float tx = wrap_x ? (float(ux) * (1.0 / 512.0)) : 0.0;\n"
+	"    float ty = wrap_y ? (float(uy) * (1.0 / 512.0)) : 0.0;\n"
+	"    int rx_base = wrap_x ? (32512 + int(ux)) : rx;\n"
+	"    int ry_base = wrap_y ? (32512 + int(uy)) : ry;\n"
+	"    float c00 = 0.0, c10 = 0.0, c01 = 0.0, c11 = 0.0;\n"
+	"    for (int k = 0; k < 4; k++) {\n"
+	"        if ((k == 1 || k == 3) && !wrap_x) continue;\n"
+	"        if (k >= 2 && !wrap_y) break;\n"
+	"        int cur_x = rx_base - (k & 1) * 65536;\n"
+	"        int cur_y = ry_base - (k >> 1) * 65536;\n"
+	"        float val = nd_gpu_eval_coarse_unwrapped(seed, cur_x, cur_y, fw);\n"
+	"        if (k == 0) c00 = val;\n"
+	"        else if (k == 1) c10 = val;\n"
+	"        else if (k == 2) c01 = val;\n"
+	"        else c11 = val;\n"
 	"    }\n"
+	"    float c_y0 = wrap_x ? mix(c00, c10, tx) : c00;\n"
+	"    float c_y1 = wrap_x ? mix(c01, c11, tx) : c01;\n"
+	"    float c = wrap_y ? mix(c_y0, c_y1, ty) : c_y0;\n"
 	"    c -= float(uSeaOffsetQ12_4);\n"
 	"    return nd_gpu_bimodal_hypsometry(c * 0.0625);\n"
 	"}\n"
@@ -921,105 +922,122 @@ static const char *s_fs_terrain =
 	"    return isOcean * (0.68 * p2Moon + 0.31 * p2Sun);\n"
 	"}\n"
 	"/* Asymmetric Shoreline Wave Run-Up & Backwash (Swash) + Intertidal Wet-Sand Hysteresis:\n"
+	" * Driven directly by the travelling water wavelets (eval_zoom_water_waves) + smooth coastal surge\n"
+	" * with zero high-frequency cellular/lace noise static.\n"
 	" * Returns vec4(swashSurfZ, highWaterZ, swashFoam, swashFilmMask). */\n"
 	"vec4 eval_shore_swash(vec2 pos, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw) {\n"
 	"    float isOcean = 1.0 - smoothstep(0.25, 0.75, abs(uSeaLevel - uBaseSeaLevel));\n"
 	"    float slopeMag = length(slopeGrad);\n"
-	"    float nearShore = smoothstep(5.5, 0.0, abs(terrainZ - baseTideZ));\n"
+	"    float nearShore = smoothstep(6.0, 0.0, abs(terrainZ - baseTideZ));\n"
 	"    if (nearShore <= 0.001 || dist > 3800.0) {\n"
 	"        float tideHigh = uSeaLevel + isOcean * 0.99;\n"
 	"        return vec4(baseTideZ, max(baseTideZ, tideHigh), 0.0, 0.0);\n"
 	"    }\n"
 	"    float distFade = smoothstep(3800.0, 450.0, dist);\n"
 	"    vec2 shoreDir = (slopeMag > 1e-4) ? (slopeGrad / slopeMag) : vec2(0.7071, -0.7071);\n"
-	"    vec2 alongDir = vec2(-shoreDir.y, shoreDir.x);\n"
-	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.045 + vec2(13.7, -9.2), 0x53574153u);\n"
-	"    vec3 nMicro = chaff_grad_noise2d(pos * 0.190 + nAlong.yz * 0.45, 0x53574132u);\n"
-	"    float groupEnv = 0.58 + 0.42 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 3.2);\n"
-	"    float crossCoord = dot(pos, shoreDir) * 0.14 + (nAlong.x - 0.5) * 1.65 + (nMicro.x - 0.5) * 0.55;\n"
-	"    float waveArg = mod(anim_time * 1.18, 628.3185) - crossCoord;\n"
-	"    /* Asymmetric trochoidal bore: steep flood run-up front, long gravity-drained backwash tail */\n"
-	"    float rawWave = sin(waveArg) + 0.32 * sin(2.0 * waveArg - 0.45) + 0.10 * cos(3.0 * waveArg);\n"
-	"    float swashAmp = (0.06 + 0.52 * isOcean) * groupEnv * smoothstep(0.015, 0.18, slopeMag) * distFade;\n"
-	"    float swashDisp = rawWave * swashAmp;\n"
+	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.025 + vec2(13.7, -9.2), 0x53574153u);\n"
+	"    float groupEnv = 0.65 + 0.35 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.4);\n"
+	"    float crossCoord = dot(pos, shoreDir) * 0.08 + (nAlong.x - 0.5) * 1.15;\n"
+	"    float waveArg = mod(anim_time * 0.95, 628.3185) - crossCoord;\n"
+	"    float swellWave = sin(waveArg) + 0.25 * sin(2.0 * waveArg - 0.45);\n"
+	"    /* Couple shoreline water level directly to the actual travelling water wavelets (eval_zoom_water_waves) */\n"
+	"    vec4 shoreWaves = eval_zoom_water_waves(pos, anim_time, dist, fw);\n"
+	"    float slopeResponse = smoothstep(0.008, 0.14, slopeMag) * distFade;\n"
+	"    float waveletRunup = shoreWaves.x * (0.55 + 0.45 * isOcean) * (0.45 + 0.55 * slopeResponse);\n"
+	"    float swellRunup = swellWave * (0.08 + 0.38 * isOcean) * groupEnv * slopeResponse;\n"
+	"    float swashDisp = waveletRunup + swellRunup;\n"
 	"    float swashSurfZ = baseTideZ + swashDisp;\n"
-	"    float recentSwashTop = baseTideZ + (0.08 + 0.68 * isOcean) * (0.75 + 0.25 * groupEnv) * smoothstep(0.015, 0.18, slopeMag);\n"
-	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.35);\n"
-	"    /* Cellular aerated lace foam along the leading swash bore & rocky wave-impact points */\n"
-	"    float boreFront = smoothstep(-0.20, 0.55, cos(waveArg - 0.35));\n"
-	"    float edgeProximity = smoothstep(0.55, 0.0, abs(terrainZ - swashSurfZ));\n"
-	"    float rockImpact = smoothstep(0.10, 0.28, slopeMag) * smoothstep(-0.1, 0.7, rawWave);\n"
-	"    vec3 laceNoise = chaff_grad_noise2d(pos * 0.85 + shoreDir * (rawWave * 0.6), 0x464F414Du);\n"
-	"    float cellularLace = smoothstep(0.42, 0.74, laceNoise.x * 0.65 + nMicro.x * 0.35);\n"
-	"    float swashFoam = clamp((edgeProximity * (0.35 + 0.65 * boreFront) + rockImpact * 0.55) * cellularLace * isOcean * distFade * nd_octave_weight(2.5, fw), 0.0, 0.68);\n"
+	"    float recentSwashTop = baseTideZ + (0.28 + 0.72 * isOcean) * (0.75 + 0.25 * groupEnv) * slopeResponse;\n"
+	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.25);\n"
+	"    /* Smooth, low-frequency wavelet-crest lip at the water's edge (zero high-frequency laceNoise static) */\n"
+	"    float edgeLip = smoothstep(0.32, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.35, shoreWaves.x + swellWave * 0.25);\n"
+	"    float swashFoam = clamp(edgeLip * (0.16 + 0.34 * shoreWaves.w) * isOcean * distFade, 0.0, 0.36);\n"
 	"    float swashFilm = smoothstep(highWaterZ + 0.15, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
 	"}\n"
-	"/* Real-Life Path-Ribbon Lamb Wake in Water (Dispersive Kelvin Arms + Turbulent Stern Trail):\n"
-	" * Evaluates the breadcrumb ring buffer of recent water-contact path nodes (uLambWakeXYT[0..7], uLambWakeVel[0..7])\n"
-	" * so curved paths leave a lingering, widening dispersive wake along the actual trajectory walked. */\n"
+	"/* Real-Life Path-Ribbon Lamb Wake in Water (Continuous Behind-Only V-Shear & Turbulent Slick):\n"
+	" * Evaluates piecewise-linear trail segments connecting ordered path nodes (uLambWakeXYT[0..7])\n"
+	" * strictly behind the lamb (zero forward projection, zero sinusoidal bullseye rings). */\n"
 	"vec4 eval_lamb_wake_ribbon(vec2 pos, float anim_time, float dist, float fw) {\n"
 	"    float headEnergy = uLambWakeHead.w;\n"
 	"    if (headEnergy <= 0.001 || dist > 2600.0) return vec4(0.0);\n"
 	"    vec2 dHead = pos - uLambWakeHead.xy;\n"
-	"    if (dot(dHead, dHead) > 190.0 * 190.0) return vec4(0.0);\n"
-	"    float distFade = smoothstep(2600.0, 450.0, dist) * nd_octave_weight(3.5, fw);\n"
+	"    if (dot(dHead, dHead) > 140.0 * 140.0) return vec4(0.0);\n"
+	"    float distFade = smoothstep(2600.0, 450.0, dist) * nd_octave_weight(3.5, fw) * headEnergy;\n"
 	"    if (distFade <= 0.001) return vec4(0.0);\n"
+	"    vec4 headVel0 = uLambWakeVel0[0];\n"
+	"    float headSpd = length(headVel0.xy);\n"
+	"    vec2 headFwd = (headSpd > 0.5) ? (headVel0.xy / headSpd) : vec2(0.0, 1.0);\n"
+	"    float sHead = dot(dHead, headFwd);\n"
+	"    /* Strict forward cutoff: never draw any wake stripe in front of the lamb */\n"
+	"    if (sHead > 0.0) return vec4(0.0);\n"
+	"    float frontGate = smoothstep(0.0, -0.35, sHead);\n"
 	"    float totalH = 0.0;\n"
 	"    vec2 totalGrad = vec2(0.0);\n"
 	"    float totalFoam = 0.0;\n"
-	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.95, 256.0), -mod(anim_time * 0.75, 256.0)), 0x57414B45u);\n"
-	"    vec2 warpOffset = (wakeTurb.yz) * 1.35;\n"
-	"    for (int i = 0; i < 8; i++) {\n"
-	"        vec4 nodeXYT = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
-	"        vec4 nodeVel = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
-	"        float nodeEnergy = nodeVel.z;\n"
-	"        if (nodeEnergy <= 0.002) continue;\n"
-	"        float age = clamp(anim_time - nodeXYT.z, 0.0, 6.0);\n"
-	"        float ageDecay = exp(-0.72 * age) * smoothstep(5.5, 0.2, age) * nodeEnergy;\n"
-	"        if (ageDecay <= 0.002) continue;\n"
-	"        vec2 v = nodeVel.xy;\n"
-	"        float spd = length(v);\n"
-	"        vec2 fwd = (spd > 0.5) ? (v / spd) : vec2(0.0, 1.0);\n"
-	"        vec2 right = vec2(-fwd.y, fwd.x);\n"
-	"        vec2 rel = (pos + warpOffset * (0.25 + 0.15 * age)) - nodeXYT.xy;\n"
-	"        float s = dot(rel, fwd);\n"
-	"        float u = abs(dot(rel, right));\n"
-	"        float signU = (dot(rel, right) >= 0.0) ? 1.0 : -1.0;\n"
-	"        /* Dispersive group expansion: wave packet travels outward at c_g = 15.5 units/s */\n"
-	"        float packetR = 4.5 + age * 15.5;\n"
-	"        float packetW = 3.2 + age * 4.2;\n"
-	"        /* Kelvin V-arm envelope behind node (s <= 3.0) + parabolic bow crest at i == 0 */\n"
-	"        float effBack = max(0.0, -s + 2.5);\n"
-	"        float kelvinHalfW = 2.8 + effBack * 0.42 + age * 6.5;\n"
-	"        float armDist = u - kelvinHalfW * 0.68;\n"
-	"        float armEnv = exp(-(armDist * armDist) / max(1.5, packetW * packetW)) * exp(-effBack * 0.032) * smoothstep(5.5, -1.5, s);\n"
-	"        if (i == 0 && spd > 4.0) {\n"
-	"            /* Crisp parabolic bow wave just ahead of the moving lamb */\n"
-	"            float bowR = length(vec2(max(0.0, s + 2.0) * 1.25, u * 0.85));\n"
-	"            float bowEnv = exp(-((bowR - 5.2) * (bowR - 5.2)) / 6.5) * smoothstep(-6.0, 2.0, s);\n"
-	"            armEnv = max(armEnv, bowEnv * 0.85);\n"
+	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.85, 256.0), -mod(anim_time * 0.65, 256.0)), 0x57414B45u);\n"
+	"    vec2 warpOffset = wakeTurb.yz * 1.05;\n"
+	"    for (int i = 0; i < 7; i++) {\n"
+	"        vec4 nodeA = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
+	"        vec4 velA  = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
+	"        if (velA.z <= 0.002) continue;\n"
+	"        int j = i + 1;\n"
+	"        vec4 nodeB = (j < 4) ? uLambWakeXYT0[j] : uLambWakeXYT1[j - 4];\n"
+	"        vec4 velB  = (j < 4) ? uLambWakeVel0[j] : uLambWakeVel1[j - 4];\n"
+	"        float spdA = length(velA.xy);\n"
+	"        vec2 fwdA = (spdA > 0.5) ? (velA.xy / spdA) : headFwd;\n"
+	"        vec2 pA = nodeA.xy;\n"
+	"        vec2 pB = (velB.z > 0.002) ? nodeB.xy : (pA - fwdA * 6.0);\n"
+	"        float tB = (velB.z > 0.002) ? nodeB.z : (nodeA.z - 0.25);\n"
+	"        vec2 seg = pA - pB;\n"
+	"        float segLen = length(seg);\n"
+	"        vec2 tDir = (segLen > 0.25) ? (seg / segLen) : fwdA;\n"
+	"        vec2 nDir = vec2(-tDir.y, tDir.x);\n"
+	"        float effLen = max(segLen, 3.5);\n"
+	"        vec2 relB = pos - pB;\n"
+	"        float proj = dot(relB, tDir);\n"
+	"        float sAhead = proj - effLen;\n"
+	"        if (i == 0 && sAhead >= 0.0) continue;\n"
+	"        float sBehind = -proj;\n"
+	"        float tSeg = clamp(proj / effLen, 0.0, 1.0);\n"
+	"        float segTime = mix(tB, nodeA.z, tSeg);\n"
+	"        float age = clamp(anim_time - segTime, 0.0, 4.2);\n"
+	"        if (age >= 4.15) continue;\n"
+	"        float segEnergy = mix((velB.z > 0.002) ? velB.z : velA.z * 0.5, velA.z, tSeg);\n"
+	"        float ageDecay = exp(-0.85 * age) * smoothstep(4.0, 0.15, age) * segEnergy;\n"
+	"        float longWin = (sAhead > 0.0) ? exp(-(sAhead * sAhead) * 0.65) : 1.0;\n"
+	"        if (sBehind > 0.0) longWin *= exp(-(sBehind * sBehind) / (12.0 + age * 14.0));\n"
+	"        float envBase = ageDecay * longWin * frontGate;\n"
+	"        if (envBase <= 0.002) continue;\n"
+	"        vec2 closest = pB + tDir * clamp(proj, 0.0, effLen);\n"
+	"        float backDist = length(uLambWakeHead.xy - closest);\n"
+	"        float rawU = dot((pos + warpOffset * (0.20 + 0.14 * age)) - closest, nDir);\n"
+	"        float u = abs(rawU);\n"
+	"        float signU = (rawU >= 0.0) ? 1.0 : -1.0;\n"
+	"        float wakeHalfW = 1.6 + backDist * 0.18 + age * 2.2;\n"
+	"        float edgeSigma = 1.15 + age * 0.85;\n"
+	"        float dEdge = (u - wakeHalfW) / edgeSigma;\n"
+	"        /* Punchy non-oscillatory Kelvin V-shear rim along the wake arms */\n"
+	"        float rimEnv = exp(-(dEdge * dEdge)) * exp(-backDist * 0.032) * envBase;\n"
+	"        float spdScale = clamp(spdA / 36.0, 0.35, 1.15);\n"
+	"        if (rimEnv > 0.002) {\n"
+	"            float hRim = 0.22 * rimEnv * spdScale;\n"
+	"            totalH += hRim;\n"
+	"            float dRimDu = (-2.4 * dEdge / edgeSigma) * hRim;\n"
+	"            totalGrad += (nDir * signU - tDir * 0.22) * dRimDu;\n"
+	"            totalFoam += rimEnv * spdScale * exp(-age * 1.15) * (0.20 + 0.26 * wakeTurb.x);\n"
 	"        }\n"
-	"        if (armEnv > 0.002) {\n"
-	"            float kFreq = 0.92 / (1.0 + 0.18 * age);\n"
-	"            float phase = (u - effBack * 0.36 - age * 14.0) * kFreq;\n"
-	"            float wSin = sin(phase);\n"
-	"            float wCos = cos(phase);\n"
-	"            float amp = 0.22 * ageDecay * armEnv * clamp(spd / 42.0, 0.20, 1.15);\n"
-	"            totalH += wSin * amp;\n"
-	"            vec2 phaseGrad = (right * signU - fwd * 0.36) * (kFreq * wCos * amp);\n"
-	"            totalGrad += phaseGrad;\n"
-	"        }\n"
-	"        /* Turbulent aerated stern eddy trail directly behind the moving lamb */\n"
-	"        float sternEnv = exp(-(u * u) / (9.0 + age * 10.0)) * exp(-(effBack * effBack) / (65.0 + age * 80.0)) * step(-2.0, effBack);\n"
-	"        if (sternEnv > 0.005) {\n"
-	"            float eddyStrength = sternEnv * ageDecay * clamp(spd / 48.0, 0.15, 1.0);\n"
-	"            totalGrad += wakeTurb.yz * (0.42 * eddyStrength);\n"
-	"            float bubbleMask = smoothstep(0.44, 0.76, wakeTurb.x) * exp(-age * 1.35);\n"
-	"            totalFoam += eddyStrength * bubbleMask * 0.38;\n"
+	"        /* Turbulent wake trough & aerated whitewater trail strictly inside the stern V-cone */\n"
+	"        float coreEnv = smoothstep(wakeHalfW + edgeSigma * 0.85, wakeHalfW * 0.15, u) * exp(-backDist * 0.038) * envBase;\n"
+	"        if (coreEnv > 0.003) {\n"
+	"            float eddy = coreEnv * spdScale;\n"
+	"            totalH -= 0.12 * eddy;\n"
+	"            totalGrad += wakeTurb.yz * (0.48 * eddy) + nDir * (signU * 0.22 * eddy);\n"
+	"            float bubbleMask = smoothstep(0.32, 0.72, wakeTurb.x) * exp(-age * 1.25);\n"
+	"            totalFoam += eddy * (0.18 + bubbleMask * 0.48);\n"
 	"        }\n"
 	"    }\n"
-	"    return vec4(clamp(totalH, -0.45, 0.45) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.55));\n"
+	"    return vec4(clamp(totalH, -0.45, 0.45) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.72));\n"
 	"}\n"
 	"vec4 sampleSubstrateSmooth(vec2 uv) {\n"
 	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
@@ -1089,7 +1107,7 @@ static const char *s_fs_terrain =
 	"            float tRef = mod(uAnimTime, 256.0);\n"
 	"            vec3 wRef1 = chaff_grad_noise2d(vWorldPos * 0.22 + vec2(tRef * 0.55, -tRef * 0.45), 0x57415631u);\n"
 	"            vec3 wRef2 = chaff_grad_noise2d(vWorldPos * 0.52 + vec2(-tRef * 0.80, tRef * 0.65), 0x57415632u);\n"
-	"            waveRefGrad = (wRef1.yz * 0.65 + wRef2.yz * 0.35 + lambWake.yz * 1.45) * refFade;\n"
+	"            waveRefGrad = (wRef1.yz * 0.65 + wRef2.yz * 0.35 + lambWake.yz * 1.65) * refFade;\n"
 	"            vec2 refractOffset = waveRefGrad * (1.92 * worldToUV * depthFactor * edgeMask);\n"
 	"            sampleUV = clamp(vUV + refractOffset, 0.0, 1.0);\n"
 	"        }\n"
@@ -1201,10 +1219,6 @@ static const char *s_fs_terrain =
 	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.32 * wetSand + 0.34 * shoreWetMoisture) * subAerialMask;\n"
 	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.42 * subAerialMask;\n"
 	"            dryCol += vec3((wetFilmSpec + quartzGlint) * (0.35 + 0.65 * sandBlend) * distFade);\n"
-	"            if (swashState.z > 0.01 && subAerialMask > 0.01) {\n"
-	"                /* Residual receding swash foam lace left on the wet beach during backwash */\n"
-	"                dryCol = mix(dryCol, vec3(0.92, 0.96, 1.0), swashState.z * subAerialMask * 0.48);\n"
-	"            }\n"
 	"            if (rockFactor > 0.25 && distFade > 0.0) {\n"
 	"                float specAngle = max(0.0, dot(N_frag, H_half));\n"
 	"                float spec = pow(specAngle, 24.0) * (rockFactor * (0.20 + 0.12 * closeZoom) * (1.0 - rockCrevice) * distFade);\n"
@@ -1327,8 +1341,8 @@ static const char *s_fs_terrain =
 	"        float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
 	"        vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw);\n"
 	"        vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.0, 0.35, fragWaterDepth);\n"
-	"        vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz;\n"
-	"        vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 1.65;\n"
+	"        vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85;\n"
+	"        vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85;\n"
 	"        vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
 	"        vec3 specNormal = normalize(torusN - specGrad.x * tangentU - specGrad.y * tangentV);\n"
 	"        float NdotV = max(0.0, dot(waveNormal, viewDir));\n"
@@ -1795,30 +1809,28 @@ static const char *s_fs_water =
 	"vec4 eval_shore_swash(vec2 pos, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw) {\n"
 	"    float isOcean = 1.0 - smoothstep(0.25, 0.75, abs(uSeaLevel - uBaseSeaLevel));\n"
 	"    float slopeMag = length(slopeGrad);\n"
-	"    float nearShore = smoothstep(5.5, 0.0, abs(terrainZ - baseTideZ));\n"
+	"    float nearShore = smoothstep(6.0, 0.0, abs(terrainZ - baseTideZ));\n"
 	"    if (nearShore <= 0.001 || dist > 3800.0) {\n"
 	"        float tideHigh = uSeaLevel + isOcean * 0.99;\n"
 	"        return vec4(baseTideZ, max(baseTideZ, tideHigh), 0.0, 0.0);\n"
 	"    }\n"
 	"    float distFade = smoothstep(3800.0, 450.0, dist);\n"
 	"    vec2 shoreDir = (slopeMag > 1e-4) ? (slopeGrad / slopeMag) : vec2(0.7071, -0.7071);\n"
-	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.045 + vec2(13.7, -9.2), 0x53574153u);\n"
-	"    vec3 nMicro = chaff_grad_noise2d(pos * 0.190 + nAlong.yz * 0.45, 0x53574132u);\n"
-	"    float groupEnv = 0.58 + 0.42 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 3.2);\n"
-	"    float crossCoord = dot(pos, shoreDir) * 0.14 + (nAlong.x - 0.5) * 1.65 + (nMicro.x - 0.5) * 0.55;\n"
-	"    float waveArg = mod(anim_time * 1.18, 628.3185) - crossCoord;\n"
-	"    float rawWave = sin(waveArg) + 0.32 * sin(2.0 * waveArg - 0.45) + 0.10 * cos(3.0 * waveArg);\n"
-	"    float swashAmp = (0.06 + 0.52 * isOcean) * groupEnv * smoothstep(0.015, 0.18, slopeMag) * distFade;\n"
-	"    float swashDisp = rawWave * swashAmp;\n"
+	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.025 + vec2(13.7, -9.2), 0x53574153u);\n"
+	"    float groupEnv = 0.65 + 0.35 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.4);\n"
+	"    float crossCoord = dot(pos, shoreDir) * 0.08 + (nAlong.x - 0.5) * 1.15;\n"
+	"    float waveArg = mod(anim_time * 0.95, 628.3185) - crossCoord;\n"
+	"    float swellWave = sin(waveArg) + 0.25 * sin(2.0 * waveArg - 0.45);\n"
+	"    vec4 shoreWaves = eval_zoom_water_waves(pos, anim_time, dist, fw);\n"
+	"    float slopeResponse = smoothstep(0.008, 0.14, slopeMag) * distFade;\n"
+	"    float waveletRunup = shoreWaves.x * (0.55 + 0.45 * isOcean) * (0.45 + 0.55 * slopeResponse);\n"
+	"    float swellRunup = swellWave * (0.08 + 0.38 * isOcean) * groupEnv * slopeResponse;\n"
+	"    float swashDisp = waveletRunup + swellRunup;\n"
 	"    float swashSurfZ = baseTideZ + swashDisp;\n"
-	"    float recentSwashTop = baseTideZ + (0.08 + 0.68 * isOcean) * (0.75 + 0.25 * groupEnv) * smoothstep(0.015, 0.18, slopeMag);\n"
-	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.35);\n"
-	"    float boreFront = smoothstep(-0.20, 0.55, cos(waveArg - 0.35));\n"
-	"    float edgeProximity = smoothstep(0.55, 0.0, abs(terrainZ - swashSurfZ));\n"
-	"    float rockImpact = smoothstep(0.10, 0.28, slopeMag) * smoothstep(-0.1, 0.7, rawWave);\n"
-	"    vec3 laceNoise = chaff_grad_noise2d(pos * 0.85 + shoreDir * (rawWave * 0.6), 0x464F414Du);\n"
-	"    float cellularLace = smoothstep(0.42, 0.74, laceNoise.x * 0.65 + nMicro.x * 0.35);\n"
-	"    float swashFoam = clamp((edgeProximity * (0.35 + 0.65 * boreFront) + rockImpact * 0.55) * cellularLace * isOcean * distFade * nd_octave_weight(2.5, fw), 0.0, 0.68);\n"
+	"    float recentSwashTop = baseTideZ + (0.28 + 0.72 * isOcean) * (0.75 + 0.25 * groupEnv) * slopeResponse;\n"
+	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.25);\n"
+	"    float edgeLip = smoothstep(0.32, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.35, shoreWaves.x + swellWave * 0.25);\n"
+	"    float swashFoam = clamp(edgeLip * (0.16 + 0.34 * shoreWaves.w) * isOcean * distFade, 0.0, 0.36);\n"
 	"    float swashFilm = smoothstep(highWaterZ + 0.15, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
 	"}\n"
@@ -1826,59 +1838,82 @@ static const char *s_fs_water =
 	"    float headEnergy = uLambWakeHead.w;\n"
 	"    if (headEnergy <= 0.001 || dist > 2600.0) return vec4(0.0);\n"
 	"    vec2 dHead = pos - uLambWakeHead.xy;\n"
-	"    if (dot(dHead, dHead) > 190.0 * 190.0) return vec4(0.0);\n"
-	"    float distFade = smoothstep(2600.0, 450.0, dist) * nd_octave_weight(3.5, fw);\n"
+	"    if (dot(dHead, dHead) > 140.0 * 140.0) return vec4(0.0);\n"
+	"    float distFade = smoothstep(2600.0, 450.0, dist) * nd_octave_weight(3.5, fw) * headEnergy;\n"
 	"    if (distFade <= 0.001) return vec4(0.0);\n"
+	"    vec4 headVel0 = uLambWakeVel0[0];\n"
+	"    float headSpd = length(headVel0.xy);\n"
+	"    vec2 headFwd = (headSpd > 0.5) ? (headVel0.xy / headSpd) : vec2(0.0, 1.0);\n"
+	"    float sHead = dot(dHead, headFwd);\n"
+	"    /* Strict forward cutoff: never draw any wake stripe in front of the lamb */\n"
+	"    if (sHead > 0.0) return vec4(0.0);\n"
+	"    float frontGate = smoothstep(0.0, -0.35, sHead);\n"
 	"    float totalH = 0.0;\n"
 	"    vec2 totalGrad = vec2(0.0);\n"
 	"    float totalFoam = 0.0;\n"
-	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.95, 256.0), -mod(anim_time * 0.75, 256.0)), 0x57414B45u);\n"
-	"    vec2 warpOffset = (wakeTurb.yz) * 1.35;\n"
-	"    for (int i = 0; i < 8; i++) {\n"
-	"        vec4 nodeXYT = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
-	"        vec4 nodeVel = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
-	"        float nodeEnergy = nodeVel.z;\n"
-	"        if (nodeEnergy <= 0.002) continue;\n"
-	"        float age = clamp(anim_time - nodeXYT.z, 0.0, 6.0);\n"
-	"        float ageDecay = exp(-0.72 * age) * smoothstep(5.5, 0.2, age) * nodeEnergy;\n"
-	"        if (ageDecay <= 0.002) continue;\n"
-	"        vec2 v = nodeVel.xy;\n"
-	"        float spd = length(v);\n"
-	"        vec2 fwd = (spd > 0.5) ? (v / spd) : vec2(0.0, 1.0);\n"
-	"        vec2 right = vec2(-fwd.y, fwd.x);\n"
-	"        vec2 rel = (pos + warpOffset * (0.25 + 0.15 * age)) - nodeXYT.xy;\n"
-	"        float s = dot(rel, fwd);\n"
-	"        float u = abs(dot(rel, right));\n"
-	"        float signU = (dot(rel, right) >= 0.0) ? 1.0 : -1.0;\n"
-	"        float packetW = 3.2 + age * 4.2;\n"
-	"        float effBack = max(0.0, -s + 2.5);\n"
-	"        float kelvinHalfW = 2.8 + effBack * 0.42 + age * 6.5;\n"
-	"        float armDist = u - kelvinHalfW * 0.68;\n"
-	"        float armEnv = exp(-(armDist * armDist) / max(1.5, packetW * packetW)) * exp(-effBack * 0.032) * smoothstep(5.5, -1.5, s);\n"
-	"        if (i == 0 && spd > 4.0) {\n"
-	"            float bowR = length(vec2(max(0.0, s + 2.0) * 1.25, u * 0.85));\n"
-	"            float bowEnv = exp(-((bowR - 5.2) * (bowR - 5.2)) / 6.5) * smoothstep(-6.0, 2.0, s);\n"
-	"            armEnv = max(armEnv, bowEnv * 0.85);\n"
+	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.85, 256.0), -mod(anim_time * 0.65, 256.0)), 0x57414B45u);\n"
+	"    vec2 warpOffset = wakeTurb.yz * 1.05;\n"
+	"    for (int i = 0; i < 7; i++) {\n"
+	"        vec4 nodeA = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
+	"        vec4 velA  = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
+	"        if (velA.z <= 0.002) continue;\n"
+	"        int j = i + 1;\n"
+	"        vec4 nodeB = (j < 4) ? uLambWakeXYT0[j] : uLambWakeXYT1[j - 4];\n"
+	"        vec4 velB  = (j < 4) ? uLambWakeVel0[j] : uLambWakeVel1[j - 4];\n"
+	"        float spdA = length(velA.xy);\n"
+	"        vec2 fwdA = (spdA > 0.5) ? (velA.xy / spdA) : headFwd;\n"
+	"        vec2 pA = nodeA.xy;\n"
+	"        vec2 pB = (velB.z > 0.002) ? nodeB.xy : (pA - fwdA * 6.0);\n"
+	"        float tB = (velB.z > 0.002) ? nodeB.z : (nodeA.z - 0.25);\n"
+	"        vec2 seg = pA - pB;\n"
+	"        float segLen = length(seg);\n"
+	"        vec2 tDir = (segLen > 0.25) ? (seg / segLen) : fwdA;\n"
+	"        vec2 nDir = vec2(-tDir.y, tDir.x);\n"
+	"        float effLen = max(segLen, 3.5);\n"
+	"        vec2 relB = pos - pB;\n"
+	"        float proj = dot(relB, tDir);\n"
+	"        float sAhead = proj - effLen;\n"
+	"        if (i == 0 && sAhead >= 0.0) continue;\n"
+	"        float sBehind = -proj;\n"
+	"        float tSeg = clamp(proj / effLen, 0.0, 1.0);\n"
+	"        float segTime = mix(tB, nodeA.z, tSeg);\n"
+	"        float age = clamp(anim_time - segTime, 0.0, 4.2);\n"
+	"        if (age >= 4.15) continue;\n"
+	"        float segEnergy = mix((velB.z > 0.002) ? velB.z : velA.z * 0.5, velA.z, tSeg);\n"
+	"        float ageDecay = exp(-0.85 * age) * smoothstep(4.0, 0.15, age) * segEnergy;\n"
+	"        float longWin = (sAhead > 0.0) ? exp(-(sAhead * sAhead) * 0.65) : 1.0;\n"
+	"        if (sBehind > 0.0) longWin *= exp(-(sBehind * sBehind) / (12.0 + age * 14.0));\n"
+	"        float envBase = ageDecay * longWin * frontGate;\n"
+	"        if (envBase <= 0.002) continue;\n"
+	"        vec2 closest = pB + tDir * clamp(proj, 0.0, effLen);\n"
+	"        float backDist = length(uLambWakeHead.xy - closest);\n"
+	"        float rawU = dot((pos + warpOffset * (0.20 + 0.14 * age)) - closest, nDir);\n"
+	"        float u = abs(rawU);\n"
+	"        float signU = (rawU >= 0.0) ? 1.0 : -1.0;\n"
+	"        float wakeHalfW = 1.6 + backDist * 0.18 + age * 2.2;\n"
+	"        float edgeSigma = 1.15 + age * 0.85;\n"
+	"        float dEdge = (u - wakeHalfW) / edgeSigma;\n"
+	"        /* Punchy non-oscillatory Kelvin V-shear rim along the wake arms */\n"
+	"        float rimEnv = exp(-(dEdge * dEdge)) * exp(-backDist * 0.032) * envBase;\n"
+	"        float spdScale = clamp(spdA / 36.0, 0.35, 1.15);\n"
+	"        if (rimEnv > 0.002) {\n"
+	"            float hRim = 0.22 * rimEnv * spdScale;\n"
+	"            totalH += hRim;\n"
+	"            float dRimDu = (-2.4 * dEdge / edgeSigma) * hRim;\n"
+	"            totalGrad += (nDir * signU - tDir * 0.22) * dRimDu;\n"
+	"            totalFoam += rimEnv * spdScale * exp(-age * 1.15) * (0.20 + 0.26 * wakeTurb.x);\n"
 	"        }\n"
-	"        if (armEnv > 0.002) {\n"
-	"            float kFreq = 0.92 / (1.0 + 0.18 * age);\n"
-	"            float phase = (u - effBack * 0.36 - age * 14.0) * kFreq;\n"
-	"            float wSin = sin(phase);\n"
-	"            float wCos = cos(phase);\n"
-	"            float amp = 0.22 * ageDecay * armEnv * clamp(spd / 42.0, 0.20, 1.15);\n"
-	"            totalH += wSin * amp;\n"
-	"            vec2 phaseGrad = (right * signU - fwd * 0.36) * (kFreq * wCos * amp);\n"
-	"            totalGrad += phaseGrad;\n"
-	"        }\n"
-	"        float sternEnv = exp(-(u * u) / (9.0 + age * 10.0)) * exp(-(effBack * effBack) / (65.0 + age * 80.0)) * step(-2.0, effBack);\n"
-	"        if (sternEnv > 0.005) {\n"
-	"            float eddyStrength = sternEnv * ageDecay * clamp(spd / 48.0, 0.15, 1.0);\n"
-	"            totalGrad += wakeTurb.yz * (0.42 * eddyStrength);\n"
-	"            float bubbleMask = smoothstep(0.44, 0.76, wakeTurb.x) * exp(-age * 1.35);\n"
-	"            totalFoam += eddyStrength * bubbleMask * 0.38;\n"
+	"        /* Turbulent wake trough & aerated whitewater trail strictly inside the stern V-cone */\n"
+	"        float coreEnv = smoothstep(wakeHalfW + edgeSigma * 0.85, wakeHalfW * 0.15, u) * exp(-backDist * 0.038) * envBase;\n"
+	"        if (coreEnv > 0.003) {\n"
+	"            float eddy = coreEnv * spdScale;\n"
+	"            totalH -= 0.12 * eddy;\n"
+	"            totalGrad += wakeTurb.yz * (0.48 * eddy) + nDir * (signU * 0.22 * eddy);\n"
+	"            float bubbleMask = smoothstep(0.32, 0.72, wakeTurb.x) * exp(-age * 1.25);\n"
+	"            totalFoam += eddy * (0.18 + bubbleMask * 0.48);\n"
 	"        }\n"
 	"    }\n"
-	"    return vec4(clamp(totalH, -0.45, 0.45) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.55));\n"
+	"    return vec4(clamp(totalH, -0.45, 0.45) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.72));\n"
 	"}\n"
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
@@ -1936,8 +1971,8 @@ static const char *s_fs_water =
 	"    float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
 	"    vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw);\n"
 	"    vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.0, 0.35, fragWaterDepth);\n"
-	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz;\n"
-	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 1.65;\n"
+	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85;\n"
+	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85;\n"
 	"    vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
 	"    vec3 specNormal = normalize(torusN - specGrad.x * tangentU - specGrad.y * tangentV);\n"
 	"    float NdotV = max(0.0, dot(waveNormal, viewDir));\n"
@@ -2337,19 +2372,21 @@ static const char *s_fs_billboard =
 	"    /* 2. Sub-Texel Anti-Aliased, Snell-Refracted & Outline-Softened Sprite Sampling */\n"
 	"    float style = vQuadUV.w;\n"
 	"    if (style > 4.5) {\n"
-	"        /* ND_BB_STYLE_PARTICLE (5.0): Volumetric sunlit water droplet & sea-spray mist puff */\n"
+	"        /* ND_BB_STYLE_PARTICLE (5.0): Crisp sunlit ballistic water droplet bead with per-droplet color variation */\n"
 	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0);\n"
+	"        qc.x *= (1.0 + 0.15 * max(0.0, qc.y));\n"
 	"        float r2 = dot(qc, qc);\n"
 	"        if (r2 >= 1.0) discard;\n"
-	"        vec3 pNoise = chaff_grad_noise2d(vLocalPos.xy * 0.55 + qc * 1.4, 0x53505259u);\n"
 	"        float radial = clamp(1.0 - r2, 0.0, 1.0);\n"
-	"        float softCore = radial * radial * (0.72 + 0.56 * pNoise.x);\n"
-	"        float pAlpha = clamp(softCore * vTint.a * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.92);\n"
-	"        if (pAlpha <= 0.008) discard;\n"
-	"        float rim = smoothstep(0.18, 0.88, r2) * radial;\n"
-	"        vec3 sunHighlight = vec3(1.0, 0.99, 0.95) * (0.68 + 0.32 * max(0.0, -qc.x * 0.55 + qc.y * 0.65));\n"
-	"        vec3 mistBody = mix(sky * 0.88 + vec3(0.12, 0.16, 0.18), sunHighlight, 0.58 + 0.34 * rim);\n"
-	"        vec3 dropCol = clamp(mistBody * vTint.rgb, 0.0, 1.0);\n"
+	"        float nz = sqrt(radial);\n"
+	"        vec3 dropN = normalize(vec3(qc.x * 0.75, qc.y * 0.75, nz));\n"
+	"        vec3 sunDir = normalize(vec3(-0.55, 0.62, 0.56));\n"
+	"        float specGlint = pow(max(0.0, dot(dropN, sunDir)), 4.0);\n"
+	"        float fresnelRim = pow(1.0 - nz, 2.0) * radial;\n"
+	"        float coreMask = smoothstep(0.0, 0.72, radial);\n"
+	"        float pAlpha = clamp(coreMask * vTint.a * 1.35 * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.98);\n"
+	"        if (pAlpha <= 0.02) discard;\n"
+	"        vec3 dropCol = clamp(mix(vTint.rgb, vec3(1.0, 1.0, 1.0), specGlint * 0.65 + fresnelRim * 0.25), 0.0, 1.0);\n"
 	"        FragColor = vec4(dropCol, pAlpha);\n"
 	"        return;\n"
 	"    }\n"
@@ -3165,6 +3202,7 @@ typedef struct {
 
 static struct {
 	bool initialized;
+	bool pipelines_ready;
 	gl_terrain_pipe_t terrain_pipe;
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
@@ -3222,16 +3260,10 @@ static GLuint compile_shader(GLenum type, const char *src)
 	if (!sh) return 0;
 	glShaderSource(sh, src, strlen(src));
 	glCompileShader(sh);
-	GLint status = 0;
-	status = glGetShaderParameter(sh, GL_COMPILE_STATUS);
-	if (!status) {
-		glDeleteShader(sh);
-		return 0;
-	}
 	return sh;
 }
 
-static GLuint create_program(const char *vs_src, const char *fs_src)
+static GLuint create_program_async(const char *vs_src, const char *fs_src)
 {
 	GLuint vs = compile_shader(GL_VERTEX_SHADER, vs_src);
 	GLuint fs = compile_shader(GL_FRAGMENT_SHADER, fs_src);
@@ -3249,13 +3281,8 @@ static GLuint create_program(const char *vs_src, const char *fs_src)
 	glAttachShader(prog, vs);
 	glAttachShader(prog, fs);
 	glLinkProgram(prog);
-	GLint status = glGetProgramParameter(prog, GL_LINK_STATUS);
 	glDeleteShader(vs);
 	glDeleteShader(fs);
-	if (!status) {
-		glDeleteProgram(prog);
-		return 0;
-	}
 	return prog;
 }
 
@@ -3324,100 +3351,134 @@ static void init_grid_buffers(void)
 
 static void init_pipelines(void)
 {
+	s_gl.terrain_pipe.prog = create_program_async(s_vs_terrain, s_fs_terrain);
+	s_gl.water_pipe.prog   = create_program_async(s_vs_water, s_fs_water);
+	s_gl.bb_pipe.prog      = create_program_async(s_vs_billboard, s_fs_billboard);
+	init_grid_buffers();
+	s_gl.initialized = true;
+	s_gl.pipelines_ready = false;
+}
+
+static bool check_pipelines_ready(void)
+{
+	if (s_gl.pipelines_ready)
+		return true;
+	if (!s_gl.initialized)
+		return false;
+
+	if (s_gl.terrain_pipe.prog && !glGetProgramParameter(s_gl.terrain_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.water_pipe.prog && !glGetProgramParameter(s_gl.water_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.bb_pipe.prog && !glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+
 	/* Terrain pipeline */
-	s_gl.terrain_pipe.prog = create_program(s_vs_terrain, s_fs_terrain);
 	if (s_gl.terrain_pipe.prog) {
-		GLuint p = s_gl.terrain_pipe.prog;
-		s_gl.terrain_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-		s_gl.terrain_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
-		s_gl.terrain_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
-		s_gl.terrain_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
-		s_gl.terrain_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-		s_gl.terrain_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
-		s_gl.terrain_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
-		s_gl.terrain_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
-		s_gl.terrain_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-		s_gl.terrain_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-		s_gl.terrain_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
-		s_gl.terrain_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-		s_gl.terrain_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
-		s_gl.terrain_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-		s_gl.terrain_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-		s_gl.terrain_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-		s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-		s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-		s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
-		s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
-		s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-		s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
-		s_gl.terrain_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
-		s_gl.terrain_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
-		s_gl.terrain_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
-		s_gl.terrain_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
-		s_gl.terrain_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
-		s_gl.terrain_pipe.uWorldId        = glGetUniformLocation(p, "uWorldId", 8);
-		s_gl.terrain_pipe.uSeaOffsetQ12_4 = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
-		s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+		if (!glGetProgramParameter(s_gl.terrain_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.terrain_pipe.prog);
+			s_gl.terrain_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.terrain_pipe.prog;
+			s_gl.terrain_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.terrain_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
+			s_gl.terrain_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+			s_gl.terrain_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
+			s_gl.terrain_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+			s_gl.terrain_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
+			s_gl.terrain_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
+			s_gl.terrain_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
+			s_gl.terrain_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+			s_gl.terrain_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
+			s_gl.terrain_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
+			s_gl.terrain_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+			s_gl.terrain_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
+			s_gl.terrain_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
+			s_gl.terrain_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
+			s_gl.terrain_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+			s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+			s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
+			s_gl.terrain_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
+			s_gl.terrain_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+			s_gl.terrain_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+			s_gl.terrain_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
+			s_gl.terrain_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
+			s_gl.terrain_pipe.uWorldId        = glGetUniformLocation(p, "uWorldId", 8);
+			s_gl.terrain_pipe.uSeaOffsetQ12_4 = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
+			s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+		}
 	}
 
 	/* Water pipeline */
-	s_gl.water_pipe.prog = create_program(s_vs_water, s_fs_water);
 	if (s_gl.water_pipe.prog) {
-		GLuint p = s_gl.water_pipe.prog;
-		s_gl.water_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-		s_gl.water_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
-		s_gl.water_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
-		s_gl.water_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
-		s_gl.water_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-		s_gl.water_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
-		s_gl.water_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
-		s_gl.water_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
-		s_gl.water_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-		s_gl.water_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-		s_gl.water_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
-		s_gl.water_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-		s_gl.water_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
-		s_gl.water_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-		s_gl.water_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-		s_gl.water_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-		s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-		s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-		s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
-		s_gl.water_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
-		s_gl.water_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-		s_gl.water_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
-		s_gl.water_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
-		s_gl.water_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
-		s_gl.water_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
-		s_gl.water_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
-		s_gl.water_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
-		s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+		if (!glGetProgramParameter(s_gl.water_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.water_pipe.prog);
+			s_gl.water_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.water_pipe.prog;
+			s_gl.water_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.water_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
+			s_gl.water_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+			s_gl.water_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
+			s_gl.water_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+			s_gl.water_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
+			s_gl.water_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
+			s_gl.water_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
+			s_gl.water_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+			s_gl.water_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
+			s_gl.water_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
+			s_gl.water_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+			s_gl.water_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
+			s_gl.water_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
+			s_gl.water_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
+			s_gl.water_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+			s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.water_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+			s_gl.water_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.water_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
+			s_gl.water_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
+			s_gl.water_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+			s_gl.water_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+			s_gl.water_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
+			s_gl.water_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
+			s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+		}
 	}
 
 	/* Billboard pipeline */
-	s_gl.bb_pipe.prog = create_program(s_vs_billboard, s_fs_billboard);
 	if (s_gl.bb_pipe.prog) {
-		GLuint p = s_gl.bb_pipe.prog;
-		s_gl.bb_pipe.uMVP           = glGetUniformLocation(p, "uMVP", 4);
-		s_gl.bb_pipe.uAtlasTex      = glGetUniformLocation(p, "uAtlasTex", 9);
-		s_gl.bb_pipe.uSeaLevel      = glGetUniformLocation(p, "uSeaLevel", 9);
-		s_gl.bb_pipe.uAnimTime      = glGetUniformLocation(p, "uAnimTime", 9);
-		s_gl.bb_pipe.uCameraPos     = glGetUniformLocation(p, "uCameraPos", 10);
-		s_gl.bb_pipe.uFogStart      = glGetUniformLocation(p, "uFogStart", 9);
-		s_gl.bb_pipe.uFogEnd        = glGetUniformLocation(p, "uFogEnd", 7);
-		s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
-		s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
-		s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
-		s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
-		s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
-		s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
-		s_gl.bb_pipe.aLocalPos      = glGetAttribLocation(p, "a_local_pos", 11);
-		s_gl.bb_pipe.aQuadUV        = glGetAttribLocation(p, "a_quad_uv", 9);
-		s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
+		if (!glGetProgramParameter(s_gl.bb_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.bb_pipe.prog);
+			s_gl.bb_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.bb_pipe.prog;
+			s_gl.bb_pipe.uMVP           = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.bb_pipe.uAtlasTex      = glGetUniformLocation(p, "uAtlasTex", 9);
+			s_gl.bb_pipe.uSeaLevel      = glGetUniformLocation(p, "uSeaLevel", 9);
+			s_gl.bb_pipe.uAnimTime      = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.bb_pipe.uCameraPos     = glGetUniformLocation(p, "uCameraPos", 10);
+			s_gl.bb_pipe.uFogStart      = glGetUniformLocation(p, "uFogStart", 9);
+			s_gl.bb_pipe.uFogEnd        = glGetUniformLocation(p, "uFogEnd", 7);
+			s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
+			s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
+			s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
+			s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
+			s_gl.bb_pipe.aLocalPos      = glGetAttribLocation(p, "a_local_pos", 11);
+			s_gl.bb_pipe.aQuadUV        = glGetAttribLocation(p, "a_quad_uv", 9);
+			s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
+		}
 	}
 
-	init_grid_buffers();
-	s_gl.initialized = true;
+	s_gl.pipelines_ready = true;
+	return true;
 }
 
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
@@ -3504,6 +3565,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	ar_mat4_multiply(s_gl.cur_mvp, proj, modelview);
 
 	if (!s_gl.initialized) init_pipelines();
+	(void)check_pipelines_ready();
 
 	glViewport(0, 0, (GLsizei)stage_w, (GLsizei)stage_h);
 	glEnable(GL_DEPTH_TEST);
@@ -3566,7 +3628,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
                                      const nd_planet_def_t *pdef)
 {
 	(void)stage_w; (void)stage_h;
-	if (!s_gl.initialized || !s_gl.terrain_pipe.prog) return;
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.terrain_pipe.prog) return;
 	const nd_planet_def_t *eff_pdef = pdef ? pdef : &s_gl.cur_pdef;
 
 	float terrain_sea_lvl = sea_level;
@@ -3743,7 +3805,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 void nd_seven_gl_flush_water(void)
 {
-	if (!s_gl.initialized || !s_gl.water_pipe.prog || s_gl.water_count == 0) {
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.water_pipe.prog || s_gl.water_count == 0) {
 		s_gl.water_count = 0;
 		return;
 	}
@@ -3833,7 +3895,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   const uint32_t *atlas_rgba)
 {
 	if (!batch || count == 0) return;
-	if (!s_gl.initialized || !s_gl.bb_pipe.prog) return;
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
 
 	uint32_t cur_ver = atlas_rgba_version();
 	if ((!s_gl.atlas_tex || s_gl.atlas_ver != cur_ver) && atlas_rgba) {
@@ -4425,12 +4487,12 @@ float nd_seven_gl_eval_shore_swash(float wx, float wy,
 void nd_seven_gl_set_lamb_wake(float wx, float wy, float ground_z,
                                int dir, int walking, float anim_time)
 {
-	/* Direction unit vector: 0=North(0,-1), 1=East(1,0), 2=South(0,1), 3=West(-1,0) */
+	/* Match nd_seven_motion.h: DIR_DOWN=0 (+Y), DIR_UP=1 (-Y), DIR_LEFT=2 (-X), DIR_RIGHT=3 (+X) */
 	float dir_vx = 0.0f, dir_vy = 1.0f;
-	if (dir == 0) { dir_vx = 0.0f; dir_vy = -1.0f; }
-	else if (dir == 1) { dir_vx = 1.0f; dir_vy = 0.0f; }
-	else if (dir == 2) { dir_vx = 0.0f; dir_vy = 1.0f; }
-	else if (dir == 3) { dir_vx = -1.0f; dir_vy = 0.0f; }
+	if (dir == 0) { dir_vx = 0.0f; dir_vy = 1.0f; }
+	else if (dir == 1) { dir_vx = 0.0f; dir_vy = -1.0f; }
+	else if (dir == 2) { dir_vx = -1.0f; dir_vy = 0.0f; }
+	else if (dir == 3) { dir_vx = 1.0f; dir_vy = 0.0f; }
 
 	/* Determine if lamb is in water (ground_z < local water level + 0.65) */
 	float sea_lvl = s_gl.cur_sea_level;
@@ -4442,45 +4504,92 @@ void nd_seven_gl_set_lamb_wake(float wx, float wy, float ground_z,
 	float dist_moved = sqrtf(dx * dx + dy * dy);
 
 	if (in_water) {
-		s_gl.cur_wake_head[0] = wx;
-		s_gl.cur_wake_head[1] = wy;
-		s_gl.cur_wake_head[2] = ground_z;
-		s_gl.cur_wake_head[3] = 1.0f;
-
-		/* Spawn a new path-ribbon breadcrumb node when moving >= 3.2 world units or every 0.18s while wading */
-		bool should_record = (s_gl.cur_wake_last_t <= 0.0f) ||
-		                     (dist_moved >= 3.2f && dt > 0.02f) ||
-		                     (walking && dt >= 0.16f) ||
-		                     (!walking && dt >= 0.45f);
-		if (should_record) {
-			uint32_t slot = s_gl.cur_wake_cursor % ND_LAMB_WAKE_NODES;
-			s_gl.cur_wake_cursor = (slot + 1) % ND_LAMB_WAKE_NODES;
-
-			float spd = (dt > 0.01f && dist_moved > 0.1f) ? fminf(64.0f, dist_moved / dt) : (walking ? 38.0f : 6.5f);
-			float vx = (dist_moved > 0.25f) ? (dx / dist_moved) * spd : dir_vx * spd;
-			float vy = (dist_moved > 0.25f) ? (dy / dist_moved) * spd : dir_vy * spd;
+		/* Reset trail if entering water fresh or after teleport / time reset */
+		if (s_gl.cur_wake_last_t <= 0.0f || dt < 0.0f || dist_moved > 64.0f || s_gl.cur_wake_vel[0][2] <= 0.001f) {
+			memset(s_gl.cur_wake_xyt, 0, sizeof(s_gl.cur_wake_xyt));
+			memset(s_gl.cur_wake_vel, 0, sizeof(s_gl.cur_wake_vel));
 			float water_depth = fmaxf(0.15f, sea_lvl - ground_z);
+			float init_spd = walking ? 38.0f : 8.0f;
 			float energy = fminf(1.0f, 0.35f + 0.65f * fminf(1.0f, water_depth / 2.5f)) * (walking ? 1.0f : 0.42f);
+			s_gl.cur_wake_xyt[0][0] = wx;
+			s_gl.cur_wake_xyt[0][1] = wy;
+			s_gl.cur_wake_xyt[0][2] = anim_time;
+			s_gl.cur_wake_xyt[0][3] = water_depth;
+			s_gl.cur_wake_vel[0][0] = dir_vx * init_spd;
+			s_gl.cur_wake_vel[0][1] = dir_vy * init_spd;
+			s_gl.cur_wake_vel[0][2] = energy;
+			s_gl.cur_wake_vel[0][3] = (float)dir;
 
-			s_gl.cur_wake_xyt[slot][0] = wx;
-			s_gl.cur_wake_xyt[slot][1] = wy;
-			s_gl.cur_wake_xyt[slot][2] = anim_time;
-			s_gl.cur_wake_xyt[slot][3] = water_depth;
-
-			s_gl.cur_wake_vel[slot][0] = vx;
-			s_gl.cur_wake_vel[slot][1] = vy;
-			s_gl.cur_wake_vel[slot][2] = energy;
-			s_gl.cur_wake_vel[slot][3] = (float)dir;
+			/* Seed slot 1 slightly behind slot 0 along -dir so segment 0->1 is immediately valid */
+			s_gl.cur_wake_xyt[1][0] = wx - dir_vx * 4.0f;
+			s_gl.cur_wake_xyt[1][1] = wy - dir_vy * 4.0f;
+			s_gl.cur_wake_xyt[1][2] = anim_time - 0.12f;
+			s_gl.cur_wake_xyt[1][3] = water_depth;
+			s_gl.cur_wake_vel[1][0] = dir_vx * init_spd;
+			s_gl.cur_wake_vel[1][1] = dir_vy * init_spd;
+			s_gl.cur_wake_vel[1][2] = energy * 0.85f;
+			s_gl.cur_wake_vel[1][3] = (float)dir;
 
 			s_gl.cur_wake_last_x = wx;
 			s_gl.cur_wake_last_y = wy;
 			s_gl.cur_wake_last_t = anim_time;
+		} else {
+			/* Shift ordered trail [7..2] <- [6..1] when lamb advances >= 3.2 units from anchor slot 1 */
+			if (dist_moved >= 3.2f || (walking && dt >= 0.18f && dist_moved >= 1.0f)) {
+				for (int k = ND_LAMB_WAKE_NODES - 1; k >= 2; k--) {
+					memcpy(s_gl.cur_wake_xyt[k], s_gl.cur_wake_xyt[k - 1], sizeof(float) * 4);
+					memcpy(s_gl.cur_wake_vel[k], s_gl.cur_wake_vel[k - 1], sizeof(float) * 4);
+				}
+				s_gl.cur_wake_xyt[1][0] = s_gl.cur_wake_last_x;
+				s_gl.cur_wake_xyt[1][1] = s_gl.cur_wake_last_y;
+				s_gl.cur_wake_xyt[1][2] = s_gl.cur_wake_last_t;
+				s_gl.cur_wake_xyt[1][3] = s_gl.cur_wake_xyt[0][3];
+				memcpy(s_gl.cur_wake_vel[1], s_gl.cur_wake_vel[0], sizeof(float) * 4);
+
+				s_gl.cur_wake_last_x = wx;
+				s_gl.cur_wake_last_y = wy;
+				s_gl.cur_wake_last_t = anim_time;
+			}
+
+			/* Slot 0 always tracks the live lamb position and current heading */
+			float adx = wx - s_gl.cur_wake_xyt[1][0];
+			float ady = wy - s_gl.cur_wake_xyt[1][1];
+			float adist = sqrtf(adx * adx + ady * ady);
+			float ux = (adist > 0.5f) ? (adx / adist) : dir_vx;
+			float uy = (adist > 0.5f) ? (ady / adist) : dir_vy;
+			/* Blend actual displacement direction with facing direction so turns are smooth */
+			float fx = ux * 0.65f + dir_vx * 0.35f;
+			float fy = uy * 0.65f + dir_vy * 0.35f;
+			float flen = sqrtf(fx * fx + fy * fy);
+			if (flen > 1e-4f) { fx /= flen; fy /= flen; }
+			else { fx = dir_vx; fy = dir_vy; }
+
+			float spd = walking ? 38.0f : 8.0f;
+			if (dt > 0.01f && dist_moved > 0.25f)
+				spd = fminf(56.0f, fmaxf(12.0f, dist_moved / dt));
+
+			float water_depth = fmaxf(0.15f, sea_lvl - ground_z);
+			float energy = fminf(1.0f, 0.35f + 0.65f * fminf(1.0f, water_depth / 2.5f)) * (walking ? 1.0f : 0.42f);
+
+			s_gl.cur_wake_xyt[0][0] = wx;
+			s_gl.cur_wake_xyt[0][1] = wy;
+			s_gl.cur_wake_xyt[0][2] = anim_time;
+			s_gl.cur_wake_xyt[0][3] = water_depth;
+			s_gl.cur_wake_vel[0][0] = fx * spd;
+			s_gl.cur_wake_vel[0][1] = fy * spd;
+			s_gl.cur_wake_vel[0][2] = energy;
+			s_gl.cur_wake_vel[0][3] = (float)dir;
 		}
+
+		s_gl.cur_wake_head[0] = wx;
+		s_gl.cur_wake_head[1] = wy;
+		s_gl.cur_wake_head[2] = ground_z;
+		s_gl.cur_wake_head[3] = 1.0f;
 	} else {
-		/* Smoothly decay head energy over 5.5 seconds after leaving water so existing trail lingers naturally */
+		/* Smoothly decay head energy over 4.0 seconds after leaving water so existing trail lingers naturally */
 		float time_since_water = anim_time - s_gl.cur_wake_last_t;
-		s_gl.cur_wake_head[3] = (time_since_water < 5.5f && s_gl.cur_wake_last_t > 0.0f)
-		                        ? fmaxf(0.0f, 1.0f - time_since_water / 5.5f)
+		s_gl.cur_wake_head[3] = (time_since_water < 4.0f && s_gl.cur_wake_last_t > 0.0f)
+		                        ? fmaxf(0.0f, 1.0f - time_since_water / 4.0f)
 		                        : 0.0f;
 	}
 }
@@ -4506,101 +4615,135 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 	if (out_grad_y) *out_grad_y = 0.0f;
 	if (out_foam) *out_foam = 0.0f;
 
-	if (s_gl.cur_wake_head[3] <= 0.001f)
+	float head_energy = s_gl.cur_wake_head[3];
+	if (head_energy <= 0.001f)
 		return 0.0f;
 
 	float dhx = frag_wx - s_gl.cur_wake_head[0];
 	float dhy = frag_wy - s_gl.cur_wake_head[1];
-	if (dhx * dhx + dhy * dhy > 190.0f * 190.0f)
+	if (dhx * dhx + dhy * dhy > 140.0f * 140.0f)
+		return 0.0f;
+
+	float hvx = s_gl.cur_wake_vel[0][0];
+	float hvy = s_gl.cur_wake_vel[0][1];
+	float hspd = sqrtf(hvx * hvx + hvy * hvy);
+	float hfwd_x = (hspd > 0.5f) ? (hvx / hspd) : 0.0f;
+	float hfwd_y = (hspd > 0.5f) ? (hvy / hspd) : 1.0f;
+	float s_head = dhx * hfwd_x + dhy * hfwd_y;
+
+	/* Strict forward cutoff: never draw any wake stripe in front of the lamb */
+	if (s_head > 0.0f)
+		return 0.0f;
+	float front_gate = gl_smoothstep(0.0f, -1.2f, s_head) * head_energy;
+	if (front_gate <= 0.001f)
 		return 0.0f;
 
 	float wt_v = 0.5f, wt_x = 0.0f, wt_y = 0.0f;
-	gl_chaff_grad_noise2d(frag_wx * 0.42f + fmodf(anim_time * 0.95f, 256.0f),
-	                      frag_wy * 0.42f - fmodf(anim_time * 0.75f, 256.0f),
+	gl_chaff_grad_noise2d(frag_wx * 0.45f + fmodf(anim_time * 0.85f, 256.0f),
+	                      frag_wy * 0.45f - fmodf(anim_time * 0.65f, 256.0f),
 	                      0x57414B45u, &wt_v, &wt_x, &wt_y);
-	float warp_x = wt_x * 1.35f;
-	float warp_y = wt_y * 1.35f;
+	float warp_x = wt_x * 0.95f;
+	float warp_y = wt_y * 0.95f;
 
 	float total_h = 0.0f;
 	float total_gx = 0.0f, total_gy = 0.0f;
 	float total_foam = 0.0f;
 
-	for (int i = 0; i < ND_LAMB_WAKE_NODES; i++) {
-		float nx = s_gl.cur_wake_xyt[i][0];
-		float ny = s_gl.cur_wake_xyt[i][1];
-		float nt = s_gl.cur_wake_xyt[i][2];
-		float vx = s_gl.cur_wake_vel[i][0];
-		float vy = s_gl.cur_wake_vel[i][1];
-		float node_energy = s_gl.cur_wake_vel[i][2];
-		if (node_energy <= 0.002f)
+	for (int i = 0; i < ND_LAMB_WAKE_NODES - 1; i++) {
+		float energy_a = s_gl.cur_wake_vel[i][2];
+		if (energy_a <= 0.002f)
 			continue;
 
-		float age = anim_time - nt;
+		int j = i + 1;
+		float energy_b = s_gl.cur_wake_vel[j][2];
+		float vx_a = s_gl.cur_wake_vel[i][0];
+		float vy_a = s_gl.cur_wake_vel[i][1];
+		float spd_a = sqrtf(vx_a * vx_a + vy_a * vy_a);
+		float fwd_ax = (spd_a > 0.5f) ? (vx_a / spd_a) : hfwd_x;
+		float fwd_ay = (spd_a > 0.5f) ? (vy_a / spd_a) : hfwd_y;
+
+		float pa_x = s_gl.cur_wake_xyt[i][0];
+		float pa_y = s_gl.cur_wake_xyt[i][1];
+		float ta   = s_gl.cur_wake_xyt[i][2];
+
+		float pb_x = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][0] : (pa_x - fwd_ax * 6.0f);
+		float pb_y = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][1] : (pa_y - fwd_ay * 6.0f);
+		float tb   = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][2] : (ta - 0.25f);
+
+		float seg_x = pa_x - pb_x;
+		float seg_y = pa_y - pb_y;
+		float seg_len = sqrtf(seg_x * seg_x + seg_y * seg_y);
+		float tdir_x = (seg_len > 0.25f) ? (seg_x / seg_len) : fwd_ax;
+		float tdir_y = (seg_len > 0.25f) ? (seg_y / seg_len) : fwd_ay;
+		float ndir_x = -tdir_y;
+		float ndir_y =  tdir_x;
+		float eff_len = fmaxf(seg_len, 3.5f);
+
+		float rel_bx = frag_wx - pb_x;
+		float rel_by = frag_wy - pb_y;
+		float proj = rel_bx * tdir_x + rel_by * tdir_y;
+		float s_ahead = proj - eff_len;
+		if (i == 0 && s_ahead >= 0.0f)
+			continue;
+		float s_behind = -proj;
+		float t_seg = fminf(1.0f, fmaxf(0.0f, proj / eff_len));
+		float seg_time = tb + (ta - tb) * t_seg;
+		float age = anim_time - seg_time;
 		if (age < 0.0f) age = 0.0f;
-		if (age > 6.0f) continue;
+		if (age >= 4.15f) continue;
 
-		float age_decay = expf(-0.72f * age) * gl_smoothstep(5.5f, 0.2f, age) * node_energy;
-		if (age_decay <= 0.002f)
+		float eb_eff = (energy_b > 0.002f) ? energy_b : (energy_a * 0.5f);
+		float seg_energy = eb_eff + (energy_a - eb_eff) * t_seg;
+		float age_decay = expf(-0.95f * age) * gl_smoothstep(4.0f, 0.15f, age) * seg_energy;
+		float long_win = (s_ahead > 0.0f) ? expf(-(s_ahead * s_ahead) * 0.65f) : 1.0f;
+		if (s_behind > 0.0f)
+			long_win *= expf(-(s_behind * s_behind) / (10.0f + age * 12.0f));
+		float env_base = age_decay * long_win * front_gate;
+		if (env_base <= 0.002f)
 			continue;
 
-		float spd = sqrtf(vx * vx + vy * vy);
-		float fwd_x = (spd > 0.5f) ? (vx / spd) : 0.0f;
-		float fwd_y = (spd > 0.5f) ? (vy / spd) : 1.0f;
-		float right_x = -fwd_y;
-		float right_y = fwd_x;
+		float clamped_proj = fminf(eff_len, fmaxf(0.0f, proj));
+		float closest_x = pb_x + tdir_x * clamped_proj;
+		float closest_y = pb_y + tdir_y * clamped_proj;
+		float bdx = s_gl.cur_wake_head[0] - closest_x;
+		float bdy = s_gl.cur_wake_head[1] - closest_y;
+		float back_dist = sqrtf(bdx * bdx + bdy * bdy);
 
-		float rx = (frag_wx + warp_x * (0.25f + 0.15f * age)) - nx;
-		float ry = (frag_wy + warp_y * (0.25f + 0.15f * age)) - ny;
-		float s = rx * fwd_x + ry * fwd_y;
-		float raw_u = rx * right_x + ry * right_y;
+		float wx_w = (frag_wx + warp_x * (0.18f + 0.12f * age)) - closest_x;
+		float wy_w = (frag_wy + warp_y * (0.18f + 0.12f * age)) - closest_y;
+		float raw_u = wx_w * ndir_x + wy_w * ndir_y;
 		float u = fabsf(raw_u);
 		float sign_u = (raw_u >= 0.0f) ? 1.0f : -1.0f;
 
-		float packet_w = 3.2f + age * 4.2f;
-		float eff_back = fmaxf(0.0f, -s + 2.5f);
-		float kelvin_hw = 2.8f + eff_back * 0.42f + age * 6.5f;
-		float arm_dist = u - kelvin_hw * 0.68f;
-		float arm_env = expf(-(arm_dist * arm_dist) / fmaxf(1.5f, packet_w * packet_w)) *
-		                expf(-eff_back * 0.032f) * gl_smoothstep(5.5f, -1.5f, s);
+		float wake_hw = 1.4f + back_dist * 0.16f + age * 2.0f;
+		float edge_sigma = 1.15f + age * 0.85f;
+		float d_edge = (u - wake_hw) / edge_sigma;
 
-		if (i == 0 && spd > 4.0f) {
-			float bx = fmaxf(0.0f, s + 2.0f) * 1.25f;
-			float by = u * 0.85f;
-			float bow_r = sqrtf(bx * bx + by * by);
-			float bow_env = expf(-((bow_r - 5.2f) * (bow_r - 5.2f)) / 6.5f) * gl_smoothstep(-6.0f, 2.0f, s);
-			if (bow_env * 0.85f > arm_env)
-				arm_env = bow_env * 0.85f;
+		float rim_env = expf(-(d_edge * d_edge)) * expf(-back_dist * 0.04f) * env_base;
+		float spd_scale = fminf(1.0f, fmaxf(0.25f, spd_a / 42.0f));
+		if (rim_env > 0.002f) {
+			float h_rim = 0.065f * rim_env * spd_scale;
+			total_h += h_rim;
+			float d_rim_du = (-2.0f * d_edge / edge_sigma) * h_rim;
+			total_gx += (ndir_x * sign_u - tdir_x * 0.16f) * d_rim_du;
+			total_gy += (ndir_y * sign_u - tdir_y * 0.16f) * d_rim_du;
 		}
 
-		if (arm_env > 0.002f) {
-			float k_freq = 0.92f / (1.0f + 0.18f * age);
-			float phase = (u - eff_back * 0.36f - age * 14.0f) * k_freq;
-			float w_sin = sinf(phase);
-			float w_cos = cosf(phase);
-			float spd_factor = fminf(1.15f, fmaxf(0.20f, spd / 42.0f));
-			float amp = 0.22f * age_decay * arm_env * spd_factor;
-			total_h += w_sin * amp;
-			float pg_scale = k_freq * w_cos * amp;
-			total_gx += (right_x * sign_u - fwd_x * 0.36f) * pg_scale;
-			total_gy += (right_y * sign_u - fwd_y * 0.36f) * pg_scale;
-		}
-
-		if (eff_back >= -2.0f) {
-			float stern_env = expf(-(u * u) / (9.0f + age * 10.0f)) *
-			                  expf(-(eff_back * eff_back) / (65.0f + age * 80.0f));
-			if (stern_env > 0.005f) {
-				float eddy = stern_env * age_decay * fminf(1.0f, fmaxf(0.15f, spd / 48.0f));
-				total_gx += wt_x * (0.42f * eddy);
-				total_gy += wt_y * (0.42f * eddy);
-				float bubble = gl_smoothstep(0.44f, 0.76f, wt_v) * expf(-age * 1.35f);
-				total_foam += eddy * bubble * 0.38f;
-			}
+		float core_env = gl_smoothstep(wake_hw + edge_sigma * 0.8f, wake_hw * 0.2f, u) *
+		                 expf(-back_dist * 0.045f) * env_base;
+		if (core_env > 0.003f) {
+			float eddy = core_env * spd_scale;
+			total_h -= 0.035f * eddy;
+			total_gx += wt_x * (0.14f * eddy);
+			total_gy += wt_y * (0.14f * eddy);
+			float bubble = gl_smoothstep(0.48f, 0.78f, wt_v) * expf(-age * 1.45f);
+			total_foam += eddy * bubble * 0.28f;
 		}
 	}
 
-	if (total_h < -0.45f) total_h = -0.45f;
-	if (total_h >  0.45f) total_h =  0.45f;
-	if (total_foam > 0.55f) total_foam = 0.55f;
+	if (total_h < -0.18f) total_h = -0.18f;
+	if (total_h >  0.18f) total_h =  0.18f;
+	if (total_foam > 0.38f) total_foam = 0.38f;
 
 	if (out_grad_x) *out_grad_x = total_gx;
 	if (out_grad_y) *out_grad_y = total_gy;

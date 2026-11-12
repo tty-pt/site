@@ -1752,9 +1752,26 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 		/* Phase 4: Presentation (Pure drawing without state mutation)
 		 * Seven stage redraws every tick at native display refresh (60Hz / 120Hz). */
 		seven_stage_redraw();
-		if (map_on && (g_map_dirty || (s_tick_counter % 2) == 0)) {
-			nd_map_canvas_redraw(&client_state);
-			g_map_dirty = 0;
+		int map_vis = map_on && !s_win[ND_WIN_MAP].minimized &&
+		              client_state.target_ref == 0;
+		if (map_vis) {
+			static int s_last_map_lx = -999999;
+			static int s_last_map_ly = -999999;
+			static int s_last_map_dir = -1;
+			static uint32_t s_last_map_tod = 0xFFFFFFFFu;
+			int cur_lx = nd_seven_get_lx();
+			int cur_ly = nd_seven_get_ly();
+			int cur_dir = nd_seven_get_dir();
+			int moved = (cur_lx != s_last_map_lx || cur_ly != s_last_map_ly || cur_dir != s_last_map_dir);
+			int tod_changed = (client_state.tod != s_last_map_tod);
+			if (g_map_dirty || tod_changed || (moved && (s_tick_counter % 4) == 0)) {
+				nd_map_canvas_redraw(&client_state);
+				g_map_dirty = 0;
+				s_last_map_lx = cur_lx;
+				s_last_map_ly = cur_ly;
+				s_last_map_dir = cur_dir;
+				s_last_map_tod = client_state.tod;
+			}
 		}
 	} else if (map_on && (g_map_dirty || (s_tick_counter % 3) == 0)) {
 		/* Server frames only mark the map dirty (nd_state_io.c); the

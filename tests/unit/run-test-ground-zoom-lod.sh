@@ -27,7 +27,7 @@ gcc -Wall -Wextra -Werror -O1 \
     mods/nd/ux/nd_seven_motion.c \
     mods/nd/ux/nd_seven_objects.c \
     mods/nd/ux/nd_lamina.c \
-    external/libareole/src/areole.c \
+    external/libareole/src/areole.c external/liblamina/src/particle.c \
     -lxxhash -lm
 
 "$out/test_ground_zoom_lod"
