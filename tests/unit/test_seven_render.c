@@ -1507,7 +1507,7 @@ int main(void)
 	{
 		nd_seven_ground_cache_forget();
 		ar_system_t *cs = nd_seven_get_chunk_sys();
-		ar_stats_t st0, st1, st2;
+		ar_stats_t st0, st1, st2, st3;
 		ar_system_get_stats(cs, &st0);
 		assert(st0.pool_in_use == 0);
 
@@ -1520,10 +1520,16 @@ int main(void)
 		size_t active_count = st1.pool_in_use;
 		assert(active_count > 0);
 
-		/* Render a second frame with the same view: all active chunks MUST be retained */
+		/* With progressive per-query population budget (max_populates_per_query = 48),
+		 * a second frame retains all active chunks from frame 1 and finishes populating
+		 * any remaining split children, after which subsequent frames stabilize at steady state. */
 		nd_seven_render(1280, 720, &st);
 		ar_system_get_stats(cs, &st2);
-		assert(st2.pool_in_use == active_count);
+		assert(st2.pool_in_use >= active_count);
+
+		nd_seven_render(1280, 720, &st);
+		ar_system_get_stats(cs, &st3);
+		assert(st3.pool_in_use == st2.pool_in_use);
 
 		nd_seven_set_zoom(1.0f);
 		nd_seven_ground_cache_forget();

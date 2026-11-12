@@ -387,18 +387,36 @@ typedef struct {
 } virgin_memo_ent_t;
 
 static virgin_memo_ent_t s_virgin_memo[VIRGIN_MEMO_SIZE];
+static uint32_t s_scenery_synth_budget = 0xFFFFFFFFu;
 
-static inline virgin_memo_ent_t *synth_virgin_entry(const int16_t pos[4])
+void nd_seven_set_scenery_synth_budget(uint32_t budget)
+{
+	s_scenery_synth_budget = budget;
+}
+
+static inline virgin_memo_ent_t *lookup_virgin_entry(const int16_t pos[4], unsigned *out_idx)
 {
 	/* Collision-free 512x512 2D spatial torus index across full-screen frustums */
 	unsigned idx = (((unsigned)(uint16_t)pos[0] & 511u) |
 	                (((unsigned)(uint16_t)pos[1] & 511u) << 9)) ^
 	               (((unsigned)(uint16_t)pos[3] & 3u) << 16);
+	if (out_idx)
+		*out_idx = idx;
 	virgin_memo_ent_t *m = &s_virgin_memo[idx];
 	if (m->valid &&
 	    m->pos[0] == pos[0] && m->pos[1] == pos[1] &&
 	    m->pos[2] == pos[2] && m->pos[3] == pos[3])
 		return m;
+	return NULL;
+}
+
+static inline virgin_memo_ent_t *synth_virgin_entry(const int16_t pos[4])
+{
+	unsigned idx = 0;
+	virgin_memo_ent_t *m = lookup_virgin_entry(pos, &idx);
+	if (m)
+		return m;
+	m = &s_virgin_memo[idx];
 	ndw_synth_virgin_tile(pos, &m->tile);
 	memcpy(m->pos, pos, sizeof(m->pos));
 	m->valid = 1;
@@ -481,7 +499,22 @@ const ndw_obj_t *nd_seven_resolve_room_objects_fast(const nd_client_state_t *st,
 		return scratch_objs;
 	}
 
-	virgin_memo_ent_t *m = synth_virgin_entry(pos);
+	unsigned idx = 0;
+	virgin_memo_ent_t *m = lookup_virgin_entry(pos, &idx);
+	if (!m) {
+		if (s_scenery_synth_budget == 0) {
+			*out_count = 0;
+			return NULL;
+		}
+		if (s_scenery_synth_budget != 0xFFFFFFFFu)
+			s_scenery_synth_budget--;
+		m = &s_virgin_memo[idx];
+		ndw_synth_virgin_tile(pos, &m->tile);
+		memcpy(m->pos, pos, sizeof(m->pos));
+		m->valid = 1;
+		m->objs_valid = 0;
+		m->obj_count = 0;
+	}
 	if (nd_seven_is_tile_obj_picked(pos, 0) ||
 	    nd_seven_is_tile_obj_picked(pos, 1) ||
 	    nd_seven_is_tile_obj_picked(pos, 2)) {

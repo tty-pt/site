@@ -39,7 +39,7 @@ gcc -g -O0 \
 	mods/nd/ux/glue/spell_ui.c \
 	mods/nd/ux/glue/fight_ui.c \
 	mods/nd/ux/glue/mortal_ui.c \
-	external/libareole/src/areole.c \
+	external/libareole/src/areole.c external/liblamina/src/particle.c \
 	-L"$REPO_ROOT/external/axil/lib" \
 	-L"$REPO_ROOT/external/libstele/lib" \
 	-lbud -laxil -lxylem -lhyle-bud -lstele -lxxhash -lm

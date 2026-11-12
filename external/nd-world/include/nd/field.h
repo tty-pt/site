@@ -622,10 +622,10 @@ typedef struct {
 static inline nd_field_room_memo_t *
 nd_field_room_memo_slot(uint16_t world, int16_t rx, int16_t ry)
 {
-	static nd_field_room_memo_t s_memo[64];
+	static nd_field_room_memo_t s_memo[4096];
 	uint32_t idx = (((uint32_t)(uint16_t)rx * 0x9E3779B1u) ^
 	                ((uint32_t)(uint16_t)ry * 0x85EBCA77u) ^
-	                (uint32_t)world) & 63u;
+	                (uint32_t)world) & 4095u;
 	nd_field_room_memo_t *m = &s_memo[idx];
 	if (m->world != world || m->rx != rx || m->ry != ry) {
 		m->world = world;

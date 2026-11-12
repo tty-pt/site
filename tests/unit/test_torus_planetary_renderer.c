@@ -7,8 +7,10 @@
 #include <assert.h>
 
 #include "ttypt/areole.h"
+#include <ttypt/lam.h>
 #include <nd/field.h>
 #include "nd_seven.h"
+#include "nd_seven_gl.h"
 
 #define EPSILON 1e-4f
 
@@ -252,6 +254,159 @@ static void test_torus_solar_incidence_floating_point_parity(void)
 	printf("  PASS: Q15 torus normals and solar incidence match cos(phi)*cos(theta - lambda) within < 1e-3 across all azimuths\n");
 }
 
+static void test_water_ebb_flow_lamb_wake_and_particles(void)
+{
+	printf("[6. Water Ebb/Flow (Tides + Swash), Behind-Only Lamb Wake Ribbon & 3D Splash Droplets]\n");
+	const nd_planet_def_t *pdef = nd_seven_get_planet(1);
+	assert(pdef != NULL);
+
+	/* 6a. Astronomical tides: verify spring vs neap and boundedness */
+	float tide_min = 1e9f, tide_max = -1e9f;
+	for (int t = 0; t < 600; t++) {
+		float time_s = (float)t * 45.0f;
+		float sun_dir[3], moon_dir[3];
+		nd_seven_gl_eval_celestial_dirs(time_s, sun_dir, moon_dir);
+
+		float h = nd_seven_gl_eval_astronomical_tide(
+			1024.0f, 2048.0f, 0.0f, 0.0f, time_s, pdef);
+		assert(isfinite(h));
+		assert(fabsf(h) < 1.25f);
+		if (h < tide_min) tide_min = h;
+		if (h > tide_max) tide_max = h;
+	}
+	assert(tide_max - tide_min > 0.35f);
+
+	/* 6b. Shoreline wave swash & wet-sand hysteresis */
+	float hw_dry = 0.0f, foam_dry = 0.0f;
+	float swash_dry = nd_seven_gl_eval_shore_swash(
+		500.0f, 500.0f, 0.0f, 0.0f, 12.0f, 0.15f, 0.0f, 12.0f, pdef, &hw_dry, &foam_dry);
+	assert(isfinite(swash_dry));
+
+	/* Near shoreline: verify swash oscillates over wave period and wets the beach */
+	float max_hw = -1e9f, max_foam = 0.0f, sw_min = 1e9f, sw_max = -1e9f;
+	for (int k = 0; k < 40; k++) {
+		float t = (float)k * 0.35f;
+		float hw = 0.0f, foam = 0.0f;
+		float sw = nd_seven_gl_eval_shore_swash(
+			500.0f, 500.0f, 0.0f, 0.0f, 0.05f, 0.22f, 0.0f, t, pdef, &hw, &foam);
+		if (sw < sw_min) sw_min = sw;
+		if (sw > sw_max) sw_max = sw;
+		if (hw > max_hw) max_hw = hw;
+		if (foam > max_foam) max_foam = foam;
+	}
+	assert(sw_max - sw_min > 0.04f);
+	assert(max_hw > 0.15f);
+	assert(max_foam > 0.05f);
+
+	/* 6c. Lamb wake ribbon: verify behind-only wake across all 4 directions (0=Down/+Y, 1=Up/-Y, 2=Left/-X, 3=Right/+X) */
+	nd_seven_gl_begin_frame(640, 480, 200.0f, 200.0f, 0.0f, 280.0f, 35.0f, 45.0f, 10.0f, pdef);
+	const float dir_dx[4] = {  0.0f,  0.0f, -1.0f,  1.0f };
+	const float dir_dy[4] = {  1.0f, -1.0f,  0.0f,  0.0f };
+	for (int dir = 0; dir < 4; dir++) {
+		/* Teleport to reset trail for this direction, then walk 3 steps along (dir_dx, dir_dy) */
+		float base_x = 200.0f + (float)dir * 200.0f;
+		float base_y = 200.0f;
+		float t0 = 20.0f + (float)dir * 10.0f;
+		nd_seven_gl_set_lamb_wake(base_x, base_y, -1.5f, dir, 1, t0);
+		nd_seven_gl_set_lamb_wake(base_x + dir_dx[dir] * 4.0f, base_y + dir_dy[dir] * 4.0f, -1.5f, dir, 1, t0 + 0.12f);
+		float hx = base_x + dir_dx[dir] * 8.0f;
+		float hy = base_y + dir_dy[dir] * 8.0f;
+		float ht = t0 + 0.24f;
+		nd_seven_gl_set_lamb_wake(hx, hy, -1.5f, dir, 1, ht);
+
+		/* Point strictly in front of the lamb (+3.0 units and +10.0 units along movement direction): MUST be zero! */
+		float gx_f = 0.0f, gy_f = 0.0f, foam_f = 0.0f;
+		float dz_front_near = nd_seven_gl_eval_lamb_wake(
+			hx + dir_dx[dir] * 3.0f, hy + dir_dy[dir] * 3.0f, ht + 0.02f, &gx_f, &gy_f, &foam_f);
+		assert(fabsf(dz_front_near) == 0.0f && fabsf(gx_f) == 0.0f && fabsf(gy_f) == 0.0f && foam_f == 0.0f);
+
+		float dz_front_far = nd_seven_gl_eval_lamb_wake(
+			hx + dir_dx[dir] * 12.0f, hy + dir_dy[dir] * 12.0f, ht + 0.02f, &gx_f, &gy_f, &foam_f);
+		assert(fabsf(dz_front_far) == 0.0f && fabsf(gx_f) == 0.0f && fabsf(gy_f) == 0.0f && foam_f == 0.0f);
+
+		/* Point behind the lamb (-4.0 units along movement direction, slightly off centerline): MUST be active! */
+		float perp_x = -dir_dy[dir] * 1.8f;
+		float perp_y =  dir_dx[dir] * 1.8f;
+		float gx_b = 0.0f, gy_b = 0.0f, foam_b = 0.0f;
+		float dz_behind = nd_seven_gl_eval_lamb_wake(
+			hx - dir_dx[dir] * 4.0f + perp_x, hy - dir_dy[dir] * 4.0f + perp_y, ht + 0.02f, &gx_b, &gy_b, &foam_b);
+		assert(fabsf(dz_behind) > 0.002f || hypotf(gx_b, gy_b) > 0.002f);
+	}
+
+	/* 6d. 3D ballistic water droplet particle system via liblamina */
+	lam_particle_sys_t *ps = lam_particle_sys_create(64, 42.0f);
+	assert(ps != NULL);
+	lam_particle_emitter_t em;
+	memset(&em, 0, sizeof(em));
+	em.x = 100.0f;
+	em.y = 200.0f;
+	em.z = 0.25f;
+	em.spread_x = 1.8f;
+	em.spread_y = 1.8f;
+	em.spread_z = 0.15f;
+	em.dir_x = -0.55f;
+	em.dir_y = 0.0f;
+	em.dir_z = 0.88f;
+	em.speed_min = 14.0f;
+	em.speed_max = 26.0f;
+	em.cone_spread = 0.72f;
+	em.size0_min = 0.55f;
+	em.size0_max = 1.15f;
+	em.size1_min = 0.18f;
+	em.size1_max = 0.42f;
+	em.life_min = 0.24f;
+	em.life_max = 0.48f;
+	em.drag = 0.85f;
+	em.gravity_scale = 1.25f;
+	em.restitution = -1.0f;
+	em.rgba0 = 0xF8FCFFF0u;
+	em.rgba1 = 0xE0F2FF00u;
+	em.count = 16;
+	em.kind = 1;
+	size_t spawned = lam_particle_emit(ps, &em);
+	assert(spawned == 16);
+	lam_particle_step(ps, 0.05f, 6.5f, -5.5f, 0.0f, NULL, NULL);
+	assert(lam_particle_active_count(ps) > 0);
+	lam_particle_draw_t draws[32];
+	size_t drawn = lam_particle_gather(ps, draws, 32);
+	assert(drawn > 0);
+	assert(draws[0].size <= 1.15f && draws[0].size >= 0.18f);
+	lam_particle_sys_destroy(ps);
+
+	/* 6e. Verify all 3 WebGL2 shader programs (terrain, water, billboard) compile and link cleanly under glslangValidator */
+	if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
+		struct {
+			const char *name;
+			const char *vs;
+			const char *fs;
+		} progs[3] = {
+			{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
+			{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
+			{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() }
+		};
+		for (int p = 0; p < 3; p++) {
+			char vpath[128], fpath[128], cmd[512];
+			snprintf(vpath, sizeof(vpath), "/tmp/test_torus_gl_%s.vert", progs[p].name);
+			snprintf(fpath, sizeof(fpath), "/tmp/test_torus_gl_%s.frag", progs[p].name);
+			FILE *vf = fopen(vpath, "w");
+			assert(vf != NULL);
+			fputs(progs[p].vs, vf);
+			fclose(vf);
+			FILE *ff = fopen(fpath, "w");
+			assert(ff != NULL);
+			fputs(progs[p].fs, ff);
+			fclose(ff);
+			snprintf(cmd, sizeof(cmd), "glslangValidator -l '%s' '%s' >/dev/null", vpath, fpath);
+			int rc = system(cmd);
+			remove(vpath);
+			remove(fpath);
+			assert(rc == 0);
+		}
+	}
+
+	printf("  PASS: Astronomical tides, shoreline swash/wetness, behind-only lamb wake (0 forward distortion), compact 3D droplets, and GLSL ES 3.00 shaders verified\n");
+}
+
 int main(void)
 {
 	printf("=== Testing 3D Torus Planetary Engine & Renderer ===\n");
@@ -260,6 +415,7 @@ int main(void)
 	test_multi_planet_definitions();
 	test_libchunk_level16_coverage();
 	test_torus_solar_incidence_floating_point_parity();
+	test_water_ebb_flow_lamb_wake_and_particles();
 	printf("ALL TORUS PLANETARY RENDERER TESTS PASSED\n");
 	return 0;
 }

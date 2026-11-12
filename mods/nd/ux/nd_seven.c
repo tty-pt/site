@@ -15,6 +15,22 @@
 /* --- macro chunk hierarchy integration ---------------------------------- */
 
 static ar_system_t *s_seven_chunk_sys = NULL;
+static lam_particle_sys_t *s_water_particles = NULL;
+static float s_prev_particle_time = 0.0f;
+static float s_last_splash_emit_time = 0.0f;
+static float s_last_spray_emit_time = 0.0f;
+
+static int seven_has_water_at(uint16_t world, int32_t wx, int32_t wy, int16_t *out_wl);
+
+static float seven_particle_surface_z(void *user_ctx, float wx, float wy)
+{
+	uint16_t world = user_ctx ? *(const uint16_t *)user_ctx : 0;
+	int16_t w_lvl = 0;
+	float gz = nd_seven_ground_elevation_f((int32_t)wx, (int32_t)wy);
+	if (seven_has_water_at(world, (int32_t)wx, (int32_t)wy, &w_lvl) && (float)w_lvl > gz)
+		return (float)w_lvl;
+	return gz;
+}
 
 static inline uint32_t macro_blend_rgb(uint32_t c1, uint32_t c2, int alpha)
 {
@@ -369,6 +385,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.min_level = min_lvl,
 		.max_level = 14,
 		.view_id = 0,
+		.max_populates_per_query = 48,
 		.split_hysteresis = 0.14f
 	};
 
@@ -378,13 +395,137 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	/* Re-evaluate focal elevation on the newly active View 0 leaves */
 	float lwz = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
 	float lamb_light_z = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
+	float anim_t = nd_seven_get_anim_time();
 
 	/* Begin 3D WebGL frame in pure C */
 	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z,
 	                           nd_seven_is_universe_owner(st) ? 1.0f : 0.0f);
 	nd_seven_gl_begin_frame((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz,
 	                        dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
-	                        nd_seven_get_anim_time(), pdef);
+	                        anim_t, pdef);
+
+	/* Update lamb wake ribbon & step 3D splash / surf-spray particles */
+	{
+		int16_t lamb_wl = 0;
+		bool lamb_in_water = seven_has_water_at(world, (int32_t)lwx, (int32_t)lwy, &lamb_wl) &&
+		                     (lwz < (float)lamb_wl + 0.65f);
+		float wake_ground_z = lamb_in_water ? (lwz - ((float)lamb_wl - (float)nd_field_water_level(world))) : (float)nd_field_water_level(world) + 10.0f;
+		nd_seven_gl_set_lamb_wake((float)lwx, (float)lwy, wake_ground_z,
+		                          nd_seven_get_dir(), nd_seven_get_walking(), anim_t);
+
+		if (!s_water_particles)
+			s_water_particles = lam_particle_sys_create(512, 42.0f);
+		if (s_water_particles) {
+			float dt = (s_prev_particle_time > 0.0f && anim_t >= s_prev_particle_time)
+			           ? (anim_t - s_prev_particle_time) : 0.033f;
+			if (dt > 0.12f) dt = 0.033f;
+			s_prev_particle_time = anim_t;
+
+			/* 1. Lamb wading/swimming ballistic droplet emitter */
+			if (lamb_in_water && dist < 1800.0f) {
+				float water_depth = (float)lamb_wl - lwz;
+				int walking = nd_seven_get_walking();
+				float interval = walking ? 0.075f : 0.48f;
+				if (water_depth > 0.05f && (anim_t - s_last_splash_emit_time >= interval || anim_t < s_last_splash_emit_time)) {
+					s_last_splash_emit_time = anim_t;
+					int dir = nd_seven_get_dir();
+					/* Match DIR_DOWN=0(+Y), DIR_UP=1(-Y), DIR_LEFT=2(-X), DIR_RIGHT=3(+X): kick droplets backward */
+					float dir_vx = (dir == 3) ? 1.0f : (dir == 2 ? -1.0f : 0.0f);
+					float dir_vy = (dir == 0) ? 1.0f : (dir == 1 ? -1.0f : 0.0f);
+					lam_particle_emitter_t em;
+					memset(&em, 0, sizeof(em));
+					em.x = (float)lwx - dir_vx * (walking ? 1.8f : 0.0f);
+					em.y = (float)lwy - dir_vy * (walking ? 1.8f : 0.0f);
+					em.z = (float)lamb_wl + 0.25f;
+					em.spread_x = walking ? 2.2f : 1.6f;
+					em.spread_y = walking ? 2.2f : 1.6f;
+					em.spread_z = 0.15f;
+					em.dir_x = -dir_vx * 0.55f;
+					em.dir_y = -dir_vy * 0.55f;
+					em.dir_z = 0.88f;
+					em.speed_min = walking ? 14.0f : 6.5f;
+					em.speed_max = walking ? 26.0f : 11.5f;
+					em.cone_spread = 0.72f;
+					em.size0_min = 0.55f;
+					em.size0_max = 1.15f;
+					em.size1_min = 0.18f;
+					em.size1_max = 0.42f;
+					em.life_min = walking ? 0.24f : 0.20f;
+					em.life_max = walking ? 0.48f : 0.36f;
+					em.drag = 0.85f;
+					em.gravity_scale = 1.25f;
+					em.restitution = -1.0f;
+					em.rgba0 = 0xF8FCFFF0u;
+					em.rgba1 = 0xE0F2FF00u;
+					em.count = walking ? 6u : 2u;
+					em.kind = 1;
+					lam_particle_emit(s_water_particles, &em);
+				}
+			}
+
+			/* 2. Shoreline wave-impact & spindrift droplet emitter on rocky/steep coasts */
+			if (dist < 1800.0f && (anim_t - s_last_spray_emit_time >= 0.14f || anim_t < s_last_spray_emit_time)) {
+				s_last_spray_emit_time = anim_t;
+				int16_t base_wl = nd_field_water_level(world);
+				uint32_t p_hash = (uint32_t)(anim_t * 37.0f) * 0x9E3779B9u;
+				for (int p_try = 0; p_try < 6; p_try++) {
+					p_hash ^= p_hash << 13;
+					p_hash ^= p_hash >> 17;
+					p_hash ^= p_hash << 5;
+					int32_t ox = (int32_t)(p_hash & 0xFFu) - 128;
+					int32_t oy = (int32_t)((p_hash >> 8) & 0xFFu) - 128;
+					int32_t sx = (int32_t)lwx + ox;
+					int32_t sy = (int32_t)lwy + oy;
+					int16_t loc_wl = 0;
+					if (!seven_has_water_at(world, sx, sy, &loc_wl))
+						continue;
+					float gz = nd_seven_ground_elevation_f(sx, sy);
+					if (fabsf(gz - (float)loc_wl) > 2.2f)
+						continue;
+					float gx = (nd_seven_ground_elevation_f(sx + 4, sy) - nd_seven_ground_elevation_f(sx - 4, sy)) * 0.125f;
+					float gy = (nd_seven_ground_elevation_f(sx, sy + 4) - nd_seven_ground_elevation_f(sx, sy - 4)) * 0.125f;
+					float foam = 0.0f;
+					nd_seven_gl_eval_shore_swash((float)sx, (float)sy, (float)loc_wl, (float)base_wl,
+					                             gz, gx, gy, anim_t, pdef, NULL, &foam);
+					float slope_mag = sqrtf(gx * gx + gy * gy);
+					if (foam > 0.08f || slope_mag > 0.12f) {
+						lam_particle_emitter_t em;
+						memset(&em, 0, sizeof(em));
+						em.x = (float)sx;
+						em.y = (float)sy;
+						em.z = (float)loc_wl + 0.3f;
+						em.spread_x = 2.4f;
+						em.spread_y = 2.4f;
+						em.spread_z = 0.2f;
+						em.dir_x = (slope_mag > 1e-3f) ? (gx / slope_mag) * 0.50f : 0.35f;
+						em.dir_y = (slope_mag > 1e-3f) ? (gy / slope_mag) * 0.50f : -0.35f;
+						em.dir_z = 0.92f;
+						em.speed_min = 12.0f;
+						em.speed_max = 23.0f;
+						em.cone_spread = 0.62f;
+						em.size0_min = 0.65f;
+						em.size0_max = 1.35f;
+						em.size1_min = 0.22f;
+						em.size1_max = 0.48f;
+						em.life_min = 0.28f;
+						em.life_max = 0.56f;
+						em.drag = 1.15f;
+						em.gravity_scale = 1.15f;
+						em.restitution = -1.0f;
+						em.rgba0 = 0xF4FAFFECu;
+						em.rgba1 = 0xE0F0FF00u;
+						em.count = 4u;
+						em.kind = 2;
+						lam_particle_emit(s_water_particles, &em);
+						break;
+					}
+				}
+			}
+
+			lam_particle_step(s_water_particles, dt, 6.5f, -5.5f, 0.0f,
+			                  seven_particle_surface_z, &world);
+		}
+	}
 
 	for (size_t m = 0; m < macro_count; m++) {
 		const ar_node_t *node = s_visible_leaves[m];
@@ -889,6 +1030,33 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 	}
 
+	/* Append active 3D water splash & surf-spray particles into s_all_gpu_batch */
+	if (s_water_particles && eff_cam_dist < 1800.0f && all_gpu_count < ALL_GPU_MAX_DRAW) {
+		lam_particle_draw_t p_draw[256];
+		size_t max_p = ALL_GPU_MAX_DRAW - all_gpu_count;
+		if (max_p > 256) max_p = 256;
+		size_t n_p = lam_particle_gather(s_water_particles, p_draw, max_p);
+		for (size_t pi = 0; pi < n_p && all_gpu_count < ALL_GPU_MAX_DRAW; pi++) {
+			lam_billboard_gpu_t *dst_bb = &s_all_gpu_batch[all_gpu_count++];
+			dst_bb->x = p_draw[pi].x;
+			dst_bb->y = p_draw[pi].y + 0.02f;
+			dst_bb->z = p_draw[pi].z;
+			dst_bb->width = p_draw[pi].size * 0.85f;
+			dst_bb->height = p_draw[pi].size * 1.35f;
+			dst_bb->anchor_y = dst_bb->height * 0.5f;
+			dst_bb->water_z_off = 0.0f;
+			dst_bb->u0 = 0.0f;
+			dst_bb->v0 = 0.0f;
+			dst_bb->u1 = 1.0f;
+			dst_bb->v1 = 1.0f;
+			dst_bb->tint_rgba = p_draw[pi].rgba;
+			dst_bb->style = ND_BB_STYLE_PARTICLE;
+			dst_bb->shadow_rx = 0;
+			dst_bb->shadow_ry = 0;
+			dst_bb->pad0 = p_draw[pi].kind;
+		}
+	}
+
 	/* Sort near-field 3D billboards globally back-to-front by world wy ascending (tie-break by wx ascending) */
 	if (all_gpu_count > 0) {
 		for (uint32_t a = 1; a < all_gpu_count; a++) {
@@ -911,6 +1079,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	float alt_fade = seven_smooth_fade(dist_scenery, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
 	uint32_t tint_scenery = seven_pack_white_alpha(alt_fade);
 	if (tint_scenery != 0) {
+		nd_seven_set_scenery_synth_budget(512);
 		uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t w_level = nd_field_water_level(world);
 		int16_t base_rx = st ? st->map_data.pos[0] : 0;
@@ -1027,6 +1196,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 		if (s_mid_batch_len > 0)
 			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+		nd_seven_set_scenery_synth_budget(0xFFFFFFFFu);
 	}
 	if (!near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
