@@ -35,6 +35,7 @@ int nd_seven_resolve_room_objects(const nd_client_state_t *st, const int16_t pos
                                   ndw_tile_t *out_tile, ndw_obj_t out_objs[NDW_MAX_OBJ]);
 const ndw_obj_t *nd_seven_resolve_room_objects_fast(const nd_client_state_t *st, const int16_t pos[4],
                                                     ndw_obj_t scratch_objs[NDW_MAX_OBJ], int *out_count);
+void nd_seven_set_scenery_synth_budget(uint32_t budget);
 int nd_seven_lookup_known_tile(const int16_t pos[4], ndw_tile_t *out);
 int nd_seven_centre_restore(const int16_t pos[4], uint8_t *glyph, uint8_t *fg);
 
