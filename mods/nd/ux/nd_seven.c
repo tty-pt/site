@@ -756,7 +756,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bw = (float)LAMB_SIZE;
 				bh = (float)LAMB_SIZE;
 				bay = (float)(LAMB_SIZE - LAMB_AY);
-				bwz_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y);
+				bwz_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y) + 3.5f;
 				u0 = (float)(col * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
 				v0 = (float)(row * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				u1 = (float)((col + 1) * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
