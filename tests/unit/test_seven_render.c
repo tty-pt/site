@@ -2414,17 +2414,26 @@ int main(void)
 		ar_system_t *cs = nd_seven_get_chunk_sys();
 		assert(cs != NULL);
 
-		/* Level 0 uses 48x48 quads (4,608 triangles, 2.25x density); Level 1+ uses 32x32 quads (2,048 triangles) */
+		/* Level 0 uses 48x48 quads (4,608 triangles, 2.25x density); Level 1..2 use 32x32 quads (2,048 triangles);
+		 * Level 3+ and macro low-zoom (cam_dist >= 5000) use 16x16 quads (512 triangles, 4x lighter) */
 		assert(nd_seven_gl_grid_quads_for_level(0) == 48);
 		assert(nd_seven_gl_grid_quads_for_level(1) == 32);
 		assert(nd_seven_gl_grid_quads_for_level(2) == 32);
+		assert(nd_seven_gl_grid_quads_for_level(3) == 16);
 
-		/* Close-up zoom polygon scaling: normal zoom stays at 48x48 (4,608 tris),
-		 * close zoom scales to 96x96 (18,432 tris), ultra-close zoom scales to 144x144 (41,472 tris) */
-		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f) == 48);
-		assert(nd_seven_gl_grid_quads_for_zoom(0, 180.0f) == 96);
-		assert(nd_seven_gl_grid_quads_for_zoom(0, 80.0f)  == 144);
-		assert(nd_seven_gl_grid_quads_for_zoom(1, 80.0f)  == 32);
+		/* Close-up and macro zoom polygon scaling: mid-near zoom (> 340) uses 48x48 (4,608 tris),
+		 * normal/close zoom (<= 340, including 1.0x at 280) scales to 96x96 (18,432 tris),
+		 * close/ultra-close zoom (<= 220) scales to 144x144 (41,472 tris),
+		 * and low zoom (14 < x < 25, cam_dist >= 5000) scales down to 16x16 (512 tris) */
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 380.0f)   == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f)   == 96);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 240.0f)   == 96);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 200.0f)   == 144);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 80.0f)    == 144);
+		assert(nd_seven_gl_grid_quads_for_zoom(1, 80.0f)    == 32);
+		assert(nd_seven_gl_grid_quads_for_zoom(1, 6500.0f)  == 16);
+		assert(nd_seven_gl_grid_quads_for_zoom(2, 20000.0f) == 16);
+		assert(nd_seven_gl_grid_quads_for_zoom(4, 280.0f)   == 16);
 
 		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values,
 		 * including across large world coordinates where 16-bit signed rotation would wrap */
@@ -2466,6 +2475,12 @@ int main(void)
 				float h_bot = nd_seven_gl_sample_height_smooth(m01->values, m01->vert_dim, m01->vert_dim,
 				                                               u, 0.0f, (float)m01->w, (float)m01->h, NULL, NULL);
 				assert(fabsf(h_top - h_bot) < 1e-5f);
+			}
+
+			/* Verify shoreline micro-relief band sets node->flags & 1 even if all discrete vertices are slightly above w_level */
+			int16_t w_lvl_test = nd_field_water_level(1);
+			if (m00->min_val <= ((int32_t)(w_lvl_test + 4) << 4)) {
+				assert((m00->flags & 1) != 0);
 			}
 		}
 

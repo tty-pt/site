@@ -123,10 +123,11 @@ const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
 
 /* Query active GPU mesh quad resolution for a given LOD level and camera distance:
- * Level 0 at normal zoom (cam_dist > 230) returns 48 (48x48 quads = 4,608 triangles);
- * Level 0 at close zoom (125 < cam_dist <= 230) returns 96 (96x96 quads = 18,432 triangles);
- * Level 0 at ultra-close zoom (cam_dist <= 125) returns 144 (144x144 quads = 41,472 triangles);
- * Level 1+ returns 32 (32x32 quads = 2,048 triangles). */
+ * Level 0 at mid-near zoom (340 < cam_dist < 5000) returns 48 (48x48 quads = 4,608 triangles);
+ * Level 0 at normal/close zoom (220 < cam_dist <= 340) returns 96 (96x96 quads = 18,432 triangles);
+ * Level 0 at close/ultra-close zoom (cam_dist <= 220) returns 144 (144x144 quads = 41,472 triangles);
+ * Level 1..2 at mid zoom (cam_dist < 5000) returns 32 (32x32 quads = 2,048 triangles);
+ * Level 3+ or macro low zoom (cam_dist >= 5000) returns 16 (16x16 quads = 512 triangles). */
 uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist);
 uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level);
 

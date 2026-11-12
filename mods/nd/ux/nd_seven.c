@@ -56,7 +56,10 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	out->attr[5] = 0;
 	out->attr[6] = 0;
 	out->attr[7] = 0;
-	out->flags = (water_depth > 0) ? 1 : 0;
+	/* Include shoreline micro-relief envelope (wz <= water_level + 4.0 units) so any chunk
+	 * where sub-texel shoreline relief or capillary wet sand can reach sea level sets flag bit 0. */
+	int32_t shore_ceil_q12_4 = ((int32_t)fs.water_level + 4) << 4;
+	out->flags = (water_depth > 0 || (int32_t)fs.elevation_q12_4 <= shore_ceil_q12_4) ? 1 : 0;
 
 	uint32_t c1 = ndw_biome_base_rgb(fs.bio);
 	uint32_t c2 = ndw_biome_base_rgb(fs.bio2);
@@ -356,6 +359,16 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	}
 	s_frame_sag_radius = r_planet;
 
+	float target_quad_px = 2.0f * (32.0f / 48.0f);
+	size_t max_leaves = SEVEN_MAX_VISIBLE_LEAVES;
+	if (dist >= 5000.0f) {
+		float low_zoom_t = (dist - 5000.0f) / 35000.0f;
+		if (low_zoom_t < 0.0f) low_zoom_t = 0.0f;
+		if (low_zoom_t > 1.0f) low_zoom_t = 1.0f;
+		target_quad_px = 1.80f + 0.80f * low_zoom_t;
+		max_leaves = (size_t)(112.0f - 24.0f * low_zoom_t);
+	}
+
 	ar_cull_opts_t opts = {
 		.z_min = z_min_cull,
 		.z_max = z_max_cull,
@@ -363,14 +376,14 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.focal_x = (float)lwx,
 		.focal_y = (float)lwy,
 		.margin = cull_margin,
-		.target_quad_px = 2.0f * (32.0f / 48.0f),
+		.target_quad_px = target_quad_px,
 		.viewport_w = (float)w,
 		.viewport_h = (float)h,
 		.min_level = 0,
 		.max_level = 16
 	};
 
-	s_visible_leaf_count = ar_system_query_matrix(cs, world, mvp, &opts, s_visible_leaves, SEVEN_MAX_VISIBLE_LEAVES);
+	s_visible_leaf_count = ar_system_query_matrix(cs, world, mvp, &opts, s_visible_leaves, max_leaves);
 	size_t macro_count = s_visible_leaf_count;
 
 	/* Begin 3D WebGL frame in pure C */
@@ -384,8 +397,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		((ar_node_t *)node)->active_view_mask |= 1;
 		((ar_node_t *)node)->last_touch_frame = nd_seven_get_anim();
 
-		bool has_water = (node->flags & 1) != 0;
-		float sea_lvl = has_water ? (float)nd_field_water_level(world) : ND_SEVEN_SEA_LEVEL_NONE;
+		int16_t w_lvl_i = nd_field_water_level(world);
+		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
+		float sea_lvl = has_water ? (float)w_lvl_i : ND_SEVEN_SEA_LEVEL_NONE;
 		uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
 		nd_seven_gl_flush_terrain_chunk(world, node->level, node->rev,
@@ -403,11 +417,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		if (alt_pdef) {
 			const ar_node_t *alt_visible[AR_DEFAULT_MAX_ACTIVE];
 			size_t alt_count = ar_system_query_matrix(cs, alt_world, mvp, &opts, alt_visible, 16);
+			int16_t alt_w_lvl = nd_field_water_level(alt_world);
 			for (size_t m = 0; m < alt_count; m++) {
 				const ar_node_t *node = alt_visible[m];
 				if (!node) continue;
-				bool has_water = (node->flags & 1) != 0;
-				float sea_lvl = has_water ? (float)nd_field_water_level(alt_world) : ND_SEVEN_SEA_LEVEL_NONE;
+				bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(alt_w_lvl + 8) << 4));
+				float sea_lvl = has_water ? (float)alt_w_lvl : ND_SEVEN_SEA_LEVEL_NONE;
 				uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
 				nd_seven_gl_flush_terrain_chunk(alt_world, node->level, node->rev,

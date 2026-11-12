@@ -11,6 +11,7 @@
 #include "nd_seven_atlas_draw.h"
 #include <ttypt/webgl.h>
 #include <ttypt/areole.h>
+#include <nd/field.h>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,7 +19,13 @@
 #define PI_F 3.14159265358979323846f
 #define TWO_PI_F 6.28318530717958647692f
 
-/* Level 1+ standard grid: 32x32 quads = 33x33 vertices = 1,089 vertices (2,048 triangles) */
+/* Macro low-zoom grid: 16x16 quads = 17x17 vertices = 289 vertices (512 triangles, 4x lighter than 32x32) */
+#define GL_GRID_QUADS_MACRO 16
+#define GL_GRID_VERTS_MACRO (GL_GRID_QUADS_MACRO + 1)
+#define GL_TOTAL_VERTS_MACRO (GL_GRID_VERTS_MACRO * GL_GRID_VERTS_MACRO)
+#define GL_TOTAL_INDICES_MACRO (GL_GRID_QUADS_MACRO * GL_GRID_QUADS_MACRO * 6)
+
+/* Level 1..2 standard grid: 32x32 quads = 33x33 vertices = 1,089 vertices (2,048 triangles) */
 #define GL_GRID_QUADS_LO 32
 #define GL_GRID_QUADS GL_GRID_QUADS_LO
 #define GL_GRID_VERTS (GL_GRID_QUADS + 1)
@@ -204,7 +211,7 @@ static const char *s_vs_terrain =
 	"    if (uChunkSpan.x <= 160.5 && edgeFade > 0.001) {\n"
 	"        float camHoriz = length(relXY);\n"
 	"        float shoreClear = (uSeaLevel <= -900.0) ? 1.0 : smoothstep(uSeaLevel + 0.5, uSeaLevel + 3.0, wz);\n"
-	"        float closeW = clamp((220.0 - camHoriz) / 140.0, 0.0, 1.0) * edgeFade * shoreClear;\n"
+	"        float closeW = clamp((420.0 - camHoriz) / 260.0, 0.0, 1.0) * edgeFade * shoreClear;\n"
 	"        if (closeW > 0.001) {\n"
 	"            vec3 g1 = chaff_grad_noise2d(worldXY * 0.22, 0xA341316Cu);\n"
 	"            vec3 g2 = chaff_grad_noise2d(worldXY * 0.68, 0xC8013EA4u);\n"
@@ -427,10 +434,10 @@ static const char *s_fs_terrain =
 	"    return vec3(disp, gTotal.x, gTotal.y);\n"
 	"}\n"
 	"vec4 eval_zoom_terrain_detail(vec2 pos, float dist, float fw, out vec4 out_octaves) {\n"
-	"    const float freqs[4] = float[4](0.16, 0.85, 4.20, 18.00);\n"
-	"    const float amps[4]  = float[4](0.28, 0.24, 0.18, 0.12);\n"
-	"    const float dFar[4]  = float[4](6500.0, 2200.0, 780.0, 240.0);\n"
-	"    const float dNear[4] = float[4](1600.0,  550.0, 180.0,  38.0);\n"
+	"    const float freqs[4] = float[4](0.16, 0.68, 1.85, 6.20);\n"
+	"    const float amps[4]  = float[4](0.28, 0.25, 0.22, 0.16);\n"
+	"    const float dFar[4]  = float[4](9500.0, 4200.0, 1850.0, 720.0);\n"
+	"    const float dNear[4] = float[4](2400.0, 1050.0,  420.0, 165.0);\n"
 	"    const uint  seeds[4] = uint[4](0xA341316Cu, 0xC8013EA4u, 0x3891053Bu, 0x85EBCA6Bu);\n"
 	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
@@ -442,7 +449,7 @@ static const char *s_fs_terrain =
 	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
 	"    for (int i = 0; i < 4; i++) {\n"
 	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"        float wNyq  = smoothstep(0.55, 0.18, freqs[i] * fw);\n"
+	"        float wNyq  = smoothstep(0.92, 0.28, freqs[i] * fw);\n"
 	"        float w = wDist * wNyq;\n"
 	"        if (w > 0.001) {\n"
 	"            vec3 g = chaff_grad_noise2d(pRot * freqs[i], seeds[i]);\n"
@@ -524,10 +531,10 @@ static const char *s_fs_terrain =
 	"    float nStd   = octaves.y;\n"
 	"    float nClose = octaves.z;\n"
 	"    float nUltra = octaves.w;\n"
-	"    float macroFade = clamp((7500.0 - vDistance) / 5000.0, 0.0, 1.0);\n"
-	"    float distFade  = clamp(1.0 - (vDistance - 600.0) / 1800.0, 0.0, 1.0);\n"
-	"    float closeZoom = clamp((380.0 - vDistance) / 260.0, 0.0, 1.0);\n"
-	"    float ultraZoom = clamp((160.0 - vDistance) / 120.0, 0.0, 1.0);\n"
+	"    float macroFade = clamp((9500.0 - vDistance) / 6000.0, 0.0, 1.0);\n"
+	"    float distFade  = clamp(1.0 - (vDistance - 900.0) / 2400.0, 0.0, 1.0);\n"
+	"    float closeZoom = clamp((820.0 - vDistance) / 480.0, 0.0, 1.0);\n"
+	"    float ultraZoom = clamp((480.0 - vDistance) / 260.0, 0.0, 1.0);\n"
 	"    /* 1. Terrestrial & shallow-submerged substrate shading (evaluated down to fragWaterDepth < 6.5 so shallow water preserves exact shore detail) */\n"
 	"    if (fragWaterDepth < 6.5) {\n"
 	"        float rockFactor  = smoothstep(0.065, 0.22, slope);\n"
@@ -1813,6 +1820,8 @@ static struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 
+	GLuint grid_vbo_macro;
+	GLuint grid_ibo_macro;
 	GLuint grid_vbo;
 	GLuint grid_ibo;
 	GLuint grid_vbo_hi;
@@ -1942,6 +1951,7 @@ static void init_grid_buffers(void)
 	static float grid_uv_scratch[GL_TOTAL_VERTS_Z3 * 2];
 	static uint16_t indices_scratch[GL_TOTAL_INDICES_Z3];
 
+	create_static_grid(GL_GRID_QUADS_MACRO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_macro, &s_gl.grid_ibo_macro);
 	create_static_grid(GL_GRID_QUADS_LO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo, &s_gl.grid_ibo);
 	create_static_grid(GL_GRID_QUADS_HI, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_hi, &s_gl.grid_ibo_hi);
 	create_static_grid(GL_GRID_QUADS_Z2, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_z2, &s_gl.grid_ibo_z2);
@@ -2035,7 +2045,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 {
 	s_gl.frame_count++;
 	s_gl.water_count = 0;
-	s_gl.cur_sea_level = -999.0f;
+	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
 	s_gl.cur_pitch_deg = pitch_deg;
 	s_gl.cur_anim_time = anim_time;
@@ -2100,13 +2110,6 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                 GLuint *out_vbo, GLuint *out_ibo, GLsizei *out_indices)
 {
-	if (level != 0) {
-		*out_vbo = s_gl.grid_vbo;
-		*out_ibo = s_gl.grid_ibo;
-		*out_indices = GL_TOTAL_INDICES;
-		return;
-	}
-
 	/* Compute distance from camera focal point to nearest point on chunk box */
 	float min_x = (float)ox, max_x = (float)(ox + span_w);
 	float min_y = (float)oy, max_y = (float)(oy + span_h);
@@ -2126,10 +2129,18 @@ static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t s
 		*out_vbo = s_gl.grid_vbo_z2;
 		*out_ibo = s_gl.grid_ibo_z2;
 		*out_indices = GL_TOTAL_INDICES_Z2;
-	} else {
+	} else if (quads >= GL_GRID_QUADS_HI) {
 		*out_vbo = s_gl.grid_vbo_hi;
 		*out_ibo = s_gl.grid_ibo_hi;
 		*out_indices = GL_TOTAL_INDICES_HI;
+	} else if (quads >= GL_GRID_QUADS_LO) {
+		*out_vbo = s_gl.grid_vbo;
+		*out_ibo = s_gl.grid_ibo;
+		*out_indices = GL_TOTAL_INDICES;
+	} else {
+		*out_vbo = s_gl.grid_vbo_macro;
+		*out_ibo = s_gl.grid_ibo_macro;
+		*out_indices = GL_TOTAL_INDICES_MACRO;
 	}
 }
 
@@ -2145,8 +2156,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	if (!s_gl.initialized || !s_gl.terrain_pipe.prog) return;
 	const nd_planet_def_t *eff_pdef = pdef ? pdef : &s_gl.cur_pdef;
 
-	if (sea_level > -900.0f) {
-		s_gl.cur_sea_level = sea_level;
+	float terrain_sea_lvl = (sea_level > -900.0f) ? sea_level : (float)nd_field_water_level(world);
+	if (terrain_sea_lvl > -900.0f) {
+		s_gl.cur_sea_level = terrain_sea_lvl;
 	}
 
 	/* Find or allocate chunk textures in LRU cache */
@@ -2251,7 +2263,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	            s_gl.cur_ref_trig[0], s_gl.cur_ref_trig[1],
 	            s_gl.cur_ref_trig[2], s_gl.cur_ref_trig[3]);
 	glUniform1f(s_gl.terrain_pipe.uHeightScale, 1.0f);
-	glUniform1f(s_gl.terrain_pipe.uSeaLevel, sea_level);
+	glUniform1f(s_gl.terrain_pipe.uSeaLevel, terrain_sea_lvl);
 	glUniform3fv(s_gl.terrain_pipe.uCameraPos, 1, s_gl.cur_eye);
 	glUniform3fv(s_gl.terrain_pipe.uPlanetCenter, 1, rel_center);
 	glUniform2f(s_gl.terrain_pipe.uTorusRadii, eff_pdef->major_r, eff_pdef->minor_r);
@@ -2448,18 +2460,20 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist)
 {
+	if (level >= 3 || cam_dist >= 5000.0f)
+		return GL_GRID_QUADS_MACRO; /* 16x16 quads = 512 triangles (4x lighter macro mesh) */
 	if (level > 0)
-		return GL_GRID_QUADS_LO;
-	if (cam_dist > 0.0f && cam_dist <= 125.0f)
-		return GL_GRID_QUADS_Z3; /* 144x144 quads = 41,472 triangles (9x normal zoom) */
-	if (cam_dist > 0.0f && cam_dist <= 230.0f)
-		return GL_GRID_QUADS_Z2; /* 96x96 quads = 18,432 triangles (4x normal zoom) */
-	return GL_GRID_QUADS_HI;         /* 48x48 quads = 4,608 triangles (normal 1.0x zoom) */
+		return GL_GRID_QUADS_LO;    /* 32x32 quads = 2,048 triangles */
+	if (cam_dist > 0.0f && cam_dist <= 220.0f)
+		return GL_GRID_QUADS_Z3;    /* 144x144 quads = 41,472 triangles (9x normal zoom) */
+	if (cam_dist > 0.0f && cam_dist <= 340.0f)
+		return GL_GRID_QUADS_Z2;    /* 96x96 quads = 18,432 triangles (4x normal zoom) */
+	return GL_GRID_QUADS_HI;            /* 48x48 quads = 4,608 triangles (mid-near zoom) */
 }
 
 uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level)
 {
-	return nd_seven_gl_grid_quads_for_zoom(level, ND_SEVEN_CAM_DIST);
+	return nd_seven_gl_grid_quads_for_zoom(level, 400.0f);
 }
 
 static inline uint32_t gl_chaff_rotl32(uint32_t x, int r)
@@ -2546,10 +2560,10 @@ float nd_seven_gl_eval_terrain_detail(float wx, float wy,
                                       float *out_grad_x, float *out_grad_y,
                                       float *out_cavity_ao)
 {
-	static const float freqs[4] = { 0.16f, 0.85f, 4.20f, 18.00f };
-	static const float amps[4]  = { 0.28f, 0.24f, 0.18f, 0.12f  };
-	static const float dFar[4]  = { 6500.0f, 2200.0f, 780.0f, 240.0f };
-	static const float dNear[4] = { 1600.0f,  550.0f, 180.0f,  38.0f };
+	static const float freqs[4] = { 0.16f, 0.68f, 1.85f, 6.20f };
+	static const float amps[4]  = { 0.28f, 0.25f, 0.22f, 0.16f };
+	static const float dFar[4]  = { 9500.0f, 4200.0f, 1850.0f, 720.0f };
+	static const float dNear[4] = { 2400.0f, 1050.0f,  420.0f, 165.0f };
 	static const uint32_t seeds[4] = {
 		0xA341316Cu, 0xC8013EA4u, 0x3891053Bu, 0x85EBCA6Bu
 	};
@@ -2568,7 +2582,7 @@ float nd_seven_gl_eval_terrain_detail(float wx, float wy,
 		if (wDist < 0.0f) wDist = 0.0f;
 		if (wDist > 1.0f) wDist = 1.0f;
 
-		float wNyq = gl_smoothstep(0.55f, 0.18f, freqs[i] * fw);
+		float wNyq = gl_smoothstep(0.92f, 0.28f, freqs[i] * fw);
 		float w = wDist * wNyq;
 		if (w > 0.001f) {
 			float val = 0.0f, ogx = 0.0f, ogy = 0.0f;
