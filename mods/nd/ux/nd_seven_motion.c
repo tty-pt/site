@@ -23,6 +23,48 @@ static float s_acc;
 static uint32_t s_anim;
 static float s_anim_sec;
 
+static nd_grass_wake_step_t s_wake_ring[ND_SEVEN_WAKE_MAX];
+static int s_wake_head = 0;
+static int s_wake_count = 0;
+
+void nd_seven_clear_wake(void)
+{
+	memset(s_wake_ring, 0, sizeof(s_wake_ring));
+	s_wake_head = 0;
+	s_wake_count = 0;
+}
+
+void nd_seven_record_wake_step(float wx, float wy, float vx, float vy, float t_sec)
+{
+	if (s_wake_count > 0) {
+		int prev_idx = (s_wake_head + ND_SEVEN_WAKE_MAX - 1) % ND_SEVEN_WAKE_MAX;
+		const nd_grass_wake_step_t *prev = &s_wake_ring[prev_idx];
+		if (prev->valid) {
+			float dx = wx - prev->wx;
+			float dy = wy - prev->wy;
+			float dt = t_sec - prev->t_sec;
+			if (dx * dx + dy * dy < 9.0f && dt >= 0.0f && dt < 0.12f)
+				return;
+		}
+	}
+	s_wake_ring[s_wake_head].wx = wx;
+	s_wake_ring[s_wake_head].wy = wy;
+	s_wake_ring[s_wake_head].vx = vx;
+	s_wake_ring[s_wake_head].vy = vy;
+	s_wake_ring[s_wake_head].t_sec = t_sec;
+	s_wake_ring[s_wake_head].valid = 1;
+	s_wake_head = (s_wake_head + 1) % ND_SEVEN_WAKE_MAX;
+	if (s_wake_count < ND_SEVEN_WAKE_MAX)
+		s_wake_count++;
+}
+
+const nd_grass_wake_step_t *nd_seven_get_wake_steps(int *out_count)
+{
+	if (out_count)
+		*out_count = s_wake_count;
+	return s_wake_ring;
+}
+
 int nd_seven_get_lx(void) { return s_lx; }
 int nd_seven_get_ly(void) { return s_ly; }
 int nd_seven_get_dir(void) { return s_dir; }
@@ -545,6 +587,7 @@ void nd_seven_forget(void)
 	nd_seven_collision_invalidate();
 	nd_spatial_resolver_invalidate();
 	nd_seven_reset_input();
+	nd_seven_clear_wake();
 	s_have = 0;
 	recentre(1);
 }
@@ -835,6 +878,11 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 		move_axis(st, dx, dy);
 		if (ox != s_lx || oy != s_ly)
 			s_walking = 1;
+	}
+	if (s_walking) {
+		float wwx = (float)((int64_t)s_pos[0] * NDW_TILE_W + s_lx);
+		float wwy = (float)((int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly);
+		nd_seven_record_wake_step(wwx, wwy, (float)dx * SPEED, (float)dy * SPEED, s_anim_sec);
 	}
 
 	if (!s_pending_key) {

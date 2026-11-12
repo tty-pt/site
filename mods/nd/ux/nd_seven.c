@@ -651,8 +651,125 @@ typedef struct {
 	char name[32];
 } drawable_3d_t;
 
+static inline uint32_t meadow_hash32(int32_t x, int32_t y, uint32_t seed)
+{
+	uint32_t h = seed ^ ((uint32_t)x * 0x9E3779B1u) ^ ((uint32_t)y * 0x85EBCA77u);
+	return ndw_mix(h);
+}
+
+static inline float meadow_patch_noise(float wx, float wy, uint32_t seed)
+{
+	float px = wx * (1.0f / 64.0f);
+	float py = wy * (1.0f / 64.0f);
+	int32_t ix = (int32_t)floorf(px);
+	int32_t iy = (int32_t)floorf(py);
+	float fx = px - (float)ix;
+	float fy = py - (float)iy;
+	float ux = fx * fx * (3.0f - 2.0f * fx);
+	float uy = fy * fy * (3.0f - 2.0f * fy);
+	float v00 = (float)(meadow_hash32(ix,     iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float v10 = (float)(meadow_hash32(ix + 1, iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float v01 = (float)(meadow_hash32(ix,     iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float v11 = (float)(meadow_hash32(ix + 1, iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float a = v00 + (v10 - v00) * ux;
+	float b = v01 + (v11 - v01) * ux;
+	return a + (b - a) * uy;
+}
+
+static int meadow_lookup_rect(int zone, uint32_t h, nd_seven_sprite_rect_t *out_rect)
+{
+	if (!out_rect)
+		return 0;
+	if (zone == ND_MEADOW_REED) {
+		int rk = (h & 1u) ? NDB_REED_2 : NDB_REED_1;
+		return nd_seven_botanical_rect(rk, out_rect);
+	}
+	if (zone == ND_MEADOW_WILDFLOWER) {
+		static const int flowers[4] = {
+			NDS_DECOR_YEL, NDS_DECOR_YEL2, NDS_DECOR_ORG, NDS_DECOR_PINK
+		};
+		*out_rect = nd_seven_sprite_rects[flowers[h & 3u]];
+		return 1;
+	}
+	if (zone == ND_MEADOW_UNDERSTORY) {
+		int uk = (h & 1u) ? NDB_GRASS_TUFT_1 : NDB_GRASS_TUFT_3;
+		return nd_seven_botanical_rect(uk, out_rect);
+	}
+	if (zone == ND_MEADOW_GRASS) {
+		uint32_t pick = h & 3u;
+		if (pick == 3u) {
+			*out_rect = nd_seven_sprite_rects[NDS_GRASS];
+			return 1;
+		}
+		return nd_seven_botanical_rect(NDB_GRASS_TUFT_1 + (int)pick, out_rect);
+	}
+	return 0;
+}
+
+int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
+                              float elev_z, float water_level,
+                              unsigned biome, float near_tree_dist_sq,
+                              int *out_zone, int *out_flip)
+{
+	if (out_zone) *out_zone = ND_MEADOW_NONE;
+	if (out_flip) *out_flip = 0;
+
+	/* 1. Strict anti-submersion: never spawn meadow flora in or under water */
+	float elev_above_water = elev_z - water_level;
+	if (elev_above_water <= 0.10f)
+		return 0;
+
+	/* 2. Substrate check: only vegetated grass/forest/savanna biomes (or tundra heather edge) */
+	ndw_ground_t g = ndw_biome_style(biome);
+	if (g.kind != NDW_G_GRASS && g.kind != NDW_G_TUNDRA)
+		return 0;
+
+	/* 3. Suppress flora directly inside a large tree trunk footprint (r < 9 units) */
+	if (near_tree_dist_sq >= 0.0f && near_tree_dist_sq < 81.0f)
+		return 0;
+
+	uint32_t h = meadow_hash32(wx, wy, 0x4D454144u);
+	if (out_flip)
+		*out_flip = (int)((h >> 7u) & 1u);
+
+	/* 4. Littoral shoreline reed & cattail band (0.10 < Z - W < 1.85) */
+	if (elev_above_water < 1.85f && g.kind == NDW_G_GRASS) {
+		if ((h & 0xFFu) < 170u) {
+			if (out_zone) *out_zone = ND_MEADOW_REED;
+			return 1;
+		}
+		return 0;
+	}
+
+	/* 5. Tree canopy drip-line understory (81 <= d^2 < 484, i.e. 9..22 units from trunk) */
+	if (near_tree_dist_sq >= 81.0f && near_tree_dist_sq < 484.0f) {
+		if ((h & 0xFFu) < 120u) {
+			if (out_zone) *out_zone = ND_MEADOW_UNDERSTORY;
+			return 1;
+		}
+		return 0;
+	}
+
+	/* 6. Cohesive meadow patches & wildflower clearings on grassy terrain */
+	float patch = meadow_patch_noise((float)wx, (float)wy, 0x464C4F52u);
+	float flower_ring = meadow_patch_noise((float)wx + 113.0f, (float)wy - 79.0f, 0x424C4F4Du);
+	uint32_t density_roll = h & 0xFFu;
+	uint32_t threshold = (g.kind == NDW_G_TUNDRA) ? 55u : (uint32_t)(75.0f + 130.0f * patch);
+
+	if (density_roll >= threshold)
+		return 0;
+
+	if (g.kind == NDW_G_GRASS && flower_ring > 0.62f && ((h >> 8u) & 7u) <= 2u) {
+		if (out_zone) *out_zone = ND_MEADOW_WILDFLOWER;
+		return 1;
+	}
+
+	if (out_zone) *out_zone = ND_MEADOW_GRASS;
+	return 1;
+}
+
 #define MAX_DRAW 192
-#define ALL_GPU_MAX_DRAW 2048
+#define ALL_GPU_MAX_DRAW 4096
 
 void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
@@ -885,6 +1002,159 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					dst_bb->pad0 = 0;
 				}
 				all_gpu_count++;
+			}
+		}
+	}
+
+	/* Emit deterministic Living Meadow tufts, shoreline reeds, wildflowers, and disturbed pollen motes */
+	float dist_meadow = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
+	float meadow_fade = seven_smooth_fade(dist_meadow, 380.0f, 680.0f);
+	if (meadow_fade > 0.02f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
+		uint16_t m_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
+		int16_t base_wl = nd_field_water_level(m_world);
+		int64_t lwx64 = 0, lwy64 = 0;
+		nd_seven_world_pos(st, &lwx64, &lwy64);
+		int32_t lwx = (int32_t)lwx64;
+		int32_t lwy = (int32_t)lwy64;
+
+		/* Cache near-field tree trunk positions for canopy understory zoning */
+		int32_t tree_wx[64], tree_wy[64];
+		int tree_n = 0;
+		for (uint32_t a = 0; a < all_gpu_count && tree_n < 64; a++) {
+			if (s_all_gpu_batch[a].style == ND_BB_STYLE_LEAF_TINT ||
+			    s_all_gpu_batch[a].style == ND_BB_STYLE_FLORA) {
+				if (s_all_gpu_batch[a].height >= 36.0f) {
+					tree_wx[tree_n] = (int32_t)s_all_gpu_batch[a].x;
+					tree_wy[tree_n] = (int32_t)s_all_gpu_batch[a].y;
+					tree_n++;
+				}
+			}
+		}
+
+		/* Sample a deterministic 24-unit grid within [-216..+216] around the Lamb */
+		const int32_t step = 24;
+		const int32_t rad = 216;
+		int32_t cx0 = ((lwx - rad) / step) * step;
+		int32_t cy0 = ((lwy - rad) / step) * step;
+
+		for (int32_t gy = cy0; gy <= lwy + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gy += step) {
+			for (int32_t gx = cx0; gx <= lwx + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gx += step) {
+				uint32_t jh = meadow_hash32(gx, gy, 0x4A495454u);
+				int32_t wx = gx + (int32_t)(jh & 15u) - 8;
+				int32_t wy = gy + (int32_t)((jh >> 4u) & 15u) - 8;
+
+				float ddx = (float)(wx - lwx);
+				float ddy = (float)(wy - lwy);
+				float r2 = ddx * ddx + ddy * ddy;
+				if (r2 > (float)(rad * rad))
+					continue;
+
+				int16_t elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
+				float z_f = (float)elev_q / 16.0f;
+				int16_t local_wl = base_wl;
+				seven_has_water_at(m_world, wx, wy, &local_wl);
+
+				/* Resolve biome at (wx, wy) */
+				int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
+				int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
+				unsigned bio = 10u;
+				ndw_tile_t mt;
+				int16_t mpos[4];
+				if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
+					bio = mt.biome;
+
+				float min_tree_d2 = 999999.0f;
+				for (int t = 0; t < tree_n; t++) {
+					float tx = (float)(wx - tree_wx[t]);
+					float ty = (float)(wy - tree_wy[t]);
+					float td2 = tx * tx + ty * ty;
+					if (td2 < min_tree_d2)
+						min_tree_d2 = td2;
+				}
+
+				int zone = ND_MEADOW_NONE;
+				int flip = 0;
+				if (!nd_seven_eval_meadow_tuft(wx, wy, z_f, (float)local_wl, bio, min_tree_d2, &zone, &flip))
+					continue;
+
+				nd_seven_sprite_rect_t sr;
+				if (!meadow_lookup_rect(zone, jh >> 8u, &sr))
+					continue;
+
+				float radial_fade = 1.0f - (sqrtf(r2) / (float)rad);
+				if (radial_fade < 0.0f) radial_fade = 0.0f;
+				float eff_alpha = meadow_fade * (0.35f + 0.65f * radial_fade);
+				uint32_t tint_m = seven_pack_white_alpha(eff_alpha);
+				if (tint_m == 0)
+					continue;
+
+				/* Understory tufts get a cooler, shaded forest-floor tint */
+				if (zone == ND_MEADOW_UNDERSTORY)
+					tint_m = (0xC4DEC800u) | (tint_m & 0xFFu);
+
+				lam_billboard_gpu_t *bb = &s_all_gpu_batch[all_gpu_count++];
+				bb->x = (float)wx;
+				bb->y = (float)wy;
+				bb->z = z_f;
+				bb->width = (float)sr.w;
+				bb->height = (float)sr.h;
+				bb->anchor_y = 2.0f;
+				bb->water_z_off = 2.0f;
+				if (flip) {
+					bb->u0 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
+					bb->u1 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
+				} else {
+					bb->u0 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
+					bb->u1 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
+				}
+				bb->v0 = (float)sr.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				bb->v1 = (float)(sr.y + sr.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				bb->tint_rgba = tint_m;
+				bb->style = ND_BB_STYLE_GRASS;
+				bb->shadow_rx = 0;
+				bb->shadow_ry = 0;
+				bb->pad0 = (uint8_t)zone;
+			}
+		}
+
+		/* Emit disturbed floating pollen / seed motes from recent footsteps in the wake buffer */
+		int wake_n = 0;
+		const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
+		nd_seven_sprite_rect_t mote_sr;
+		if (wake && wake_n > 0 && nd_seven_botanical_rect(NDB_POLLEN_MOTE, &mote_sr)) {
+			float anim_t = nd_seven_get_anim_time();
+			for (int w_i = 0; w_i < wake_n && all_gpu_count + 2 < ALL_GPU_MAX_DRAW; w_i++) {
+				if (!wake[w_i].valid)
+					continue;
+				float tau = anim_t - wake[w_i].t_sec;
+				if (tau < 0.0f || tau > 1.25f)
+					continue;
+				uint32_t mh = meadow_hash32((int32_t)wake[w_i].wx, (int32_t)wake[w_i].wy, (uint32_t)w_i + 0x504F4C4Cu);
+				float drift_x = ((float)(int32_t)(mh & 15u) - 7.5f) * 0.6f + tau * 6.5f;
+				float drift_y = ((float)(int32_t)((mh >> 4u) & 15u) - 7.5f) * 0.5f - tau * 4.0f;
+				float lift_z = 3.0f + tau * 9.5f;
+				float mote_alpha = (1.0f - (tau / 1.25f)) * meadow_fade * 0.85f;
+				uint32_t mote_tint = seven_pack_white_alpha(mote_alpha);
+				if (mote_tint == 0)
+					continue;
+				float base_z = nd_seven_ground_elevation_f((int32_t)wake[w_i].wx, (int32_t)wake[w_i].wy);
+				lam_billboard_gpu_t *mbb = &s_all_gpu_batch[all_gpu_count++];
+				mbb->x = wake[w_i].wx + drift_x;
+				mbb->y = wake[w_i].wy + drift_y + 0.02f;
+				mbb->z = base_z + lift_z;
+				mbb->width = (float)mote_sr.w;
+				mbb->height = (float)mote_sr.h;
+				mbb->anchor_y = 0.0f;
+				mbb->water_z_off = 0.0f;
+				mbb->u0 = (float)mote_sr.x / (float)ND_SEVEN_ATLAS_W;
+				mbb->u1 = (float)(mote_sr.x + mote_sr.w) / (float)ND_SEVEN_ATLAS_W;
+				mbb->v0 = (float)mote_sr.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				mbb->v1 = (float)(mote_sr.y + mote_sr.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				mbb->tint_rgba = mote_tint;
+				mbb->style = ND_BB_STYLE_STANDARD;
+				mbb->shadow_rx = 0;
+				mbb->shadow_ry = 0;
+				mbb->pad0 = 0;
 			}
 		}
 	}

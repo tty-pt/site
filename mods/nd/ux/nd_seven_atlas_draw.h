@@ -19,12 +19,23 @@
 
 typedef struct { uint8_t r, g, b, leaf; } tint_t;
 
+enum nd_seven_botanical_kind {
+	NDB_GRASS_TUFT_1 = 0,
+	NDB_GRASS_TUFT_2,
+	NDB_GRASS_TUFT_3,
+	NDB_REED_1,
+	NDB_REED_2,
+	NDB_POLLEN_MOTE,
+	NDB_COUNT
+};
+
 void atlas_load(void);
 const uint8_t *atlas_px(void);
 const uint32_t *atlas_rgba(void);
 uint32_t atlas_rgba_version(void);
 int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect);
 int nd_seven_obj_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect);
+int nd_seven_botanical_rect(int kind, nd_seven_sprite_rect_t *out_rect);
 
 uint32_t tint_col(uint32_t c, int r, int g, int b);
 uint32_t shade(uint32_t c, int num);

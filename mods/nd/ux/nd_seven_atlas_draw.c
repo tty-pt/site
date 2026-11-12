@@ -11,8 +11,125 @@ static uint32_t s_atlas_rgba[ND_SEVEN_ATLAS_W * ND_SEVEN_RUNTIME_ATLAS_H];
 static int s_atlas_ready;
 static uint32_t s_atlas_ver = 1;
 static uint16_t s_shelf_x = 0;
-static uint16_t s_shelf_y = ND_SEVEN_ATLAS_H_PX;
+static uint16_t s_shelf_y = ND_SEVEN_ATLAS_H_PX + 24;
 static uint16_t s_shelf_h = 0;
+
+static const nd_seven_sprite_rect_t s_botanical_rects[NDB_COUNT] = {
+	[NDB_GRASS_TUFT_1] = { 0,  ND_SEVEN_ATLAS_H_PX, 16, 16 },
+	[NDB_GRASS_TUFT_2] = { 16, ND_SEVEN_ATLAS_H_PX, 16, 16 },
+	[NDB_GRASS_TUFT_3] = { 32, ND_SEVEN_ATLAS_H_PX, 16, 16 },
+	[NDB_REED_1]       = { 48, ND_SEVEN_ATLAS_H_PX, 14, 22 },
+	[NDB_REED_2]       = { 62, ND_SEVEN_ATLAS_H_PX, 14, 22 },
+	[NDB_POLLEN_MOTE]  = { 76, ND_SEVEN_ATLAS_H_PX, 4,  4  }
+};
+
+static inline void atlas_put_px(uint16_t x, uint16_t y, uint32_t rgba)
+{
+	if (x < ND_SEVEN_ATLAS_W && y < ND_SEVEN_RUNTIME_ATLAS_H)
+		s_atlas_rgba[(size_t)y * ND_SEVEN_ATLAS_W + x] = rgba;
+}
+
+static void synthesize_botanical_shelf(void)
+{
+	const uint32_t c_root  = RGB(30, 56, 30);
+	const uint32_t c_deep  = RGB(42, 86, 40);
+	const uint32_t c_mid   = RGB(64, 128, 56);
+	const uint32_t c_lush  = RGB(88, 164, 68);
+	const uint32_t c_tip   = RGB(132, 198, 86);
+	const uint32_t c_stalk = RGB(74, 122, 62);
+	const uint32_t c_head1 = RGB(112, 72, 38);
+	const uint32_t c_head2 = RGB(84, 52, 26);
+
+	/* Clear reserved botanical shelf row (y: ND_SEVEN_ATLAS_H_PX .. +23) */
+	memset(&s_atlas_rgba[(size_t)ND_SEVEN_ATLAS_H_PX * ND_SEVEN_ATLAS_W], 0,
+	       24u * ND_SEVEN_ATLAS_W * sizeof(uint32_t));
+
+	/* Synthesize 3 multi-blade grass tufts (16x16 each) */
+	for (int v = 0; v < 3; v++) {
+		uint16_t bx = s_botanical_rects[NDB_GRASS_TUFT_1 + v].x;
+		uint16_t by = s_botanical_rects[NDB_GRASS_TUFT_1 + v].y;
+		/* 5 layered blades per tuft with subtle variant lean & height */
+		static const int8_t blade_x[3][5] = {
+			{ 3, 6, 8, 10, 13 },
+			{ 2, 5, 8, 11, 13 },
+			{ 3, 5, 7, 10, 12 }
+		};
+		static const int8_t blade_h[3][5] = {
+			{ 9, 12, 14, 11, 8 },
+			{ 10, 13, 11, 14, 9 },
+			{ 8, 11, 14, 12, 10 }
+		};
+		static const int8_t blade_lean[3][5] = {
+			{ -2, -1, 0, 1, 2 },
+			{ -1, 1, -1, 1, 2 },
+			{ -2, 0, 1, -1, 2 }
+		};
+		for (int b = 0; b < 5; b++) {
+			int x0 = blade_x[v][b];
+			int bh = blade_h[v][b];
+			int lean = blade_lean[v][b];
+			for (int dy = 0; dy < bh; dy++) {
+				int py = 15 - dy;
+				int px = x0 + (lean * dy) / (bh > 1 ? bh - 1 : 1);
+				if (px < 1) px = 1;
+				if (px > 14) px = 14;
+				uint32_t col = (dy < 2) ? c_root :
+				               (dy < 5) ? c_deep :
+				               (dy < bh - 3) ? c_mid :
+				               (dy < bh - 1) ? c_lush : c_tip;
+				atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), col);
+				if (dy < bh - 2 && px + 1 < 15) {
+					uint32_t side_col = (dy < 3) ? c_root : c_deep;
+					atlas_put_px((uint16_t)(bx + px + 1), (uint16_t)(by + py), side_col);
+				}
+			}
+		}
+	}
+
+	/* Synthesize 2 littoral shoreline reed / cattail clusters (14x22 each) */
+	for (int r = 0; r < 2; r++) {
+		uint16_t bx = s_botanical_rects[NDB_REED_1 + r].x;
+		uint16_t by = s_botanical_rects[NDB_REED_1 + r].y;
+		static const int8_t stalk_x[2][3] = { { 3, 7, 10 }, { 4, 7, 11 } };
+		static const int8_t stalk_h[2][3] = { { 17, 21, 18 }, { 19, 21, 16 } };
+		static const int8_t has_cattail[2][3] = { { 0, 1, 1 }, { 1, 1, 0 } };
+		for (int s = 0; s < 3; s++) {
+			int sx = stalk_x[r][s];
+			int sh = stalk_h[r][s];
+			int lean = (s == 0) ? -1 : (s == 2 ? 1 : 0);
+			for (int dy = 0; dy < sh; dy++) {
+				int py = 21 - dy;
+				int px = sx + (lean * dy) / 14;
+				uint32_t col = (dy < 3) ? c_root :
+				               (dy < 8) ? c_deep :
+				               (dy < sh - 2) ? c_stalk : c_tip;
+				atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), col);
+				/* Brown cylindrical cattail seed-head near upper third */
+				if (has_cattail[r][s] && dy >= sh - 8 && dy <= sh - 4) {
+					atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), c_head1);
+					if (px > 0)
+						atlas_put_px((uint16_t)(bx + px - 1), (uint16_t)(by + py), c_head2);
+				}
+			}
+		}
+	}
+
+	/* Synthesize 1 floating pollen / dandelion seed mote (4x4 soft warm-white glow) */
+	{
+		uint16_t bx = s_botanical_rects[NDB_POLLEN_MOTE].x;
+		uint16_t by = s_botanical_rects[NDB_POLLEN_MOTE].y;
+		uint32_t core = RGBA(255, 252, 210, 245);
+		uint32_t halo = RGBA(245, 240, 175, 150);
+		for (uint16_t ry = 0; ry < 4; ry++) {
+			for (uint16_t rx = 0; rx < 4; rx++) {
+				int is_core = (rx >= 1 && rx <= 2 && ry >= 1 && ry <= 2);
+				int is_corner = ((rx == 0 || rx == 3) && (ry == 0 || ry == 3));
+				if (!is_corner)
+					atlas_put_px(bx + rx, by + ry, is_core ? core : halo);
+			}
+		}
+	}
+}
 
 typedef struct {
 	uint32_t img_id;
@@ -38,6 +155,7 @@ void atlas_load(void)
 		uint8_t idx = s_atlas[p];
 		s_atlas_rgba[p] = (idx < ND_SEVEN_PALETTE_N) ? nd_seven_palette[idx] : 0;
 	}
+	synthesize_botanical_shelf();
 	s_atlas_ready = 1;
 }
 
@@ -125,6 +243,15 @@ int nd_seven_obj_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect)
 		return 1;
 	}
 	return 0;
+}
+
+int nd_seven_botanical_rect(int kind, nd_seven_sprite_rect_t *out_rect)
+{
+	if (kind < 0 || kind >= NDB_COUNT || !out_rect)
+		return 0;
+	atlas_load();
+	*out_rect = s_botanical_rects[kind];
+	return 1;
 }
 
 uint32_t tint_col(uint32_t c, int r, int g, int b)

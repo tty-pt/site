@@ -108,6 +108,24 @@ const nd_planet_def_t *nd_seven_get_planet(uint16_t world);
 uint32_t nd_seven_last_mid_billboard_count(void);
 int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, float *w, float *h);
 
+/* Botanical Micro-Ecology & Living Meadow Classifier:
+ * Evaluates deterministic botanical placement for a world sub-cell (wx, wy).
+ * Returns 1 if a tuft/reed/flower is placed and populates out_rect (atlas rect)
+ * and out_zone (1 = littoral reed, 2 = meadow wildflower, 3 = turf/tall grass, 4 = canopy understory).
+ * Returns 0 when submerged (elev_z <= water_level), on non-vegetated substrates, or inside tree trunks. */
+enum {
+	ND_MEADOW_NONE       = 0,
+	ND_MEADOW_REED       = 1,
+	ND_MEADOW_WILDFLOWER = 2,
+	ND_MEADOW_GRASS      = 3,
+	ND_MEADOW_UNDERSTORY = 4
+};
+
+int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
+                              float elev_z, float water_level,
+                              unsigned biome, float near_tree_dist_sq,
+                              int *out_zone, int *out_flip);
+
 /* Viewport LOD & Macro Chunk Thresholds (zero magic numbers) */
 #define ND_SEVEN_STRATOSPHERE_ZOOM_THRESHOLD 0.25f  /* Camera zoom threshold below which macro quadtree LOD activates */
 #define ND_SEVEN_FOCAL_WINDOW_RADIUS_ROOMS   3      /* 7x7 focal room grid radius around the player (-3..+3) */

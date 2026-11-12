@@ -16,6 +16,7 @@ extern "C" {
 #define ND_BB_STYLE_FLORA     2u  /* Flora with full-sprite tint */
 #define ND_BB_STYLE_MINERAL   3u  /* Rock / stone / boulder mineral scenery */
 #define ND_BB_STYLE_GLOW      4u  /* Subtle emissive universe-owner lamb glow */
+#define ND_BB_STYLE_GRASS     5u  /* Ground-pinned reactive grass / reed / flower tuft */
 
 typedef struct {
 	float x, y, z;
@@ -184,6 +185,16 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
                                    float cam_dist, float pixel_footprint,
                                    float *out_grad_x, float *out_grad_y,
                                    float *out_crest);
+
+/* Pure-C reactive grass & botanical displacement physics:
+ * Combines 3-octave recursive wind (gl_eval_recursive_wind), radial ankle parting
+ * around (lamb_wx, lamb_wy) within R=18 world units, and elastic footstep wake trail
+ * depression + underdamped harmonic rustle recovery over 1.4s. */
+void nd_seven_gl_eval_grass_displacement(float wx, float wy,
+                                         float anim_time,
+                                         float lamb_wx, float lamb_wy,
+                                         float *out_shear_x, float *out_shear_y,
+                                         float *out_depress_z, float *out_rustle);
 
 #ifdef __cplusplus
 }

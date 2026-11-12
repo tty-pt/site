@@ -1046,6 +1046,10 @@ static const char *s_fs_terrain =
 	"                vec3 vegCol = mix(deepMoss, lushTurf, smoothstep(0.25, 0.72, nMeso));\n"
 	"                vegCol = mix(vegCol, warmClover, smoothstep(0.38, 0.76, nStd) * 0.70);\n"
 	"                float bladeRelief = (nStd - 0.5) * 0.16 * distFade + (nClose - 0.5) * 0.20 * closeZoom + (nUltra - 0.5) * 0.14 * ultraZoom;\n"
+	"                vec4 meadowWind = eval_recursive_wind(vWorldPos, uAnimTime, fw, vDistance);\n"
+	"                float meadowGustWave = clamp((meadowWind.z - 0.55) * 0.55 + meadowWind.w * 0.45, 0.0, 1.0);\n"
+	"                vec3 windSheenCol = vegCol * vec3(1.16, 1.14, 0.86);\n"
+	"                vegCol = mix(vegCol, windSheenCol, meadowGustWave * 0.28 * distFade);\n"
 	"                vegCol *= clamp(1.0 + bladeRelief, 0.76, 1.26);\n"
 	"                dryCol = mix(dryCol, vegCol, macroFade * smoothstep(0.35, -0.10, fragWaterDepth));\n"
 	"            }\n"
@@ -2082,7 +2086,8 @@ static const char *s_fs_billboard =
 	"    }\n"
 	"    /* 2. Sub-Texel Anti-Aliased, Snell-Refracted & Outline-Softened Sprite Sampling */\n"
 	"    float style = vQuadUV.w;\n"
-	"    bool isLambGlow = (style > 3.5);\n"
+	"    bool isLambGlow = (style > 3.5 && style < 4.5);\n"
+	"    bool isGrass = (style > 4.5);\n"
 	"    vec2 sampleUV = vUV;\n"
 	"    if (isSubmerged) {\n"
 	"        vec2 atlasSize = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
@@ -2141,8 +2146,8 @@ static const char *s_fs_billboard =
 	"    float microH = (g1.x - 0.5) * 0.26 + (g2.x - 0.5) * 0.16 * distFade;\n"
 	"    vec2 microGrad = g1.yz * 0.22 + g2.yz * (0.32 * distFade);\n"
 	"    float microCavity = clamp(max(0.0, 0.48 - g1.x) * 0.42 + max(0.0, 0.48 - g2.x) * 0.32 * distFade, 0.0, 0.34);\n"
-	"    bool isFoliage = !isLambGlow && ((style > 0.5 && style < 2.5) || (albedo.g > max(albedo.r, albedo.b) * 1.06));\n"
-	"    bool isMineral = !isLambGlow && (style > 2.5);\n"
+	"    bool isFoliage = !isLambGlow && (isGrass || (style > 0.5 && style < 2.5) || (albedo.g > max(albedo.r, albedo.b) * 1.06));\n"
+	"    bool isMineral = !isLambGlow && !isGrass && (style > 2.5);\n"
 	"    if (isFoliage && distFade > 0.01) {\n"
 	"        /* Harmonize foliage palette with terrain vegetation (deepMoss / lushTurf / warmClover) */\n"
 	"        vec3 warmFoliage = albedo * vec3(1.06, 1.02, 0.84);\n"
@@ -2150,6 +2155,11 @@ static const char *s_fs_billboard =
 	"        albedo = mix(deepLeaf, warmFoliage, smoothstep(0.28, 0.72, g1.x));\n"
 	"        float leafRelief = (g1.x - 0.5) * 0.16 * distFade + (g2.x - 0.5) * 0.14 * closeZoom;\n"
 	"        albedo *= clamp(1.0 + leafRelief, 0.80, 1.22);\n"
+	"        if (isGrass) {\n"
+	"            vec4 gWind = eval_recursive_wind(vLocalPos.xy, uAnimTime);\n"
+	"            float tipSheen = smoothstep(0.25, 0.95, qy) * clamp((gWind.z - 0.50) * 0.55 + gWind.w * 0.45, 0.0, 1.0);\n"
+	"            albedo = mix(albedo * vec3(0.76, 0.86, 0.72), albedo * vec3(1.18, 1.15, 0.86), smoothstep(0.0, 0.85, qy + tipSheen * 0.35));\n"
+	"        }\n"
 	"    } else if (isMineral && distFade > 0.01) {\n"
 	"        /* Harmonize mineral sprites with terrain slate/granite strata & fracture crevices */\n"
 	"        vec3 slateWarm   = vec3(0.42, 0.39, 0.35);\n"
@@ -2319,6 +2329,10 @@ const char *nd_seven_gl_vs_billboard(void) { return s_vs_billboard; }
 const char *nd_seven_gl_fs_billboard(void) { return s_fs_billboard; }
 
 /* --- Pure-C Torus Geometry & Camera Math --- */
+
+static float s_grass_lamb_wx = 0.0f;
+static float s_grass_lamb_wy = 0.0f;
+static float s_grass_anim_time = 0.0f;
 
 static void torus_frame_double(double wx, double wy, double wz,
                                const nd_planet_def_t *pdef,
@@ -2541,23 +2555,36 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 	/* Triangle 2: BR, TR, TL (indices 1, 3, 2) */
 	int idx[6] = { 0, 1, 2, 1, 3, 2 };
 
+	float grass_sx = 0.0f, grass_sy = 0.0f, grass_dz = 0.0f, grass_rustle = 0.0f;
+	if (b->style == ND_BB_STYLE_GRASS) {
+		nd_seven_gl_eval_grass_displacement(b->x, b->y, s_grass_anim_time,
+		                                    s_grass_lamb_wx, s_grass_lamb_wy,
+		                                    &grass_sx, &grass_sy, &grass_dz, &grass_rustle);
+	}
+
 	for (int i = 0; i < 6; i++) {
 		int k = idx[i];
-		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * right[0] + c[k].dy * up[0];
-		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * right[1] + c[k].dy * up[1];
-		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * right[2] + c[k].dy * up[2];
+		float tip_mask = (b->style == ND_BB_STYLE_GRASS && c[k].qy > 0.5f) ? 1.0f : 0.0f;
+		float sx = grass_sx * tip_mask;
+		float sy = grass_sy * tip_mask;
+		float dz = grass_dz * tip_mask;
+
+		out_verts[i].world_pos[0] = base_pos[0] + (c[k].dx + sx) * right[0] + c[k].dy * up[0] + sy * S[0] - dz * N[0];
+		out_verts[i].world_pos[1] = base_pos[1] + (c[k].dx + sx) * right[1] + c[k].dy * up[1] + sy * S[1] - dz * N[1];
+		out_verts[i].world_pos[2] = base_pos[2] + (c[k].dx + sx) * right[2] + c[k].dy * up[2] + sy * S[2] - dz * N[2];
 
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
 
-		out_verts[i].tint[0] = tint[0];
-		out_verts[i].tint[1] = tint[1];
-		out_verts[i].tint[2] = tint[2];
+		float sheen = (b->style == ND_BB_STYLE_GRASS) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
+		out_verts[i].tint[0] = fminf(1.0f, tint[0] + sheen);
+		out_verts[i].tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
+		out_verts[i].tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
 		out_verts[i].tint[3] = tint[3];
 
-		out_verts[i].local_pos[0] = b->x + c[k].dx;
-		out_verts[i].local_pos[1] = b->y - c[k].dy / (sin_p > 0.1f ? sin_p : 0.819152f);
-		out_verts[i].local_pos[2] = c[k].loc_z;
+		out_verts[i].local_pos[0] = b->x + c[k].dx + sx;
+		out_verts[i].local_pos[1] = b->y - c[k].dy / (sin_p > 0.1f ? sin_p : 0.819152f) + sy;
+		out_verts[i].local_pos[2] = c[k].loc_z - dz;
 
 		out_verts[i].quad_uv[0] = c[k].qx;
 		out_verts[i].quad_uv[1] = c[k].qy;
@@ -3113,6 +3140,8 @@ void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
 	s_gl.cur_lamb_light[1] = wy;
 	s_gl.cur_lamb_light[2] = wz;
 	s_gl.cur_lamb_light[3] = (intensity > 0.0f) ? intensity : 0.0f;
+	s_grass_lamb_wx = wx;
+	s_grass_lamb_wy = wy;
 }
 
 float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
@@ -3149,6 +3178,9 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.cur_anim_time = anim_time;
 	s_gl.cur_tx = tx;
 	s_gl.cur_ty = ty;
+	s_grass_anim_time = anim_time;
+	s_grass_lamb_wx = tx;
+	s_grass_lamb_wy = ty;
 	if (pdef) s_gl.cur_pdef = *pdef;
 
 	/* Evaluate double-precision reference origin at (tx, ty, 0) to eliminate 32-bit float cancellation */
@@ -3520,7 +3552,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	bool emit_shadows = (s_gl.cur_dist < 16000.0f);
 
 	for (uint32_t i = 0; i < count; i++) {
-		bool want_shadow = emit_shadows && (batch[i].style != ND_BB_STYLE_GLOW) &&
+		bool want_shadow = emit_shadows &&
+		                   (batch[i].style != ND_BB_STYLE_GLOW) &&
+		                   (batch[i].style != ND_BB_STYLE_GRASS) &&
 		                   (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
 		uint32_t needed = want_shadow ? 12u : 6u;
 		if (out_verts_count + needed > MAX_BB_VERTS)
@@ -3978,6 +4012,109 @@ float nd_seven_gl_eval_billboard_lighting(float qx, float qy,
 	float amb_luma = 0.55f + 0.18f * hemi_sky;
 	float light_scalar = (amb_luma * 0.52f + 1.01f * (0.58f * sun_diff)) * (cavity_ao * contact_ao);
 	return 0.22f + 0.78f * light_scalar;
+}
+
+void nd_seven_gl_eval_grass_displacement(float wx, float wy,
+                                         float anim_time,
+                                         float lamb_wx, float lamb_wy,
+                                         float *out_shear_x, float *out_shear_y,
+                                         float *out_depress_z, float *out_rustle)
+{
+	/* 1. Continuous 3-octave recursive wind sway (matches ocean waves & terrain meadow gusts) */
+	float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
+	gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
+
+	/* Per-tuft deterministic phase & stiffness from chaff_hash3 */
+	uint32_t h = gl_chaff_hash3((int32_t)floorf(wx), (int32_t)floorf(wy), 0, 0x47524153u);
+	float phase = (float)(h & 0xFFFFu) * (TWO_PI_F / 65536.0f);
+	float stiff = 0.82f + 0.36f * ((float)((h >> 16u) & 0xFFu) / 255.0f);
+
+	float flutter = sinf(anim_time * 3.8f + wx * 0.08f + wy * 0.06f + phase) * (0.28f + 0.42f * catspaw);
+	float wind_mag = (1.15f * gust + 0.85f * catspaw + flutter) * stiff;
+	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.35f);
+	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.35f);
+	float dz = (wind_mag * wind_mag) * 0.08f;
+	float rustle = 0.15f * catspaw;
+
+	/* 2. Immediate radial ankle parting around (lamb_wx, lamb_wy) within R = 18.0 world units */
+	float dx = wx - lamb_wx;
+	float dy = wy - lamb_wy;
+	float d2 = dx * dx + dy * dy;
+	const float R_touch = 18.0f;
+	if (d2 < R_touch * R_touch) {
+		float dist = sqrtf(d2);
+		float t = 1.0f - (dist / R_touch);
+		float weight = t * t * (3.0f - 2.0f * t); /* smoothstep falloff */
+		float rx = 0.0f, ry = 0.0f;
+		if (dist > 0.25f) {
+			rx = dx / dist;
+			ry = dy / dist;
+		} else {
+			/* Directly underfoot: part deterministically left or right based on tuft hash */
+			rx = ((h & 1u) != 0u) ? 1.0f : -1.0f;
+			ry = 0.25f;
+		}
+		/* Bias horizontal parting slightly wider so ankles clearly part blades left & right */
+		sx += rx * (5.6f * weight);
+		sy += ry * (3.8f * weight);
+		dz += 3.2f * weight;
+		float foot_flutter = sinf(anim_time * 18.0f + phase) * 0.85f * weight;
+		sx += (-ry) * foot_flutter;
+		rustle += 0.85f * weight;
+	}
+
+	/* 3. Elastic footstep wake trail recovery & underdamped harmonic rustle over 1.4s */
+	int wake_n = 0;
+	const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
+	if (wake && wake_n > 0) {
+		const float R_wake = 16.0f;
+		const float tau_max = 1.40f;
+		for (int i = 0; i < wake_n; i++) {
+			if (!wake[i].valid)
+				continue;
+			float tau = anim_time - wake[i].t_sec;
+			if (tau < 0.0f || tau > tau_max)
+				continue;
+			float wdx = wx - wake[i].wx;
+			float wdy = wy - wake[i].wy;
+			float wd2 = wdx * wdx + wdy * wdy;
+			if (wd2 >= R_wake * R_wake)
+				continue;
+			float wdist = sqrtf(wd2);
+			float wt = 1.0f - (wdist / R_wake);
+			float w_spatial = wt * wt * (3.0f - 2.0f * wt);
+			float decay = expf(-2.8f * tau) * (1.0f - (tau / tau_max));
+			/* Underdamped spring-back oscillation: cos(15 * tau) */
+			float osc = cosf(15.0f * tau + phase * 0.25f);
+			float wrx = (wdist > 0.25f) ? (wdx / wdist) : (((h & 2u) != 0u) ? 1.0f : -1.0f);
+			float wry = (wdist > 0.25f) ? (wdy / wdist) : 0.0f;
+
+			/* Blend radial push with actor's step velocity vector */
+			float vlen = sqrtf(wake[i].vx * wake[i].vx + wake[i].vy * wake[i].vy);
+			float vnx = (vlen > 1.0f) ? (wake[i].vx / vlen) : 0.0f;
+			float vny = (vlen > 1.0f) ? (wake[i].vy / vlen) : 0.0f;
+
+			float env = w_spatial * decay;
+			sx += (wrx * 3.2f + vnx * 1.4f * osc) * env;
+			sy += (wry * 2.2f + vny * 1.0f * osc) * env;
+			dz += 2.1f * env * (0.65f + 0.35f * fabsf(osc));
+			rustle += 0.65f * env * fabsf(osc);
+		}
+	}
+
+	/* Clamp maximum tip shear & depression to preserve clean sprite proportions */
+	if (sx < -8.5f) sx = -8.5f;
+	if (sx >  8.5f) sx =  8.5f;
+	if (sy < -6.5f) sy = -6.5f;
+	if (sy >  6.5f) sy =  6.5f;
+	if (dz <  0.0f) dz =  0.0f;
+	if (dz >  4.8f) dz =  4.8f;
+	if (rustle > 1.0f) rustle = 1.0f;
+
+	if (out_shear_x)   *out_shear_x   = sx;
+	if (out_shear_y)   *out_shear_y   = sy;
+	if (out_depress_z) *out_depress_z = dz;
+	if (out_rustle)    *out_rustle    = rustle;
 }
 
 

@@ -46,4 +46,18 @@ int nd_seven_tick(const nd_client_state_t *st, float dt);
 int nd_seven_collision(const nd_client_state_t *st, int x, int y);
 void nd_seven_collision_invalidate(void);
 
+/* Elastic footstep / actor wake ring buffer for reactive grass */
+#define ND_SEVEN_WAKE_MAX 16
+
+typedef struct {
+	float wx, wy;
+	float vx, vy;
+	float t_sec;
+	uint8_t valid;
+} nd_grass_wake_step_t;
+
+void nd_seven_record_wake_step(float wx, float wy, float vx, float vy, float t_sec);
+void nd_seven_clear_wake(void);
+const nd_grass_wake_step_t *nd_seven_get_wake_steps(int *out_count);
+
 #endif /* ND_SEVEN_MOTION_H */
