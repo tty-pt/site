@@ -2898,83 +2898,102 @@ int main(void)
 		       l_at, l_near, l_mid, l_far);
 	}
 
-	/* Phase 9: 4D Wind-Coupled Volumetric Clouds, Projected Ground/Water Shadows & Water Cloud Reflections */
+	/* Phase 9: 8-Octave Observer-Gated ("Quantum") 4D Volumetric Clouds, Big Synoptic Features & Shadows */
 	{
 		const char *vs_c = nd_seven_gl_vs_cloud();
 		const char *fs_c = nd_seven_gl_fs_cloud();
 		const char *fs_t = nd_seven_gl_fs_terrain();
 		const char *fs_w = nd_seven_gl_fs_water();
-		assert(vs_c && fs_c && fs_t && fs_w);
+		const char *fs_b = nd_seven_gl_fs_billboard();
+		assert(vs_c && fs_c && fs_t && fs_w && fs_b);
 
-		/* 1. Verify shader contracts for 4D lattice hashing, geostrophic wind-shear cloud density,
-		 * multi-active fractal billow erosion (fbmErode), 3-deck vertical strata (uCloudDeck),
-		 * projected ground/water cloud shadows, water cloud reflections, Beer-Powder silver-lining,
-		 * and close-up diorama aperture parting */
-		assert(strstr(vs_c, "uCloudDeck") != NULL);
-		assert(strstr(fs_c, "uCloudDeck") != NULL);
+		/* 1. Verify shader contracts for 4D lattice hashing, 8-octave observer-gated fractal cascade
+		 * (eval_zoom_cloud_density), synoptic clear/cloudy weather belts (synFront / bigCloud),
+		 * below-cloud quantum gating (shellFade / apertureMask), Beer-Powder silver-lining,
+		 * and projected ground, water, and lamb billboard cloud shadows */
 		assert(strstr(fs_c, "chaff_hash4") != NULL);
 		assert(strstr(fs_c, "chaff_grad_noise4d") != NULL);
 		assert(strstr(fs_c, "eval_recursive_wind") != NULL);
-		assert(strstr(fs_c, "eval_planetary_cloud_density") != NULL);
-		assert(strstr(fs_c, "fbmErode") != NULL);
+		assert(strstr(fs_c, "eval_zoom_cloud_density") != NULL);
+		assert(strstr(fs_c, "synFront") != NULL);
+		assert(strstr(fs_c, "bigCloud") != NULL);
+		assert(strstr(fs_c, "shellFade") != NULL);
 		assert(strstr(fs_c, "apertureMask") != NULL);
 		assert(strstr(fs_c, "powder") != NULL);
+		assert(strstr(fs_t, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_t, "eval_planetary_cloud_shadow") != NULL);
+		assert(strstr(fs_w, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_w, "eval_planetary_cloud_shadow") != NULL);
 		assert(strstr(fs_w, "reflCloudDens") != NULL);
+		assert(strstr(fs_b, "eval_zoom_cloud_density") != NULL);
+		assert(strstr(fs_b, "cloudShadow") != NULL);
 
-		/* 2. Verify deterministic 4D cloud density & climate humidity response across all 3 strata */
+		/* 2. Verify planetary & regional weather distribution (cloudy in some parts, crystal-clear in others),
+		 * big synoptic/mesoscale feature coherence, and climate humidity modulation */
 		float sum_arid = 0.0f, sum_humid = 0.0f;
-		float sum_d0 = 0.0f, sum_d1 = 0.0f, sum_d2 = 0.0f;
+		float sum_core = 0.0f, sum_crown = 0.0f;
 		int cloud_cells = 0, clear_cells = 0;
 		for (int iy = 0; iy < 16; iy++) {
 			for (int ix = 0; ix < 16; ix++) {
-				float wx = (float)ix * 140.0f - 800.0f;
-				float wy = (float)iy * 140.0f - 800.0f;
+				float wx = (float)ix * 1600.0f - 12000.0f;
+				float wy = (float)iy * 1600.0f - 12000.0f;
 				float d_arid  = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.20f, NULL, NULL, NULL, NULL);
 				float d_humid = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
 				float d_again = nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
-				float d_mid   = nd_seven_gl_eval_cloud_density(wx, wy, 192.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
-				float d_high  = nd_seven_gl_eval_cloud_density(wx, wy, 288.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
+				float d_crown = nd_seven_gl_eval_cloud_density(wx, wy, 142.0f, 24.0f, 0.90f, NULL, NULL, NULL, NULL);
 				assert(fabsf(d_humid - d_again) < 1e-6f);
 				assert(d_humid >= d_arid - 1e-6f);
 				sum_arid  += d_arid;
 				sum_humid += d_humid;
-				sum_d0    += d_humid;
-				sum_d1    += d_mid;
-				sum_d2    += d_high;
+				sum_core  += d_humid;
+				sum_crown += d_crown;
 				if (d_humid > 0.15f) cloud_cells++;
-				if (d_arid  < 0.05f) clear_cells++;
+				if (d_arid == 0.0f)  clear_cells++;
 			}
 		}
 		assert(sum_humid > sum_arid * 1.25f);
-		assert(cloud_cells > 15 && clear_cells > 15);
-		assert(sum_d0 > 10.0f && sum_d1 > 8.0f && sum_d2 > 5.0f);
+		assert(cloud_cells > 20 && clear_cells > 80);
+		assert(sum_core > sum_crown && sum_crown > 2.0f);
 
-		/* 3. Verify 3-layer vertical cloud strata [88..144], [168..228], [268..320] and clear inter-deck gaps */
+		/* 3. Verify unified vertical cloud envelope [88..176] and clear sky below/above */
 		float d_below = nd_seven_gl_eval_cloud_density(120.0f, -200.0f,  84.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		float d_gap01 = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 156.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		float d_gap12 = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 248.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 326.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
-		assert(d_below == 0.0f && d_gap01 == 0.0f && d_gap12 == 0.0f && d_above == 0.0f);
+		float d_above = nd_seven_gl_eval_cloud_density(120.0f, -200.0f, 180.0f, 15.0f, 0.85f, NULL, NULL, NULL, NULL);
+		assert(d_below == 0.0f && d_above == 0.0f);
 
-		/* 4. Verify 4D temporal derivative stability at t = 100,000s vs t = 10s */
+		/* 4. Verify quantum observer-distance & Nyquist progressive octave activation (close > mid > far) */
+		float grad_close = 0.0f, grad_mid = 0.0f, grad_far = 0.0f;
+		for (int k = 0; k < 128; k++) {
+			float wx = (float)k * 650.0f - 25000.0f;
+			float wy = (float)k * 480.0f - 18000.0f;
+			float gxc = 0.0f, gyc = 0.0f, gxm = 0.0f, gym = 0.0f, gxf = 0.0f, gyf = 0.0f;
+			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f,   280.0f,  0.15f, &gxc, &gyc, NULL, NULL);
+			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f,  4200.0f,  2.50f, &gxm, &gym, NULL, NULL);
+			nd_seven_gl_eval_zoom_cloud_density(wx, wy, 108.0f, 24.0f, 0.90f, 65000.0f, 40.00f, &gxf, &gyf, NULL, NULL);
+			grad_close += hypotf(gxc, gyc);
+			grad_mid   += hypotf(gxm, gym);
+			grad_far   += hypotf(gxf, gyf);
+		}
+		assert(grad_close > grad_mid * 1.25f);
+		assert(grad_mid > grad_far * 1.25f);
+		assert(grad_far > 1e-4f);
+
+		/* 5. Verify 4D temporal derivative stability at t = 100,000s vs t = 10s */
 		float gt_early = 0.0f, gt_late = 0.0f;
-		for (int k = 0; k < 64; k++) {
-			float wx = (float)k * 95.0f - 600.0f;
-			float wy = (float)k * 73.0f - 400.0f;
+		for (int k = 0; k < 96; k++) {
+			float wx = (float)k * 850.0f - 32000.0f;
+			float wy = (float)k * 610.0f - 24000.0f;
 			float gx1 = 0.0f, gy1 = 0.0f, gz1 = 0.0f, gt1 = 0.0f;
 			float gx2 = 0.0f, gy2 = 0.0f, gz2 = 0.0f, gt2 = 0.0f;
-			nd_seven_gl_eval_cloud_density(wx, wy, 110.0f, 10.0f,     0.75f, &gx1, &gy1, &gz1, &gt1);
-			nd_seven_gl_eval_cloud_density(wx, wy, 110.0f, 100000.0f, 0.75f, &gx2, &gy2, &gz2, &gt2);
+			nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 10.0f,     0.85f, &gx1, &gy1, &gz1, &gt1);
+			nd_seven_gl_eval_cloud_density(wx, wy, 108.0f, 100000.0f, 0.85f, &gx2, &gy2, &gz2, &gt2);
 			gt_early += fabsf(gt1) + hypotf(gx1, gy1);
 			gt_late  += fabsf(gt2) + hypotf(gx2, gy2);
 		}
 		assert(gt_early > 0.001f);
 		assert(gt_late > gt_early * 0.50f && gt_late < gt_early * 1.85f);
 
-		printf("PASS: 4D multi-layer fractal volumetric clouds (decks=%.1f/%.1f/%.1f), climate humidity modulation (arid=%.2f vs humid=%.2f), and t=100000s 4D boiling stability verified\n",
-		       sum_d0, sum_d1, sum_d2, sum_arid, sum_humid);
+		printf("PASS: 8-octave quantum 4D clouds (cloudy=%d, clear=%d, core=%.1f, crown=%.1f, grad=%.3f>%.3f>%.3f, arid=%.2f vs humid=%.2f) & t=100000s stability verified\n",
+		       cloud_cells, clear_cells, sum_core, sum_crown, grad_close, grad_mid, grad_far, sum_arid, sum_humid);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

@@ -189,8 +189,19 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
                                    float *out_grad_x, float *out_grad_y,
                                    float *out_crest);
 
-/* Pure-C reference mirror of the deterministic 4D wind-coupled volumetric cloud
- * density and analytical 4D spatiotemporal partial derivatives in s_fs_cloud / s_fs_terrain / s_fs_water. */
+/* Pure-C reference mirror of the 8-octave observer-gated ("quantum") 4D wind-coupled
+ * fractal cloud cascade in s_fs_cloud / s_fs_terrain / s_fs_water / s_fs_billboard:
+ * Gates fine fractal octaves by camera distance (cam_dist) and screen-space Nyquist
+ * footprint (pixel_footprint), early-outing in clear-sky synoptic regions while
+ * preserving large-scale weather systems and resolving close-up billow detail
+ * where observed. */
+float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
+                                          float anim_time,
+                                          float climate_humidity,
+                                          float cam_dist, float pixel_footprint,
+                                          float *out_grad_x, float *out_grad_y,
+                                          float *out_grad_z, float *out_grad_t);
+
 float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
                                      float anim_time,
                                      float climate_humidity,
@@ -202,3 +213,4 @@ float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
 #endif
 
 #endif /* ND_SEVEN_GL_H */
+
