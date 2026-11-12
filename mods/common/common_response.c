@@ -321,7 +321,7 @@ XY_IMPL(int, site_ui_respond_isomorphic,
 		snprintf(
 		        state_script, sizeof(state_script),
 		        "<script type=\"application/json\" "
-		        "id=\"bud-state\">%s</script>",
+		        "id=\"bud-state\" data-state=\"1\">%s</script>",
 		        state_json);
 	else
 		state_script[0] = '\0';

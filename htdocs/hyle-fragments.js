@@ -662,4 +662,27 @@ var existing = rows.querySelector('input[value="' + newId + '"]');
 	var nodes = document.querySelectorAll('[data-hyle-frag-url]');
 	for (var i = 0; i < nodes.length; i++)
 		adopt(nodes[i]);
+
+	var hyleCapFactory = function (root) {
+		return {
+			mount: function () {
+				var scope = (root && root.querySelectorAll) ? root : document;
+				var list = scope.querySelectorAll('[data-hyle-frag-url]');
+				for (var j = 0; j < list.length; j++)
+					adopt(list[j]);
+			},
+			destroy: function () {},
+			makeImports: function () { return {}; }
+		};
+	};
+	window.__wasm_capability_registry = window.__wasm_capability_registry || {};
+	window.__wasm_capability_registry.hyle = hyleCapFactory;
+	if (typeof window.registerWasmCapability === 'function') {
+		window.registerWasmCapability('hyle', hyleCapFactory);
+	}
+	if (window.steleClient && typeof window.steleClient.on === 'function' && typeof window.steleClient.emit === 'function') {
+		window.steleClient.on('stl:mutate', function (_t, payload) { window.steleClient.emit('hyle:mutate', payload); });
+		window.steleClient.on('stl:saved', function (_t, payload) { window.steleClient.emit('hyle:saved', payload); });
+		window.steleClient.on('stl:rollback', function (_t, payload) { window.steleClient.emit('hyle:rollback', payload); });
+	}
 })();

@@ -34,7 +34,7 @@ static inline const char *ui_t(const char *msgid)
 #define SITE_FRAGMENTS_V "?v=1"
 #endif
 #define SITE_UI_FRAGMENTS_SCRIPT                                               \
-	"<script defer src=\"/hyle-fragments.js" SITE_FRAGMENTS_V "\"></"      \
+	"<script defer src=\"/hyle-cap.js" SITE_FRAGMENTS_V "\"></"            \
 	"script>"
 
 SITE_UI_WEAK char *site_ui_page(

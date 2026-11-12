@@ -4,7 +4,7 @@
  *
  * Implements dynamic on-demand component WASM instantiation with isolated linear
  * memory instances, multi-slot hydration, declarative capability loading, and pure-C
- * event routing with zero site-specific JS.
+ * event routing with zero application-specific JS.
  */
 
 const globalScope = typeof window !== 'undefined' ? window : globalThis;
@@ -34,6 +34,9 @@ function createSlotBridge(root) {
  * @returns {Promise<WebAssembly.WebAssemblyInstantiatedSource|null>}
  */
 async function instantiateWasmStreamingWithFallback(url, imports) {
+	if (typeof url === 'string' && url.startsWith('/') && (typeof window === 'undefined' || !window.location?.origin)) {
+		return null;
+	}
 	const fullUrl = (typeof window !== 'undefined' && window.location?.origin && url.startsWith('/'))
 		? `${window.location.origin}${url}`
 		: url;
@@ -73,7 +76,7 @@ export class SteleWasmClient {
 		return createSlotBridge(root);
 	}
 
-	constructor() {
+	constructor(options = {}) {
 		this.instance = null;
 		this.sharedMemory = (typeof WebAssembly !== 'undefined' && typeof WebAssembly.Memory === 'function')
 			? new WebAssembly.Memory({ initial: 256, maximum: 4096 })
@@ -86,6 +89,11 @@ export class SteleWasmClient {
 			window.__active_bridges = this.activeBridges;
 		}
 		this.eventListeners = new Map();
+		this.capabilityUrls = {
+			...(typeof globalScope.__wasm_capability_urls === 'object' ? globalScope.__wasm_capability_urls : {}),
+			...(options.capabilityUrls || {})
+		};
+		this.fallbackWasmUrl = options.fallbackWasmUrl || null;
 	}
 
 	decodeString(memory, ptr, len) {
@@ -146,24 +154,19 @@ export class SteleWasmClient {
 		if (!cap || cap === 'stele' || cap === 'stl' || cap === 'env' || cap === 'wasi_snapshot_preview1') return;
 		if (globalScope.__wasm_capability_registry[cap]) return;
 
-		const capabilityMap = {
-			'axil': '/axil-bridge.js',
-			'axil-ws': '/axil-bridge.js',
-			'axil-tty': '/axil-tty-bridge.js',
-			'tty': '/axil-tty-bridge.js',
-			'bud': '/bud-hydrate.js',
-			'hyle': '/hyle-fragments.js',
-			'lamina': '/lamina-bridge.js',
-			'xylem': '/xylem-bridge.js',
-			'webgl': '/webgl-bridge.js'
-		};
-		const knownUrl = capabilityMap[cap];
-		const candidates = knownUrl ? [knownUrl] : [
-			`/${cap}-bridge.js`,
-			cap.includes('-') ? `/${cap.split('-')[0]}-bridge.js` : null,
-			cap === 'tty' ? '/axil-tty-bridge.js' : null,
-			`/${cap}-hydrate.js`
-		].filter(Boolean);
+		const attrUrl = typeof document !== 'undefined'
+			? (document.body?.getAttribute(`data-capability-${cap}`) ||
+			   document.querySelector(`meta[name="capability-${cap}"]`)?.getAttribute('content') ||
+			   null)
+			: null;
+		const mappedUrl = this.capabilityUrls?.[cap] || globalScope.__wasm_capability_urls?.[cap] || attrUrl;
+		const prefix = cap.includes('-') ? cap.split('-')[0] : null;
+		const candidates = [...new Set([
+			mappedUrl,
+			`/${cap}-cap.js`,
+			prefix ? `/${prefix}-cap.js` : null,
+			`/${cap}-bridge.js`
+		].filter(Boolean))];
 
 		for (const url of candidates) {
 			try {
@@ -178,6 +181,7 @@ export class SteleWasmClient {
 	}
 
 	async loadCapabilities() {
+		if (typeof document === 'undefined') return;
 		const capAttr = [
 			document.body?.getAttribute('data-capabilities') || '',
 			document.querySelector('[data-slot="1"], [data-capabilities]')?.getAttribute('data-capabilities') || '',
@@ -372,7 +376,10 @@ export class SteleWasmClient {
 		const getWasm = () => {
 			return this.slotInstances.get(slot)?.instance?.exports || (this.instance ? this.instance.exports : null);
 		};
-		const slotRoot = this.slotBridges.get(slot)?.root || (slot === 0 ? (document.querySelector('[data-slot="0"]') || document.getElementById('chrome-root')) : document.querySelector('[data-slot="1"], [data-slot]'));
+		const hasDoc = typeof document !== 'undefined';
+		const slotRoot = this.slotBridges.get(slot)?.root || (hasDoc
+			? (slot === 0 ? (document.querySelector?.('[data-slot="0"]') || document.getElementById?.('chrome-root')) : document.querySelector?.('[data-slot="1"], [data-slot]'))
+			: null);
 
 		const candidateBridges = [];
 		const instantiatedFactories = new Set();
@@ -388,7 +395,7 @@ export class SteleWasmClient {
 					if (instantiatedFactories.has(factory)) continue;
 					instantiatedFactories.add(factory);
 					try {
-						const root = slotRoot || document.body;
+						const root = slotRoot || (hasDoc ? document.body : null);
 						const capBridge = factory(root, getWasm);
 						if (capBridge) {
 							candidateBridges.push(capBridge);
@@ -407,8 +414,8 @@ export class SteleWasmClient {
 
 		// Also discover from data-capabilities attribute
 		const slotCapsAttr = [
-			slotRoot?.getAttribute('data-capabilities') || '',
-			slot === 1 ? (document.body?.getAttribute('data-capabilities') || '') : ''
+			slotRoot?.getAttribute?.('data-capabilities') || '',
+			(slot === 1 && hasDoc) ? (document.body?.getAttribute?.('data-capabilities') || '') : ''
 		].join(' ');
 		const slotDeclared = new Set(slotCapsAttr.trim().split(/\s+/).filter(Boolean));
 
@@ -419,7 +426,7 @@ export class SteleWasmClient {
 			if (instantiatedFactories.has(factory)) continue;
 			instantiatedFactories.add(factory);
 			try {
-				const root = slotRoot || document.body;
+				const root = slotRoot || (hasDoc ? document.body : null);
 				const capBridge = factory(root, getWasm);
 				if (capBridge) {
 					candidateBridges.push(capBridge);
@@ -464,17 +471,20 @@ export class SteleWasmClient {
 	}
 
 	async bindSlots() {
-		const modulesAttr = (typeof document !== 'undefined' && document.body?.getAttribute('data-modules')) || '';
+		if (typeof document === 'undefined') return false;
+		const modulesAttr = document.body?.getAttribute?.('data-modules') || '';
 		const tokens = modulesAttr.trim().split(/\s+/).filter(Boolean);
 		let mountedCount = 0;
 
-		const chromeRoot = document.querySelector('[data-slot="0"]') || document.getElementById('chrome-root');
-		if (chromeRoot && (tokens.length === 0 || tokens.includes('site_chrome'))) {
+		const chromeRoot = document.querySelector?.('[data-slot="0"]') || document.getElementById?.('chrome-root');
+		const chromeModAttr = chromeRoot?.getAttribute?.('data-module');
+		const chromeModule = chromeModAttr || (chromeRoot ? (tokens[0] || null) : null);
+		if (chromeRoot && chromeModule) {
 			const bridge = createSlotBridge(chromeRoot);
 			if (bridge) this.slotBridges.set(0, bridge);
-			const stateEl = document.getElementById('chrome-state');
+			const stateEl = document.querySelector?.('[data-state="0"]') || document.getElementById?.('chrome-state');
 			let state = null;
-			if (stateEl && stateEl.hasAttribute('data-title')) {
+			if (stateEl && stateEl.hasAttribute?.('data-title')) {
 				state = {
 					title: stateEl.getAttribute('data-title') || '',
 					path: stateEl.getAttribute('data-path') || '',
@@ -485,20 +495,20 @@ export class SteleWasmClient {
 			} else {
 				state = this.extractElementState(stateEl);
 			}
-			if (await this.mountSlot(0, 'site_chrome', state)) mountedCount++;
+			if (await this.mountSlot(0, chromeModule, state)) mountedCount++;
 		}
 
-		const pageRoot = document.querySelector('[data-slot="1"], [data-slot], [data-module]');
+		const pageRoot = document.querySelector?.('[data-slot="1"], [data-slot]:not([data-slot="0"]), [data-module]:not([data-slot="0"])') ||
+		                 document.getElementById?.('page-root');
 		if (pageRoot) {
-			const pageModule = tokens.find(t => t !== 'site_chrome') || pageRoot.getAttribute('data-module') || '';
+			const pageModule = pageRoot.getAttribute?.('data-module') || (chromeModule ? tokens.find(t => t !== chromeModule) : tokens[0]) || tokens[1] || '';
 			if (pageModule) {
 				const bridge = createSlotBridge(pageRoot);
 				if (bridge) this.slotBridges.set(1, bridge);
 
 				let state = null;
-				const binSrcMeta = typeof document !== 'undefined'
-					? (document.querySelector('meta[name="state-src"]') || document.querySelector('meta[name="page-state-src"]'))
-					: null;
+				const binSrcMeta = document.querySelector?.('meta[name="state-src"]') ||
+				                   document.querySelector?.('meta[name="page-state-src"]');
 				const binUrl = binSrcMeta?.getAttribute?.('content');
 				if (binUrl && typeof fetch === 'function') {
 					try {
@@ -513,7 +523,8 @@ export class SteleWasmClient {
 				}
 
 				if (!state) {
-					const stateEl = document.querySelector('[data-state="1"], [data-state], #page-state');
+					const stateEl = document.querySelector?.('[data-state="1"], [data-state]:not([data-state="0"]), #page-state') ||
+					                document.getElementById?.('page-state');
 					state = this.extractElementState(stateEl);
 				}
 
@@ -604,11 +615,20 @@ export class SteleWasmClient {
 
 	async mountSlot(slot, moduleName, json) {
 		// 1. Try on-demand dynamic component WASM instantiation with shared linear memory substrate
-		try {
-			const candidateUrls = [`/${moduleName}.wasm`, `/${moduleName}_detail.wasm`, '/site.wasm'];
-			for (const compUrl of candidateUrls) {
+		if (typeof fetch === 'function') {
+			try {
+				const configuredBundle = (typeof document !== 'undefined' && document.body?.getAttribute?.('data-wasm-bundle')) || this.fallbackWasmUrl;
+				const candidateUrls = [...new Set([
+					`/${moduleName}.wasm`,
+					`/${moduleName}_detail.wasm`,
+					configuredBundle
+				].filter(Boolean))];
+				for (const compUrl of candidateUrls) {
 				let wasmModule = null;
 				let wasmBuffer = null;
+				if (typeof compUrl === 'string' && compUrl.startsWith('/') && (typeof window === 'undefined' || !window.location?.origin)) {
+					continue;
+				}
 				try {
 					const fullUrl = (typeof window !== 'undefined' && window.location?.origin && compUrl.startsWith('/'))
 						? `${window.location.origin}${compUrl}`
@@ -739,8 +759,9 @@ export class SteleWasmClient {
 					return true;
 				}
 			}
-		} catch (err) {
-			console.warn(`Dynamic component WASM load failed for ${moduleName}:`, err);
+			} catch (err) {
+				console.warn(`Dynamic component WASM load failed for ${moduleName}:`, err);
+			}
 		}
 
 		// 2. Fall back to shared substrate kernel slot mount if available
@@ -949,10 +970,10 @@ export class SteleWasmClient {
 
 			// Handle POST forms with optimistic mutations & rollback
 			if (method === 'POST') {
-				const isOptimistic = form.hasAttribute('data-optimistic') || form.hasAttribute('data-dataset') || form.hasAttribute('data-table') || form.hasAttribute('data-hyle-dataset');
+				const isOptimistic = form.hasAttribute('data-optimistic') || form.hasAttribute('data-dataset') || form.hasAttribute('data-table');
 				const actionUrl = form.getAttribute('action') || window.location.href;
-				const dataset = form.getAttribute('data-dataset') || form.getAttribute('data-table') || form.getAttribute('data-hyle-dataset') || '';
-				const itemId = form.getAttribute('data-item') || form.getAttribute('data-hyle-item') || '';
+				const dataset = form.getAttribute('data-dataset') || form.getAttribute('data-table') || '';
+				const itemId = form.getAttribute('data-item') || '';
 
 				if (!isOptimistic && !comp?.instance?.exports?.wasm_action) return;
 
@@ -979,14 +1000,12 @@ export class SteleWasmClient {
 					}
 					this.updateSlot(slot);
 					this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
-					this.emit('hyle:mutate', { dataset, itemId, patch: patchObj, slot });
 				} else if (comp?.instance?.exports?.wasm_action) {
 					const [dataPtr] = this.encodeString(comp.instance, comp.memory, patchJson);
 					comp.instance.exports.wasm_action(4, dataPtr); // action 4 = optimistic submit
 					if (comp.instance.exports.free) comp.instance.exports.free(dataPtr);
 					this.updateSlot(slot);
 					this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
-					this.emit('hyle:mutate', { dataset, itemId, patch: patchObj, slot });
 				}
 
 				// 2. Background HTTP fetch
@@ -1000,7 +1019,6 @@ export class SteleWasmClient {
 						throw new Error(`HTTP ${resp.status}`);
 					}
 					this.emit('stl:saved', { dataset, itemId, status: resp.status, slot });
-					this.emit('hyle:saved', { dataset, itemId, status: resp.status });
 				} catch (err) {
 					console.warn('[stele-client] Form mutation failed, executing rollback:', err);
 					// 3. Rollback on failure
@@ -1020,7 +1038,6 @@ export class SteleWasmClient {
 					}
 					this.updateSlot(slot);
 					this.emit('stl:rollback', { dataset, itemId, error: err.message, slot });
-					this.emit('hyle:rollback', { dataset, itemId, error: err.message });
 				}
 			}
 		});

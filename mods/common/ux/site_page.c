@@ -174,11 +174,11 @@ char *site_ui_page_lang(
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
-	        "<script id=\"chrome-state\" data-title=\"%s\" data-path=\"%s\" "
+	        "<script id=\"chrome-state\" data-state=\"0\" data-title=\"%s\" data-path=\"%s\" "
 	        "data-icon=\"%s\" data-user=\"%s\" data-lang=\"%s\"></script>\n"
 	        "%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
-	        "<script type=\"module\" src=\"/bud-hydrate.js" SITE_CLIENT_V "\"></script>\n"
+	        "<script type=\"module\" src=\"/bud-cap.js" SITE_CLIENT_V "\"></script>\n"
 	        "<script type=\"module\" src=\"/stele-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        locale, title_esc, extra_head, module_attr, state_title, state_path,
@@ -201,11 +201,11 @@ char *site_ui_page_lang(
 	        "<link rel=\"stylesheet\" href=\"/styles.css" SITE_CSS_V "\">\n"
 	        "<link rel=\"stylesheet\" href=\"/hyle.css" SITE_CSS_V "\">\n"
 	        "%s</head>\n<body style=\"margin:0\"%s>\n"
-	        "<script id=\"chrome-state\" data-title=\"%s\" data-path=\"%s\" "
+	        "<script id=\"chrome-state\" data-state=\"0\" data-title=\"%s\" data-path=\"%s\" "
 	        "data-icon=\"%s\" data-user=\"%s\" data-lang=\"%s\"></script>\n"
 	        "%s\n%s\n" SITE_UI_FRAGMENTS_SCRIPT
 	        "\n"
-	        "<script type=\"module\" src=\"/bud-hydrate.js" SITE_CLIENT_V "\"></script>\n"
+	        "<script type=\"module\" src=\"/bud-cap.js" SITE_CLIENT_V "\"></script>\n"
 	        "<script type=\"module\" src=\"/stele-client.js" SITE_CLIENT_V
 	        "\"></script>\n</body>\n</html>\n",
 	        locale, title_esc, extra_head, module_attr, state_title, state_path,

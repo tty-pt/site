@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
-// 1. Verify export from htdocs/axil-tty-bridge.js
-const { createAxilTtyBridge } = await import('../../external/axil-tty/htdocs/axil-tty-bridge.js');
+// 1. Verify export from htdocs/axil-tty-cap.js
+const { createAxilTtyBridge } = await import('../../external/axil-tty/htdocs/axil-tty-cap.js');
 assert.equal(typeof createAxilTtyBridge, 'function', 'createAxilTtyBridge should be exported');
 
 // 2. Verify export from CJS bundle

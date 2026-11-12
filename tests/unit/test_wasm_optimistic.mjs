@@ -32,8 +32,8 @@ test("SteleWasmClient intercepts optimistic form submission, updates state, and 
   const client = new SteleWasmClient();
 
   const events = [];
-  client.on("hyle:mutate", (topic, payload) => events.push({ type: "mutate", payload }));
-  client.on("hyle:rollback", (topic, payload) => events.push({ type: "rollback", payload }));
+  client.on("stl:mutate", (topic, payload) => events.push({ type: "mutate", payload }));
+  client.on("stl:rollback", (topic, payload) => events.push({ type: "rollback", payload }));
 
   let updateCalled = false;
   let rollbackCalled = false;
@@ -83,11 +83,11 @@ test("SteleWasmClient intercepts optimistic form submission, updates state, and 
     getAttribute: (attr) => {
       if (attr === "method") return "POST";
       if (attr === "action") return "/api/song/edit";
-      if (attr === "data-hyle-dataset") return "song";
-      if (attr === "data-hyle-item") return "song_42";
+      if (attr === "data-dataset") return "song";
+      if (attr === "data-item") return "song_42";
       return null;
     },
-    hasAttribute: (attr) => attr === "data-hyle-dataset",
+    hasAttribute: (attr) => attr === "data-dataset",
     closest: () => ({ getAttribute: () => "1" })
   };
 

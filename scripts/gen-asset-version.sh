@@ -2,11 +2,11 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/mods/common/ux/version.gen.h"
-if [ ! -f "$ROOT/htdocs/styles.css" ] || [ ! -f "$ROOT/htdocs/hyle.css" ] || [ ! -f "$ROOT/htdocs/stele-client.js" ]; then
+if [ ! -f "$ROOT/htdocs/styles.css" ] || [ ! -f "$ROOT/htdocs/hyle.css" ] || [ ! -f "$ROOT/htdocs/stele-client.js" ] || [ ! -f "$ROOT/htdocs/hyle-cap.js" ]; then
 	make -C "$ROOT" stage-assets >/dev/null 2>&1 || true
 fi
 CSS_CKSUM="$( (cksum "$ROOT/htdocs/styles.css" 2>/dev/null; cksum "$ROOT/htdocs/hyle.css" 2>/dev/null; cksum "$ROOT/htdocs/stele-client.js" 2>/dev/null) | cksum | awk '{print $1}')"
-FRAG_CKSUM="$(cksum "$ROOT/htdocs/hyle-fragments.js" 2>/dev/null | awk '{print $1}')"
+FRAG_CKSUM="$(cksum "$ROOT/htdocs/hyle-cap.js" "$ROOT/htdocs/hyle-fragments.js" 2>/dev/null | head -n1 | awk '{print $1}')"
 # fallback if cksum missing
 if [ -z "$CSS_CKSUM" ]; then
 	CSS_CKSUM="$(date +%s)"

@@ -19,7 +19,7 @@ globalThis.document = { querySelectorAll: () => canvases, querySelector: () => c
 globalThis.requestAnimationFrame = () => {};
 globalThis.ImageData = class { constructor(d, w, h) { this.data = d; this.width = w; this.height = h; } };
 
-const { createLaminaBridge, SHADERS } = await import('../../external/liblamina/htdocs/lamina-bridge.js');
+const { createLaminaBridge, SHADERS } = await import('../../external/liblamina/htdocs/lamina-cap.js');
 const memory = { buffer: new ArrayBuffer(1920 * 1080 * 4 + 16) };
 const bridge = createLaminaBridge(null, () => ({ memory }));
 bridge.mount();

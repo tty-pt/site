@@ -1776,6 +1776,11 @@ export function createSlotBridge(root, wasm = null, listenerResolver = null) {
 if (typeof window !== 'undefined') {
 	const factory = (root) => createBudWasmBridge(root);
 	window.__wasm_slot_bridge_factory = factory;
+	window.__wasm_capability_registry = window.__wasm_capability_registry || {};
+	window.__wasm_capability_registry.bud = (root) => createBudWasmBridge(root);
+	if (typeof window.registerWasmCapability === 'function') {
+		window.registerWasmCapability('bud', (root) => createBudWasmBridge(root));
+	}
 	if (typeof window.registerSlotBridge === 'function') {
 		window.registerSlotBridge(factory);
 	} else if (window.SteleWasmClient && typeof window.SteleWasmClient.registerBridgeFactory === 'function') {

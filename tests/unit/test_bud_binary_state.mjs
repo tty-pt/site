@@ -98,7 +98,7 @@ test("stele-client: mountSlot routes binary payload to stl_kernel_mount_bin", as
   assert.equal(mountedBin, true);
 });
 
-test("stele-client: bindSlots resolves meta[name=bud-state-src] via fetch into Uint8Array binary state", async () => {
+test("stele-client: bindSlots resolves meta[name=state-src] via fetch into Uint8Array binary state", async () => {
   const { SteleWasmClient } = await import("../../htdocs/stele-client.js");
   const client = new SteleWasmClient();
 
@@ -135,11 +135,14 @@ test("stele-client: bindSlots resolves meta[name=bud-state-src] via fetch into U
       setAttribute() {},
     },
     getElementById(id) {
-      if (id === "bud-root") return { getAttribute: () => "list_fe" };
+      if (id === "page-root") return { getAttribute: () => "list_fe" };
       return null;
     },
     querySelector(selector) {
-      if (selector === 'meta[name="bud-state-src"]') {
+      if (selector && selector.includes('[data-slot="1"]')) {
+        return { getAttribute: (attr) => attr === "data-module" ? "list_fe" : null };
+      }
+      if (selector === 'meta[name="state-src"]' || selector === 'meta[name="page-state-src"]') {
         return { getAttribute: (attr) => attr === "content" ? "/song/?format=bin" : null };
       }
       return null;
