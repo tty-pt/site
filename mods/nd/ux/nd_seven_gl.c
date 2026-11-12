@@ -2635,6 +2635,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	            0.70f * (1.0f - space_t) + 0.016f * space_t,
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.terrain_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+	glUniform4f(s_gl.terrain_pipe.uLambLight,
+	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
 
 	GLuint active_vbo = 0, active_ibo = 0;
 	GLsizei active_indices = 0;
@@ -2698,6 +2701,9 @@ void nd_seven_gl_flush_water(void)
 	            0.70f * (1.0f - space_t) + 0.016f * space_t,
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.water_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+	glUniform4f(s_gl.water_pipe.uLambLight,
+	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
 
 	for (uint32_t i = 0; i < s_gl.water_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.water_queue[i];
@@ -2760,7 +2766,8 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	bool emit_shadows = (s_gl.cur_dist < 4500.0f);
 
 	for (uint32_t i = 0; i < count; i++) {
-		bool want_shadow = emit_shadows && (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
+		bool want_shadow = emit_shadows && (batch[i].style != ND_BB_STYLE_GLOW) &&
+		                   (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
 		uint32_t needed = want_shadow ? 12u : 6u;
 		if (out_verts_count + needed > MAX_BB_VERTS)
 			break;
@@ -2802,6 +2809,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	            0.70f * (1.0f - space_t) + 0.016f * space_t,
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.bb_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+	glUniform4f(s_gl.bb_pipe.uLambLight,
+	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
 	glBufferData(GL_ARRAY_BUFFER, bb_verts, out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
