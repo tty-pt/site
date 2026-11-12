@@ -719,6 +719,7 @@ static void chunk_populate_buffers(nd_room_chunk_t *chunk, uint8_t lod,
 
 static nd_room_chunk_t s_room_adapters[MAX_ROOM_ADAPTERS];
 static nd_room_chunk_t s_query_adapter;
+static uint32_t s_query_adapter_vert_dim = AR_DEFAULT_VERT_DIM;
 static uint8_t s_depth_pool[MAX_ROOM_ADAPTERS][TILE_PX_W * TILE_PX_H];
 static uint32_t s_pixel_pool[MAX_ROOM_ADAPTERS][TILE_PX_W * TILE_PX_H];
 static int s_adapter_count = 0;
@@ -767,6 +768,7 @@ const nd_room_chunk_t *nd_seven_chunk_find(const int16_t pos[4])
 			s_query_adapter.pixels = (uint32_t *)node->rgba;
 			s_query_adapter.substrate = (uint32_t *)node->rgba;
 			s_query_adapter.depth = NULL;
+			s_query_adapter_vert_dim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 			return &s_query_adapter;
 		}
 	}
@@ -824,7 +826,12 @@ static float s_cam_zoom = 1.0f;
 
 void nd_seven_set_3d_mode(int enable)
 {
-	s_is_3d_mode = enable ? 1 : 0;
+	int next = enable ? 1 : 0;
+	if (s_is_3d_mode != next) {
+		s_is_3d_mode = next;
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		if (cs) ar_clear(cs);
+	}
 }
 
 int nd_seven_get_3d_mode(void)
@@ -1234,11 +1241,11 @@ __attribute__((unused)) static void chunk_populate_buffers(nd_room_chunk_t *chun
 				int grad_y = (dy_step > 0) ? ((int)(h_s - h_n) * 2 / dy_step) : 0;
 				int slope_q12_4 = grad_x + grad_y;
 
-				/* Very prominent directional diffuse hillshading: Northwest sun illuminates positive slopes, shadows negative slopes */
-				int shade_delta = slope_q12_4 * 5;
+				/* Directional diffuse hillshading in 2D software pixel-art mode, scaled for high-relief 3D elevation */
+				int shade_delta = slope_q12_4;
+				if (shade_delta < -28) shade_delta = -28;
+				if (shade_delta > 28) shade_delta = 28;
 				int shade_val = ND_SHADE_NEUTRAL + shade_delta;
-				if (shade_val < 140) shade_val = 140;
-				if (shade_val > 380) shade_val = 380;
 
 				/* Continuous substrate color from bio, bio2, blend */
 				uint32_t col1 = ndw_biome_base_rgb(bio);
@@ -1250,10 +1257,10 @@ __attribute__((unused)) static void chunk_populate_buffers(nd_room_chunk_t *chun
 					/* Seabed substrate is golden sand sediment under water */
 					substrate = RGB(226, 200, 140);
 				} else {
-					/* Steep slope bedrock exposure: ridges shed soil and reveal weathered rock */
+					/* Steep slope bedrock exposure on extreme alpine cliffs */
 					int abs_slope = abs(grad_x) + abs(grad_y);
-					if (abs_slope > 18) {
-						int rock_mix = (abs_slope - 18) * 12;
+					if (abs_slope > 96) {
+						int rock_mix = (abs_slope - 96) * 4;
 						if (rock_mix > 200) rock_mix = 200;
 						uint32_t rock_col = RGB(132, 128, 118);
 						substrate = alpha_blend_rgb(substrate, rock_col, rock_mix);
@@ -1679,14 +1686,15 @@ void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_sta
 	if (fb && bw > 0 && bh > 0) {
 		bool is_macro_adapter = (chunk == &s_query_adapter);
 		if (is_macro_adapter) {
+			int vdim = (int)(s_query_adapter_vert_dim ? s_query_adapter_vert_dim : AR_DEFAULT_VERT_DIM);
 			for (int r = 0; r < bh; r++) {
-				int sy = ((src_y0 + r) * (AR_DEFAULT_VERT_DIM - 1)) / tile_h;
-				if (sy >= AR_DEFAULT_VERT_DIM) sy = AR_DEFAULT_VERT_DIM - 1;
-				const uint32_t *src_row = &chunk->pixels[sy * AR_DEFAULT_VERT_DIM];
+				int sy = ((src_y0 + r) * (vdim - 1)) / tile_h;
+				if (sy >= vdim) sy = vdim - 1;
+				const uint32_t *src_row = &chunk->pixels[sy * vdim];
 				uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
 				for (int c = 0; c < bw; c++) {
-					int sx = ((src_x0 + c) * (AR_DEFAULT_VERT_DIM - 1)) / tile_w;
-					if (sx >= AR_DEFAULT_VERT_DIM) sx = AR_DEFAULT_VERT_DIM - 1;
+					int sx = ((src_x0 + c) * (vdim - 1)) / tile_w;
+					if (sx >= vdim) sx = vdim - 1;
 					uint32_t col = src_row[sx];
 					if (col == 0) col = placeholder_rgb(own ? own->biome : 0);
 					dst_row[c] = col;
@@ -1724,6 +1732,17 @@ int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 	int gdim = AR_DEFAULT_GRID_DIM;
 	int vdim = AR_DEFAULT_VERT_DIM;
 
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	const ar_node_t *node0 = NULL;
+	if (cs) {
+		uint64_t key0 = morton_quad_pack(world, 0, cx, cy);
+		node0 = ar_system_find_by_key(cs, key0);
+		if (node0 && node0->grid_dim > 0 && node0->vert_dim > 0) {
+			gdim = (int)node0->grid_dim;
+			vdim = (int)node0->vert_dim;
+		}
+	}
+
 	float fx = ((float)(wx - ox) / (float)NDW_TILE_W) * (float)gdim;
 	float fy = ((float)(wy - oy) / (float)NDW_TILE_H) * (float)gdim;
 	int col0 = (int)fx;
@@ -1741,24 +1760,20 @@ int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 	float wv = v * v * (3.0f - 2.0f * v);
 
 	float v00, v10, v01, v11;
-	ar_system_t *cs = nd_seven_get_chunk_sys();
-	const ar_node_t *node0 = NULL;
-	if (cs) {
-		uint64_t key0 = morton_quad_pack(world, 0, cx, cy);
-		node0 = ar_system_find_by_key(cs, key0);
-	}
 	if (node0 && node0->values) {
 		v00 = (float)node0->values[row0 * vdim + col0];
 		v10 = (float)node0->values[row0 * vdim + col1];
 		v01 = (float)node0->values[row1 * vdim + col0];
 		v11 = (float)node0->values[row1 * vdim + col1];
 	} else {
-		int32_t step_x = NDW_TILE_W / gdim;
-		int32_t step_y = NDW_TILE_H / gdim;
-		v00 = (float)nd_field_sample(world, 3, ox + col0 * step_x, oy + row0 * step_y).elevation_q12_4;
-		v10 = (float)nd_field_sample(world, 3, ox + col1 * step_x, oy + row0 * step_y).elevation_q12_4;
-		v01 = (float)nd_field_sample(world, 3, ox + col0 * step_x, oy + row1 * step_y).elevation_q12_4;
-		v11 = (float)nd_field_sample(world, 3, ox + col1 * step_x, oy + row1 * step_y).elevation_q12_4;
+		int32_t x0 = ox + (int32_t)(((int64_t)col0 * NDW_TILE_W) / gdim);
+		int32_t x1 = ox + (int32_t)(((int64_t)col1 * NDW_TILE_W) / gdim);
+		int32_t y0 = oy + (int32_t)(((int64_t)row0 * NDW_TILE_H) / gdim);
+		int32_t y1 = oy + (int32_t)(((int64_t)row1 * NDW_TILE_H) / gdim);
+		v00 = (float)nd_field_sample(world, 3, x0, y0).elevation_q12_4;
+		v10 = (float)nd_field_sample(world, 3, x1, y0).elevation_q12_4;
+		v01 = (float)nd_field_sample(world, 3, x0, y1).elevation_q12_4;
+		v11 = (float)nd_field_sample(world, 3, x1, y1).elevation_q12_4;
 	}
 
 	float h0 = v00 * (1.0f - wu) + v10 * wu;

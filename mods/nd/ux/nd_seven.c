@@ -67,6 +67,28 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	if (water_depth > 0 && !nd_seven_get_3d_mode()) {
 		col = water_color_at_depth((int)water_depth, 128, 128, 128);
 	}
+
+	/* Smooth world-coordinate hypsometric + band-limited meso relief tinting:
+	 * uses only continuous rotated fBm (fs.fine_elev) and elevation (elev_rel) — zero
+	 * uncorrelated per-vertex white-noise hashes that would cause bilinear diamonds. */
+	{
+		int fine_rel = (int)fs.fine_elev;
+		int elev_rel = ((int)fs.elevation_q12_4 - ((int)fs.water_level << 4)) >> 4;
+		if (elev_rel < -32) elev_rel = -32;
+		if (elev_rel > 64) elev_rel = 64;
+		int shade_q8 = 250 + (elev_rel >> 2) + fine_rel;
+
+		int r = (int)(col & 0xFF);
+		int g = (int)((col >> 8) & 0xFF);
+		int b = (int)((col >> 16) & 0xFF);
+		r = (r * shade_q8) >> 8;
+		g = (g * (shade_q8 + (fine_rel >> 2))) >> 8;
+		b = (b * (shade_q8 - (elev_rel >> 4) - (fine_rel >> 2))) >> 8;
+		if (r < 0) r = 0; else if (r > 255) r = 255;
+		if (g < 0) g = 0; else if (g > 255) g = 255;
+		if (b < 0) b = 0; else if (b > 255) b = 255;
+		col = 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+	}
 	out->rgba = col;
 }
 
@@ -77,9 +99,10 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		memset(&cfg, 0, sizeof(cfg));
 		cfg.base_w = NDW_TILE_W;
 		cfg.base_h = NDW_TILE_H;
+		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
-		cfg.max_active = 96;
-		cfg.pool_capacity = 256;
+		cfg.max_active = 160;
+		cfg.pool_capacity = 384;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;
@@ -239,7 +262,7 @@ const nd_planet_def_t *nd_seven_get_planet(uint16_t world)
 	return &s_planets[0];
 }
 
-#define SEVEN_MAX_VISIBLE_LEAVES 96
+#define SEVEN_MAX_VISIBLE_LEAVES 160
 static const ar_node_t *s_visible_leaves[SEVEN_MAX_VISIBLE_LEAVES];
 static size_t s_visible_leaf_count = 0;
 static ar_frustum_t s_frame_frustum;
@@ -315,9 +338,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_frame_frustum_valid = 1;
 
 	float r_planet = 0.0f;
-	float z_min_cull = lwz - 80.0f;
-	float z_max_cull = lwz + 80.0f;
-	float cull_margin = 64.0f;
+	float z_min_cull = lwz - 96.0f;
+	float z_max_cull = lwz + 96.0f;
+	float cull_margin = 48.0f;
 	if (dist >= 1200.0f) {
 		r_planet = dist * 1.25f;
 		if (r_planet < 16000.0f) r_planet = 16000.0f;
@@ -335,7 +358,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.focal_x = (float)lwx,
 		.focal_y = (float)lwy,
 		.margin = cull_margin,
-		.target_quad_px = 2.0f,
+		.target_quad_px = 2.0f * (32.0f / 48.0f),
 		.viewport_w = (float)w,
 		.viewport_h = (float)h,
 		.min_level = 0,
@@ -358,11 +381,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 		bool has_water = (node->flags & 1) != 0;
 		float sea_lvl = has_water ? (float)nd_field_water_level(world) : ND_SEVEN_SEA_LEVEL_NONE;
+		uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
 		nd_seven_gl_flush_terrain_chunk(world, node->level, node->rev,
 		                                node->ox, node->oy, node->w, node->h,
 		                                node->rgba, node->values,
-		                                AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
+		                                vdim, vdim,
 		                                (uint32_t)w, (uint32_t)h,
 		                                sea_lvl, pdef);
 	}
@@ -379,11 +403,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 				if (!node) continue;
 				bool has_water = (node->flags & 1) != 0;
 				float sea_lvl = has_water ? (float)nd_field_water_level(alt_world) : ND_SEVEN_SEA_LEVEL_NONE;
+				uint32_t vdim = node->vert_dim ? node->vert_dim : AR_DEFAULT_VERT_DIM;
 
 				nd_seven_gl_flush_terrain_chunk(alt_world, node->level, node->rev,
 				                                node->ox, node->oy, node->w, node->h,
 				                                node->rgba, node->values,
-				                                AR_DEFAULT_VERT_DIM, AR_DEFAULT_VERT_DIM,
+				                                vdim, vdim,
 				                                (uint32_t)w, (uint32_t)h,
 				                                sea_lvl, alt_pdef);
 			}

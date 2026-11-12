@@ -595,17 +595,19 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				}
 
 				if (chk) {
+					int gdim = chk->grid_dim ? (int)chk->grid_dim : AR_DEFAULT_GRID_DIM;
+					int vdim = chk->vert_dim ? (int)chk->vert_dim : AR_DEFAULT_VERT_DIM;
 					for (uint32_t py = 0; py < tile_sz; py++) {
-						int cy = ((int)py * AR_DEFAULT_GRID_DIM) / (int)tile_sz;
+						int cy = ((int)py * gdim) / (int)tile_sz;
 						for (uint32_t px = 0; px < tile_sz; px++) {
-							int cx = ((int)px * AR_DEFAULT_GRID_DIM) / (int)tile_sz;
-							const ar_sample_t *s = &chk->samples[cy * AR_DEFAULT_VERT_DIM + cx];
+							int cx = ((int)px * gdim) / (int)tile_sz;
+							const ar_sample_t *s = &chk->samples[cy * vdim + cx];
 							uint32_t col;
 							uint8_t wdepth = s->attr[3];
 							if (wdepth > 0) {
 								col = water_color_at_depth(wdepth > 28 ? 28 : wdepth, 128, 128, 128);
 							} else {
-								col = chk->rgba[cy * AR_DEFAULT_VERT_DIM + cx];
+								col = chk->rgba[cy * vdim + cx];
 							}
 							fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(col, amb, 255));
 						}

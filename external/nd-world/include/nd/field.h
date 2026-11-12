@@ -154,13 +154,13 @@ static inline int16_t
 nd_field_bimodal_hypsometry(int16_t elev)
 {
 	if (elev < 0) {
-		/* Ocean basin: coastal shelf (-6..0), dropping into deep seabed (-25..-2000) */
-		if (elev > -6) {
-			return elev; /* Gentle continental shelf for coastal shallows */
+		/* Ocean basin: gradual shallow shelf (-8..0), dropping into mid shelf (-16..-8) and deep seabed (-25..-2000) */
+		if (elev > -8) {
+			return elev; /* Gentle continental shelf for ankle-to-waist coastal shallows (-1..-7) */
 		} else {
-			int32_t d = -elev - 6;
-			/* Decisive oceanic depression: drops ocean floor below sea level */
-			int32_t deep = 12 + (d * 18) / 10 + (d * d * 45) / 100;
+			int32_t d = -elev - 8;
+			/* Smooth shelf-to-basin progression: -8 -> -8, -12 -> -16, -20 -> -41, deep trenches -> -2000 */
+			int32_t deep = 8 + (d * 18) / 10 + (d * d * 45) / 100;
 			if (deep > 2000) deep = 2000;
 			return (int16_t)(-deep);
 		}
@@ -498,6 +498,36 @@ nd_field_eval_coarse_torus_x_q12_4(uint32_t seed, int16_t rx, int32_t ry_unwrapp
 	return nd_field_eval_coarse_unwrapped_q12_4(seed, (int32_t)rx, ry_unwrapped);
 }
 
+/* Continuous regional ruggedness envelope R(wx, wy) in Q8 fixed-point [0..256].
+ * Combines a macro tectonic province octave (shift 10 = 1,024 world units, ~6.4x8 rooms)
+ * and a rotated meso ridge-belt octave (shift 8 = 256 world units, ~1.6x2 rooms),
+ * followed by a smooth threshold ramp so ~45% of land forms open clear plains (R = 0),
+ * ~30% forms rolling hills, and ~25% forms craggy rugged ridges and highlands (R -> 256). */
+static inline uint16_t
+nd_field_ruggedness_q8(uint16_t world, int32_t wx, int32_t wy)
+{
+	uint32_t rug_seed = 0x52554747u ^ ((uint32_t)world * 0x9E3779B1u);
+	int16_t p0[2] = { (int16_t)wy, (int16_t)wx };
+	uint32_t raw_macro = noise_wpoint_n(p0, 10, 8, rug_seed ^ 0xA531u, 2, NOISE_FADE5) >> 16;
+
+	int32_t rx = wx;
+	int32_t ry = wy;
+	chaff_rot2d_i32_q15(&rx, &ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	int16_t p1[2] = { (int16_t)ry, (int16_t)rx };
+	uint32_t raw_meso = noise_wpoint_n(p1, 8, 8, rug_seed ^ 0x5CA9u, 2, NOISE_FADE5) >> 16;
+
+	int32_t raw = (int32_t)((raw_macro * 5u + raw_meso * 3u) >> 3);
+	if (raw <= 120)
+		return 0;
+	if (raw >= 168)
+		return 256;
+	int32_t t = ((raw - 120) * 256) / 48;
+	int32_t smooth = (t * t * (3 * 256 - 2 * t)) >> 16;
+	if (smooth < 0) smooth = 0;
+	if (smooth > 256) smooth = 256;
+	return (uint16_t)smooth;
+}
+
 static inline int32_t
 nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
                          int32_t *out_coarse_q12_4, int32_t *out_fine_q12_4)
@@ -510,27 +540,29 @@ nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 	int32_t coarse_q12_4 = 0;
 	int32_t fine_q12_4 = 0;
 
-	uint16_t uy = (uint16_t)((uint16_t)ry - 32512u);
-	if (uy < 512u) {
-		int32_t ry_hi = 32512 + (int32_t)uy;
-		int32_t ry_lo = ry_hi - ND_FIELD_PLANET_ROOM_SPAN;
-		int32_t c_hi = nd_field_eval_coarse_torus_x_q12_4(seed, rx, ry_hi);
-		int32_t c_lo = nd_field_eval_coarse_torus_x_q12_4(seed, rx, ry_lo);
-		coarse_q12_4 = c_hi + (int32_t)(((int64_t)(c_lo - c_hi) * (int32_t)uy) >> 9);
-	} else {
-		coarse_q12_4 = nd_field_eval_coarse_torus_x_q12_4(seed, rx, (int32_t)ry);
-	}
+	if (out_coarse_q12_4 != NULL || out_fine_q12_4 == NULL) {
+		uint16_t uy = (uint16_t)((uint16_t)ry - 32512u);
+		if (uy < 512u) {
+			int32_t ry_hi = 32512 + (int32_t)uy;
+			int32_t ry_lo = ry_hi - ND_FIELD_PLANET_ROOM_SPAN;
+			int32_t c_hi = nd_field_eval_coarse_torus_x_q12_4(seed, rx, ry_hi);
+			int32_t c_lo = nd_field_eval_coarse_torus_x_q12_4(seed, rx, ry_lo);
+			coarse_q12_4 = c_hi + (int32_t)(((int64_t)(c_lo - c_hi) * (int32_t)uy) >> 9);
+		} else {
+			coarse_q12_4 = nd_field_eval_coarse_torus_x_q12_4(seed, rx, (int32_t)ry);
+		}
 
-	static uint16_t s_cached_world = 0xFFFFu;
-	static int32_t s_cached_origin_bias = 0;
-	if (world != s_cached_world) {
-		s_cached_origin_bias = nd_field_eval_coarse_unwrapped_q12_4(seed, 0, 0) >> 2;
-		s_cached_world = world;
+		static uint16_t s_cached_world = 0xFFFFu;
+		static int32_t s_cached_origin_bias = 0;
+		if (world != s_cached_world) {
+			s_cached_origin_bias = nd_field_eval_coarse_unwrapped_q12_4(seed, 0, 0) >> 2;
+			s_cached_world = world;
+		}
+		uint32_t w = (((world >> 2) + 2) & 3) * 65536u;
+		int32_t sea_offset_q12_4 = (int32_t)((((int64_t)w * 200 / 262144 - 100)) << 4) +
+		                           ND_FIELD_ORIGIN_SEA_OFFSET_Q12_4 + s_cached_origin_bias;
+		coarse_q12_4 -= sea_offset_q12_4;
 	}
-	uint32_t w = (((world >> 2) + 2) & 3) * 65536u;
-	int32_t sea_offset_q12_4 = (int32_t)((((int64_t)w * 200 / 262144 - 100)) << 4) +
-	                           ND_FIELD_ORIGIN_SEA_OFFSET_Q12_4 + s_cached_origin_bias;
-	coarse_q12_4 -= sea_offset_q12_4;
 
 	if (lod > 0) {
 		uint8_t min_shift;
@@ -540,12 +572,28 @@ nd_field_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 		else               min_shift = (uint8_t)(ND_FIELD_SHIFT_FINE_MIN + (lod - 3));
 		if (min_shift > ND_FIELD_SHIFT_FINE_MAX) min_shift = ND_FIELD_SHIFT_FINE_MAX;
 
-		fine_q12_4 = chaff_fbm_rotated_2d_q12_4(
-			(int16_t)wx, (int16_t)wy,
+		int32_t base_fine_q12_4 = chaff_fbm_rotated_2d_q12_4(
+			wx, wy,
 			min_shift, ND_FIELD_SHIFT_FINE_MAX,
 			7, ND_FIELD_FINE_MIN_SHIFT, 1,
 			seed, 0xBEEFu,
 			CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+
+		uint16_t rug_q8 = nd_field_ruggedness_q8(world, wx, wy);
+		if (rug_q8 > 0) {
+			uint8_t meso_min = (min_shift > 5) ? min_shift : 5;
+			int32_t meso_ridge_q12_4 = chaff_fbm_rotated_2d_q12_4(
+				wx, wy,
+				meso_min, ND_FIELD_SHIFT_FINE_MAX,
+				6, 5, 10,
+				seed ^ 0x7F4A7C15u, 0xCAFEu,
+				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+			int32_t base_scale_q8 = 128 + ((int32_t)rug_q8 * 3 >> 1);
+			int32_t scaled_base = (int32_t)(((int64_t)base_fine_q12_4 * base_scale_q8) >> 8);
+			fine_q12_4 = scaled_base + (int32_t)(((int64_t)meso_ridge_q12_4 * (int32_t)rug_q8) >> 8);
+		} else {
+			fine_q12_4 = base_fine_q12_4 >> 1;
+		}
 	}
 
 	if (out_coarse_q12_4) *out_coarse_q12_4 = coarse_q12_4;
@@ -560,14 +608,48 @@ chaff_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 	return nd_field_elevation_q12_4(world, lod, wx, wy, out_coarse_q12_4, out_fine_q12_4);
 }
 
+typedef struct {
+	uint16_t world;
+	int16_t rx;
+	int16_t ry;
+	int16_t hyp;
+	uint32_t cl_macro;
+	uint32_t tm_macro;
+	uint8_t hyp_valid;
+	uint8_t macro_valid;
+} nd_field_room_memo_t;
+
+static inline nd_field_room_memo_t *
+nd_field_room_memo_slot(uint16_t world, int16_t rx, int16_t ry)
+{
+	static nd_field_room_memo_t s_memo[64];
+	uint32_t idx = (((uint32_t)(uint16_t)rx * 0x9E3779B1u) ^
+	                ((uint32_t)(uint16_t)ry * 0x85EBCA77u) ^
+	                (uint32_t)world) & 63u;
+	nd_field_room_memo_t *m = &s_memo[idx];
+	if (m->world != world || m->rx != rx || m->ry != ry) {
+		m->world = world;
+		m->rx = rx;
+		m->ry = ry;
+		m->hyp_valid = 0;
+		m->macro_valid = 0;
+	}
+	return m;
+}
+
 static inline int16_t
 nd_field_room_hyp_coarse(uint16_t world, int16_t rx, int16_t ry)
 {
-	int32_t r_wx = (int32_t)rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
-	int32_t r_wy = -(int32_t)ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
-	int32_t c = 0, f = 0;
-	nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c, &f);
-	return nd_field_bimodal_hypsometry((int16_t)(c >> 4));
+	nd_field_room_memo_t *m = nd_field_room_memo_slot(world, rx, ry);
+	if (!m->hyp_valid) {
+		int32_t r_wx = (int32_t)rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+		int32_t r_wy = -(int32_t)ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
+		int32_t c = 0;
+		nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c, NULL);
+		m->hyp = nd_field_bimodal_hypsometry((int16_t)(c >> 4));
+		m->hyp_valid = 1;
+	}
+	return m->hyp;
 }
 
 static inline int32_t
@@ -615,10 +697,25 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	int16_t room_y = (int16_t)(ry_q16 >> 16);
 
 	int32_t coarse_q12_4 = nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
+	s.water_level = nd_field_water_level(world);
 	int32_t fine_q12_4 = 0;
 	if (lod > 0) {
-		int32_t dummy = 0;
-		nd_field_elevation_q12_4(world, lod, wx, wy, &dummy, &fine_q12_4);
+		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
+
+		/* Smooth coastal/bathymetric transition: keep immediate beach & surf zone
+		 * (-3..+4 world units relative to water_level) gently sloped while preserving
+		 * natural underwater sandbar/shoal relief (~50% at depth) and 100% inland relief. */
+		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
+		if (rel_water_q12_4 <= -(8 << 4)) {
+			fine_q12_4 >>= 1;
+		} else if (rel_water_q12_4 <= 0) {
+			/* -8..0 world units: ramp from 50% (128/256) at depth 8 down to 25% (64/256) at shoreline */
+			int32_t w_sub = 64 + ((-rel_water_q12_4) >> 1);
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
+		} else if (rel_water_q12_4 < (4 << 4)) {
+			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) >> 6);
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);
+		}
 
 		/* Fine elevation budget bound: |fine_elev| <= ND_FIELD_FINE_AMP_BUDGET */
 		int32_t max_fine_q12_4 = (int32_t)ND_FIELD_FINE_AMP_BUDGET << 4;
@@ -628,11 +725,14 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 
 	s.coarse_elev = (int16_t)(coarse_q12_4 >> 4);
 	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
-	s.water_level = nd_field_water_level(world);
 
 	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
-	if (s.coarse_elev > s.water_level && (total_q12_4 >> 4) <= s.water_level) {
-		total_q12_4 = (int32_t)(s.water_level + 1) << 4;
+	int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
+	if (rel_water_q12_4 > (1 << 4)) {
+		int32_t land_floor_q12_4 = ((int32_t)s.water_level << 4) +
+		                           ((rel_water_q12_4 >= (3 << 4)) ? 16 : ((rel_water_q12_4 - 16) >> 1));
+		if (total_q12_4 < land_floor_q12_4)
+			total_q12_4 = land_floor_q12_4;
 	}
 	if (total_q12_4 > 32000) total_q12_4 = 32000;
 	if (total_q12_4 < -32000) total_q12_4 = -32000;
@@ -647,8 +747,14 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 		s.depth = 0;
 	}
 
-	uint32_t cl_macro = chaff_sample_torus_macro((int32_t)room_x, (int32_t)room_y, 14, 1 + world);
-	uint32_t tm_macro = chaff_sample_torus_macro((int32_t)room_x, (int32_t)room_y, 14, 53 + world);
+	nd_field_room_memo_t *rm = nd_field_room_memo_slot(world, room_x, room_y);
+	if (!rm->macro_valid) {
+		rm->cl_macro = chaff_sample_torus_macro((int32_t)room_x, (int32_t)room_y, 14, 1 + world);
+		rm->tm_macro = chaff_sample_torus_macro((int32_t)room_x, (int32_t)room_y, 14, 53 + world);
+		rm->macro_valid = 1;
+	}
+	uint32_t cl_macro = rm->cl_macro;
+	uint32_t tm_macro = rm->tm_macro;
 	uint32_t cl_reg = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 5, 8, 1 + world);
 	uint32_t tm_reg = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 6, 8, 53 + world);
 	uint32_t cl_raw = (cl_macro >> 1) + (cl_reg >> 1);

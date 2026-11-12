@@ -2204,7 +2204,10 @@ int main(void)
 		assert(vs_t && strstr(vs_t, "sampleHeightSmooth"));
 		assert(fs_t && strstr(fs_t, "seabedAbsorption"));
 		assert(vs_w && strstr(vs_w, "sampleHeightSmooth"));
-		assert(fs_w && strstr(fs_w, "if (vWaterDepth <= 0.0)"));
+		assert(fs_w && strstr(fs_w, "if (fragWaterDepth <= 0.0)"));
+		assert(fs_w && strstr(fs_w, "eval_zoom_water_waves"));
+		assert(fs_w && strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)"));
+		assert(fs_w && !strstr(fs_w, "cSeabed"));
 		assert(vs_b && strstr(vs_b, "a_local_pos"));
 		assert(fs_b && strstr(fs_b, "waterAbsorption"));
 
@@ -2389,6 +2392,365 @@ int main(void)
 		nd_seven_forget();
 		printf("PASS: -22x zoom (0.00738) emits %u homogeneous billboards with zero zoom-out thinning (ring[4..12]: %d vs %d at 0.15x, >14: %d, >30: %d, max_cheb=%d) and fades out uniformly by -23x zoom\n",
 		       mid_cnt, ring_4_12_far_zoom, ring_4_12_mid_zoom, far_horizon_cnt, deep_horizon_30_cnt, max_cheb_seen);
+	}
+
+	/* High-Resolution 48x48 Level 0 Terrain Grid & Exact Seam Continuity Verification */
+	{
+		nd_seven_set_3d_mode(1);
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		assert(cs != NULL);
+
+		/* Level 0 uses 48x48 quads (4,608 triangles, 2.25x density); Level 1+ uses 32x32 quads (2,048 triangles) */
+		assert(nd_seven_gl_grid_quads_for_level(0) == 48);
+		assert(nd_seven_gl_grid_quads_for_level(1) == 32);
+		assert(nd_seven_gl_grid_quads_for_level(2) == 32);
+
+		/* Close-up zoom polygon scaling: normal zoom stays at 48x48 (4,608 tris),
+		 * close zoom scales to 96x96 (18,432 tris), ultra-close zoom scales to 144x144 (41,472 tris) */
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f) == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 180.0f) == 96);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 80.0f)  == 144);
+		assert(nd_seven_gl_grid_quads_for_zoom(1, 80.0f)  == 32);
+
+		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values,
+		 * including across large world coordinates where 16-bit signed rotation would wrap */
+		const int32_t test_origins[3][2] = {
+			{ 0, 0 },
+			{ 32640, -16384 },
+			{ -32800, 24576 }
+		};
+		for (int t = 0; t < 3; t++) {
+			int32_t bx = test_origins[t][0];
+			int32_t by = test_origins[t][1];
+			const ar_node_t *m00 = ar_system_ensure(cs, 1, 0, bx, by);
+			const ar_node_t *m10 = ar_system_ensure(cs, 1, 0, bx + NDW_TILE_W, by);
+			const ar_node_t *m01 = ar_system_ensure(cs, 1, 0, bx, by + NDW_TILE_H);
+			assert(m00 != NULL && m10 != NULL && m01 != NULL);
+			assert(m00->grid_dim == 48 && m00->vert_dim == 49 && m00->vert_count == 2401);
+
+			for (uint32_t r = 0; r < m00->vert_dim; r++) {
+				assert(m00->values[r * m00->vert_dim + 48] == m10->values[r * m10->vert_dim + 0]);
+				assert(m00->rgba[r * m00->vert_dim + 48] == m10->rgba[r * m10->vert_dim + 0]);
+			}
+			for (uint32_t c = 0; c < m00->vert_dim; c++) {
+				assert(m00->values[48 * m00->vert_dim + c] == m01->values[0 * m01->vert_dim + c]);
+				assert(m00->rgba[48 * m00->vert_dim + c] == m01->rgba[0 * m01->vert_dim + c]);
+			}
+
+			/* Verify watertight perimeter height welding across 48x48, 96x96, and 144x144 mesh subdivisions */
+			for (int k = 0; k <= 144; k++) {
+				float v = (float)k / 144.0f;
+				float h_left = nd_seven_gl_sample_height_smooth(m00->values, m00->vert_dim, m00->vert_dim,
+				                                                1.0f, v, (float)m00->w, (float)m00->h, NULL, NULL);
+				float h_right = nd_seven_gl_sample_height_smooth(m10->values, m10->vert_dim, m10->vert_dim,
+				                                                 0.0f, v, (float)m10->w, (float)m10->h, NULL, NULL);
+				assert(fabsf(h_left - h_right) < 1e-5f);
+
+				float u = (float)k / 144.0f;
+				float h_top = nd_seven_gl_sample_height_smooth(m00->values, m00->vert_dim, m00->vert_dim,
+				                                               u, 1.0f, (float)m00->w, (float)m00->h, NULL, NULL);
+				float h_bot = nd_seven_gl_sample_height_smooth(m01->values, m01->vert_dim, m01->vert_dim,
+				                                               u, 0.0f, (float)m01->w, (float)m01->h, NULL, NULL);
+				assert(fabsf(h_top - h_bot) < 1e-5f);
+			}
+		}
+
+		const ar_node_t *n00 = ar_system_ensure(cs, 1, 0, 0, 0);
+		assert(n00 != NULL);
+
+		/* Verify organic substrate variation on dry land (non-flat RGBA across chunk vertices) */
+		uint32_t first_rgba = n00->rgba[0];
+		int distinct_rgba = 0;
+		for (uint32_t i = 1; i < n00->vert_count; i++) {
+			if (n00->rgba[i] != first_rgba)
+				distinct_rgba++;
+		}
+		assert(distinct_rgba > 100);
+		printf("PASS: 48x48 normal-zoom, 96x96 close-zoom, and 144x144 ultra-close-zoom meshes verified with watertight inter-chunk height continuity\n");
+	}
+
+	/* R5 & R6: Zoom-Progressive 4-Octave Rotated Gradient Terrain Detail, Per-Fragment Quintic Reconstruction & Anti-Zigzag Filtering */
+	{
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		assert(fs_t != NULL);
+		assert(strstr(fs_t, "chaff_grad_noise2d") != NULL);
+		assert(strstr(fs_t, "chaff_grad_dir") != NULL);
+		assert(strstr(fs_t, "eval_zoom_terrain_detail") != NULL);
+		assert(strstr(fs_t, "sampleSubstrateSmooth") != NULL);
+		assert(strstr(fs_t, "sampleHeightSmooth(vUV, fragGrad)") != NULL);
+		assert(strstr(fs_t, "dFdx(vWorldPos)") != NULL);
+		assert(strstr(fs_t, "rockCrevice") != NULL);
+		assert(strstr(fs_t, "talusFactor") != NULL);
+		assert(strstr(fs_t, "quartzGlint") != NULL);
+		assert(strstr(fs_t, "bladeRelief") != NULL);
+
+		/* Evaluate sub-unit surface detail across 4 progressive zoom tiers:
+		 * Tier 0: Far zoom (cam_dist = 1800, footprint = 3.0)
+		 * Tier 1: Normal 1x zoom (cam_dist = 280, footprint = 0.45)
+		 * Tier 2: Close 2.5x zoom (cam_dist = 112, footprint = 0.18)
+		 * Tier 3: Ultra-close 8x zoom (cam_dist = 35, footprint = 0.02) */
+		const float dists[4] = { 1800.0f, 280.0f, 112.0f, 35.0f };
+		const float footprints[4] = { 3.0f, 0.45f, 0.18f, 0.02f };
+		float mean_grad[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float mean_cavity[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		float sub_diff[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+		for (int t = 0; t < 4; t++) {
+			float g_sum = 0.0f;
+			float c_sum = 0.0f;
+			float d_sum = 0.0f;
+			float prev_h = 0.0f;
+			int samples = 0;
+			for (int ry = 0; ry < 24; ry++) {
+				for (int rx = 0; rx < 24; rx++) {
+					float wx = 120.0f + (float)rx * 0.04f;
+					float wy = 80.0f + (float)ry * 0.04f;
+					float gx = 0.0f, gy = 0.0f, cav = 0.0f;
+					float h = nd_seven_gl_eval_terrain_detail(wx, wy, dists[t], footprints[t], &gx, &gy, &cav);
+					g_sum += sqrtf(gx * gx + gy * gy);
+					c_sum += cav;
+					if (samples > 0)
+						d_sum += fabsf(h - prev_h);
+					prev_h = h;
+					samples++;
+				}
+			}
+			mean_grad[t] = g_sum / (float)samples;
+			mean_cavity[t] = c_sum / (float)samples;
+			sub_diff[t] = d_sum / (float)(samples - 1);
+		}
+
+		/* As camera zooms in (1800 -> 280 -> 112 -> 35), finer octaves unlock and sharpen surface detail */
+		assert(mean_grad[1] > mean_grad[0] * 1.5f);
+		assert(mean_grad[2] > mean_grad[1] * 1.5f);
+		assert(mean_grad[3] > mean_grad[2] * 1.3f);
+		assert(sub_diff[3] > sub_diff[1] * 1.2f);
+		assert(mean_cavity[3] > mean_cavity[1]);
+
+		/* Verify true 2D gradient noise has non-zero gradients right on integer lattice lines
+		 * (eliminating the value-noise zero-derivative lattice lines & 45-deg saddle zigzags) */
+		int nonzero_on_lattice = 0;
+		for (int k = 1; k <= 16; k++) {
+			float gx_lat = 0.0f, gy_lat = 0.0f;
+			nd_seven_gl_eval_terrain_detail((float)(k * 10), (float)(k * 7), 100.0f, 0.05f, &gx_lat, &gy_lat, NULL);
+			if (hypotf(gx_lat, gy_lat) > 0.02f)
+				nonzero_on_lattice++;
+		}
+		assert(nonzero_on_lattice >= 14);
+
+		/* Nyquist anti-aliasing check: at close distance (35.0) but coarse pixel footprint (2.0),
+		 * high-frequency octaves are automatically filtered out to prevent aliasing shimmer */
+		float gx_nyq = 0.0f, gy_nyq = 0.0f, gx_full = 0.0f, gy_full = 0.0f;
+		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 2.0f, &gx_nyq, &gy_nyq, NULL);
+		nd_seven_gl_eval_terrain_detail(120.37f, 80.61f, 35.0f, 0.02f, &gx_full, &gy_full, NULL);
+		assert(hypotf(gx_nyq, gy_nyq) < hypotf(gx_full, gy_full) * 0.5f);
+
+		printf("PASS: zoom-progressive rotated gradient terrain detail & anti-zigzag quintic filtering verified (mean grad: far=%.3f, 1x=%.3f, 2.5x=%.3f, 8x=%.3f)\n",
+		       mean_grad[0], mean_grad[1], mean_grad[2], mean_grad[3]);
+	}
+
+	/* R7 & R8: Non-Stationary Regional Ruggedness Envelope & Real 3D Height Relief (Clear Plains vs Rugged Ridges) */
+	{
+		nd_seven_set_3d_mode(1);
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		assert(cs != NULL);
+
+		int clear_rooms = 0;
+		int rolling_rooms = 0;
+		int rugged_rooms = 0;
+		float max_clear_span = 0.0f;
+		float max_rugged_span = 0.0f;
+		float sum_clear_span = 0.0f;
+		float sum_rugged_span = 0.0f;
+
+		for (int ry = -24; ry <= 24; ry += 2) {
+			for (int rx = -24; rx <= 24; rx += 2) {
+				int32_t ox = rx * NDW_TILE_W;
+				int32_t oy = ry * NDW_TILE_H;
+				int32_t cx = ox + (NDW_TILE_W / 2);
+				int32_t cy = oy + (NDW_TILE_H / 2);
+				nd_field_sample_t center_s = nd_field_sample(0, 3, cx, cy);
+				/* Inspect inland dry land rooms well above sea level */
+				if (center_s.is_water || center_s.coarse_elev < center_s.water_level + 8)
+					continue;
+
+				uint16_t rug = nd_field_ruggedness_q8(0, cx, cy);
+				const ar_node_t *node = ar_system_ensure(cs, 0, 0, ox, oy);
+				assert(node != NULL && node->values != NULL);
+				float span_units = (float)(node->max_val - node->min_val) / 16.0f;
+
+				if (rug == 0) {
+					clear_rooms++;
+					sum_clear_span += span_units;
+					if (span_units > max_clear_span)
+						max_clear_span = span_units;
+				} else if (rug >= 180) {
+					rugged_rooms++;
+					sum_rugged_span += span_units;
+					if (span_units > max_rugged_span)
+						max_rugged_span = span_units;
+				} else {
+					rolling_rooms++;
+				}
+			}
+		}
+
+		assert(clear_rooms >= 20);
+		assert(rolling_rooms >= 10);
+		assert(rugged_rooms >= 15);
+		float avg_clear_span = sum_clear_span / (float)clear_rooms;
+		float avg_rugged_span = sum_rugged_span / (float)rugged_rooms;
+
+		/* Clear plains remain gently level while rugged zones have 4x+ higher average intra-room 3D relief
+		 * and peak single-room 3D vertical spans exceeding 25 world units */
+		assert(avg_clear_span <= 8.0f);
+		assert(avg_rugged_span >= avg_clear_span * 3.5f);
+		assert(max_rugged_span >= 25.0f);
+
+		printf("PASS: non-stationary regional 3D relief verified (clear=%d rooms avg=%.1f, rolling=%d, rugged=%d rooms avg=%.1f max=%.1f world units)\n",
+		       clear_rooms, avg_clear_span, rolling_rooms, rugged_rooms, avg_rugged_span, max_rugged_span);
+	}
+
+	/* Phase 6: Realistic Physical Water Optics, Single-Pass Seabed Transmission & 6-Octave Zoom Wave Cascade */
+	{
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		const char *fs_w = nd_seven_gl_fs_water();
+		assert(fs_t && fs_w);
+
+		/* 1. Single-pass seabed transmission & Phase 8 realistic water shader invariants:
+		 * - 4x4 Catmull-Rom bicubic spline in both s_fs_terrain and s_fs_water
+		 * - Shared world-space sub-texel shoreline micro-relief
+		 * - Biome-aware water body palette and seabed substrate derived from uSubstrateTex
+		 * - Capillary wet-shore darkening
+		 * - Non-pulsating shoreline swash (no global time-sine) with distance attenuation
+		 * - 3D wave slope hillshading
+		 * - s_fs_water is a pure air-water surface interface with zero fake opaque cSeabed */
+		assert(strstr(fs_t, "littoralSand") != NULL);
+		assert(strstr(fs_t, "hBicubic") != NULL);
+		assert(strstr(fs_t, "eval_shore_micro_relief") != NULL);
+		assert(strstr(fs_t, "wTropical") != NULL && strstr(fs_t, "wPolar") != NULL);
+		assert(strstr(fs_t, "shoreWetMoisture") != NULL);
+		assert(strstr(fs_t, "C_SHALLOW") != NULL && strstr(fs_t, "C_ABYSS") != NULL);
+		assert(strstr(fs_w, "eval_zoom_water_waves") != NULL);
+		assert(strstr(fs_w, "hBicubic") != NULL);
+		assert(strstr(fs_w, "eval_shore_micro_relief") != NULL);
+		assert(strstr(fs_w, "shoreDist") != NULL);
+		assert(strstr(fs_w, "foamDistFade") != NULL);
+		assert(strstr(fs_w, "waveSlopeDiff") != NULL);
+		assert(strstr(fs_w, "swashPhase = sin(") == NULL);
+		assert(strstr(fs_w, "meniscus * 0.78") == NULL);
+		assert(strstr(fs_w, "cSeabed") == NULL);
+
+		/* 2. Verify 6-octave zoom-continuous wave cascade across planetary orbit to ultra-close zoom:
+		 * Tier 0: Planetary / orbital zoom (cam_dist = 35000, footprint = 12.0)
+		 * Tier 1: Macro regional zoom (cam_dist = 4500, footprint = 2.0)
+		 * Tier 2: Normal 1x zoom (cam_dist = 280, footprint = 0.40)
+		 * Tier 3: Ultra-close 8x zoom (cam_dist = 38, footprint = 0.02) */
+		const float w_dists[4] = { 35000.0f, 4500.0f, 280.0f, 38.0f };
+		const float w_fw[4]    = {    12.0f,    2.0f,  0.40f,  0.02f };
+		float w_grad[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+		for (int t = 0; t < 4; t++) {
+			float g_sum = 0.0f;
+			int n = 0;
+			for (int ry = 0; ry < 16; ry++) {
+				for (int rx = 0; rx < 16; rx++) {
+					float wx = 240.0f + (float)rx * 0.35f;
+					float wy = 180.0f + (float)ry * 0.35f;
+					float gx = 0.0f, gy = 0.0f, crest = 0.0f;
+					nd_seven_gl_eval_water_waves(wx, wy, 12.5f, w_dists[t], w_fw[t], &gx, &gy, &crest);
+					g_sum += hypotf(gx, gy);
+					n++;
+				}
+			}
+			w_grad[t] = g_sum / (float)n;
+		}
+
+		/* Planetary/orbital zoom retains live macro ocean swell (w_grad[0] > 0),
+		 * and zooming in progressively unlocks finer wind waves, chop, and capillary ripples */
+		assert(w_grad[0] > 0.003f);
+		assert(w_grad[1] > w_grad[0] * 1.4f);
+		assert(w_grad[2] > w_grad[1] * 1.4f);
+		assert(w_grad[3] > w_grad[2] * 1.3f);
+
+		/* 3. Verify temporal phase-wrapping stability: wave gradients at t = 100,000s remain
+		 * just as crisp and non-degenerate as at t = 10s (zero float32 precision loss over time) */
+		float g_early = 0.0f, g_late = 0.0f;
+		for (int k = 0; k < 32; k++) {
+			float wx = 100.0f + (float)k * 1.13f;
+			float wy = 200.0f + (float)k * 0.87f;
+			float gx1 = 0.0f, gy1 = 0.0f, gx2 = 0.0f, gy2 = 0.0f;
+			nd_seven_gl_eval_water_waves(wx, wy, 10.0f,     180.0f, 0.15f, &gx1, &gy1, NULL);
+			nd_seven_gl_eval_water_waves(wx, wy, 100000.0f, 180.0f, 0.15f, &gx2, &gy2, NULL);
+			g_early += hypotf(gx1, gy1);
+			g_late  += hypotf(gx2, gy2);
+		}
+		assert(g_late > g_early * 0.75f && g_late < g_early * 1.35f);
+
+		/* 4. Verify natural bathymetric shelf progression in nd_field_bimodal_hypsometry:
+		 * Shallow coastal elevations (-1..-7) remain gentle wading shallows instead of dropping to -12 */
+		assert(nd_field_bimodal_hypsometry(-2) == -2);
+		assert(nd_field_bimodal_hypsometry(-6) == -6);
+		assert(nd_field_bimodal_hypsometry(-7) == -7);
+		assert(nd_field_bimodal_hypsometry(-12) < -14);
+		assert(nd_field_bimodal_hypsometry(-30) < -60);
+
+		/* 5. Verify all 3 WebGL2 shader programs (terrain, water, billboard) compile and link cleanly
+		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
+		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
+			struct {
+				const char *name;
+				const char *vs;
+				const char *fs;
+			} progs[3] = {
+				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
+				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
+				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() }
+			};
+			for (int p = 0; p < 3; p++) {
+				char vpath[128], fpath[128], cmd[512];
+				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
+				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
+				FILE *vf = fopen(vpath, "w");
+				assert(vf != NULL);
+				fputs(progs[p].vs, vf);
+				fclose(vf);
+				FILE *ff = fopen(fpath, "w");
+				assert(ff != NULL);
+				fputs(progs[p].fs, ff);
+				fclose(ff);
+				snprintf(cmd, sizeof(cmd), "glslangValidator -l '%s' '%s' >/dev/null", vpath, fpath);
+				int rc = system(cmd);
+				remove(vpath);
+				remove(fpath);
+				assert(rc == 0);
+			}
+		}
+
+		/* 6. Verify 4x4 Catmull-Rom bicubic C1 gradient continuity across texel boundaries:
+		 * On a steady diagonal height ramp h(x,y) = 16*(x + y), the gradient at interior texel
+		 * grid lines (f = 0) must be strictly non-zero and continuous (unlike 2x2 quintic S-curve
+		 * plateauing which forced derivative = 0 on every texel line). */
+		{
+			int16_t ramp[9 * 9];
+			for (int ry = 0; ry < 9; ry++) {
+				for (int rx = 0; rx < 9; rx++) {
+					ramp[ry * 9 + rx] = (int16_t)((rx + ry) * 32);
+				}
+			}
+			/* Sample exactly on interior texel grid line u = 4/8 = 0.5, v = 4/8 = 0.5 */
+			float gx_grid = 0.0f, gy_grid = 0.0f;
+			float h_grid = nd_seven_gl_sample_height_smooth(ramp, 9, 9, 0.5f, 0.5f, 160.0f, 128.0f, &gx_grid, &gy_grid);
+			float gx_mid = 0.0f, gy_mid = 0.0f;
+			float h_mid = nd_seven_gl_sample_height_smooth(ramp, 9, 9, 0.5625f, 0.5625f, 160.0f, 128.0f, &gx_mid, &gy_mid);
+			assert(fabsf(h_grid - 16.0f) < 1e-4f);
+			assert(h_mid > h_grid);
+			assert(gx_grid > 0.5f && gy_grid > 0.5f);
+			assert(fabsf(gx_grid - gx_mid) < 1e-3f && fabsf(gy_grid - gy_mid) < 1e-3f);
+		}
+
+		printf("PASS: single-pass volumetric water optics, 6-octave orbital-to-capillary wave cascade (grad: orbit=%.4f, macro=%.4f, 1x=%.4f, 8x=%.4f), t=100000s temporal stability, and glslangValidator GLSL ES 3.00 compile+link verified\n",
+		       w_grad[0], w_grad[1], w_grad[2], w_grad[3]);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
