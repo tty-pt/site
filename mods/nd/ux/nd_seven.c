@@ -4,6 +4,7 @@
 #include <ttypt/areole.h>
 #include <nd/seven-world.h>
 #include <nd/field.h>
+#include <nd/attr-bcp.h>
 #include "nd_seven.h"
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_ground.h"
@@ -259,6 +260,62 @@ float nd_seven_lamb_elevation_f(const nd_client_state_t *st, int32_t wx, int32_t
 	return ground_elev_f;
 }
 
+int nd_seven_is_universe_owner(const nd_client_state_t *st)
+{
+	if (!st)
+		return 0;
+	if ((st->pres_flags & ND_REGION_UNIVERSE_OWNER) != 0)
+		return 1;
+	for (size_t i = 0; i < (size_t)st->entity_count && i < sizeof(st->entities) / sizeof(st->entities[0]); i++) {
+		if (st->entities[i].ref == st->me && (st->entities[i].flags & ND_EF_UNIVERSE_OWNER) != 0)
+			return 1;
+	}
+	const nd_stats_state_t *ss = (const nd_stats_state_t *)nd_client_ext_get(st, ND_ATTR_EXT_KEY);
+	if (ss && ss->attr[ND_ATTR_WIZ] > 0)
+		return 1;
+	if (st->me == 1 && (st->pres_flags & ND_REGION_LOCKED) == 0)
+		return 1;
+	return 0;
+}
+
+static void draw_lamb_2d_owner_glow(uint32_t *fb, int w, int h, int sx, int sy, int scale)
+{
+	if (!fb || w <= 0 || h <= 0)
+		return;
+	int cy = sy - 7 * scale;
+	int rad = 28 * scale;
+	if (rad < 16) rad = 16;
+	int r2_max = rad * rad;
+	int y0 = cy - rad; if (y0 < 0) y0 = 0;
+	int y1 = cy + rad; if (y1 >= h) y1 = h - 1;
+	int x0 = sx - rad; if (x0 < 0) x0 = 0;
+	int x1 = sx + rad; if (x1 >= w) x1 = w - 1;
+
+	for (int py = y0; py <= y1; py++) {
+		int dy = py - cy;
+		int dy2 = dy * dy;
+		uint32_t *row = &fb[py * w];
+		for (int px = x0; px <= x1; px++) {
+			int dx = px - sx;
+			int d2 = dx * dx + dy2;
+			if (d2 >= r2_max)
+				continue;
+			int inv = r2_max - d2;
+			int w_q8 = (int)(((int64_t)inv * (int64_t)inv * 36) / ((int64_t)r2_max * (int64_t)r2_max));
+			if (w_q8 <= 0)
+				continue;
+			uint32_t c = row[px];
+			int r = (int)(c & 0xFF) + ((w_q8 * 255) >> 8);
+			int g = (int)((c >> 8) & 0xFF) + ((w_q8 * 240) >> 8);
+			int b = (int)((c >> 16) & 0xFF) + ((w_q8 * 204) >> 8);
+			if (r > 255) r = 255;
+			if (g > 255) g = 255;
+			if (b > 255) b = 255;
+			row[px] = (c & 0xFF000000u) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+		}
+	}
+}
+
 /* Celestial Body Definitions */
 static const nd_planet_def_t s_planets[] = {
 	{ .world_id = 0, .center = { 0.0f, 0.0f, 0.0f },             .major_r = 2000000.0f, .minor_r = 1335000.0f },
@@ -392,6 +449,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	size_t macro_count = s_visible_leaf_count;
 
 	/* Begin 3D WebGL frame in pure C */
+	float lamb_light_z = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
+	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z,
+	                           nd_seven_is_universe_owner(st) ? 1.0f : 0.0f);
 	nd_seven_gl_begin_frame((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz,
 	                        dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
 	                        nd_seven_get_anim_time(), pdef);
@@ -807,6 +867,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				}
 
 				if (dr[a].what == D_LAMB) {
+					if (nd_seven_is_universe_owner(st))
+						draw_lamb_2d_owner_glow(fb, w, h, dr[a].sx, dr[a].sy, spr_scale);
 					draw_lamb_scaled_sub(fb, w, h, dr[a].sx, dr[a].sy, spr_scale, sub_units);
 				} else if (dr[a].what == D_ENTITY) {
 					if (dr[a].sprite_id) {
@@ -956,7 +1018,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 					seven_apply_obj_billboard_style(&dr[a].obj, &obj_sr, tint_b, dst_bb);
 				} else if (dr[a].what == D_LAMB) {
 					dst_bb->tint_rgba = tint_b;
-					dst_bb->style = ND_BB_STYLE_STANDARD;
+					dst_bb->style = nd_seven_is_universe_owner(st)
+					                ? ND_BB_STYLE_GLOW : ND_BB_STYLE_STANDARD;
 					dst_bb->shadow_rx = 8;
 					dst_bb->shadow_ry = 4;
 					dst_bb->pad0 = 0;

@@ -2851,7 +2851,54 @@ int main(void)
 		       lit_sun_crown, lit_lee_base, ao_base, ao_crown);
 	}
 
-	/* Phase 8: 4D Wind-Coupled Volumetric Clouds, Projected Ground/Water Shadows & Water Cloud Reflections */
+	/* Phase 8: Universe Owner Lamb Glow & Shared-Position Point Light */
+	{
+		const char *fs_t = nd_seven_gl_fs_terrain();
+		const char *fs_w = nd_seven_gl_fs_water();
+		const char *fs_b = nd_seven_gl_fs_billboard();
+		assert(strstr(fs_t, "uLambLight") != NULL);
+		assert(strstr(fs_w, "uLambLight") != NULL);
+		assert(strstr(fs_b, "uLambLight") != NULL);
+		assert(strstr(fs_b, "isLambGlow") != NULL);
+
+		/* 1. Verify universe owner permission detection in nd_seven_is_universe_owner */
+		nd_client_state_t test_st;
+		memset(&test_st, 0, sizeof(test_st));
+		test_st.me = 42;
+		assert(nd_seven_is_universe_owner(&test_st) == 0);
+
+		/* Default initial cosmos owner (me == 1, unlocked) */
+		test_st.me = 1;
+		assert(nd_seven_is_universe_owner(&test_st) == 1);
+		test_st.pres_flags = ND_REGION_LOCKED;
+		assert(nd_seven_is_universe_owner(&test_st) == 0);
+
+		/* Explicit universe owner presentation flag (0x04) or entity flag (1 << 6) */
+		test_st.me = 42;
+		test_st.pres_flags = 0x04u;
+		assert(nd_seven_is_universe_owner(&test_st) == 1);
+		test_st.pres_flags = 0;
+		test_st.entity_count = 1;
+		test_st.entities[0].ref = 42;
+		test_st.entities[0].flags = (1u << 6);
+		assert(nd_seven_is_universe_owner(&test_st) == 1);
+
+		/* 2. Verify point light spatial attenuation from the lamb's world position */
+		float l_off  = nd_seven_gl_eval_lamb_light(320.0f, 384.0f, 10.0f, 320.0f, 384.0f, 10.0f, 0.0f);
+		float l_at   = nd_seven_gl_eval_lamb_light(320.0f, 384.0f, 10.0f, 320.0f, 384.0f, 10.0f, 1.0f);
+		float l_near = nd_seven_gl_eval_lamb_light(345.0f, 384.0f, 10.0f, 320.0f, 384.0f, 10.0f, 1.0f);
+		float l_mid  = nd_seven_gl_eval_lamb_light(420.0f, 384.0f, 10.0f, 320.0f, 384.0f, 10.0f, 1.0f);
+		float l_far  = nd_seven_gl_eval_lamb_light(600.0f, 384.0f, 10.0f, 320.0f, 384.0f, 10.0f, 1.0f);
+		assert(fabsf(l_off) < 1e-6f);
+		assert(l_at > 0.15f && l_at < 0.30f);
+		assert(l_at > l_near && l_near > l_mid && l_mid > 0.0f);
+		assert(fabsf(l_far) < 1e-6f);
+
+		printf("PASS: universe owner lamb glow & shared-position point light (at=%.3f, near=%.3f, mid=%.3f, far=%.3f) verified\n",
+		       l_at, l_near, l_mid, l_far);
+	}
+
+	/* Phase 9: 4D Wind-Coupled Volumetric Clouds, Projected Ground/Water Shadows & Water Cloud Reflections */
 	{
 		const char *vs_c = nd_seven_gl_vs_cloud();
 		const char *fs_c = nd_seven_gl_fs_cloud();
