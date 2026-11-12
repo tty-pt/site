@@ -19,6 +19,13 @@ static lam_particle_sys_t *s_water_particles = NULL;
 static float s_prev_particle_time = 0.0f;
 static float s_last_splash_emit_time = 0.0f;
 static float s_last_spray_emit_time = 0.0f;
+static float s_prev_lamb_wx = 0.0f;
+static float s_prev_lamb_wy = 0.0f;
+static float s_prev_lamb_vx = 0.0f;
+static float s_prev_lamb_vy = 0.0f;
+static int   s_prev_lamb_dir = -1;
+static int   s_prev_lamb_walking = 0;
+static int   s_prev_lamb_in_water = 0;
 
 static int seven_has_water_at(uint16_t world, int32_t wx, int32_t wy, int16_t *out_wl);
 
@@ -210,7 +217,7 @@ int16_t nd_seven_lamb_elevation(const nd_client_state_t *st, int32_t wx, int32_t
 		int16_t w_level = 0;
 		if (seven_has_water_at(world, wx, wy, &w_level) && ground_elev < w_level) {
 			/* Buoyancy: swimming elevation in deep water keeps the lamb realistically half-submerged */
-			int16_t swim_floor = (int16_t)(w_level - 8);
+			int16_t swim_floor = (int16_t)(w_level - 5);
 			if (ground_elev < swim_floor)
 				return swim_floor;
 		}
@@ -225,7 +232,7 @@ float nd_seven_lamb_elevation_f(const nd_client_state_t *st, int32_t wx, int32_t
 		uint16_t world = (uint16_t)st->map_data.pos[3];
 		int16_t w_level = 0;
 		if (seven_has_water_at(world, wx, wy, &w_level) && ground_elev_f < (float)w_level) {
-			float swim_floor = (float)(w_level - 8);
+			float swim_floor = (float)(w_level - 5);
 			if (ground_elev_f < swim_floor)
 				return swim_floor;
 		}
@@ -416,8 +423,22 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		float eff_wl = fmaxf((float)lamb_wl, live_wl);
 		bool lamb_in_water = has_loc_water && (lwz < eff_wl + 0.65f);
 		float wake_ground_z = lamb_in_water ? (lwz - ((float)lamb_wl - (float)base_wl)) : (float)base_wl + 10.0f;
-		nd_seven_gl_set_lamb_wake((float)lwx, (float)lwy, wake_ground_z,
-		                          nd_seven_get_dir(), nd_seven_get_walking(), anim_t);
+
+		/* Compute the exact 3D waterline intersection on the 55-deg tilted lamb billboard:
+		 * In s_fs_billboard, the water plane Z = eff_wl intersects the sprite at vLocalPos.z = eff_wl,
+		 * which projects onto the horizontal water plane at Y = lwy + ((lamb_render_z + 6.0) - eff_wl) / sin(55 deg).
+		 * Anchoring both the wake trail and splash droplets here makes the trail and submerged level agree 100%. */
+		float lamb_render_z = lamb_light_z;
+		float waterline_dy = lamb_in_water
+		                     ? fmaxf(0.0f, fminf(6.5f, (lamb_render_z + 6.0f) - eff_wl))
+		                     : 4.5f;
+		float wake_wx = (float)lwx;
+		float wake_wy = (float)lwy + (waterline_dy / 0.819152f);
+
+		int walking = nd_seven_get_walking();
+		int dir = nd_seven_get_dir();
+		nd_seven_gl_set_lamb_wake(wake_wx, wake_wy, wake_ground_z,
+		                          dir, walking, anim_t);
 
 		if (!s_water_particles)
 			s_water_particles = lam_particle_sys_create(512, 42.0f);
@@ -427,59 +448,77 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			if (dt > 0.12f || dt <= 0.0005f) dt = 0.016f;
 			s_prev_particle_time = anim_t;
 
-			/* 1. Lamb wading/swimming ballistic droplet emitter:
-			 * Only emit when the lamb is actively moving through water, positioned at the
-			 * lamb's feet/waterline (shifted +4.5 in +Y to match LAMB_FOOT_Y=25 vs LAMB_AY=16). */
-			int walking = nd_seven_get_walking();
+			/* 1. Sudden-movement impulse detection for lamb water droplets:
+			 * Track velocity and acceleration so droplets burst when there is sudden movement
+			 * (water entry, sudden start from standstill, sharp turn/reversal, or acceleration spike). */
+			float dx = (s_prev_lamb_dir >= 0) ? ((float)lwx - s_prev_lamb_wx) : 0.0f;
+			float dy = (s_prev_lamb_dir >= 0) ? ((float)lwy - s_prev_lamb_wy) : 0.0f;
+			float dist_step = sqrtf(dx * dx + dy * dy);
+			float cur_vx = (dist_step < 48.0f && dt > 0.001f) ? (dx / dt) : 0.0f;
+			float cur_vy = (dist_step < 48.0f && dt > 0.001f) ? (dy / dt) : 0.0f;
+			float dvx = cur_vx - s_prev_lamb_vx;
+			float dvy = cur_vy - s_prev_lamb_vy;
+			float accel = sqrtf(dvx * dvx + dvy * dvy) / fmaxf(dt, 0.012f);
+
+			bool sudden_start = (walking && !s_prev_lamb_walking);
+			bool sudden_turn  = (walking && s_prev_lamb_dir >= 0 && dir != s_prev_lamb_dir);
+			bool water_entry  = (lamb_in_water && !s_prev_lamb_in_water && walking);
+			bool accel_spike  = (walking && accel > 260.0f && dist_step > 0.25f);
+			bool sudden_move  = sudden_start || sudden_turn || water_entry || accel_spike;
+
+			s_prev_lamb_wx = (float)lwx;
+			s_prev_lamb_wy = (float)lwy;
+			s_prev_lamb_vx = cur_vx;
+			s_prev_lamb_vy = cur_vy;
+			s_prev_lamb_dir = dir;
+			s_prev_lamb_walking = walking;
+			s_prev_lamb_in_water = lamb_in_water ? 1 : 0;
+
 			if (lamb_in_water && walking && dist < 1800.0f) {
-				float interval = 0.032f;
-				if (anim_t - s_last_splash_emit_time >= interval || anim_t < s_last_splash_emit_time) {
+				float min_interval = sudden_move ? 0.018f : 0.140f;
+				if (sudden_move || (anim_t - s_last_splash_emit_time >= min_interval || anim_t < s_last_splash_emit_time)) {
 					s_last_splash_emit_time = anim_t;
-					int dir = nd_seven_get_dir();
-					/* Match DIR_DOWN=0(+Y), DIR_UP=1(-Y), DIR_LEFT=2(-X), DIR_RIGHT=3(+X): kick droplets backward & outward */
 					float dir_vx = (dir == 3) ? 1.0f : (dir == 2 ? -1.0f : 0.0f);
 					float dir_vy = (dir == 0) ? 1.0f : (dir == 1 ? -1.0f : 0.0f);
-					float lamb_render_z = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
-					float waterline_dy = fmaxf(0.0f, fminf(9.5f, lamb_render_z + 9.5f - eff_wl));
+					float impulse_boost = sudden_move ? 1.35f : 0.78f;
 					lam_particle_emitter_t em;
 					memset(&em, 0, sizeof(em));
-					em.x = (float)lwx - dir_vx * 2.4f;
-					em.y = (float)lwy + (waterline_dy / 0.819152f) - dir_vy * 2.4f;
-					em.z = eff_wl + 0.35f;
-					em.spread_x = 3.2f;
-					em.spread_y = 2.6f;
-					em.spread_z = 0.25f;
-					em.dir_x = -dir_vx * 0.65f;
-					em.dir_y = -dir_vy * 0.65f;
-					em.dir_z = 0.82f;
-					em.speed_min = 12.0f;
-					em.speed_max = 24.0f;
-					em.cone_spread = 0.58f;
-					em.size0_min = 0.58f;
-					em.size0_max = 0.92f;
-					em.size1_min = 0.38f;
-					em.size1_max = 0.65f;
-					em.life_min = 0.24f;
-					em.life_max = 0.48f;
+					em.x = wake_wx - dir_vx * 1.4f;
+					em.y = wake_wy - dir_vy * 1.4f;
+					em.z = eff_wl + 0.30f;
+					em.spread_x = sudden_move ? 3.4f : 2.2f;
+					em.spread_y = sudden_move ? 2.8f : 1.8f;
+					em.spread_z = 0.22f;
+					em.dir_x = -dir_vx * 0.68f;
+					em.dir_y = -dir_vy * 0.68f;
+					em.dir_z = sudden_move ? 0.88f : 0.74f;
+					em.speed_min = 11.0f * impulse_boost;
+					em.speed_max = 22.0f * impulse_boost;
+					em.cone_spread = sudden_move ? 0.68f : 0.42f;
+					em.size0_min = 0.54f;
+					em.size0_max = sudden_move ? 0.88f : 0.74f;
+					em.size1_min = 0.34f;
+					em.size1_max = 0.56f;
+					em.life_min = 0.22f;
+					em.life_max = sudden_move ? 0.48f : 0.34f;
 					em.drag = 0.95f;
 					em.gravity_scale = 1.05f;
 					em.restitution = -1.0f;
-					em.rgba0 = 0xFFFFFFB8u;
+					em.rgba0 = sudden_move ? 0xFFFFFFC4u : 0xFFFFFF90u;
 					em.rgba1 = 0xFFFFFF00u;
-					em.count = 16u;
+					em.count = water_entry ? 22u : (sudden_move ? 16u : 3u);
 					em.kind = 1;
 					lam_particle_emit(s_water_particles, &em);
 				}
 			}
 
-			/* 2. Water-body wave-crest spindrift & shoreline wave-runup mist emitter:
-			 * Sensitive to active wave movement across the entire water body as well as shorelines,
-			 * emitting more subtle, fine droplets wherever waves crest or surge. */
-			if (dist < 1800.0f && (anim_t - s_last_spray_emit_time >= 0.045f || anim_t < s_last_spray_emit_time)) {
+			/* 2. Water-body wave-surge spindrift & shoreline wave-impact mist emitter:
+			 * Triggered only where there is sudden wave movement (steep breaking crests or surging shore impact). */
+			if (dist < 1800.0f && (anim_t - s_last_spray_emit_time >= 0.055f || anim_t < s_last_spray_emit_time)) {
 				s_last_spray_emit_time = anim_t;
 				uint32_t p_hash = (uint32_t)(anim_t * 53.0f) * 0x9E3779B9u;
 				int spawned_batches = 0;
-				for (int p_try = 0; p_try < 14 && spawned_batches < 3; p_try++) {
+				for (int p_try = 0; p_try < 14 && spawned_batches < 2; p_try++) {
 					p_hash ^= p_hash << 13;
 					p_hash ^= p_hash >> 17;
 					p_hash ^= p_hash << 5;
@@ -508,21 +547,21 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 						sw_z = nd_seven_gl_eval_shore_swash((float)sx, (float)sy, (float)loc_wl, (float)base_wl,
 						                                    gz, gx, gy, anim_t, pdef, NULL, &foam);
 					}
-					/* Trigger subtle spindrift droplets when wave crests/slopes are lively over the water body or surging at the shore */
-					bool active_open_wave = (depth > 0.35f) && (w_crest > 0.20f || wave_slope > 0.24f || w_h > 0.32f);
-					bool active_shore_wave = near_shore && (foam > 0.04f || (slope_mag > 0.05f && (w_crest > 0.14f || w_h > 0.15f)));
+					/* Trigger spindrift only on sudden steep wave peaks or strong shore run-up surges */
+					bool active_open_wave = (depth > 0.50f) && (w_crest > 0.30f && wave_slope > 0.32f);
+					bool active_shore_wave = near_shore && (foam > 0.14f || (slope_mag > 0.08f && w_crest > 0.24f && w_h > 0.24f));
 					if (active_open_wave || active_shore_wave) {
 						lam_particle_emitter_t em;
 						memset(&em, 0, sizeof(em));
 						em.x = (float)sx;
 						em.y = (float)sy;
 						em.z = fmaxf((float)loc_wl, sw_z) + 0.35f;
-						em.spread_x = 4.5f;
-						em.spread_y = 4.5f;
+						em.spread_x = 4.0f;
+						em.spread_y = 4.0f;
 						em.spread_z = 0.25f;
 						if (active_shore_wave && slope_mag > 1e-3f) {
-							em.dir_x = (gx / slope_mag) * 0.48f;
-							em.dir_y = (gy / slope_mag) * 0.48f;
+							em.dir_x = (gx / slope_mag) * 0.52f;
+							em.dir_y = (gy / slope_mag) * 0.52f;
 						} else {
 							em.dir_x = 0.52f;
 							em.dir_y = -0.45f;
@@ -531,18 +570,18 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 						em.speed_min = 9.0f;
 						em.speed_max = 19.0f;
 						em.cone_spread = 0.62f;
-						em.size0_min = 0.55f;
-						em.size0_max = 0.88f;
-						em.size1_min = 0.35f;
-						em.size1_max = 0.60f;
-						em.life_min = 0.24f;
-						em.life_max = 0.50f;
+						em.size0_min = 0.52f;
+						em.size0_max = 0.82f;
+						em.size1_min = 0.32f;
+						em.size1_max = 0.55f;
+						em.life_min = 0.22f;
+						em.life_max = 0.46f;
 						em.drag = 1.15f;
 						em.gravity_scale = 0.95f;
 						em.restitution = -1.0f;
 						em.rgba0 = 0xFFFFFF98u;
 						em.rgba1 = 0xFFFFFF00u;
-						em.count = active_shore_wave ? 6u : 5u;
+						em.count = active_shore_wave ? 6u : 4u;
 						em.kind = 2;
 						lam_particle_emit(s_water_particles, &em);
 						spawned_batches++;
@@ -946,7 +985,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bw = (float)LAMB_SIZE;
 				bh = (float)LAMB_SIZE;
 				bay = (float)(LAMB_SIZE - LAMB_AY);
-				bwz_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y) + 3.5f;
+				bwz_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y);
 				u0 = (float)(col * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
 				v0 = (float)(row * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				u1 = (float)((col + 1) * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
