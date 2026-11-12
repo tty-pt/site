@@ -554,6 +554,16 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 	 * colour on EVERY tile (wilderness as well as rooms), three cells per tile
 	 * (left / centre / right) showing plants, stairs, shops, ponds and entities
 	 * in their own colours, and walls in the wall-paint colour around rooms. */
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	if (cs) {
+		float center_wx = ((float)map->pos[0] + 0.5f) * (float)NDW_TILE_W;
+		float center_wy = (-(float)map->pos[1] + 0.5f) * (float)NDW_TILE_H;
+		ar_eval_ortho(cs, 1, (uint16_t)map->pos[3],
+		              center_wx, center_wy,
+		              (float)(cols * NDW_TILE_W), (float)(rows * NDW_TILE_H),
+		              (float)(cols * tile_sz), (float)(rows * tile_sz));
+	}
+
 	for (uint32_t y = 0; y < rows; y++) {
 		for (uint32_t x = 0; x < cols; x++) {
 			const nd_map_tile_t *tile = &map->tiles[y * cols + x];
@@ -573,43 +583,33 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 				uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
 				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
 			} else {
-				/* Wilderness: render directly from unified libchunk level-0 spatial index */
+				/* Wilderness: render via libareole orthographic minimap view (view_id = 1) */
 				int16_t room_pos[4] = {
 					(int16_t)(map->pos[0] + (int)x - (int)map->player_x),
 					(int16_t)(map->pos[1] - ((int)y - (int)map->player_y)),
 					map->pos[2],
 					map->pos[3]
 				};
-				int32_t ox = (int32_t)room_pos[0] * 160;
-				int32_t oy = -(int32_t)room_pos[1] * 128;
+				int32_t ox = (int32_t)room_pos[0] * NDW_TILE_W;
+				int32_t oy = -(int32_t)room_pos[1] * NDW_TILE_H;
 				uint16_t world = (uint16_t)room_pos[3];
 
-				ar_system_t *cs = nd_seven_get_chunk_sys();
-				const ar_node_t *chk = NULL;
 				if (cs) {
-					uint64_t key = morton_quad_key(world, 0, ox, oy, 160, 128);
-					chk = ar_system_find_by_key(cs, key);
-					if (!chk) {
-						chk = ar_node_find(cs, world, 0, ox, oy);
-					}
-				}
-
-				if (chk) {
-					int gdim = chk->grid_dim ? (int)chk->grid_dim : AR_DEFAULT_GRID_DIM;
-					int vdim = chk->vert_dim ? (int)chk->vert_dim : AR_DEFAULT_VERT_DIM;
 					for (uint32_t py = 0; py < tile_sz; py++) {
-						int cy = ((int)py * gdim) / (int)tile_sz;
+						int32_t wy = oy + ((int32_t)py * NDW_TILE_H) / (int32_t)tile_sz;
 						for (uint32_t px = 0; px < tile_sz; px++) {
-							int cx = ((int)px * gdim) / (int)tile_sz;
-							const ar_sample_t *s = &chk->samples[cy * vdim + cx];
-							uint32_t col;
-							uint8_t wdepth = s->attr[3];
-							if (wdepth > 0) {
-								col = water_color_at_depth(wdepth > 28 ? 28 : wdepth, 128, 128, 128);
-							} else {
-								col = chk->rgba[cy * vdim + cx];
+							int32_t wx = ox + ((int32_t)px * NDW_TILE_W) / (int32_t)tile_sz;
+							ar_sample_t s;
+							if (ar_probe_view(cs, 1, world, wx, wy, &s)) {
+								uint32_t col;
+								uint8_t wdepth = s.attr[3];
+								if (wdepth > 0) {
+									col = water_color_at_depth(wdepth > 28 ? 28 : wdepth, 128, 128, 128);
+								} else {
+									col = s.rgba;
+								}
+								fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(col, amb, 255));
 							}
-							fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(col, amb, 255));
 						}
 					}
 				} else {

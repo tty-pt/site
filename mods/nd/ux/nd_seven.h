@@ -9,12 +9,8 @@
 #include "nd_seven_objects.h"
 
 /*
- * The 2D "seven" stage: the NeverDark map as one continuous, scrolling world
- * with the seven-ways lamb as the player. Pure C, dual-compiled. Every map
- * tile is a small block laid out beside its neighbours as far as the frame
- * reaches (nd/seven-world.h); its biome, plants and features come from the
- * nd_map_data_t tile, its position from nd_map_data_t.pos, the art from the
- * generated sprite atlas plus procedural pixel art (cactus, fir, sand ...).
+ * The 3D "seven" stage: the NeverDark map as one continuous, scrolling 3D world
+ * with the seven-ways lamb as the player. Pure C, dual-compiled.
  */
 
 /* Feed a key event. Returns 1 if the key drives the lamb (and was consumed). */
@@ -28,10 +24,9 @@ void nd_spatial_resolver_invalidate(void);
  */
 int nd_seven_tick(const nd_client_state_t *st, float dt);
 
-/* Draw the world around the lamb into a w x h RGBA framebuffer (any size). */
-void nd_seven_render(uint32_t *fb, uint32_t w, uint32_t h, const nd_client_state_t *st);
+/* Render the 3D WebGL world around the lamb for a w x h viewport. */
+void nd_seven_render(uint32_t w, uint32_t h, const nd_client_state_t *st);
 
-/* Lamb state, exposed for tests and the HUD. */
 /* Forget remembered tile glyphs (new session or world). */
 void nd_seven_forget(void);
 
@@ -69,11 +64,7 @@ int nd_seven_is_universe_owner(const nd_client_state_t *st);
 /* Unified multi-scale terrain chunk system */
 ar_system_t *nd_seven_get_chunk_sys(void);
 
-/* 3D WebGL diorama mode toggle */
-void nd_seven_set_3d_mode(int enable);
-int nd_seven_get_3d_mode(void);
-
-/* Camera zoom controls (both 2D and 3D) */
+/* Camera zoom controls */
 void nd_seven_set_zoom(float zoom);
 float nd_seven_get_zoom(void);
 void nd_seven_zoom_in(void);

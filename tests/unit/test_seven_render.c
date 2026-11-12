@@ -2193,7 +2193,8 @@ int main(void)
 		assert(fs_w && strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)"));
 		assert(fs_w && !strstr(fs_w, "cSeabed"));
 		assert(vs_b && strstr(vs_b, "a_local_pos"));
-		assert(fs_b && strstr(fs_b, "waterAbsorption"));
+		assert(fs_b && strstr(fs_b, "seabedAbsorption"));
+		assert(fs_b && strstr(fs_b, "snellTexelShift"));
 
 		/* 2. Verify pitch-rotated billboard basis orthogonality and 1:1 projected aspect ratio at 55 deg */
 		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
@@ -2798,6 +2799,10 @@ int main(void)
 		assert(strstr(fs_b, "sampleAtlasSmooth") != NULL);
 		assert(strstr(fs_b, "fetchBoundedTexel") != NULL);
 		assert(strstr(fs_b, "chaff_grad_noise2d") != NULL);
+		assert(strstr(fs_b, "snellTexelShift") != NULL);
+		assert(strstr(fs_b, "waveRefGrad") != NULL);
+		assert(strstr(fs_b, "seabedAbsorption") != NULL);
+		assert(strstr(fs_b, "1.2 / 328.0") == NULL);
 		assert(strstr(fs_b, "contactAO") != NULL);
 		assert(strstr(fs_b, "fogFactor") != NULL);
 
@@ -2813,12 +2818,12 @@ int main(void)
 		assert(ao_crown > 0.98f);
 		assert(lit_sun_crown > lit_lee_base * 1.35f);
 
-		/* 2. Verify 3D ground-contact shadow quad geometry on the curved torus tangent plane */
+		/* 2. Verify 3D ground-contact shadow quad geometry and water_z_off == anchor_y waterline alignment */
 		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
 		lam_billboard_gpu_t tree_bb = {
 			.x = 480.0f, .y = 384.0f, .z = 12.0f,
 			.width = 61.0f, .height = 74.0f,
-			.anchor_y = 6.0f, .water_z_off = 0.0f,
+			.anchor_y = 6.0f, .water_z_off = 6.0f,
 			.u0 = 0.1f, .v0 = 0.1f, .u1 = 0.2f, .v1 = 0.3f,
 			.tint_rgba = 0x73C35FFF,
 			.style = ND_BB_STYLE_LEAF_TINT,
@@ -2828,11 +2833,14 @@ int main(void)
 		nd_seven_gl_eval_billboard_quad(&tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, bverts);
 		nd_seven_gl_eval_billboard_shadow_quad(&tree_bb, pdef, sverts);
 
-		/* Upright quad carries style and clamped sprite UV bounds */
+		/* Upright quad carries style, clamped sprite UV bounds, and exact ground Z at anchor_y height */
 		assert(fabsf(bverts[0].quad_uv[3] - (float)ND_BB_STYLE_LEAF_TINT) < 1e-5f);
 		assert(fabsf(bverts[0].quad_uv[2] - 12.0f) < 1e-5f);
 		assert(fabsf(bverts[0].sprite_bounds[0] - 0.1f) < 1e-5f);
 		assert(fabsf(bverts[0].sprite_bounds[2] - 0.2f) < 1e-5f);
+		float anchor_t = tree_bb.anchor_y / tree_bb.height;
+		float z_at_anchor = bverts[0].local_pos[2] + anchor_t * (bverts[2].local_pos[2] - bverts[0].local_pos[2]);
+		assert(fabsf(z_at_anchor - tree_bb.z) < 1e-4f);
 		/* Horizontal local_pos[0] spans [x - width/2, x + width/2] across the quad */
 		assert(fabsf((bverts[1].local_pos[0] - bverts[0].local_pos[0]) - 61.0f) < 1e-4f);
 

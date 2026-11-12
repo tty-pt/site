@@ -532,8 +532,8 @@ static const char *s_fs_terrain =
 	"    float nStd   = octaves.y;\n"
 	"    float nClose = octaves.z;\n"
 	"    float nUltra = octaves.w;\n"
-	"    float macroFade = clamp((9500.0 - vDistance) / 6000.0, 0.0, 1.0);\n"
-	"    float distFade  = clamp(1.0 - (vDistance - 900.0) / 2400.0, 0.0, 1.0);\n"
+	"    float macroFade = clamp((44000.0 - vDistance) / 38000.0, 0.0, 1.0);\n"
+	"    float distFade  = clamp(1.0 - (vDistance - 1800.0) / 26200.0, 0.0, 1.0);\n"
 	"    float closeZoom = clamp((820.0 - vDistance) / 480.0, 0.0, 1.0);\n"
 	"    float ultraZoom = clamp((480.0 - vDistance) / 260.0, 0.0, 1.0);\n"
 	"    /* 1. Terrestrial & shallow-submerged substrate shading (evaluated down to fragWaterDepth < 6.5 so shallow water preserves exact shore detail) */\n"
@@ -1413,9 +1413,19 @@ static const char *s_fs_billboard =
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
 	"    float d = 0.0;\n"
 	"    bool isSubmerged = false;\n"
-	"    if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 0.25) {\n"
-	"        d = (uSeaLevel - 0.25) - vLocalPos.z;\n"
-	"        isSubmerged = true;\n"
+	"    vec2 waveRefGrad = vec2(0.0);\n"
+	"    float waveSurfZ = uSeaLevel;\n"
+	"    if (uSeaLevel > -900.0) {\n"
+	"        float tRef = mod(uAnimTime, 256.0);\n"
+	"        vec3 wRef1 = chaff_grad_noise2d(vLocalPos.xy * 0.22 + vec2(tRef * 0.55, -tRef * 0.45), 0x57415631u);\n"
+	"        vec3 wRef2 = chaff_grad_noise2d(vLocalPos.xy * 0.52 + vec2(-tRef * 0.80, tRef * 0.65), 0x57415632u);\n"
+	"        waveRefGrad = wRef1.yz * 0.65 + wRef2.yz * 0.35;\n"
+	"        float waveElev = ((wRef1.x - 0.5) * 0.26 + (wRef2.x - 0.5) * 0.12) * smoothstep(2600.0, 400.0, vDist);\n"
+	"        waveSurfZ = uSeaLevel + waveElev;\n"
+	"        if (vLocalPos.z < waveSurfZ) {\n"
+	"            d = waveSurfZ - vLocalPos.z;\n"
+	"            isSubmerged = true;\n"
+	"        }\n"
 	"    }\n"
 	"    /* 1. 3D Ground-Contact Drop Shadow Pass (vQuadUV.w < -0.5) */\n"
 	"    if (vQuadUV.w < -0.5) {\n"
@@ -1428,27 +1438,36 @@ static const char *s_fs_billboard =
 	"        vec2 umbraDelta = vQuadUV.xy + vec2(0.20, 0.16);\n"
 	"        float umbra = exp(-dot(umbraDelta, umbraDelta) * 3.2) * 0.16;\n"
 	"        float waterAtten = isSubmerged ? clamp(1.0 - d * 0.25, 0.0, 1.0) : 1.0;\n"
-	"        float distAtten = clamp((4200.0 - vDist) / 2200.0, 0.0, 1.0);\n"
+	"        float distAtten = clamp((16000.0 - vDist) / 12000.0, 0.0, 1.0);\n"
 	"        float shadowAlpha = clamp((penumbra * 0.36 * dapple + umbra) * vTint.a * waterAtten * distAtten * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.48);\n"
 	"        if (shadowAlpha <= 0.005) discard;\n"
 	"        vec3 shadowRgb = mix(vec3(0.05, 0.07, 0.10), sky * 0.16, 0.45);\n"
 	"        FragColor = vec4(shadowRgb, shadowAlpha);\n"
 	"        return;\n"
 	"    }\n"
-	"    /* 2. Sub-Texel Anti-Aliased & Outline-Softened Sprite Sampling */\n"
+	"    /* 2. Sub-Texel Anti-Aliased, Snell-Refracted & Outline-Softened Sprite Sampling */\n"
 	"    float style = vQuadUV.w;\n"
 	"    bool isLambGlow = (style > 3.5);\n"
 	"    vec2 sampleUV = vUV;\n"
 	"    if (isSubmerged) {\n"
-	"        float distortStrength = clamp(d * 0.25, 0.0, 1.0);\n"
-	"        vec2 waveOffset = vec2(\n"
-	"            sin(vLocalPos.y * 0.35 + uAnimTime * 3.5),\n"
-	"            cos(vLocalPos.x * 0.35 + uAnimTime * 2.8)\n"
-	"        ) * (vec2(1.2 / 512.0, 1.2 / 328.0) * distortStrength);\n"
-	"        sampleUV = vUV + waveOffset;\n"
+	"        vec2 atlasSize = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
+	"        float depthRamp = smoothstep(0.0, 2.2, d) * clamp(d / 6.5, 0.12, 1.0);\n"
+	"        float refractDistFade = clamp(1.0 - (vDist - 800.0) / 2400.0, 0.0, 1.0);\n"
+	"        /* Physical Snell's law air->water (n1/n2 = 1/1.333) ray deflection + subtle vertical foreshortening */\n"
+	"        vec2 snellTexelShift = vec2(\n"
+	"            -waveRefGrad.x * (1.35 * depthRamp),\n"
+	"            -waveRefGrad.y * (0.95 * depthRamp) - clamp(d * 0.08, 0.0, 0.55) * smoothstep(0.0, 1.2, d)\n"
+	"        ) * refractDistFade;\n"
+	"        sampleUV = vUV + snellTexelShift / atlasSize;\n"
+	"        if (vSpriteBounds.z > vSpriteBounds.x && vSpriteBounds.w > vSpriteBounds.y) {\n"
+	"            vec2 halfTexel = 0.5 / atlasSize;\n"
+	"            sampleUV = clamp(sampleUV, vSpriteBounds.xy + halfTexel, vSpriteBounds.zw - halfTexel);\n"
+	"        }\n"
 	"    }\n"
 	"    vec4 baseCol = sampleAtlasSmooth(vUV, vSpriteBounds, style);\n"
-	"    float edgeAlpha = smoothstep(0.12, 0.46, baseCol.a);\n"
+	"    vec4 subSample = isSubmerged ? sampleAtlasSmooth(sampleUV, vSpriteBounds, style) : baseCol;\n"
+	"    float effSampleAlpha = isSubmerged ? mix(baseCol.a, subSample.a, smoothstep(0.0, 0.65, d)) : baseCol.a;\n"
+	"    float edgeAlpha = smoothstep(0.12, 0.46, effSampleAlpha);\n"
 	"    float auraAlpha = 0.0;\n"
 	"    if (isLambGlow && edgeAlpha < 0.99) {\n"
 	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.46) * 2.0);\n"
@@ -1456,7 +1475,6 @@ static const char *s_fs_billboard =
 	"        auraAlpha = exp(-r2 * 2.8) * 0.16 * (1.0 - edgeAlpha);\n"
 	"    }\n"
 	"    if (edgeAlpha <= 0.01 && auraAlpha <= 0.005) discard;\n"
-	"    vec4 subSample = isSubmerged ? sampleAtlasSmooth(sampleUV, vSpriteBounds, style) : baseCol;\n"
 	"    if (subSample.a < 0.12) subSample = baseCol;\n"
 	"    /* 3. Leaf-Selective Plant Tinting & Natural Palette Harmonization */\n"
 	"    vec3 albedo = subSample.rgb;\n"
@@ -1480,7 +1498,7 @@ static const char *s_fs_billboard =
 	"    /* 4. 3D Volumetric Canopy/Body Normals, Micro-Relief & Directional Sun Lighting */\n"
 	"    float qx = clamp(vQuadUV.x, -1.0, 1.0);\n"
 	"    float qy = clamp(vQuadUV.y, 0.0, 1.0);\n"
-	"    float distFade = clamp(1.0 - (vDist - 900.0) / 2400.0, 0.0, 1.0);\n"
+	"    float distFade = clamp(1.0 - (vDist - 1800.0) / 36000.0, 0.0, 1.0);\n"
 	"    float closeZoom = clamp((820.0 - vDist) / 480.0, 0.0, 1.0);\n"
 	"    vec2 surfPos = vec2(vLocalPos.x, vLocalPos.z);\n"
 	"    vec3 g1 = chaff_grad_noise2d(surfPos * 0.24, 0xA341316Cu);\n"
@@ -1518,6 +1536,12 @@ static const char *s_fs_billboard =
 	"    vec3 sunCol = vec3(1.06, 1.02, 0.95);\n"
 	"    vec3 lightTerm = (ambCol * 0.52 + sunCol * (0.58 * sunDiff)) * (cavityAO * contactAO);\n"
 	"    vec3 lit = albedo * mix(vec3(1.0), lightTerm, isLambGlow ? 0.32 : 0.78);\n"
+	"    if (!isLambGlow && uSeaLevel > -900.0 && !isSubmerged) {\n"
+	"        /* Capillary wet-rim darkening just above the waterline (matches terrain shoreWetMoisture) */\n"
+	"        float heightAboveWater = vLocalPos.z - waveSurfZ;\n"
+	"        float wetRim = smoothstep(0.45, 0.0, heightAboveWater);\n"
+	"        lit *= (1.0 - wetRim * 0.18);\n"
+	"    }\n"
 	"    if (isLambGlow) {\n"
 	"        /* Subtle self-luminance: slightly brighter than the environment with a soft warm rim */\n"
 	"        float rimGlow = smoothstep(0.85, 0.25, baseCol.a) * edgeAlpha;\n"
@@ -1546,29 +1570,50 @@ static const char *s_fs_billboard =
 	"            lit += (albedo * 0.72 + vec3(0.28)) * warmGlow;\n"
 	"        }\n"
 	"    }\n"
-	"    /* 5. Physical Volumetric Water Submersion Optics */\n"
+	"    /* 5. Physical Volumetric Water Submersion Optics (Unified with s_fs_terrain & s_fs_water) */\n"
 	"    if (isSubmerged) {\n"
-	"        float c1 = chaff_sample_3d(vec3(vLocalPos.xy * 2.0, uAnimTime * 3.5), 3u, 0x1337u);\n"
-	"        float c2 = chaff_sample_3d(vec3((vLocalPos.xy + vec2(37.0, -23.0)) * 2.0, uAnimTime * 2.5), 3u, 0xBEEFu);\n"
-	"        float diff = abs(c1 - c2);\n"
-	"        float caustic = pow(clamp(1.0 - diff * 6.0, 0.0, 1.0), 3.0);\n"
-	"        float causticCoherence = exp(-0.12 * d);\n"
-	"        vec3 submergedCaustic = vec3(0.48, 0.82, 0.94) * (caustic * 0.45 * causticCoherence);\n"
-	"        vec3 viewDir = normalize(uCameraPos - vWorldPos);\n"
-	"        float cosView = max(0.25, dot(vec3(0.0, 0.0, 1.0), viewDir));\n"
-	"        float shallowFactor = smoothstep(0.0, 16.0, d);\n"
-	"        float effectiveOpticalPath = (d * (0.20 + 0.80 * shallowFactor)) / cosView;\n"
-	"        float submergedBlend = clamp(0.16 + 0.18 * smoothstep(0.0, 8.0, d), 0.0, 0.46);\n"
-	"        vec3 shallowWash = vec3(0.14, 0.48, 0.54);\n"
-	"        vec3 tintedSurface = mix(lit + submergedCaustic, shallowWash * (0.65 + 0.35 * lit), submergedBlend);\n"
-	"        vec3 waterAbsorption = exp(-vec3(0.042, 0.016, 0.005) * effectiveOpticalPath);\n"
-	"        vec3 waterColor = tintedSurface * waterAbsorption;\n"
-	"        vec3 deepOceanScattered = vec3(0.018, 0.085, 0.20) * shallowFactor *\n"
-	"                                  (1.0 - exp(-vec3(0.014, 0.022, 0.036) * effectiveOpticalPath));\n"
-	"        lit = waterColor + deepOceanScattered;\n"
-	"        float meniscus = smoothstep(0.0, 0.35, d) * smoothstep(1.6, 0.35, d);\n"
-	"        vec3 meniscusColor = vec3(0.90, 0.95, 0.99);\n"
-	"        lit = mix(lit, meniscusColor, meniscus * 0.55);\n"
+	"        float dClamped = clamp(d, 0.0, 64.0);\n"
+	"        float wetBlend = smoothstep(0.0, 0.45, dClamped);\n"
+	"        float caustDistFade = clamp(1.0 - (vDist - 900.0) / 2500.0, 0.0, 1.0);\n"
+	"        float caustCloseZoom = clamp((420.0 - vDist) / 300.0, 0.0, 1.0);\n"
+	"        float caustic = 0.0;\n"
+	"        if (caustDistFade > 0.01 && dClamped < 16.0) {\n"
+	"            float tC = mod(uAnimTime, 256.0);\n"
+	"            vec2 cUV = vLocalPos.xy + waveRefGrad * 1.6;\n"
+	"            float c1 = chaff_sample_3d(vec3(cUV * 1.85, tC * 2.4), 3u, 0x1337u);\n"
+	"            float c2 = chaff_sample_3d(vec3((cUV + vec2(37.0, -23.0)) * 1.85, tC * 1.9), 3u, 0xBEEFu);\n"
+	"            float caustMeso = pow(clamp(1.0 - abs(c1 - c2) * 5.6, 0.0, 1.0), 3.0);\n"
+	"            float caustFine = 0.0;\n"
+	"            if (caustCloseZoom > 0.01) {\n"
+	"                float c3 = chaff_sample_3d(vec3(cUV * 4.8, tC * 3.6), 2u, 0xCA57u);\n"
+	"                float c4 = chaff_sample_3d(vec3((cUV + vec2(-19.0, 41.0)) * 4.8, tC * 3.0), 2u, 0xCA58u);\n"
+	"                caustFine = pow(clamp(1.0 - abs(c3 - c4) * 5.6, 0.0, 1.0), 3.0) * caustCloseZoom;\n"
+	"            }\n"
+	"            caustic = (caustMeso + caustFine * 0.65) * caustDistFade;\n"
+	"        }\n"
+	"        float causticFocus = smoothstep(0.10, 1.10, dClamped) * exp(-0.15 * dClamped);\n"
+	"        vec3 caustLit = lit * (1.0 + caustic * causticFocus * 0.38);\n"
+	"        /* Under Seven's 55-deg diorama pitch, cos(55 deg) = 0.5736 (torus-invariant slant path) */\n"
+	"        float cosView = 0.5736;\n"
+	"        float opticalDepth = dClamped / cosView;\n"
+	"        float shallowFactor = smoothstep(0.40, 15.0, dClamped);\n"
+	"        float effectiveOpticalDepth = opticalDepth * (0.14 + 0.86 * shallowFactor);\n"
+	"        vec3 seabedAbsorption = exp(-vec3(0.058, 0.022, 0.007) * effectiveOpticalDepth);\n"
+	"        vec3 transmittedSpr = caustLit * seabedAbsorption;\n"
+	"        vec3 C_SHALLOW = vec3(0.12, 0.44, 0.49);\n"
+	"        vec3 C_SHELF   = vec3(0.09, 0.34, 0.46);\n"
+	"        vec3 C_OUTER   = vec3(0.05, 0.22, 0.38);\n"
+	"        vec3 C_ABYSS   = vec3(0.024, 0.10, 0.24);\n"
+	"        vec3 inscatterCol = mix(C_SHALLOW, C_SHELF, smoothstep(2.5, 9.5, dClamped));\n"
+	"        inscatterCol = mix(inscatterCol, C_OUTER, smoothstep(9.5, 20.0, dClamped));\n"
+	"        inscatterCol = mix(inscatterCol, C_ABYSS, smoothstep(20.0, 42.0, dClamped));\n"
+	"        float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.072 * effectiveOpticalDepth));\n"
+	"        vec3 waterBody = mix(transmittedSpr, inscatterCol, bodyScatterWeight);\n"
+	"        lit = mix(lit, waterBody, wetBlend);\n"
+	"        /* Crisp air-water meniscus refraction ring along the live wave intersection */\n"
+	"        float meniscus = smoothstep(0.0, 0.18, dClamped) * smoothstep(0.85, 0.18, dClamped) * clamp(1.0 - (vDist - 600.0) / 1800.0, 0.0, 1.0);\n"
+	"        vec3 meniscusColor = mix(sky, vec3(0.94, 0.98, 1.0), 0.65);\n"
+	"        lit = mix(lit, meniscusColor, meniscus * 0.48);\n"
 	"    }\n"
 	"    /* 6. Atmospheric Distance Fog & Planetary Limb Scattering Parity with Terrain */\n"
 	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95), 0.22 * uAtmoIntensity);\n"
@@ -2132,6 +2177,9 @@ typedef struct {
 	int32_t span_w, span_h;
 	uint8_t level;
 	float sea_level;
+	float rel_center[3];
+	float major_r;
+	float minor_r;
 	GLuint height_tex;
 	GLuint substrate_tex;
 } gl_water_chunk_t;
@@ -2658,6 +2706,11 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		s_gl.water_queue[s_gl.water_count].span_h = span_h;
 		s_gl.water_queue[s_gl.water_count].level = level;
 		s_gl.water_queue[s_gl.water_count].sea_level = sea_level;
+		s_gl.water_queue[s_gl.water_count].rel_center[0] = rel_center[0];
+		s_gl.water_queue[s_gl.water_count].rel_center[1] = rel_center[1];
+		s_gl.water_queue[s_gl.water_count].rel_center[2] = rel_center[2];
+		s_gl.water_queue[s_gl.water_count].major_r = eff_pdef->major_r;
+		s_gl.water_queue[s_gl.water_count].minor_r = eff_pdef->minor_r;
 		s_gl.water_queue[s_gl.water_count].height_tex = slot->height_tex;
 		s_gl.water_queue[s_gl.water_count].substrate_tex = slot->substrate_tex;
 		s_gl.water_count++;
@@ -2724,6 +2777,8 @@ void nd_seven_gl_flush_water(void)
 		glBindTexture(GL_TEXTURE_2D, chk->substrate_tex);
 		glUniform1i(s_gl.water_pipe.uSubstrateTex, 1);
 
+		glUniform3fv(s_gl.water_pipe.uPlanetCenter, 1, chk->rel_center);
+		glUniform2f(s_gl.water_pipe.uTorusRadii, chk->major_r, chk->minor_r);
 		glUniform2f(s_gl.water_pipe.uChunkOrigin, (float)chk->ox, (float)chk->oy);
 		glUniform2f(s_gl.water_pipe.uChunkRelOrigin,
 		            (float)((double)chk->ox - (double)s_gl.cur_tx),
@@ -2763,7 +2818,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 	static nd_seven_gl_bb_vert_t bb_verts[MAX_BB_VERTS];
 	uint32_t out_verts_count = 0;
-	bool emit_shadows = (s_gl.cur_dist < 4500.0f);
+	bool emit_shadows = (s_gl.cur_dist < 16000.0f);
 
 	for (uint32_t i = 0; i < count; i++) {
 		bool want_shadow = emit_shadows && (batch[i].style != ND_BB_STYLE_GLOW) &&

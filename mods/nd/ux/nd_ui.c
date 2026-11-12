@@ -8,10 +8,6 @@
 
 nd_client_state_t client_state;
 nd_scene_t g_scene;
-/* The seven stage fills the page: its framebuffer follows the viewport size
- * (wasm_tick) and is allocated on demand. ND_CANVAS_W/H is only the size the
- * canvas carries before the first frame. */
-uint32_t *g_lamina_fb;
 int g_stage_w = ND_CANVAS_W, g_stage_h = ND_CANVAS_H;
 #define ND_STAGE_MIN_W 320
 #define ND_STAGE_MIN_H 240
@@ -807,8 +803,6 @@ const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
 	return &g_viewport_drivers[idx];
 }
 
-static int s_enable_3d_terrain = 1;
-
 static bud_node *mount_seven_stage(void)
 {
 	/* A different tag than the terminal's <div>: swapping stages must replace
@@ -851,7 +845,6 @@ void nd_ui_init_defaults(void)
 {
 	if (g_ui_initialized) return;
 	g_ui_initialized = 1;
-	nd_seven_set_3d_mode(s_enable_3d_terrain);
 	nd_scene_init(&g_scene);
 	nd_register_viewport_driver(&s_tty_driver);
 	nd_register_viewport_driver(&s_seven_driver);
@@ -1690,28 +1683,16 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	return root;
 }
 
-/* Follow the viewport: (re)allocate the stage framebuffer when its size
- * changes. Returns 0 when no buffer could be had. */
 static int seven_stage_fit(int width, int height)
 {
 	int w = width < ND_STAGE_MIN_W ? ND_STAGE_MIN_W : width > ND_STAGE_MAX_W ? ND_STAGE_MAX_W : width;
 	int h = height < ND_STAGE_MIN_H ? ND_STAGE_MIN_H : height > ND_STAGE_MAX_H ? ND_STAGE_MAX_H : height;
 
-	if (g_lamina_fb && w == g_stage_w && h == g_stage_h)
-		return 1;
-	uint32_t *nb = realloc(g_lamina_fb, (size_t)w * (size_t)h * sizeof(uint32_t));
-	if (!nb)
-		return g_lamina_fb != NULL;
-	g_lamina_fb = nb;
 	g_stage_w = w;
 	g_stage_h = h;
 	return 1;
 }
 
-/* 2D/3D Renderer Toggle:
- * 0 = Legacy 2D CPU software blit into g_lamina_fb via lam_canvas_flush
- * 1 = Real 3D continuous WebGL terrain grid mesh displaced by elevation and lit by directional sunlight
- */
 static void seven_stage_redraw(void)
 {
 	if (!seven_stage_fit(g_stage_w, g_stage_h))
@@ -1722,24 +1703,9 @@ static void seven_stage_redraw(void)
 	float wz = nd_seven_ground_elevation_f((int32_t)wx, (int32_t)wy);
 	float zoom = nd_seven_get_zoom();
 	float eff_cam_dist = ND_SEVEN_CAM_DIST / zoom;
-	float eff_scale = (float)SCALE * zoom;
-	(void)eff_scale;
 
-	/* 3D WebGL terrain mesh pipeline:
-	 * Camera tilted at diorama pitch targeting lamb foot position,
-	 * rendering authentic 3D triangle vertices displaced by continuous elevation H(wx, wy)
-	 * and illuminated by Northwest directional sunlight. */
 	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_YAW, ND_SEVEN_CAM_FOV);
-
-	/* Render scene: in 3D WebGL mode, pass NULL for fb to completely bypass
-	 * redundant CPU software framebuffer rasterization and clears, while
-	 * flushing 3D terrain grid meshes and 3D billboards directly to WebGL! */
-	nd_seven_render(NULL, (uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
-
-	/* Notice: lam_canvas_flush is intentionally NOT called in 3D mode,
-	 * so the 3D WebGL terrain mesh remains visible on #seven-stage-canvas! */
-
-	/* Reset 2D camera mode for DOM / UI overlays */
+	nd_seven_render((uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
 	lam_cam_set_2d();
 }
 
@@ -1747,7 +1713,6 @@ int g_map_dirty = 0;
 
 ISO_EXPORT(void, wasm_canvas_render, void)
 {
-	nd_seven_ground_build_budget(ND_CHUNK_BUILDS_PER_TICK);
 	if (nd_ui_seven_active(&client_state))
 		seven_stage_redraw();
 	nd_map_canvas_redraw(&client_state);
@@ -1775,9 +1740,6 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	nd_seven_sync_origin(&client_state);
 	sync_room_objects(&client_state);
 
-	/* Chunk construction is expensive: cap the number of new chunks this
-	 * tick. Tiles without a chunk draw a flat placeholder until built. */
-	nd_seven_ground_build_budget(ND_CHUNK_BUILDS_PER_TICK);
 	int map_on = nd_map_canvas_enabled(&client_state);
 
 	/* Phase 3: Simulation */
@@ -1801,15 +1763,9 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 		g_map_dirty = 0;
 	}
 
-	/* Renderer-independent chunk lifetime: with neither the Seven stage
-	 * nor a canvas map enabled nothing may stay cached; otherwise free
-	 * every chunk that left the 7x7 view window. */
 	if (!now_seven && !map_on) {
 		g_map_dirty = 0;
-		if (nd_seven_chunk_count() > 0)
-			nd_seven_ground_cache_forget();
-	} else {
-		nd_seven_ground_frame_end(&client_state.map_data);
+		nd_seven_ground_cache_forget();
 	}
 }
 
