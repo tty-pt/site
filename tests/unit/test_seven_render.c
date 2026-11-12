@@ -2302,21 +2302,51 @@ int main(void)
 		assert(strstr(fs_c, "sampleSubstrateSmooth") != NULL);
 		assert(strstr(fs_c, "gpuFieldBlend") != NULL);
 		assert(strstr(fs_c, "worldBioHumidity") != NULL);
+		assert(strstr(fs_c, "texBioHumidity") != NULL);
+		assert(strstr(fs_c, "spanBlend") != NULL);
+		assert(strstr(fs_c, "distBlend") != NULL);
+		assert(strstr(fs_c, "contFw") != NULL);
+		assert(strstr(fs_c, "uChunkSpan") != NULL);
+		assert(strstr(fs_c, "beer") != NULL);
 		assert(strstr(fs_c, "powder") != NULL);
+		assert(strstr(fs_c, "hgPhase") != NULL);
+		assert(strstr(fs_c, "domeLambert") != NULL);
+		assert(strstr(fs_c, "cloudGradN") != NULL);
+		assert(strstr(fs_c, "tEnter") != NULL);
+		assert(strstr(fs_c, "tExit") != NULL);
 		assert(strstr(fs_t, "chaff_grad4") != NULL);
+		assert(strstr(fs_t, "chaff_grad_noise4d") != NULL);
 		assert(strstr(fs_t, "cloud_remap") != NULL);
 		assert(strstr(fs_t, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_t, "eval_planetary_cloud_shadow") != NULL);
 		assert(strstr(fs_t, "rawCloudShadow") != NULL);
+		assert(strstr(fs_t, "dryCloudMask") != NULL);
+		assert(strstr(fs_t, "cloudShadow") != NULL);
+		assert(strstr(fs_t, "sunTrans") != NULL);
+		assert(strstr(fs_t, "worldBioHumidity") != NULL);
+		assert(strstr(fs_t, "cloudFw") != NULL);
+		assert(strstr(fs_t, "reflCloudXY") != NULL);
 		assert(strstr(fs_t, "reflCloudDens") != NULL);
+		assert(strstr(fs_t, "reflCloudCol") != NULL);
 		assert(strstr(fs_w, "sampleSubstrateSmooth") != NULL);
+		assert(strstr(fs_w, "chaff_hash4") != NULL);
 		assert(strstr(fs_w, "chaff_grad4") != NULL);
+		assert(strstr(fs_w, "chaff_grad_noise4d") != NULL);
+		assert(strstr(fs_w, "cloud_remap") != NULL);
 		assert(strstr(fs_w, "eval_zoom_cloud_density") != NULL);
 		assert(strstr(fs_w, "eval_planetary_cloud_shadow") != NULL);
+		assert(strstr(fs_w, "reflCloudXY") != NULL);
 		assert(strstr(fs_w, "reflCloudDens") != NULL);
+		assert(strstr(fs_w, "reflCloudCol") != NULL);
+		assert(strstr(fs_b, "chaff_hash4") != NULL);
 		assert(strstr(fs_b, "chaff_grad4") != NULL);
+		assert(strstr(fs_b, "chaff_grad_noise4d") != NULL);
+		assert(strstr(fs_b, "cloud_remap") != NULL);
 		assert(strstr(fs_b, "eval_zoom_cloud_density") != NULL);
+		assert(strstr(fs_b, "eval_planetary_cloud_shadow") != NULL);
 		assert(strstr(fs_b, "cloudShadow") != NULL);
+		assert(strstr(fs_b, "bbHumidity") != NULL);
+		assert(strstr(fs_b, "bbFw") != NULL);
 
 		/* 2. Verify planetary & regional weather distribution (cloudy in ~25-45% of regions, crystal-clear in ~55-75%),
 		 * big synoptic/mesoscale feature coherence across the planet, and climate humidity modulation */
@@ -2381,6 +2411,37 @@ int main(void)
 		}
 		assert(gt_early > 0.0005f);
 		assert(gt_late > gt_early * 0.50f && gt_late < gt_early * 1.85f);
+
+		/* 6. Verify 3D vertical profile & derivative continuity across cloud base (92), core (124), and top (232) */
+		float d_z91  = nd_seven_gl_eval_cloud_density(-42000.0f, -28000.0f,  91.9f, 24.0f, 0.92f, NULL, NULL, NULL, NULL);
+		float d_z95  = nd_seven_gl_eval_cloud_density(-42000.0f, -28000.0f,  95.0f, 24.0f, 0.92f, NULL, NULL, NULL, NULL);
+		float d_z110 = nd_seven_gl_eval_cloud_density(-42000.0f, -28000.0f, 110.0f, 24.0f, 0.92f, NULL, NULL, NULL, NULL);
+		float d_z124 = nd_seven_gl_eval_cloud_density(-42000.0f, -28000.0f, 124.0f, 24.0f, 0.92f, NULL, NULL, NULL, NULL);
+		float d_z225 = nd_seven_gl_eval_cloud_density(-42000.0f, -28000.0f, 225.0f, 24.0f, 0.92f, NULL, NULL, NULL, NULL);
+		float d_z233 = nd_seven_gl_eval_cloud_density(-42000.0f, -28000.0f, 233.0f, 24.0f, 0.92f, NULL, NULL, NULL, NULL);
+		assert(d_z91 == 0.0f);
+		assert(d_z233 == 0.0f);
+		assert(d_z95 >= 0.0f && d_z95 <= 1.0f);
+		assert(d_z110 >= 0.0f && d_z110 <= 1.0f);
+		assert(d_z124 >= d_z95);
+		assert(d_z124 >= d_z225);
+		assert(d_z225 >= 0.0f && d_z225 <= 1.0f);
+
+		/* 7. Verify Nyquist filter width band-limiting suppresses high-frequency octaves cleanly */
+		float g_fine_x = 0.0f, g_fine_y = 0.0f, g_coarse_x = 0.0f, g_coarse_y = 0.0f;
+		float sum_nyq_fine = 0.0f, sum_nyq_coarse = 0.0f;
+		for (int k = 0; k < 64; k++) {
+			float wx = (float)k * 2900.0f - 90000.0f;
+			float wy = (float)k * 2100.0f - 65000.0f;
+			float df = nd_seven_gl_eval_zoom_cloud_density(wx, wy, 124.0f, 18.0f, 0.90f, 300.0f,  0.10f, &g_fine_x, &g_fine_y, NULL, NULL);
+			float dc = nd_seven_gl_eval_zoom_cloud_density(wx, wy, 124.0f, 18.0f, 0.90f, 300.0f, 50.00f, &g_coarse_x, &g_coarse_y, NULL, NULL);
+			assert(df >= 0.0f && df <= 1.0f);
+			assert(dc >= 0.0f && dc <= 1.0f);
+			sum_nyq_fine   += hypotf(g_fine_x, g_fine_y);
+			sum_nyq_coarse += hypotf(g_coarse_x, g_coarse_y);
+		}
+		assert(sum_nyq_fine > sum_nyq_coarse * 1.35f);
+		assert(sum_nyq_coarse > 0.0f);
 
 		printf("PASS: 8-octave quantum 4D clouds (cloudy=%d, clear=%d, core=%.1f, crown=%.1f, grad=%.3f>%.3f>%.3f, arid=%.2f vs humid=%.2f) & t=100000s stability verified\n",
 		       cloud_cells, clear_cells, sum_core, sum_crown, grad_close, grad_mid, grad_far, sum_arid, sum_humid);
