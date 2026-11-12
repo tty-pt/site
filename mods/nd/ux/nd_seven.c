@@ -376,7 +376,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	/* Begin 3D WebGL frame in pure C */
 	nd_seven_gl_begin_frame((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz,
 	                        dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
-	                        (float)nd_seven_get_anim() * ND_SEVEN_ANIM_TIME_FACTOR, pdef);
+	                        nd_seven_get_anim_time(), pdef);
 
 	for (size_t m = 0; m < macro_count; m++) {
 		const ar_node_t *node = s_visible_leaves[m];

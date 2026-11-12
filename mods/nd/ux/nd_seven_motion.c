@@ -21,13 +21,15 @@ static int s_pending_key;      /* move key sent, waiting for the new map */
 static float s_pending_t;
 static float s_acc;
 static uint32_t s_anim;
+static float s_anim_sec;
 
 int nd_seven_get_lx(void) { return s_lx; }
 int nd_seven_get_ly(void) { return s_ly; }
 int nd_seven_get_dir(void) { return s_dir; }
 int nd_seven_get_walking(void) { return s_walking; }
 uint32_t nd_seven_get_anim(void) { return s_anim; }
-void nd_seven_step_anim(uint32_t delta) { s_anim += delta; }
+float nd_seven_get_anim_time(void) { return s_anim_sec; }
+void nd_seven_step_anim(uint32_t delta) { s_anim += delta; s_anim_sec += (float)delta * (1.0f / 60.0f); }
 
 void nd_seven_reset_input(void)
 {
@@ -796,8 +798,14 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 
 	s_anim++;
 	nd_seven_sync_origin(st);
+	if (dt < 0.0f)
+		dt = 0.0f;
 	if (dt > 0.1f)
 		dt = 0.1f;
+	/* Advance continuous animation clock strictly by wall-clock dt (capped at 1/30s per frame
+	 * so frame-rate changes from 15fps chunk baking to 60/120fps steady state never speed up wind/water) */
+	float anim_dt = (dt > 0.033f) ? 0.033f : ((dt > 0.0f) ? dt : (1.0f / 60.0f));
+	s_anim_sec += anim_dt * 1.4f;
 
 	if (s_pending_key) {
 		s_pending_t -= dt;

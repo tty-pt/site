@@ -15,6 +15,7 @@ int nd_seven_get_dir(void);
 int nd_seven_get_world(void);
 int nd_seven_get_walking(void);
 uint32_t nd_seven_get_anim(void);
+float nd_seven_get_anim_time(void);
 void nd_seven_step_anim(uint32_t delta);
 
 /* Lamb placement & inspection */

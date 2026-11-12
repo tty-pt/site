@@ -51,23 +51,6 @@ static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
 	nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
 }
 
-/* The packed sprite atlas as palette indices, decoded once. */
-static const uint8_t *atlas_px(void)
-{
-	static uint8_t atlas[ND_SEVEN_ATLAS_W * ND_SEVEN_ATLAS_H_PX];
-	static int ready;
-
-	if (!ready) {
-		size_t o = 0;
-		for (size_t i = 0; i + 1 < ND_SEVEN_RLE_LEN && o < sizeof(atlas); i += 2) {
-			size_t run = (size_t)nd_seven_rle[i] + 1;
-			while (run-- && o < sizeof(atlas))
-				atlas[o++] = nd_seven_rle[i + 1];
-		}
-		ready = 1;
-	}
-	return atlas;
-}
 
 static void dump(const char *name, const uint32_t *p, int w, int h)
 {
@@ -2662,6 +2645,12 @@ int main(void)
 		assert(strstr(fs_t, "wTropical") != NULL && strstr(fs_t, "wPolar") != NULL);
 		assert(strstr(fs_t, "shoreWetMoisture") != NULL);
 		assert(strstr(fs_t, "C_SHALLOW") != NULL && strstr(fs_t, "C_ABYSS") != NULL);
+		assert(strstr(fs_t, "shallowFactor") != NULL && strstr(fs_t, "effectiveOpticalDepth") != NULL);
+		assert(strstr(fs_w, "eval_recursive_wind") != NULL);
+		assert(strstr(fs_w, "eval_water_fetch_and_basin") != NULL);
+		assert(strstr(fs_w, "eval_wind_capillary_facets") != NULL);
+		assert(strstr(fs_w, "openSeaFactor") != NULL && strstr(fs_w, "windFetch") != NULL);
+		assert(strstr(fs_w, "specMicro") != NULL && strstr(fs_w, "specWavelet") != NULL && strstr(fs_w, "specBroad") != NULL);
 		assert(strstr(fs_w, "eval_zoom_water_waves") != NULL);
 		assert(strstr(fs_w, "hBicubic") != NULL);
 		assert(strstr(fs_w, "eval_shore_micro_relief") != NULL);

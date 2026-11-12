@@ -236,7 +236,7 @@ static const char *s_vs_terrain =
 	"    vec3 tangentU = vec3(-su, cu, 0.0);\n"
 	"    vec3 tangentV = vec3(-sv * cu, -sv * su, cv);\n"
 	"    vec3 N = normalize(torusN - grad.x * effectiveScale * tangentU - grad.y * effectiveScale * tangentV);\n"
-	"    vec3 L = normalize(vec3(-0.577, -0.577, 0.816));\n"
+	"    vec3 L = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    float diff = max(0.0, dot(N, L));\n"
 	"    vLighting = 0.45 + 0.55 * diff;\n"
 	"    vWorldPos = worldXY;\n"
@@ -488,7 +488,7 @@ static const char *s_fs_terrain =
 	"    fragNormal = normalize(fragNormal - shoreRelief.y * tangentU - shoreRelief.z * tangentV);\n"
 	"    float fragWaterDepth = (uSeaLevel > -900.0) ? (uSeaLevel - fragZ) : -999.0;\n"
 	"    vec4 octaves = vec4(0.5);\n"
-	"    vec4 detail = (fragWaterDepth <= 14.0) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, octaves) : vec4(0.0);\n"
+	"    vec4 detail = (fragWaterDepth <= 18.0) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, octaves) : vec4(0.0);\n"
 	"    vec2 edgeMask = 4.0 * vUV * (1.0 - vUV);\n"
 	"    vec2 sampleUV = vUV + detail.yz * (0.010 * edgeMask);\n"
 	"    vec2 waveRefGrad = vec2(0.0);\n"
@@ -498,7 +498,7 @@ static const char *s_fs_terrain =
 	"        vec3 wRef1 = chaff_grad_noise2d(vWorldPos * 0.22 + vec2(tRef * 0.55, -tRef * 0.45), 0x57415631u);\n"
 	"        vec3 wRef2 = chaff_grad_noise2d(vWorldPos * 0.52 + vec2(-tRef * 0.80, tRef * 0.65), 0x57415632u);\n"
 	"        waveRefGrad = wRef1.yz * 0.65 + wRef2.yz * 0.35;\n"
-	"        vec2 refractOffset = waveRefGrad * (0.015 * depthFactor * edgeMask);\n"
+	"        vec2 refractOffset = waveRefGrad * (0.012 * depthFactor * edgeMask);\n"
 	"        sampleUV = clamp(vUV + refractOffset, 0.0, 1.0);\n"
 	"    }\n"
 	"    vec4 baseCol = sampleSubstrateSmooth(sampleUV);\n"
@@ -510,7 +510,7 @@ static const char *s_fs_terrain =
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
-	"    vec3 L_frag = normalize(vec3(-0.577, -0.577, 0.816));\n"
+	"    vec3 L_frag = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    float baseDiff = max(0.0, dot(fragNormal, L_frag));\n"
 	"    float effLighting = 0.45 + 0.55 * baseDiff;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
@@ -528,8 +528,8 @@ static const char *s_fs_terrain =
 	"    float distFade  = clamp(1.0 - (vDistance - 600.0) / 1800.0, 0.0, 1.0);\n"
 	"    float closeZoom = clamp((380.0 - vDistance) / 260.0, 0.0, 1.0);\n"
 	"    float ultraZoom = clamp((160.0 - vDistance) / 120.0, 0.0, 1.0);\n"
-	"    /* 1. Dry land shading (evaluated for fragWaterDepth < 0.85) */\n"
-	"    if (fragWaterDepth < 0.85) {\n"
+	"    /* 1. Terrestrial & shallow-submerged substrate shading (evaluated down to fragWaterDepth < 6.5 so shallow water preserves exact shore detail) */\n"
+	"    if (fragWaterDepth < 6.5) {\n"
 	"        float rockFactor  = smoothstep(0.065, 0.22, slope);\n"
 	"        float talusFactor = smoothstep(0.032, 0.10, slope) * (1.0 - smoothstep(0.14, 0.25, slope));\n"
 	"        float rockCrevice = 0.0;\n"
@@ -572,13 +572,13 @@ static const char *s_fs_terrain =
 	"                float duneWave = nMeso * 0.45 + nStd * 0.55;\n"
 	"                wetSand = smoothstep(2.6, 0.0, elevAboveWater);\n"
 	"                vec3 drySandCol = vec3(0.75, 0.67, 0.49) * (0.88 + 0.22 * duneWave + 0.16 * (nClose - 0.5) * closeZoom + 0.10 * (nUltra - 0.5) * ultraZoom);\n"
-	"                vec3 wetSandCol = vec3(0.50, 0.42, 0.30) * (0.90 + 0.18 * nStd + 0.12 * (nClose - 0.5) * closeZoom);\n"
+	"                vec3 wetSandCol = vec3(0.54, 0.46, 0.34) * (0.90 + 0.18 * nStd + 0.12 * (nClose - 0.5) * closeZoom);\n"
 	"                vec3 sandCol = mix(drySandCol, wetSandCol, wetSand);\n"
 	"                sandBlend = isSandBiome ? 1.0 : shoreFactor;\n"
 	"                dryCol = mix(dryCol, sandCol, sandBlend * distFade);\n"
 	"                sandSparkle = smoothstep(0.68, 0.88, nClose * 0.45 + nUltra * 0.55) * closeZoom;\n"
 	"            }\n"
-	"            if (rockFactor < 0.65 && !isSandBiome && shoreFactor < 0.7 && dryCol.g > dryCol.r * 1.02) {\n"
+	"            if (rockFactor < 0.65 && !isSandBiome && shoreFactor < 0.7 && fragWaterDepth < 0.35 && dryCol.g > dryCol.r * 1.02) {\n"
 	"                vec3 deepMoss = dryCol * vec3(0.78, 0.96, 0.76);\n"
 	"                vec3 lushTurf = dryCol * vec3(0.92, 1.09, 0.88);\n"
 	"                vec3 warmClover = dryCol * vec3(1.12, 1.04, 0.74);\n"
@@ -586,7 +586,7 @@ static const char *s_fs_terrain =
 	"                vegCol = mix(vegCol, warmClover, smoothstep(0.38, 0.76, nStd) * 0.70);\n"
 	"                float bladeRelief = (nStd - 0.5) * 0.16 * distFade + (nClose - 0.5) * 0.20 * closeZoom + (nUltra - 0.5) * 0.14 * ultraZoom;\n"
 	"                vegCol *= clamp(1.0 + bladeRelief, 0.76, 1.26);\n"
-	"                dryCol = mix(dryCol, vegCol, macroFade);\n"
+	"                dryCol = mix(dryCol, vegCol, macroFade * smoothstep(0.35, -0.10, fragWaterDepth));\n"
 	"            }\n"
 	"            float normStrength = 0.24 + 0.22 * distFade + 0.16 * closeZoom;\n"
 	"            vec3 N_frag = normalize(fragNormal - microGrad.x * normStrength * tangentU - microGrad.y * normStrength * tangentV);\n"
@@ -598,12 +598,13 @@ static const char *s_fs_terrain =
 	"            dryLighting = mix(dryLighting, fragLit, macroFade);\n"
 	"            float microShade = clamp(1.0 + h0 * (0.30 + 0.16 * closeZoom) * macroFade, 0.72, 1.28);\n"
 	"            dryCol *= microShade;\n"
-	"            /* Capillary wet-shore darkening (24% darker) and wet specular sheen just above waterline */\n"
-	"            float shoreWetMoisture = smoothstep(-0.38, 0.05, fragWaterDepth);\n"
-	"            dryCol *= (1.0 - shoreWetMoisture * 0.24);\n"
+	"            /* Capillary wet-shore darkening and sub-aerial wet specular sheen just above waterline */\n"
+	"            float shoreWetMoisture = smoothstep(-0.38, 0.15, fragWaterDepth);\n"
+	"            dryCol *= (1.0 - shoreWetMoisture * 0.20);\n"
+	"            float subAerialMask = smoothstep(0.25, -0.02, fragWaterDepth);\n"
 	"            float wetSpecAngle = max(0.0, dot(N_frag, H_half));\n"
-	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.38 * wetSand + 0.28 * shoreWetMoisture);\n"
-	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.45;\n"
+	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.32 * wetSand + 0.24 * shoreWetMoisture) * subAerialMask;\n"
+	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.42 * subAerialMask;\n"
 	"            dryCol += vec3((wetFilmSpec + quartzGlint) * (0.35 + 0.65 * sandBlend) * distFade);\n"
 	"            if (rockFactor > 0.25 && distFade > 0.0) {\n"
 	"                float specAngle = max(0.0, dot(N_frag, H_half));\n"
@@ -612,94 +613,97 @@ static const char *s_fs_terrain =
 	"            }\n"
 	"        }\n"
 	"    }\n"
-	"    /* 2. Submerged benthic seabed substrate (evaluated for fragWaterDepth > -0.25) */\n"
+	"    /* 2. Submerged benthic seabed substrate (gradually blends in across deeper shelf) */\n"
 	"    vec3 subCol = baseCol.rgb;\n"
 	"    float subLighting = effLighting;\n"
-	"    if (fragWaterDepth > -0.25) {\n"
-	"        float shallowSandMask = smoothstep(12.0, 1.5, fragWaterDepth) * (1.0 - smoothstep(0.08, 0.22, slope));\n"
+	"    if (fragWaterDepth > 0.15) {\n"
+	"        float shallowSandMask = smoothstep(14.0, 2.0, fragWaterDepth) * (1.0 - smoothstep(0.08, 0.22, slope));\n"
 	"        float sandRipple = (nStd - 0.5) * 0.22 + (nClose - 0.5) * 0.18 * closeZoom + (nUltra - 0.5) * 0.12 * ultraZoom;\n"
 	"        /* Biome-aware seabed: quartz/coral sand, temperate riverbed, glacial silt, volcanic basalt */\n"
-	"        vec3 bioSand = vec3(0.74, 0.66, 0.48) * wTropical\n"
-	"                     + vec3(0.46, 0.45, 0.37) * wTemperate\n"
-	"                     + vec3(0.56, 0.61, 0.66) * wPolar\n"
-	"                     + vec3(0.20, 0.19, 0.22) * wVolcanic;\n"
+	"        vec3 bioSand = vec3(0.72, 0.64, 0.47) * wTropical\n"
+	"                     + vec3(0.48, 0.45, 0.37) * wTemperate\n"
+	"                     + vec3(0.56, 0.60, 0.64) * wPolar\n"
+	"                     + vec3(0.22, 0.20, 0.22) * wVolcanic;\n"
 	"        vec3 littoralSand = bioSand * clamp(0.92 + sandRipple, 0.72, 1.22);\n"
 	"        float pebble = smoothstep(0.64, 0.85, nClose * 0.5 + nUltra * 0.5) * closeZoom;\n"
 	"        littoralSand = mix(littoralSand, vec3(0.45, 0.43, 0.38), pebble * 0.42);\n"
-	"        vec3 benthicSubstrate = mix(baseCol.rgb, bioSand * 0.72, 0.45);\n"
+	"        vec3 benthicSubstrate = mix(baseCol.rgb, bioSand * 0.78, 0.42);\n"
 	"        subCol = mix(benthicSubstrate, littoralSand, shallowSandMask * (0.45 + 0.55 * distFade));\n"
-	"        if (distFade > 0.01 && fragWaterDepth < 14.0) {\n"
+	"        if (distFade > 0.01 && fragWaterDepth < 18.0) {\n"
 	"            vec3 N_sub = normalize(fragNormal - detail.y * (0.30 * distFade) * tangentU - detail.z * (0.30 * distFade) * tangentV);\n"
 	"            float subDiff = max(0.0, dot(N_sub, L_frag));\n"
 	"            float subCavity = clamp(1.0 + detail.x * 0.28 - detail.w * 0.38, 0.62, 1.18);\n"
 	"            subLighting = mix(subLighting, (0.45 + 0.55 * subDiff) * subCavity, distFade);\n"
 	"        }\n"
 	"    }\n"
-	"    /* Continuous non-step transition between dry shore and submerged seabed */\n"
-	"    float submergedBlend = smoothstep(-0.15, 0.65, fragWaterDepth);\n"
+	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
+	"    float submergedBlend = smoothstep(0.35, 5.5, fragWaterDepth);\n"
 	"    vec3 lit = mix(dryCol * dryLighting, subCol * subLighting, submergedBlend);\n"
-	"    /* 3. Physical Volumetric Water Extinction & Biome-Aware Optics */\n"
+	"    /* 3. Physical Volumetric Water Extinction & Biome-Aware Optics (Crystal-Clear Shallows) */\n"
 	"    if (fragWaterDepth > 0.0) {\n"
-	"        float d = clamp(fragWaterDepth, 0.0, 48.0);\n"
-	"        float wetBlend = smoothstep(0.0, 0.18, fragWaterDepth);\n"
+	"        float d = clamp(fragWaterDepth, 0.0, 64.0);\n"
+	"        float wetBlend = smoothstep(0.0, 0.45, fragWaterDepth);\n"
 	"        float distFade = clamp(1.0 - (vDistance - 900.0) / 2500.0, 0.0, 1.0);\n"
 	"        float closeZoom = clamp((420.0 - vDistance) / 300.0, 0.0, 1.0);\n"
 	"        /* Subsurface wave-refracted caustic light web projected onto seabed before Beer-Lambert absorption */\n"
 	"        float caustic = 0.0;\n"
-	"        if (distFade > 0.01 && d < 14.0) {\n"
+	"        if (distFade > 0.01 && d < 16.0) {\n"
 	"            float tC = mod(uAnimTime, 256.0);\n"
 	"            vec2 cUV = vWorldPos + waveRefGrad * 1.6;\n"
-	"            float c1 = chaff_sample_3d(vec3(cUV * 1.85, tC * 2.8), 3u, 0x1337u);\n"
-	"            float c2 = chaff_sample_3d(vec3((cUV + vec2(37.0, -23.0)) * 1.85, tC * 2.2), 3u, 0xBEEFu);\n"
-	"            float caustMeso = pow(clamp(1.0 - abs(c1 - c2) * 5.2, 0.0, 1.0), 2.8);\n"
+	"            float c1 = chaff_sample_3d(vec3(cUV * 1.85, tC * 2.4), 3u, 0x1337u);\n"
+	"            float c2 = chaff_sample_3d(vec3((cUV + vec2(37.0, -23.0)) * 1.85, tC * 1.9), 3u, 0xBEEFu);\n"
+	"            float caustMeso = pow(clamp(1.0 - abs(c1 - c2) * 5.6, 0.0, 1.0), 3.0);\n"
 	"            float caustFine = 0.0;\n"
 	"            if (closeZoom > 0.01) {\n"
-	"                float c3 = chaff_sample_3d(vec3(cUV * 4.8, tC * 4.2), 2u, 0xCA57u);\n"
-	"                float c4 = chaff_sample_3d(vec3((cUV + vec2(-19.0, 41.0)) * 4.8, tC * 3.5), 2u, 0xCA58u);\n"
-	"                caustFine = pow(clamp(1.0 - abs(c3 - c4) * 5.2, 0.0, 1.0), 2.8) * closeZoom;\n"
+	"                float c3 = chaff_sample_3d(vec3(cUV * 4.8, tC * 3.6), 2u, 0xCA57u);\n"
+	"                float c4 = chaff_sample_3d(vec3((cUV + vec2(-19.0, 41.0)) * 4.8, tC * 3.0), 2u, 0xCA58u);\n"
+	"                caustFine = pow(clamp(1.0 - abs(c3 - c4) * 5.6, 0.0, 1.0), 3.0) * closeZoom;\n"
 	"            }\n"
 	"            caustic = (caustMeso + caustFine * 0.65) * distFade;\n"
 	"        }\n"
-	"        float causticFocus = smoothstep(0.12, 0.85, d) * exp(-0.18 * d);\n"
-	"        lit *= (1.0 + caustic * causticFocus * 0.55);\n"
+	"        float causticFocus = smoothstep(0.10, 1.10, d) * exp(-0.15 * d);\n"
+	"        lit *= (1.0 + caustic * causticFocus * 0.38);\n"
 	"        vec3 viewDir = normalize(vViewDir);\n"
 	"        float cosView = max(0.35, dot(torusN, viewDir));\n"
 	"        float opticalDepth = d / cosView;\n"
-	"        /* Biome water palette: Tropical, Temperate, Polar, Volcanic */\n"
-	"        vec3 C_SHALLOW = vec3(0.25, 0.85, 0.92) * wTropical\n"
-	"                       + vec3(0.18, 0.68, 0.66) * wTemperate\n"
-	"                       + vec3(0.32, 0.78, 0.90) * wPolar\n"
-	"                       + vec3(0.16, 0.58, 0.56) * wVolcanic;\n"
-	"        vec3 C_SHELF   = vec3(0.20, 0.70, 0.89) * wTropical\n"
-	"                       + vec3(0.14, 0.54, 0.68) * wTemperate\n"
-	"                       + vec3(0.20, 0.58, 0.80) * wPolar\n"
-	"                       + vec3(0.12, 0.44, 0.52) * wVolcanic;\n"
-	"        vec3 C_OUTER   = vec3(0.14, 0.48, 0.79) * wTropical\n"
-	"                       + vec3(0.10, 0.38, 0.58) * wTemperate\n"
-	"                       + vec3(0.11, 0.36, 0.62) * wPolar\n"
-	"                       + vec3(0.08, 0.30, 0.44) * wVolcanic;\n"
-	"        vec3 C_ABYSS   = vec3(0.055, 0.196, 0.53) * wTropical\n"
-	"                       + vec3(0.045, 0.170, 0.40) * wTemperate\n"
-	"                       + vec3(0.040, 0.140, 0.38) * wPolar\n"
-	"                       + vec3(0.035, 0.130, 0.28) * wVolcanic;\n"
-	"        /* Volumetric Beer-Lambert optical extinction: red/amber wavelengths attenuate first */\n"
-	"        vec3 seabedAbsorption = exp(-vec3(0.32, 0.08, 0.03) * opticalDepth);\n"
+	"        /* Non-linear shallow optical path: crystal-clear wading shallows (d < 4), smooth shelf ramp (4..16) */\n"
+	"        float shallowFactor = smoothstep(0.40, 15.0, d);\n"
+	"        float effectiveOpticalDepth = opticalDepth * (0.14 + 0.86 * shallowFactor);\n"
+	"        /* Natural lacustrine & oceanic water body palette (no neon cyan wash in shallows) */\n"
+	"        vec3 C_SHALLOW = vec3(0.16, 0.56, 0.62) * wTropical\n"
+	"                       + vec3(0.11, 0.42, 0.46) * wTemperate\n"
+	"                       + vec3(0.17, 0.50, 0.62) * wPolar\n"
+	"                       + vec3(0.09, 0.34, 0.38) * wVolcanic;\n"
+	"        vec3 C_SHELF   = vec3(0.11, 0.43, 0.58) * wTropical\n"
+	"                       + vec3(0.08, 0.32, 0.44) * wTemperate\n"
+	"                       + vec3(0.11, 0.36, 0.54) * wPolar\n"
+	"                       + vec3(0.07, 0.25, 0.34) * wVolcanic;\n"
+	"        vec3 C_OUTER   = vec3(0.07, 0.28, 0.48) * wTropical\n"
+	"                       + vec3(0.05, 0.21, 0.36) * wTemperate\n"
+	"                       + vec3(0.06, 0.21, 0.40) * wPolar\n"
+	"                       + vec3(0.04, 0.16, 0.27) * wVolcanic;\n"
+	"        vec3 C_ABYSS   = vec3(0.030, 0.120, 0.30) * wTropical\n"
+	"                       + vec3(0.024, 0.100, 0.24) * wTemperate\n"
+	"                       + vec3(0.022, 0.090, 0.24) * wPolar\n"
+	"                       + vec3(0.018, 0.072, 0.18) * wVolcanic;\n"
+	"        /* Gentle Beer-Lambert spectral absorption: red attenuates gradually while shallows remain clear */\n"
+	"        vec3 seabedAbsorption = exp(-vec3(0.058, 0.022, 0.007) * effectiveOpticalDepth);\n"
 	"        vec3 transmittedBed = lit * seabedAbsorption;\n"
 	"        /* Depth-staged in-scattered water body color */\n"
-	"        float tShelf = smoothstep(0.0, 5.0, d);\n"
-	"        float tOuter = smoothstep(5.0, 12.0, d);\n"
-	"        float tAbyss = smoothstep(12.0, 28.0, d);\n"
+	"        float tShelf = smoothstep(2.5, 9.5, d);\n"
+	"        float tOuter = smoothstep(9.5, 20.0, d);\n"
+	"        float tAbyss = smoothstep(20.0, 42.0, d);\n"
 	"        vec3 inscatterCol = mix(C_SHALLOW, C_SHELF, tShelf);\n"
 	"        inscatterCol = mix(inscatterCol, C_OUTER, tOuter);\n"
 	"        inscatterCol = mix(inscatterCol, C_ABYSS, tAbyss);\n"
-	"        float bodyScatterWeight = 1.0 - exp(-0.28 * opticalDepth);\n"
+	"        float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.072 * effectiveOpticalDepth));\n"
 	"        vec3 waterBody = mix(transmittedBed, inscatterCol, bodyScatterWeight);\n"
 	"        lit = mix(lit, waterBody, wetBlend);\n"
 	"    }\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
 	"    vec3 viewDirNorm = normalize(vViewDir);\n"
-	"    float limb = pow(clamp(1.0 - max(0.0, dot(vec3(0.0, 0.0, 1.0), viewDirNorm)), 0.0, 1.0), 3.0);\n"
+	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDirNorm)), 0.0, 1.0), 3.0);\n"
 	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95), limb * 0.45 * uAtmoIntensity);\n"
 	"    FragColor = vec4(mix(surfaceLit, sky, fogFactor * uAtmoIntensity), 1.0);\n"
 	"}\n";
@@ -966,23 +970,74 @@ static const char *s_fs_water =
 	"    vec2 gTotal = (g1.yz * (0.18 * 0.38 * wNyq1) + g2.yz * (0.52 * 0.16 * wNyq2)) * env;\n"
 	"    return vec3(disp, gTotal.x, gTotal.y);\n"
 	"}\n"
+	"/* Multi-octave moving recursive wind field: synoptic wind -> meso gusts (cat's paws) -> micro eddies.\n"
+	" * Uses spatial domain warping + constant-direction phase advection so temporal velocity is invariant over time. */\n"
+	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
+	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
+	"    const vec2 dir0 = vec2(0.741, -0.671);\n"
+	"    const vec2 dir1 = vec2(0.822, -0.569);\n"
+	"    const vec2 dir2 = vec2(0.640, -0.768);\n"
+	"    float t0 = mod(anim_time * 0.08, 1024.0);\n"
+	"    vec2 p0 = worldPos * 0.0055 - dir0 * t0;\n"
+	"    vec3 w0 = chaff_grad_noise2d(p0, 0x57494E44u);\n"
+	"    vec2 baseWind = normalize(dir0 + vec2(-w0.z, w0.y) * 0.28);\n"
+	"    float t1 = mod(anim_time * 0.22, 1024.0);\n"
+	"    vec2 p1 = rot * (worldPos * 0.028 + w0.yz * 0.65) - dir1 * t1;\n"
+	"    vec3 w1 = chaff_grad_noise2d(p1, 0x47555354u);\n"
+	"    vec2 mesoGrad = irot * w1.yz;\n"
+	"    vec2 localWind1 = normalize(baseWind + vec2(-mesoGrad.y, mesoGrad.x) * 0.22);\n"
+	"    float t2 = mod(anim_time * 0.48, 1024.0);\n"
+	"    vec2 p2 = rot * (rot * (worldPos * 0.120) + w0.yz * 0.45 + w1.yz * 0.55) - dir2 * t2;\n"
+	"    vec3 w2 = chaff_grad_noise2d(p2, 0x45444459u);\n"
+	"    vec2 microGrad = (irot * irot) * w2.yz;\n"
+	"    vec2 windDir = normalize(localWind1 + vec2(-microGrad.y, microGrad.x) * 0.16);\n"
+	"    float gustEnv = clamp(0.42 + 0.45 * w0.x + 0.55 * (w1.x - 0.38) + 0.30 * (w2.x - 0.42), 0.25, 1.35);\n"
+	"    float catspaw = smoothstep(0.38, 0.76, w1.x * 0.62 + w2.x * 0.38);\n"
+	"    return vec4(windDir.x, windDir.y, gustEnv, catspaw);\n"
+	"}\n"
+	"/* Height-model basin & upwind fetch classifier: distinguishes quiet lakes/sheltered coves from deep open sea */\n"
+	"vec2 eval_water_fetch_and_basin(vec2 uv, vec2 windDir, vec2 shoreGrad, float fragWaterDepth, float effectiveScale) {\n"
+	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
+	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
+	"    ivec2 maxC = ivec2(maxCoordF);\n"
+	"    vec2 offshoreDir = (length(shoreGrad) > 1e-4) ? (-normalize(shoreGrad)) : windDir;\n"
+	"    float d_up1 = uSeaLevel - getH(ivec2(clamp(uv - windDir * 0.10, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_up2 = uSeaLevel - getH(ivec2(clamp(uv - windDir * 0.24, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_off1 = uSeaLevel - getH(ivec2(clamp(uv + offshoreDir * 0.16, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_off2 = uSeaLevel - getH(ivec2(clamp(uv + offshoreDir * 0.34, 0.0, 1.0) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_c0 = uSeaLevel - getH(ivec2(vec2(0.5, 0.5) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_c1 = uSeaLevel - getH(ivec2(vec2(0.2, 0.2) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_c2 = uSeaLevel - getH(ivec2(vec2(0.8, 0.2) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_c3 = uSeaLevel - getH(ivec2(vec2(0.2, 0.8) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float d_c4 = uSeaLevel - getH(ivec2(vec2(0.8, 0.8) * maxCoordF), maxC) * effectiveScale;\n"
+	"    float maxD = max(fragWaterDepth, max(max(d_off1, d_off2), max(d_c0, max(max(d_c1, d_c2), max(d_c3, d_c4)))));\n"
+	"    float meanD = (max(0.0, d_off1) + max(0.0, d_off2) + max(0.0, d_c0) + max(0.0, d_up1) + max(0.0, d_up2)) * 0.2;\n"
+	"    float openSeaFactor = smoothstep(14.0, 28.0, maxD) * smoothstep(7.0, 18.0, meanD);\n"
+	"    float windFetch = clamp(0.25 + 0.40 * smoothstep(0.4, 5.0, d_up1) + 0.35 * smoothstep(1.2, 12.0, d_up2), 0.25, 1.0);\n"
+	"    return vec2(openSeaFactor, windFetch);\n"
+	"}\n"
 	"vec4 eval_zoom_water_waves(vec2 pos, float anim_time, float dist, float fw) {\n"
+	"    vec4 wind = eval_recursive_wind(pos, anim_time);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
 	"    const float freqs[6] = float[6](0.024, 0.072, 0.220, 0.680, 2.150, 6.800);\n"
 	"    const float amps[6]  = float[6](1.450, 0.680, 0.280, 0.115, 0.045, 0.018);\n"
 	"    const float spds[6]  = float[6](0.180, 0.340, 0.620, 1.050, 1.750, 2.800);\n"
 	"    const float dFar[6]  = float[6](65000.0, 18000.0, 4800.0, 1600.0, 520.0, 200.0);\n"
 	"    const float dNear[6] = float[6](14000.0,  3600.0, 1100.0,  360.0, 130.0,  42.0);\n"
 	"    const uint  seeds[6] = uint[6](0x4F434530u, 0x5357454Cu, 0x57415645u, 0x52495050u, 0x46494E45u, 0x53505241u);\n"
+	"    const vec2  dirs[6]  = vec2[6](\n"
+	"        vec2( 0.8575, -0.5145),\n"
+	"        vec2( 0.6402, -0.7682),\n"
+	"        vec2( 0.9285, -0.3714),\n"
+	"        vec2( 0.5145, -0.8575),\n"
+	"        vec2( 0.7809, -0.6247),\n"
+	"        vec2( 0.3714, -0.9285)\n"
+	"    );\n"
 	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
-	"    const vec2  windDirs[6] = vec2[6](\n"
-	"        vec2( 0.7071, -0.7071),\n"
-	"        vec2( 0.8660, -0.5000),\n"
-	"        vec2( 0.5000, -0.8660),\n"
-	"        vec2( 0.9397, -0.3420),\n"
-	"        vec2( 0.3420, -0.9397),\n"
-	"        vec2( 0.7660,  0.6428)\n"
-	"    );\n"
 	"    float h = 0.0;\n"
 	"    vec2 grad = vec2(0.0);\n"
 	"    float crest = 0.0;\n"
@@ -991,26 +1046,54 @@ static const char *s_fs_water =
 	"    for (int i = 0; i < 6; i++) {\n"
 	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), (i == 0) ? 0.35 : 0.0, 1.0);\n"
 	"        float wNyq  = smoothstep(0.55, 0.16, freqs[i] * fw);\n"
-	"        float w = wDist * wNyq;\n"
+	"        float gustScale = (i >= 3) ? (0.75 + 0.45 * gust) : (0.85 + 0.20 * gust);\n"
+	"        float w = wDist * wNyq * gustScale;\n"
 	"        if (w > 0.001) {\n"
 	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"            vec2 q = pRot * freqs[i] - windDirs[i] * phase;\n"
+	"            /* Spatial wind-streamline warp (never multiplied by anim_time, so wave speed never accelerates) */\n"
+	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
+	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
 	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
 	"            float signedVal = g.x - 0.5;\n"
-	"            /* Trochoidal Gerstner-like crest sharpening on primary wave trains */\n"
+	"            /* Trochoidal Gerstner-like crest sharpening without derivative cancellation */\n"
 	"            float ridge = 0.5 - abs(signedVal);\n"
 	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
-	"            float dShape = mix(1.0, (signedVal >= 0.0) ? -0.70 : 0.70, 0.35);\n"
+	"            float dShape = 0.85 + 0.45 * ridge;\n"
 	"            vec2 worldG = curInvRot * g.yz;\n"
 	"            h += shaped * amps[i] * w;\n"
 	"            grad += worldG * (dShape * freqs[i] * amps[i] * w);\n"
 	"            crest += max(0.0, ridge - 0.22) * (w * ((i <= 2) ? 1.4 : 0.8));\n"
-	"            pRot += g.yz * (0.09 * w);\n"
+	"            pRot += g.yz * (0.11 * w);\n"
 	"        }\n"
 	"        pRot = rot * pRot;\n"
 	"        curInvRot = curInvRot * irot;\n"
 	"    }\n"
 	"    return vec4(h, grad.x, grad.y, clamp(crest, 0.0, 1.0));\n"
+	"}\n"
+	"/* High-frequency wind-driven capillary micro-facets for full-surface specular shimmer */\n"
+	"vec2 eval_wind_capillary_facets(vec2 pos, float anim_time, vec4 wind, float dist, float fw) {\n"
+	"    float distVis = clamp(1.0 - (dist - 550.0) / 2200.0, 0.0, 1.0);\n"
+	"    if (distVis <= 0.001) return vec2(0.0);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    const vec2 prevW = vec2(0.741, -0.671);\n"
+	"    const vec2 prevP = vec2(0.671,  0.741);\n"
+	"    float rippleEnv = (0.55 + 0.65 * wind.w) * distVis;\n"
+	"    float f1 = 1.35;\n"
+	"    float f2 = 3.40;\n"
+	"    float nyq1 = smoothstep(0.60, 0.15, f1 * fw);\n"
+	"    float nyq2 = smoothstep(0.60, 0.15, f2 * fw);\n"
+	"    float t1 = mod(anim_time * 1.15, 512.0);\n"
+	"    float t2 = mod(anim_time * 1.65, 512.0);\n"
+	"    /* Steady coordinate projection + bounded spatial wind-gust warp so velocity never grows with anim_time */\n"
+	"    vec2 gustShift = wDir * (wind.z * 0.55) + wPerp * (wind.w * 0.35);\n"
+	"    vec2 wCoord1 = vec2(dot(pos, prevW) * 1.45, dot(pos, prevP) * 0.78) * f1 + gustShift - vec2(t1, 0.18 * t1);\n"
+	"    vec2 wCoord2 = vec2(dot(pos, prevW) * 1.35 + dot(pos, prevP) * 0.35, dot(pos, prevP) * 0.85 - dot(pos, prevW) * 0.25) * f2 + gustShift * 1.4 - vec2(t2, -0.22 * t2);\n"
+	"    vec3 c1 = (nyq1 > 0.001) ? chaff_grad_noise2d(wCoord1, 0xCA9111A1u) : vec3(0.5, 0.0, 0.0);\n"
+	"    vec3 c2 = (nyq2 > 0.001) ? chaff_grad_noise2d(wCoord2 + c1.yz * 0.25, 0xCA9111A2u) : vec3(0.5, 0.0, 0.0);\n"
+	"    vec2 localG = c1.yz * (0.14 * nyq1) + c2.yz * (0.11 * nyq2);\n"
+	"    vec2 worldCapGrad = (wDir * localG.x * 1.40 + wPerp * localG.y * 0.80) * rippleEnv;\n"
+	"    return worldCapGrad;\n"
 	"}\n"
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
@@ -1029,10 +1112,10 @@ static const char *s_fs_water =
 	"        discard;\n"
 	"    }\n"
 	"    vec3 viewDir = normalize(vViewDir);\n"
-	"    vec3 sunDir = normalize(vec3(-0.577, -0.577, 0.816));\n"
 	"    vec3 torusN = normalize(vTorusNormal);\n"
 	"    vec3 tangentU = normalize(vTangentU);\n"
 	"    vec3 tangentV = normalize(vTangentV);\n"
+	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    /* Biome-aware water optics derived from uSubstrateTex (populated via ndw_biome_base_rgb) */\n"
 	"    vec3 rawBiome = texture(uSubstrateTex, vUV).rgb;\n"
 	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
@@ -1041,70 +1124,87 @@ static const char *s_fs_water =
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
-	"    vec3 C_SHALLOW = vec3(0.25, 0.85, 0.92) * wTropical\n"
-	"                   + vec3(0.18, 0.68, 0.66) * wTemperate\n"
-	"                   + vec3(0.32, 0.78, 0.90) * wPolar\n"
-	"                   + vec3(0.16, 0.58, 0.56) * wVolcanic;\n"
-	"    vec3 C_SHELF   = vec3(0.20, 0.70, 0.89) * wTropical\n"
-	"                   + vec3(0.14, 0.54, 0.68) * wTemperate\n"
-	"                   + vec3(0.20, 0.58, 0.80) * wPolar\n"
-	"                   + vec3(0.12, 0.44, 0.52) * wVolcanic;\n"
-	"    vec3 C_OUTER   = vec3(0.14, 0.48, 0.79) * wTropical\n"
-	"                   + vec3(0.10, 0.38, 0.58) * wTemperate\n"
-	"                   + vec3(0.11, 0.36, 0.62) * wPolar\n"
-	"                   + vec3(0.08, 0.30, 0.44) * wVolcanic;\n"
-	"    /* Damp wave amplitude gently in ankle-deep surf zone (0..1.5 units) */\n"
-	"    float shoreWaveDamp = smoothstep(0.0, 1.5, fragWaterDepth);\n"
+	"    vec3 C_SHALLOW = vec3(0.16, 0.56, 0.62) * wTropical\n"
+	"                   + vec3(0.11, 0.42, 0.46) * wTemperate\n"
+	"                   + vec3(0.17, 0.50, 0.62) * wPolar\n"
+	"                   + vec3(0.09, 0.34, 0.38) * wVolcanic;\n"
+	"    vec3 C_SHELF   = vec3(0.11, 0.43, 0.58) * wTropical\n"
+	"                   + vec3(0.08, 0.32, 0.44) * wTemperate\n"
+	"                   + vec3(0.11, 0.36, 0.54) * wPolar\n"
+	"                   + vec3(0.07, 0.25, 0.34) * wVolcanic;\n"
+	"    vec3 C_OUTER   = vec3(0.07, 0.28, 0.48) * wTropical\n"
+	"                   + vec3(0.05, 0.21, 0.36) * wTemperate\n"
+	"                   + vec3(0.06, 0.21, 0.40) * wPolar\n"
+	"                   + vec3(0.04, 0.16, 0.27) * wVolcanic;\n"
+	"    /* Evaluate recursive moving wind field & height-model basin/fetch profile */\n"
+	"    vec4 wind = eval_recursive_wind(vWorldPos, uAnimTime);\n"
+	"    vec2 basin = eval_water_fetch_and_basin(vUV, wind.xy, shoreGrad, fragWaterDepth, effectiveScale);\n"
+	"    float openSeaFactor = basin.x;\n"
+	"    float windFetch = basin.y;\n"
+	"    /* Scale gravity waves by depth, upwind fetch, and lake-vs-ocean basin exposure */\n"
+	"    float shoreWaveDamp = smoothstep(0.0, 1.8, fragWaterDepth);\n"
+	"    float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
 	"    vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw);\n"
-	"    vec2 waveGrad = waves.yz * (0.35 + 0.65 * shoreWaveDamp);\n"
+	"    vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.0, 0.35, fragWaterDepth);\n"
+	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45;\n"
+	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35;\n"
 	"    vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
+	"    vec3 specNormal = normalize(torusN - specGrad.x * tangentU - specGrad.y * tangentV);\n"
 	"    float NdotV = max(0.0, dot(waveNormal, viewDir));\n"
 	"    float NdotL = max(0.0, dot(waveNormal, sunDir));\n"
-	"    vec3 halfVec = normalize(sunDir + viewDir);\n"
-	"    float NdotH = max(0.0, dot(waveNormal, halfVec));\n"
-	"    /* Dual-lobe specular: crisp sun micro-glint + zoom-adaptive macro ocean glitter sheen */\n"
+	"    /* Mirror-cone sky/solar glitter axis in the local torus frame so wavelets across the entire surface sparkle */\n"
+	"    vec3 flatRefl = reflect(-viewDir, torusN);\n"
+	"    vec3 glintSunDir = normalize(flatRefl - 0.14 * tangentU - 0.04 * tangentV + 0.08 * torusN);\n"
+	"    vec3 halfVec = normalize(glintSunDir + viewDir);\n"
+	"    float NdotH_cap  = max(0.0, dot(specNormal, halfVec));\n"
+	"    float NdotH_wave = max(0.0, dot(waveNormal, halfVec));\n"
+	"    /* Three-tier specular hierarchy across the entire water surface:\n"
+	"     * 1. Crisp pinpoint capillary sun glints (modulated by recursive wind cat's-paws)\n"
+	"     * 2. Travelling wavelet slope highlights\n"
+	"     * 3. Broad sky-sheen facet modulation */\n"
 	"    float closeWeight = clamp(1.0 - (vDistance - 350.0) / 1400.0, 0.0, 1.0);\n"
-	"    float specSharp = pow(NdotH, 180.0) * (0.45 + 0.75 * closeWeight);\n"
-	"    float specBroad = pow(NdotH, 28.0)  * (0.28 + 0.22 * (1.0 - closeWeight));\n"
-	"    float specSun = (specSharp + specBroad) * smoothstep(0.0, 0.25, fragWaterDepth);\n"
-	"    /* Schlick Fresnel for air-water interface (R0 = 0.02) */\n"
-	"    float fresnel = 0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);\n"
+	"    float specMicro   = pow(smoothstep(0.9942, 0.9997, NdotH_cap), 2.5) * (0.42 + 0.52 * wind.w) * (0.50 + 0.50 * closeWeight);\n"
+	"    float specWavelet = pow(smoothstep(0.9840, 0.9982, NdotH_wave), 2.0) * (0.22 + 0.18 * wind.z);\n"
+	"    float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
+	"    float specSun     = (specMicro + specWavelet + specBroad) * smoothstep(0.0, 0.25, fragWaterDepth);\n"
+	"    /* Schlick Fresnel for air-water interface (R0 = 0.02) + per-wavelet facet tilt contrast */\n"
+	"    float flatNdotV = max(0.0, dot(torusN, viewDir));\n"
+	"    float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
+	"    float fresnel = clamp(0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0) + max(0.0, facetTilt) * 0.22, 0.015, 0.65);\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.72, 0.88);\n"
 	"    vec3 sunColor = vec3(1.0, 0.98, 0.92);\n"
-	"    /* 3D wave slope hillshading: sunward wave faces tilt bright aquamarine, leeward troughs deepen toward cobalt */\n"
-	"    float waveSlopeDiff = dot(waveNormal, sunDir) - dot(torusN, sunDir);\n"
+	"    /* 3D wave slope hillshading: sunward wave faces tilt luminous, leeward troughs deepen */\n"
+	"    float waveSlopeDiff = dot(specNormal, sunDir) - dot(torusN, sunDir);\n"
 	"    float hillshadeLit = max(0.0, waveSlopeDiff);\n"
 	"    float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
-	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.45 - hillshadeShd * 0.35);\n"
-	"    /* Subsurface wave-crest back-scattering on sunlit wave peaks */\n"
-	"    float crestGlow = clamp(waves.w * 0.65 + max(0.0, NdotL - 0.52) * 1.15, 0.0, 1.0) * smoothstep(0.2, 3.5, fragWaterDepth);\n"
-	"    vec3 sssTint = mix(C_SHALLOW, waveShade, 0.45) * (crestGlow * 0.35);\n"
-	"    /* Non-pulsating shoreline swash: horizontal gradient-normalized shore distance & wave crest lap */\n"
+	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40);\n"
+	"    /* Subsurface wave-crest back-scattering only in deeper water (suppressed in crystal shallows) */\n"
+	"    float deepSssMask = smoothstep(2.5, 10.0, fragWaterDepth);\n"
+	"    float crestGlow = clamp(waves.w * 0.60 + hillshadeLit * 1.40, 0.0, 1.0) * deepSssMask;\n"
+	"    vec3 sssTint = mix(C_SHALLOW, waveShade, 0.55) * (crestGlow * 0.22);\n"
+	"    /* Height-model gated shoreline surf: ZERO crashing waves or shore vapor on quiet lakes (openSeaFactor == 0)! */\n"
 	"    float shoreSlope = max(0.22, length(shoreGrad));\n"
 	"    float shoreDist = fragWaterDepth / shoreSlope;\n"
-	"    float tSwash = mod(uAnimTime * 0.95, 256.0);\n"
-	"    vec3 swashNoise = chaff_grad_noise2d(vWorldPos * 0.28 + vec2(tSwash * 0.35, -tSwash * 0.25), 0xF0A157u);\n"
-	"    float waterEdge = smoothstep(0.42, 0.0, shoreDist) * smoothstep(0.0, 0.05, fragWaterDepth) * (0.45 + 0.55 * swashNoise.x);\n"
-	"    float crestLap = smoothstep(1.8, 0.15, shoreDist) * smoothstep(0.28, 0.72, waves.w) * smoothstep(0.38, 0.75, swashNoise.x);\n"
-	"    float whitecap = smoothstep(0.62, 0.92, waves.w) * smoothstep(2.0, 8.0, fragWaterDepth) * 0.32;\n"
-	"    /* Shoreline foam attenuates cleanly with viewing distance so low orbit has zero white borders or flashing */\n"
 	"    float foamDistFade = smoothstep(950.0, 220.0, vDistance);\n"
-	"    float foam = clamp(waterEdge * 0.55 + crestLap * 0.65 + whitecap, 0.0, 0.92) * foamDistFade;\n"
-	"    vec3 foamColor = vec3(0.95, 0.98, 1.0);\n"
-	"    /* Pure air-water surface compositing: seabed absorption & scattering were already applied\n"
-	"     * once in s_fs_terrain on the framebuffer, so s_fs_water adds ONLY surface reflection, SSS,\n"
-	"     * specular sun glints, and shore foam without double-extinguishing the seabed! */\n"
-	"    float skyReflWeight = fresnel * (0.35 + 0.65 * shoreWaveDamp);\n"
-	"    float sssWeight     = crestGlow * 0.28;\n"
-	"    float specWeight    = clamp(specSun, 0.0, 0.96);\n"
+	"    float openSeaSurfEnergy = openSeaFactor * windFetch * smoothstep(0.55, 1.15, wind.z);\n"
+	"    float crestLap = smoothstep(1.6, 0.20, shoreDist) * smoothstep(0.48, 0.82, waves.w) * openSeaSurfEnergy * 0.22;\n"
+	"    float whitecap = smoothstep(0.68, 0.94, waves.w) * smoothstep(6.0, 16.0, fragWaterDepth) * openSeaSurfEnergy * 0.24;\n"
+	"    float foam = clamp(crestLap + whitecap, 0.0, 0.38) * foamDistFade;\n"
+	"    vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
+	"    /* Pure air-water surface compositing: shallow water stays glass-clear except for wavelet specularity & Fresnel */\n"
+	"    float shallowGlassMask = smoothstep(0.0, 4.5, fragWaterDepth);\n"
+	"    float skyReflWeight = fresnel * (0.18 + 0.82 * shallowGlassMask);\n"
+	"    float sssWeight     = crestGlow * 0.16;\n"
+	"    float specWeight    = clamp(specSun, 0.0, 0.92);\n"
 	"    float foamWeight    = foam;\n"
 	"    float totalWeight   = skyReflWeight + sssWeight + specWeight + foamWeight;\n"
-	"    vec3 surfaceNum = sky * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
-	"    vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : sky;\n"
+	"    vec3 reflSkyCol = mix(sky * 0.92, sky * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
+	"    vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
+	"    vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    surfaceRgb = mix(surfaceRgb, vec3(0.35, 0.70, 1.0), limb * 0.55 * uAtmoIntensity);\n"
-	"    float edgeFade = smoothstep(0.0, 0.08, fragWaterDepth);\n"
-	"    float alpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight) + limb * 0.35 * uAtmoIntensity, 0.0, 0.96) * edgeFade;\n"
+	"    float edgeFade = smoothstep(0.0, 0.14, fragWaterDepth);\n"
+	"    float alpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight) + limb * 0.35 * uAtmoIntensity, 0.0, 0.94) * edgeFade;\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    FragColor = vec4(mix(surfaceRgb, sky, fogFactor * uAtmoIntensity), alpha);\n"
 	"}\n";
@@ -2505,6 +2605,69 @@ float nd_seven_gl_eval_terrain_detail(float wx, float wy,
 	return h;
 }
 
+static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
+                                          float *out_dir_x, float *out_dir_y,
+                                          float *out_gust, float *out_catspaw)
+{
+	float raw_t0 = anim_time * 0.08f;
+	float t0 = raw_t0 - 1024.0f * floorf(raw_t0 / 1024.0f);
+	float p0x = wx * 0.0055f - 0.741f * t0;
+	float p0y = wy * 0.0055f + 0.671f * t0;
+	float w0v = 0.0f, w0gx = 0.0f, w0gy = 0.0f;
+	gl_chaff_grad_noise2d(p0x, p0y, 0x57494E44u, &w0v, &w0gx, &w0gy);
+
+	float bwx = 0.741f - w0gy * 0.28f;
+	float bwy = -0.671f + w0gx * 0.28f;
+	float bw_inv = 1.0f / sqrtf(bwx * bwx + bwy * bwy + 1e-6f);
+	bwx *= bw_inv;
+	bwy *= bw_inv;
+
+	float raw_t1 = anim_time * 0.22f;
+	float t1 = raw_t1 - 1024.0f * floorf(raw_t1 / 1024.0f);
+	float u1x = wx * 0.028f + w0gx * 0.65f;
+	float u1y = wy * 0.028f + w0gy * 0.65f;
+	float p1x = ( 0.8f * u1x + 0.6f * u1y) - 0.822f * t1;
+	float p1y = (-0.6f * u1x + 0.8f * u1y) + 0.569f * t1;
+	float w1v = 0.0f, w1gx = 0.0f, w1gy = 0.0f;
+	gl_chaff_grad_noise2d(p1x, p1y, 0x47555354u, &w1v, &w1gx, &w1gy);
+	float mgx =  0.8f * w1gx - 0.6f * w1gy;
+	float mgy =  0.6f * w1gx + 0.8f * w1gy;
+
+	float lwx = bwx - mgy * 0.22f;
+	float lwy = bwy + mgx * 0.22f;
+	float lw_inv = 1.0f / sqrtf(lwx * lwx + lwy * lwy + 1e-6f);
+	lwx *= lw_inv;
+	lwy *= lw_inv;
+
+	float raw_t2 = anim_time * 0.48f;
+	float t2 = raw_t2 - 1024.0f * floorf(raw_t2 / 1024.0f);
+	float r1x =  0.8f * (wx * 0.120f) + 0.6f * (wy * 0.120f) + w0gx * 0.45f + w1gx * 0.55f;
+	float r1y = -0.6f * (wx * 0.120f) + 0.8f * (wy * 0.120f) + w0gy * 0.45f + w1gy * 0.55f;
+	float p2x = ( 0.8f * r1x + 0.6f * r1y) - 0.640f * t2;
+	float p2y = (-0.6f * r1x + 0.8f * r1y) + 0.768f * t2;
+	float w2v = 0.0f, w2gx = 0.0f, w2gy = 0.0f;
+	gl_chaff_grad_noise2d(p2x, p2y, 0x45444459u, &w2v, &w2gx, &w2gy);
+	/* irot * irot = mat2(0.28, 0.96, -0.96, 0.28) */
+	float u2gx =  0.28f * w2gx - 0.96f * w2gy;
+	float u2gy =  0.96f * w2gx + 0.28f * w2gy;
+
+	float fwx = lwx - u2gy * 0.16f;
+	float fwy = lwy + u2gx * 0.16f;
+	float fw_inv = 1.0f / sqrtf(fwx * fwx + fwy * fwy + 1e-6f);
+	fwx *= fw_inv;
+	fwy *= fw_inv;
+
+	float gust = 0.42f + 0.45f * w0v + 0.55f * (w1v - 0.38f) + 0.30f * (w2v - 0.42f);
+	if (gust < 0.25f) gust = 0.25f;
+	if (gust > 1.35f) gust = 1.35f;
+
+	float cp = gl_smoothstep(0.38f, 0.76f, w1v * 0.62f + w2v * 0.38f);
+	if (out_dir_x) *out_dir_x = fwx;
+	if (out_dir_y) *out_dir_y = fwy;
+	if (out_gust) *out_gust = gust;
+	if (out_catspaw) *out_catspaw = cp;
+}
+
 float nd_seven_gl_eval_water_waves(float wx, float wy,
                                    float anim_time,
                                    float cam_dist, float pixel_footprint,
@@ -2519,14 +2682,18 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
 	static const uint32_t seeds[6] = {
 		0x4F434530u, 0x5357454Cu, 0x57415645u, 0x52495050u, 0x46494E45u, 0x53505241u
 	};
-	static const float windDirs[6][2] = {
-		{  0.7071f, -0.7071f },
-		{  0.8660f, -0.5000f },
-		{  0.5000f, -0.8660f },
-		{  0.9397f, -0.3420f },
-		{  0.3420f, -0.9397f },
-		{  0.7660f,  0.6428f }
+	static const float dirs[6][2] = {
+		{  0.8575f, -0.5145f },
+		{  0.6402f, -0.7682f },
+		{  0.9285f, -0.3714f },
+		{  0.5145f, -0.8575f },
+		{  0.7809f, -0.6247f },
+		{  0.3714f, -0.9285f }
 	};
+
+	float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
+	gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
+	float wPerpX = -wDirY, wPerpY = wDirX;
 
 	float fw = (pixel_footprint > 1e-4f) ? pixel_footprint : 1e-4f;
 	float h = 0.0f;
@@ -2543,18 +2710,21 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
 		if (wDist > 1.0f) wDist = 1.0f;
 
 		float wNyq = gl_smoothstep(0.55f, 0.16f, freqs[i] * fw);
-		float w = wDist * wNyq;
+		float gustScale = (i >= 3) ? (0.75f + 0.45f * gust) : (0.85f + 0.20f * gust);
+		float w = wDist * wNyq * gustScale;
 		if (w > 0.001f) {
 			float raw_phase = anim_time * spds[i];
 			float phase = raw_phase - 1024.0f * floorf(raw_phase / 1024.0f);
-			float qx = prx * freqs[i] - windDirs[i][0] * phase;
-			float qy = pry * freqs[i] - windDirs[i][1] * phase;
+			float warpX = (wDirX * (gust - 0.65f) + wPerpX * (catspaw - 0.5f)) * 0.45f;
+			float warpY = (wDirY * (gust - 0.65f) + wPerpY * (catspaw - 0.5f)) * 0.45f;
+			float qx = prx * freqs[i] + warpX - dirs[i][0] * phase;
+			float qy = pry * freqs[i] + warpY - dirs[i][1] * phase;
 			float val = 0.0f, ogx = 0.0f, ogy = 0.0f;
 			gl_chaff_grad_noise2d(qx, qy, seeds[i], &val, &ogx, &ogy);
 			float signedVal = val - 0.5f;
 			float ridge = 0.5f - fabsf(signedVal);
 			float shaped = signedVal * 0.65f + (ridge - 0.18f) * 0.35f;
-			float dShape = 0.65f + ((signedVal >= 0.0f) ? -0.70f : 0.70f) * 0.35f;
+			float dShape = 0.85f + 0.45f * ridge;
 			float wgx = ir00 * ogx + ir10 * ogy;
 			float wgy = ir01 * ogx + ir11 * ogy;
 			h  += shaped * amps[i] * w;
@@ -2563,8 +2733,8 @@ float nd_seven_gl_eval_water_waves(float wx, float wy,
 			if (ridge > 0.22f) {
 				crest += (ridge - 0.22f) * (w * ((i <= 2) ? 1.4f : 0.8f));
 			}
-			prx += ogx * (0.09f * w);
-			pry += ogy * (0.09f * w);
+			prx += ogx * (0.11f * w);
+			pry += ogy * (0.11f * w);
 		}
 		float n_prx =  0.8f * prx + 0.6f * pry;
 		float n_pry = -0.6f * prx + 0.8f * pry;
