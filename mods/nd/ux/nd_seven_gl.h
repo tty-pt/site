@@ -13,6 +13,8 @@ extern "C" {
 typedef struct {
 	float x, y, z;
 	float width, height;
+	float anchor_y;     /* downward screen-Y shift from bottom of quad (0 = bottom at world pos) */
+	float water_z_off;  /* offset from bottom of quad to physical ground/water contact line */
 	float u0, v0, u1, v1;
 	uint32_t tint_rgba;
 } lam_billboard_gpu_t;

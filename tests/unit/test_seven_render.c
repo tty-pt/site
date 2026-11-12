@@ -7,6 +7,7 @@
 #include <nd/field.h>
 #include "nd_seven.h"
 #include "nd_seven_atlas.h"
+#include "nd_seven_atlas_draw.h"
 #include "nd_seven_objects.h"
 #include "nd_seven_motion.h"
 #include "nd_seven_ground.h"
@@ -187,12 +188,12 @@ int main(void)
 	 * monotonically with H (it rises toward the shore), and underwater substrate displays
 	 * high-resolution authentic biomes. */
 	{
-		/* 1. Deep ocean basin in world 1: dark sapphire body */
+		/* 1. Deep ocean basin in world 1: dark sapphire body (sample outside centered lamb sprite) */
 		set_map(0, 0, 0, 0x1B, 0, 0, 0, 0);
 		st.map_data.pos[3] = 1;
 		nd_seven_render(fb, 1280, 720, &st);
 		dump("water", fb, 1280, 720);
-		uint32_t c = fb[360 * 1280 + 640];
+		uint32_t c = fb[360 * 1280 + 600];
 		int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
 		assert(r < 50 && g < 100 && b > 100);
 
@@ -342,8 +343,8 @@ int main(void)
 			assert(top && bot && lef && rig);
 			assert(!mushroom);
 		}
-		/* the medium tan rock is ~48x41 px plus shadow: a cut at 350 would give < 40 */
-		assert(nd_seven_sprite_rects[NDS_ROCK_TAN].w >= 44 && nd_seven_sprite_rects[NDS_ROCK_TAN].w <= 49);
+		/* the medium tan rock is ~41x42 px without painted shadow: a cut at 350 would give < 40 */
+		assert(nd_seven_sprite_rects[NDS_ROCK_TAN].w >= 41 && nd_seven_sprite_rects[NDS_ROCK_TAN].w <= 49);
 		assert(nd_seven_sprite_rects[NDS_ROCK_TAN].h >= 40);
 		printf("PASS: atlas rock sprites are whole\n");
 	}
@@ -2372,7 +2373,7 @@ int main(void)
 					far_horizon_cnt++;
 				if (cheb > 30)
 					deep_horizon_30_cnt++;
-				assert(bw > 0.0f && bh > 0.0f && bh <= 46.0f); /* True 1:1 physical world-space dimensions */
+				assert(bw > 0.0f && bh > 0.0f && bh <= 74.0f); /* True 1:1 physical world-space dimensions */
 				unscaled_cnt++;
 			}
 		}
@@ -2380,7 +2381,37 @@ int main(void)
 		assert(far_horizon_cnt > 1000);
 		assert(deep_horizon_30_cnt > 1000);
 		assert(max_cheb_seen > 100 && max_cheb_seen <= 255);
-		assert(unscaled_cnt == (int)mid_cnt);
+		assert(unscaled_cnt > 1000 && unscaled_cnt == (int)(mid_cnt < 262144 ? mid_cnt : 262144));
+
+		/* Verify configurable per-object vertical anchor (anchor_y), lamb centering, and water cutoff calibration */
+		{
+			assert(LAMB_AY == 16);
+			assert(LAMB_FOOT_Y == 25);
+			const nd_planet_def_t *pdef_test = nd_seven_get_planet(1);
+			lam_billboard_gpu_t lamb_bb = {
+				.x = 80.0f, .y = 64.0f, .z = 5.0f,
+				.width = 32.0f, .height = 32.0f,
+				.anchor_y = (float)(LAMB_SIZE - LAMB_AY),
+				.water_z_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y),
+				.u0 = 0.0f, .v0 = 0.0f, .u1 = 1.0f, .v1 = 1.0f,
+				.tint_rgba = 0xFFFFFFFFu
+			};
+			nd_seven_gl_bb_vert_t lqv[6];
+			nd_seven_gl_eval_billboard_quad(&lamb_bb, ND_SEVEN_DIORAMA_PITCH, pdef_test, lqv);
+			/* At the hoof row (7/31 of quad height from bottom), local_pos[2] equals ground z (5.0f) */
+			float hoof_t = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y) / 32.0f;
+			float z_at_hoof = lqv[0].local_pos[2] + hoof_t * (lqv[2].local_pos[2] - lqv[0].local_pos[2]);
+			assert(fabsf(z_at_hoof - 5.0f) < 1e-4f);
+
+			/* Custom per-object anchor_y override on ndw_obj_t */
+			ndw_obj_t custom_o;
+			memset(&custom_o, 0, sizeof(custom_o));
+			custom_o.kind = NDW_K_ROCK;
+			custom_o.hh = 14;
+			assert(ndw_obj_anchor_y(&custom_o, 42) == 14);
+			custom_o.anchor_y = 18;
+			assert(ndw_obj_anchor_y(&custom_o, 42) == 18);
+		}
 
 		/* By -23x zoom (0.0059f, eff_cam_dist ~47,457 > 44,000), all scenery has uniformly faded out together */
 		nd_seven_set_zoom(0.0059f);

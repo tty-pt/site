@@ -231,6 +231,7 @@ typedef struct {
 	uint8_t glyph;      /* the map glyph */
 	uint8_t slot_id;    /* deterministic sub-cell spatial slot: 0=side 0, 1=side 1, 2=side 2 */
 	uint8_t hw, hh;     /* blocking box half width / height (0 = walkable) */
+	uint8_t anchor_y;   /* downward screen-Y anchor offset from bottom of sprite (configurable per object) */
 	uint8_t plant_id;   /* packed flora species/stage/variant (0 = generic/non-plant) */
 	uint8_t col_mask;   /* programmer-defined collision footprint tier */
 	int16_t x, y;       /* foot point, tile local units */
@@ -247,6 +248,7 @@ typedef struct {
 	uint8_t scatter_mode;    /* NDW_SCATTER_CLUSTER (flora/clusters), NDW_SCATTER_SINGLE (nodes) */
 	uint8_t is_big;
 	uint8_t hw, hh;
+	uint8_t anchor_y;        /* Default downward screen-Y anchor offset (in sprite px from bottom) */
 	uint8_t count_base;      /* Base object count to place */
 	uint8_t count_rand;      /* Mask for extra random count (e.g. 1 if next & 1) */
 	uint8_t pad_x;           /* Edge padding inside cell third (6 or 4) */
@@ -256,31 +258,58 @@ static inline const ndw_content_entry_t *
 ndw_find_content(int glyph)
 {
 	static const ndw_content_entry_t table[] = {
-		{ 'x', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
-		{ 'X', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
-		{ 'w', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
-		{ 'W', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
-		{ 'v', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
-		{ 'V', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
-		{ 'f', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  4,  5, 1, 0, 6 },
-		{ 'F', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  5,  6, 2, 1, 6 },
-		{ 't', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
-		{ 'T', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
-		{ 'r', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 0,  4,  6, 1, 0, 6 },
-		{ 'R', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 1,  5,  6, 2, 1, 6 },
-		{ 'a', NDW_K_FIR,     NDW_SCATTER_CLUSTER, 0,  5,  6, 1, 0, 6 },
-		{ 'A', NDW_K_FIR,     NDW_SCATTER_CLUSTER, 1,  6,  6, 2, 1, 6 },
-		{ 'i', NDW_K_CACTUS,  NDW_SCATTER_CLUSTER, 0,  4,  6, 1, 0, 6 },
-		{ 'I', NDW_K_CACTUS,  NDW_SCATTER_CLUSTER, 1,  5,  6, 2, 1, 6 },
-		{ '*', NDW_K_STONE,   NDW_SCATTER_SINGLE,  0,  0,  0, 1, 0, 4 },
-		{ 'o', NDW_K_ROCK,    NDW_SCATTER_SINGLE,  0, 10, 14, 1, 0, 4 },
-		{ 'O', NDW_K_BOULDER, NDW_SCATTER_SINGLE,  1, 13, 22, 1, 1, 4 },
+		{ 'x', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6,  6, 1, 0, 6 },
+		{ 'X', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6,  8, 2, 1, 6 },
+		{ 'w', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6,  6, 1, 0, 6 },
+		{ 'W', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6,  8, 2, 1, 6 },
+		{ 'v', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  5,  6,  6, 1, 0, 6 },
+		{ 'V', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  6,  6,  8, 2, 1, 6 },
+		{ 'f', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 0,  4,  5,  5, 1, 0, 6 },
+		{ 'F', NDW_K_DECID,   NDW_SCATTER_CLUSTER, 1,  5,  6,  6, 2, 1, 6 },
+		{ 't', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 0,  5,  6,  6, 1, 0, 6 },
+		{ 'T', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 1,  6,  6,  8, 2, 1, 6 },
+		{ 'r', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 0,  4,  6,  5, 1, 0, 6 },
+		{ 'R', NDW_K_TALL,    NDW_SCATTER_CLUSTER, 1,  5,  6,  6, 2, 1, 6 },
+		{ 'a', NDW_K_FIR,     NDW_SCATTER_CLUSTER, 0,  5,  6,  6, 1, 0, 6 },
+		{ 'A', NDW_K_FIR,     NDW_SCATTER_CLUSTER, 1,  6,  6,  8, 2, 1, 6 },
+		{ 'i', NDW_K_CACTUS,  NDW_SCATTER_CLUSTER, 0,  4,  6,  6, 1, 0, 6 },
+		{ 'I', NDW_K_CACTUS,  NDW_SCATTER_CLUSTER, 1,  5,  6,  8, 2, 1, 6 },
+		{ '*', NDW_K_STONE,   NDW_SCATTER_SINGLE,  0,  0,  0,  8, 1, 0, 4 },
+		{ 'o', NDW_K_ROCK,    NDW_SCATTER_SINGLE,  0, 10, 14, 14, 1, 0, 4 },
+		{ 'O', NDW_K_BOULDER, NDW_SCATTER_SINGLE,  1, 13, 22, 22, 1, 1, 4 },
 	};
 	for (size_t i = 0; i < sizeof(table)/sizeof(table[0]); i++) {
 		if (table[i].glyph == (char)glyph)
 			return &table[i];
 	}
 	return NULL;
+}
+
+/* Resolve the effective downward screen-Y anchor offset (in sprite pixels from bottom)
+ * for a placed terrain object of sprite height `spr_h`.
+ * - If o->anchor_y is explicitly configured (> 0), uses it (clamped so at least half a tile remains above).
+ * - Otherwise defaults to centering the topmost tile (`spr_h - NDW_CELL_PX / 2`) for single-tile
+ *   objects (`spr_h <= 24`), or using the object's 3/4 perspective base depth (`hh` or `8`). */
+static inline int
+ndw_obj_anchor_y(const ndw_obj_t *o, int spr_h)
+{
+	if (spr_h <= 1)
+		return 0;
+	int ay = 0;
+	if (o && o->anchor_y > 0) {
+		ay = (int)o->anchor_y;
+	} else if (o && o->hh > 0) {
+		ay = (int)o->hh;
+	} else if (spr_h <= 24) {
+		ay = spr_h - (NDW_CELL_PX / 2);
+	} else {
+		ay = (o && o->big) ? 8 : 6;
+	}
+	if (ay < 0)
+		ay = 0;
+	if (ay > spr_h - 4)
+		ay = spr_h - 4;
+	return ay;
 }
 
 /* Plant family of a map glyph: an NDW_K_* plant kind, else 0. */
@@ -505,6 +534,7 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 					} else {
 						o.hw = ce->hw; o.hh = ce->hh;
 					}
+					o.anchor_y = ce->anchor_y;
 					int obj_m = o.hw > 0 ? o.hw : pad;
 
 					/* Organic, continuous 2D slot domain boundaries */
@@ -558,6 +588,7 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 					if (o.kind == NDW_K_ROCK && (o.variant & 3) < 2) {
 						o.hw = 7;
 						o.hh = 7;
+						o.anchor_y = 7;
 					}
 
 					/* Margin clearance */
@@ -650,6 +681,8 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 								o.hh = nhh;
 							}
 						}
+						if (o.hh > 0)
+							o.anchor_y = o.hh;
 					}
 					if (!have_anchor) {
 						anchor_x = o.x;

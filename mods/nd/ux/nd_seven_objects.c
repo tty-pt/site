@@ -5,7 +5,7 @@
 #include <string.h>
 
 #define SCALE 2
-#define LAMB_AY 23
+#define LAMB_AY 16
 
 static const int8_t s_spots[16][2] = {
 	{ -16, 26 }, { 16, 26 }, { -28, 12 }, { 28, 12 }, { -38, -6 }, { 38, -6 }, { -22, -18 }, { 22, -18 },
@@ -965,6 +965,7 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 		so->col_mask = raw_objs[i].col_mask;
 		so->hw = raw_objs[i].hw;
 		so->hh = raw_objs[i].hh;
+		so->anchor_y = raw_objs[i].anchor_y;
 		so->entity_ref = 0;
 		so->flip = 0;
 		so->sprite_id = 0;
@@ -1094,6 +1095,7 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 			so->col_mask = 0;
 			so->hw = 0;
 			so->hh = 0;
+			so->anchor_y = 6;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);
@@ -1158,6 +1160,7 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 		so->col_mask = raw_objs[i].col_mask;
 		so->hw = raw_objs[i].hw;
 		so->hh = raw_objs[i].hh;
+		so->anchor_y = raw_objs[i].anchor_y;
 		so->entity_ref = 0;
 		so->flip = 0;
 		so->sprite_id = 0;
@@ -1235,6 +1238,7 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 			so->col_mask = 0;
 			so->hw = 0;
 			so->hh = 0;
+			so->anchor_y = 6;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);

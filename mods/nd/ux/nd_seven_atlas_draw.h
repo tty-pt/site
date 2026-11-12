@@ -6,10 +6,11 @@
 #include <nd/seven-world.h>
 #include "nd_seven_atlas.h"
 
-#define SCALE      2
-#define LAMB_SIZE  32
-#define LAMB_AX    16
-#define LAMB_AY    28
+#define SCALE       2
+#define LAMB_SIZE   32
+#define LAMB_AX     16
+#define LAMB_AY     16
+#define LAMB_FOOT_Y 25
 
 #define ND_SEVEN_RUNTIME_ATLAS_H 4096
 

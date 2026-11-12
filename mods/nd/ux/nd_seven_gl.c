@@ -1444,6 +1444,8 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 
 	float half_w = b->width * 0.5f;
 	float h = b->height;
+	float ay = b->anchor_y;
+	float wz_off = b->water_z_off;
 
 	float tint[4] = {
 		(float)((b->tint_rgba >> 24) & 0xFF) / 255.0f,
@@ -1453,10 +1455,10 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 	};
 
 	struct { float dx, dy, u, v, loc_z; } c[4] = {
-		{ -half_w, 0.0f, b->u0, b->v1, b->z },       /* BL (0) */
-		{  half_w, 0.0f, b->u1, b->v1, b->z },       /* BR (1) */
-		{ -half_w, h,    b->u0, b->v0, b->z + h },   /* TL (2) */
-		{  half_w, h,    b->u1, b->v0, b->z + h }    /* TR (3) */
+		{ -half_w, -ay,     b->u0, b->v1, b->z - wz_off },       /* BL (0) */
+		{  half_w, -ay,     b->u1, b->v1, b->z - wz_off },       /* BR (1) */
+		{ -half_w, h - ay,  b->u0, b->v0, b->z + h - wz_off },   /* TL (2) */
+		{  half_w, h - ay,  b->u1, b->v0, b->z + h - wz_off }    /* TR (3) */
 	};
 
 	/* Triangle 1: BL, BR, TL (indices 0, 1, 2) */

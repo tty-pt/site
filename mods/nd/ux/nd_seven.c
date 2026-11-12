@@ -170,7 +170,10 @@ static int drawable_top_y(const drawable_t *d)
 {
 	if (d->sprite_id > 0 && d->sprite_id < NDS_COUNT) {
 		const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[d->sprite_id];
-		return d->sy - sr->h * SCALE;
+		int off_y = (sr->h <= 24) ? (sr->h - (NDW_CELL_PX / 2)) : 6;
+		if (off_y < 0) off_y = 0;
+		if (off_y > sr->h - 4) off_y = sr->h - 4;
+		return d->sy - (sr->h - off_y) * SCALE;
 	}
 	if (d->what == D_ENTITY) {
 		return d->sy - 28 * SCALE;
@@ -178,7 +181,9 @@ static int drawable_top_y(const drawable_t *d)
 	if (d->what == D_OBJ) {
 		int spr = nd_seven_obj_sprite(&d->obj);
 		if (spr > 0 && spr < NDS_COUNT) {
-			return d->sy - nd_seven_sprite_rects[spr].h * SCALE;
+			int sh = nd_seven_sprite_rects[spr].h;
+			int off_y = ndw_obj_anchor_y(&d->obj, sh);
+			return d->sy - (sh - off_y) * SCALE;
 		}
 		switch (d->obj.kind) {
 		case NDW_K_FIR:
@@ -481,6 +486,8 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 		bb.z = z_f;
 		bb.width = (float)sr->w;
 		bb.height = (float)sr->h;
+		bb.anchor_y = (float)ndw_obj_anchor_y(&raw_objs[k], sr->h);
+		bb.water_z_off = 0.0f;
 		if (flip) {
 			bb.u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
 			bb.u1 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
@@ -637,6 +644,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 					dr[n].obj.slot_id = sp.objs[k].slot_id;
 					dr[n].obj.hw = sp.objs[k].hw ? sp.objs[k].hw : (uint8_t)(sp.objs[k].kind == NDW_K_ROCK ? 6 : sp.objs[k].kind == NDW_K_BOULDER ? 10 : 0);
 					dr[n].obj.hh = sp.objs[k].hh;
+					dr[n].obj.anchor_y = sp.objs[k].anchor_y;
 					dr[n].obj.plant_id = sp.objs[k].plant_id;
 					dr[n].obj.col_mask = sp.objs[k].col_mask;
 					dr[n].obj.glyph = sp.objs[k].glyph;
@@ -702,14 +710,17 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				} else if (dr[a].what == D_ENTITY) {
 					if (dr[a].sprite_id) {
 						const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[dr[a].sprite_id];
+						int off_y = (sr->h <= 24) ? (sr->h - (NDW_CELL_PX / 2)) : 6;
+						if (off_y < 0) off_y = 0;
+						if (off_y > sr->h - 4) off_y = sr->h - 4;
 						blit_sub(fb, w, h, dr[a].sprite_id, 0, 0, sr->w, sr->h,
-						         sr->w / 2, sr->h - 1, dr[a].sx, dr[a].sy, spr_scale, NULL, dr[a].flip, sub_units);
+						         sr->w / 2, sr->h - 1 - off_y, dr[a].sx, dr[a].sy, spr_scale, NULL, dr[a].flip, sub_units);
 					} else {
 						ctx_t c = { fb, w, h, dr[a].sx, dr[a].sy, spr_scale };
 						draw_pawn(&c, dr[a].ch, dr[a].fg);
 					}
 				} else {
-					draw_world_obj_scaled(fb, w, h, &dr[a].obj, dr[a].sx, dr[a].sy, nd_seven_get_anim(), spr_scale);
+					draw_world_obj_scaled_sub(fb, w, h, &dr[a].obj, dr[a].sx, dr[a].sy, nd_seven_get_anim(), spr_scale, sub_units);
 				}
 				if (dr[a].name[0] && dr[a].what != D_LAMB) {
 					int dx = dr[a].sx - w / 2;
@@ -728,6 +739,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			int has_sprite = 0;
 			float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
 			float bw = 0.0f, bh = 0.0f;
+			float bay = 0.0f, bwz_off = 0.0f;
 
 			if (dr[a].what == D_LAMB) {
 				int row, col;
@@ -740,6 +752,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				}
 				bw = (float)LAMB_SIZE;
 				bh = (float)LAMB_SIZE;
+				bay = (float)(LAMB_SIZE - LAMB_AY);
+				bwz_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y);
 				u0 = (float)(col * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
 				v0 = (float)(row * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				u1 = (float)((col + 1) * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
@@ -758,6 +772,11 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[sprite];
 				bw = (float)sr->w;
 				bh = (float)sr->h;
+				int off_y = (sr->h <= 24) ? (sr->h - (NDW_CELL_PX / 2)) : 6;
+				if (off_y < 0) off_y = 0;
+				if (off_y > sr->h - 4) off_y = sr->h - 4;
+				bay = (float)off_y;
+				bwz_off = 0.0f;
 				u0 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
 				v0 = (float)sr->y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				u1 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
@@ -793,6 +812,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				if (has_sprite) {
 					bw = (float)sr_val.w;
 					bh = (float)sr_val.h;
+					bay = (float)ndw_obj_anchor_y(&dr[a].obj, sr_val.h);
+					bwz_off = 0.0f;
 					int flip = (dr[a].obj.variant >> 2) & 1;
 					if (flip) {
 						u0 = (float)(sr_val.x + sr_val.w) / (float)ND_SEVEN_ATLAS_W;
@@ -819,6 +840,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				s_all_gpu_batch[all_gpu_count].z = dr[a].z_f;
 				s_all_gpu_batch[all_gpu_count].width = bw;
 				s_all_gpu_batch[all_gpu_count].height = bh;
+				s_all_gpu_batch[all_gpu_count].anchor_y = bay;
+				s_all_gpu_batch[all_gpu_count].water_z_off = bwz_off;
 				s_all_gpu_batch[all_gpu_count].u0 = u0;
 				s_all_gpu_batch[all_gpu_count].v0 = v0;
 				s_all_gpu_batch[all_gpu_count].u1 = u1;

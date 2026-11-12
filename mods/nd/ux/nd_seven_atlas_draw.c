@@ -191,7 +191,8 @@ void blit_sub(uint32_t *fb, int w, int h, int id,
 	if (ox >= w || oy >= h || ox + sw * scale <= 0 || oy + sh * scale <= 0)
 		return;
 
-	int y_water = (sub_units > 0) ? (ay - sub_units) : 9999;
+	int water_base_y = (id == NDS_LAMB) ? LAMB_FOOT_Y : ((ay > sh / 2) ? ay : (sh - 1));
+	int y_water = (sub_units > 0) ? (water_base_y - sub_units) : 9999;
 
 	for (int y = 0; y < sh; y++) {
 		const uint8_t *row = &s_atlas[(r->y + sy + y) * ND_SEVEN_ATLAS_W + r->x + sx];
@@ -561,7 +562,8 @@ static void blit_rgba_rect(uint32_t *fb, int w, int h, const nd_seven_sprite_rec
 	int ox = dx - ax * scale, oy = dy - ay * scale;
 	if (ox >= w || oy >= h || ox + sw * scale <= 0 || oy + sh * scale <= 0)
 		return;
-	int y_water = (sub_units > 0) ? (ay - sub_units) : 9999;
+	int water_base_y = (ay > sh / 2) ? ay : (sh - 1);
+	int y_water = (sub_units > 0) ? (water_base_y - sub_units) : 9999;
 
 	for (int y = 0; y < sh; y++) {
 		const uint32_t *row = &s_atlas_rgba[(r->y + y) * ND_SEVEN_ATLAS_W + r->x];
@@ -607,8 +609,9 @@ void draw_world_obj_scaled_sub(uint32_t *fb, int w, int h, const ndw_obj_t *o, i
 	    (o->kind == NDW_K_DECID || o->kind == NDW_K_TALL ||
 	     o->kind == NDW_K_FIR || o->kind == NDW_K_CACTUS) &&
 	    nd_seven_plant_rect(o->plant_id, &dyn_r)) {
+		int off_y = ndw_obj_anchor_y(o, dyn_r.h);
 		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 12 : 8) * scale, (o->big ? 4 : 3) * scale);
-		blit_rgba_rect(fb, w, h, &dyn_r, dyn_r.w / 2, dyn_r.h - 1, sx, sy, scale, flip, sub_units);
+		blit_rgba_rect(fb, w, h, &dyn_r, dyn_r.w / 2, dyn_r.h - 1 - off_y, sx, sy, scale, flip, sub_units);
 		return;
 	}
 
@@ -619,7 +622,7 @@ void draw_world_obj_scaled_sub(uint32_t *fb, int w, int h, const ndw_obj_t *o, i
 		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 14 : 10) * scale, (o->big ? 5 : 3) * scale);
 		plant_tint(o->fg, &t);
 		r = &nd_seven_sprite_rects[id];
-		blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, &t, flip, sub_units);
+		blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1 - ndw_obj_anchor_y(o, r->h), sx, sy, scale, &t, flip, sub_units);
 		break;
 	case NDW_K_FIR:
 		draw_drop_shadow(fb, w, h, sx, sy, (o->big ? 10 : 7) * scale, 3 * scale);
@@ -640,7 +643,7 @@ void draw_world_obj_scaled_sub(uint32_t *fb, int w, int h, const ndw_obj_t *o, i
 			id = nd_seven_obj_sprite(o);
 			r = &nd_seven_sprite_rects[id];
 			draw_drop_shadow(fb, w, h, sx, sy, 4 * scale, 2 * scale);
-			blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, NULL, flip, sub_units);
+			blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1 - ndw_obj_anchor_y(o, r->h), sx, sy, scale, NULL, flip, sub_units);
 		}
 		break;
 	case NDW_K_ROCK:
@@ -650,14 +653,14 @@ void draw_world_obj_scaled_sub(uint32_t *fb, int w, int h, const ndw_obj_t *o, i
 		else {
 			id = nd_seven_obj_sprite(o);
 			r = &nd_seven_sprite_rects[id];
-			blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, NULL, flip, sub_units);
+			blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1 - ndw_obj_anchor_y(o, r->h), sx, sy, scale, NULL, flip, sub_units);
 		}
 		break;
 	case NDW_K_BOULDER:
 		draw_drop_shadow(fb, w, h, sx, sy, 11 * scale, 4 * scale);
 		id = nd_seven_obj_sprite(o);
 		r = &nd_seven_sprite_rects[id];
-		blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1, sx, sy, scale, NULL, flip, sub_units);
+		blit_sub(fb, w, h, id, 0, 0, r->w, r->h, r->w / 2, r->h - 1 - ndw_obj_anchor_y(o, r->h), sx, sy, scale, NULL, flip, sub_units);
 		break;
 	default:             draw_pawn(&c, o->glyph, o->fg); break;
 	}
