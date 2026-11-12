@@ -2826,14 +2826,28 @@ int main(void)
 			assert(br.y >= ND_SEVEN_ATLAS_H_PX);
 			assert(br.w >= 16 && br.h >= 18);
 			int non_zero = 0;
+			int upper_px = 0, lower_mid_px = 0;
 			for (uint16_t ry = 0; ry < br.h; ry++) {
 				for (uint16_t rx = 0; rx < br.w; rx++) {
 					uint32_t px = rgba[(size_t)(br.y + ry) * ND_SEVEN_ATLAS_W + (br.x + rx)];
-					if ((px >> 24) > 0)
+					uint32_t a = (px >> 24) & 0xFFu;
+					if (a > 0) {
 						non_zero++;
+						uint32_t r_ch = px & 0xFFu;
+						uint32_t g_ch = (px >> 8) & 0xFFu;
+						/* Verify no overly dark root pixels (G >= 95 on grass/turf swatches) */
+						if (k <= NDB_TALL_GRASS_2)
+							assert(g_ch >= 95u && r_ch >= 50u);
+						if (ry >= 2 && ry <= 5 && a >= 140)
+							upper_px++;
+						if (ry >= br.h - 7 && ry <= br.h - 4 && a >= 140)
+							lower_mid_px++;
+					}
 				}
 			}
 			assert(non_zero >= 60);
+			/* Verify tapered non-square blades: upper blade rows are strictly narrower than lower-mid rows */
+			assert(upper_px < lower_mid_px);
 		}
 
 		/* 2. R2: Verify deterministic micro-ecology zoning, anti-submersion, slope, and tree-trunk suppression */
@@ -2870,6 +2884,7 @@ int main(void)
 				}
 				if (nd_seven_eval_meadow_area(x * 19, y * 23, 5.0f, 0.0f, 0.02f, 10, 9999.0f, &z_area, &sc_area, NULL)) {
 					lowland_cnt++;
+					assert(sc_area >= 0.35f && sc_area <= 0.70f);
 					if (z_area == ND_MEADOW_TALL_GRASS)
 						tall_cnt++;
 				}

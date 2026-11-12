@@ -842,12 +842,7 @@ static int meadow_lookup_rect(int zone, uint32_t h, nd_seven_sprite_rect_t *out_
 		return nd_seven_botanical_rect(tk, out_rect);
 	}
 	if (zone == ND_MEADOW_GRASS) {
-		uint32_t pick = h & 7u;
-		if (pick == 7u) {
-			*out_rect = nd_seven_sprite_rects[NDS_GRASS];
-			return 1;
-		}
-		return nd_seven_botanical_rect(NDB_GRASS_TUFT_1 + (int)(pick % 3u), out_rect);
+		return nd_seven_botanical_rect(NDB_GRASS_TUFT_1 + (int)(h % 3u), out_rect);
 	}
 	return 0;
 }
@@ -901,7 +896,7 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 			float rt = (reed_env - 0.40f) * (1.0f / 0.55f);
 			if (rt > 1.0f) rt = 1.0f;
 			if (out_zone) *out_zone = ND_MEADOW_REED;
-			if (out_scale) *out_scale = 0.86f + 0.32f * rt;
+			if (out_scale) *out_scale = 0.48f + 0.16f * rt;
 			return 1;
 		}
 		return 0;
@@ -914,7 +909,7 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 		float u_env   = 0.62f * u_macro + 0.38f * u_fine - slope_pen;
 		if (u_env > 0.34f) {
 			if (out_zone) *out_zone = ND_MEADOW_UNDERSTORY;
-			if (out_scale) *out_scale = 0.76f + 0.22f * u_env;
+			if (out_scale) *out_scale = 0.38f + 0.14f * u_env;
 			return 1;
 		}
 		return 0;
@@ -957,7 +952,7 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 	if (core_t > 1.0f)
 		core_t = 1.0f;
 
-	float sc = 0.76f + 0.46f * core_t + ((float)(int32_t)(h & 7u) - 3.5f) * 0.015f;
+	float sc = 0.40f + 0.22f * core_t + ((float)(int32_t)(h & 7u) - 3.5f) * 0.008f;
 	if (out_scale)
 		*out_scale = sc;
 
@@ -1257,17 +1252,17 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			}
 		}
 
-		/* Sample a tight 9-unit grid within [-288..+288] so meadow swatches overlap into contiguous carpets */
-		const int32_t step = 9;
-		const int32_t rad = 288;
+		/* Sample a high-frequency 6-unit grid within [-252..+252] with 2..3 micro-tufts per fertile cell */
+		const int32_t step = 6;
+		const int32_t rad = 252;
 		int32_t cx0 = ((lwx - rad) / step) * step;
 		int32_t cy0 = ((lwy - rad) / step) * step;
 
 		for (int32_t gy = cy0; gy <= lwy + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gy += step) {
 			for (int32_t gx = cx0; gx <= lwx + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gx += step) {
 				uint32_t jh = meadow_hash32(gx, gy, 0x4A495454u);
-				int32_t wx = gx + (int32_t)(jh & 7u) - 3;
-				int32_t wy = gy + (int32_t)((jh >> 3u) & 7u) - 3;
+				int32_t wx = gx + (int32_t)(jh % 5u) - 2;
+				int32_t wy = gy + (int32_t)((jh >> 3u) % 5u) - 2;
 
 				float ddx = (float)(wx - lwx);
 				float ddy = (float)(wy - lwy);
@@ -1322,9 +1317,15 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				if (tint_m == 0)
 					continue;
 
-				/* Understory tufts get a cooler, shaded forest-floor tint */
-				if (zone == ND_MEADOW_UNDERSTORY)
-					tint_m = (0xC4DEC800u) | (tint_m & 0xFFu);
+				/* Understory tufts get a soft shaded forest-floor tint; open meadow tufts get subtle natural emerald/golden hue variation */
+				if (zone == ND_MEADOW_UNDERSTORY) {
+					tint_m = (0xE0F0DC00u) | (tint_m & 0xFFu);
+				} else if (zone == ND_MEADOW_GRASS || zone == ND_MEADOW_TALL_GRASS) {
+					static const uint32_t meadow_tints[4] = {
+						0xFAFFF400u, 0xF4FCEE00u, 0xFFFDF000u, 0xF0FAE800u
+					};
+					tint_m = meadow_tints[(jh >> 12u) & 3u] | (tint_m & 0xFFu);
+				}
 
 				lam_billboard_gpu_t *bb = &s_all_gpu_batch[all_gpu_count++];
 				bb->x = (float)wx;
@@ -1332,8 +1333,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bb->z = z_f;
 				bb->width = (float)sr.w * scale_m;
 				bb->height = (float)sr.h * scale_m;
-				bb->anchor_y = 2.0f * scale_m;
-				bb->water_z_off = 2.0f * scale_m;
+				bb->anchor_y = 1.6f * scale_m;
+				bb->water_z_off = 1.6f * scale_m;
 				if (flip) {
 					bb->u0 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
 					bb->u1 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
@@ -1349,16 +1350,17 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bb->shadow_ry = 0;
 				bb->pad0 = (uint8_t)zone;
 
-				/* In lush meadow cores, layer a companion overlapping tuft or wildflower */
-				if ((zone == ND_MEADOW_TALL_GRASS || (zone == ND_MEADOW_GRASS && scale_m > 1.04f)) &&
+				/* Layer 2nd companion micro-tuft in every fertile meadow cell for high blade frequency */
+				if ((zone == ND_MEADOW_GRASS || zone == ND_MEADOW_TALL_GRASS || zone == ND_MEADOW_UNDERSTORY) &&
 				    all_gpu_count + 4 < ALL_GPU_MAX_DRAW) {
-					int zone2 = (((jh >> 14u) & 7u) == 0u) ? ND_MEADOW_WILDFLOWER : ND_MEADOW_GRASS;
+					int zone2 = (zone == ND_MEADOW_TALL_GRASS && (((jh >> 14u) & 7u) == 0u))
+					            ? ND_MEADOW_WILDFLOWER : ND_MEADOW_GRASS;
 					nd_seven_sprite_rect_t sr2;
 					if (meadow_lookup_rect(zone2, jh >> 17u, &sr2)) {
-						int32_t ox2 = (int32_t)((jh >> 6u) & 7u) - 3;
-						int32_t oy2 = (int32_t)((jh >> 11u) & 7u) - 3;
-						if (ox2 == 0 && oy2 == 0) ox2 = 3;
-						float sc2 = scale_m * 0.92f;
+						int32_t ox2 = (int32_t)((jh >> 6u) % 5u) - 2;
+						int32_t oy2 = (int32_t)((jh >> 11u) % 5u) - 2;
+						if (ox2 == 0 && oy2 == 0) ox2 = 2;
+						float sc2 = scale_m * 0.86f;
 						int flip2 = (int)((jh >> 21u) & 1u);
 						lam_billboard_gpu_t *bb2 = &s_all_gpu_batch[all_gpu_count++];
 						bb2->x = (float)(wx + ox2);
@@ -1366,8 +1368,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						bb2->z = z_f + dz_dx * (float)ox2 + dz_dy * (float)oy2;
 						bb2->width = (float)sr2.w * sc2;
 						bb2->height = (float)sr2.h * sc2;
-						bb2->anchor_y = 2.0f * sc2;
-						bb2->water_z_off = 2.0f * sc2;
+						bb2->anchor_y = 1.6f * sc2;
+						bb2->water_z_off = 1.6f * sc2;
 						if (flip2) {
 							bb2->u0 = (float)(sr2.x + sr2.w) / (float)ND_SEVEN_ATLAS_W;
 							bb2->u1 = (float)sr2.x / (float)ND_SEVEN_ATLAS_W;
@@ -1382,6 +1384,41 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						bb2->shadow_rx = 0;
 						bb2->shadow_ry = 0;
 						bb2->pad0 = (uint8_t)zone2;
+					}
+				}
+
+				/* Layer 3rd fine micro-tuft in lush meadow cores for dense carpet clumping */
+				if ((zone == ND_MEADOW_TALL_GRASS || (zone == ND_MEADOW_GRASS && scale_m > 0.48f)) &&
+				    all_gpu_count + 4 < ALL_GPU_MAX_DRAW) {
+					nd_seven_sprite_rect_t sr3;
+					if (meadow_lookup_rect(ND_MEADOW_GRASS, jh >> 23u, &sr3)) {
+						int32_t ox3 = (int32_t)((jh >> 15u) % 5u) - 2;
+						int32_t oy3 = (int32_t)((jh >> 19u) % 5u) - 2;
+						if (ox3 == 0 && oy3 == 0) oy3 = -2;
+						float sc3 = scale_m * 0.74f;
+						int flip3 = (int)((jh >> 26u) & 1u);
+						lam_billboard_gpu_t *bb3 = &s_all_gpu_batch[all_gpu_count++];
+						bb3->x = (float)(wx + ox3);
+						bb3->y = (float)(wy + oy3);
+						bb3->z = z_f + dz_dx * (float)ox3 + dz_dy * (float)oy3;
+						bb3->width = (float)sr3.w * sc3;
+						bb3->height = (float)sr3.h * sc3;
+						bb3->anchor_y = 1.5f * sc3;
+						bb3->water_z_off = 1.5f * sc3;
+						if (flip3) {
+							bb3->u0 = (float)(sr3.x + sr3.w) / (float)ND_SEVEN_ATLAS_W;
+							bb3->u1 = (float)sr3.x / (float)ND_SEVEN_ATLAS_W;
+						} else {
+							bb3->u0 = (float)sr3.x / (float)ND_SEVEN_ATLAS_W;
+							bb3->u1 = (float)(sr3.x + sr3.w) / (float)ND_SEVEN_ATLAS_W;
+						}
+						bb3->v0 = (float)sr3.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+						bb3->v1 = (float)(sr3.y + sr3.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+						bb3->tint_rgba = tint_m;
+						bb3->style = ND_BB_STYLE_GRASS;
+						bb3->shadow_rx = 0;
+						bb3->shadow_ry = 0;
+						bb3->pad0 = (uint8_t)ND_MEADOW_GRASS;
 					}
 				}
 			}

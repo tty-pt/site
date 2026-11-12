@@ -24,36 +24,135 @@ static const nd_seven_sprite_rect_t s_botanical_rects[NDB_COUNT] = {
 	[NDB_REED_2]       = { 112, ND_SEVEN_ATLAS_H_PX, 16, 24 }
 };
 
-static inline void atlas_put_px(uint16_t x, uint16_t y, uint32_t rgba)
+static inline void atlas_put_px_alpha(uint16_t x, uint16_t y, uint32_t rgb, int alpha)
 {
-	if (x < ND_SEVEN_ATLAS_W && y < ND_SEVEN_RUNTIME_ATLAS_H)
-		s_atlas_rgba[(size_t)y * ND_SEVEN_ATLAS_W + x] = rgba;
+	if (alpha <= 0 || x >= ND_SEVEN_ATLAS_W || y >= ND_SEVEN_RUNTIME_ATLAS_H)
+		return;
+	if (alpha > 255)
+		alpha = 255;
+	uint32_t *dst = &s_atlas_rgba[(size_t)y * ND_SEVEN_ATLAS_W + x];
+	uint32_t old = *dst;
+	int old_a = (int)((old >> 24) & 0xFFu);
+	if (old_a == 0 || alpha >= 252) {
+		*dst = (rgb & 0x00FFFFFFu) | ((uint32_t)alpha << 24);
+		return;
+	}
+	int out_a = alpha + ((old_a * (255 - alpha)) >> 8);
+	if (out_a > 255)
+		out_a = 255;
+	int nr = (int)(rgb & 0xFFu);
+	int ng = (int)((rgb >> 8) & 0xFFu);
+	int nb = (int)((rgb >> 16) & 0xFFu);
+	int or_c = (int)(old & 0xFFu);
+	int og_c = (int)((old >> 8) & 0xFFu);
+	int ob_c = (int)((old >> 16) & 0xFFu);
+	int r = ((nr * alpha) + (or_c * (255 - alpha))) >> 8;
+	int g = ((ng * alpha) + (og_c * (255 - alpha))) >> 8;
+	int b = ((nb * alpha) + (ob_c * (255 - alpha))) >> 8;
+	*dst = ((uint32_t)out_a << 24) | ((uint32_t)(b & 0xFF) << 16) |
+	       ((uint32_t)(g & 0xFF) << 8) | (uint32_t)(r & 0xFF);
+}
+
+static inline uint32_t lerp_rgb(uint32_t c0, uint32_t c1, int t_q8)
+{
+	if (t_q8 <= 0) return c0;
+	if (t_q8 >= 256) return c1;
+	int r0 = (int)(c0 & 0xFFu), g0 = (int)((c0 >> 8) & 0xFFu), b0 = (int)((c0 >> 16) & 0xFFu);
+	int r1 = (int)(c1 & 0xFFu), g1 = (int)((c1 >> 8) & 0xFFu), b1 = (int)((c1 >> 16) & 0xFFu);
+	int r = r0 + (((r1 - r0) * t_q8) >> 8);
+	int g = g0 + (((g1 - g0) * t_q8) >> 8);
+	int b = b0 + (((b1 - b0) * t_q8) >> 8);
+	return 0xFF000000u | ((uint32_t)(b & 0xFF) << 16) |
+	       ((uint32_t)(g & 0xFF) << 8) | (uint32_t)(r & 0xFF);
+}
+
+static void draw_tapered_blade(uint16_t bx, uint16_t by, uint16_t rect_w, uint16_t rect_h,
+                               int x0, int dy_start, int bh, int lean,
+                               uint32_t c_root, uint32_t c_deep, uint32_t c_mid,
+                               uint32_t c_lush, uint32_t c_tip, int is_plume)
+{
+	int span = (bh - dy_start > 1) ? (bh - dy_start - 1) : 1;
+	for (int dy = dy_start; dy < bh; dy++) {
+		int py = (int)(rect_h - 1) - dy;
+		if (py < 0 || py >= (int)rect_h)
+			continue;
+		int rel = dy - dy_start;
+		int t_q8 = (rel * 256) / span; /* 0..256 from root to tip */
+
+		/* Quadratic curved trajectory in 1/256th pixel fixed point */
+		int curve_q8 = (t_q8 * ((t_q8 * 180 + 76 * 256) >> 8)) >> 8;
+		int fx_q8 = (x0 << 8) + ((lean * curve_q8));
+		int ix = fx_q8 >> 8;
+		int frac = fx_q8 & 0xFF;
+
+		/* Smooth color gradient from terrain-matched root to sunlit tip */
+		uint32_t col;
+		if (t_q8 < 64) {
+			col = lerp_rgb(c_root, c_deep, t_q8 * 4);
+		} else if (t_q8 < 144) {
+			col = lerp_rgb(c_deep, c_mid, ((t_q8 - 64) * 256) / 80);
+		} else if (t_q8 < 216) {
+			col = lerp_rgb(c_mid, c_lush, ((t_q8 - 144) * 256) / 72);
+		} else {
+			col = lerp_rgb(c_lush, c_tip, ((t_q8 - 216) * 256) / 40);
+		}
+
+		/* Vertical alpha envelope: feathered roots (no dark bottom line) & pointed tip (no square top) */
+		int root_alpha = (dy == 0) ? 95 : (dy == 1 ? 165 : (dy == 2 ? 225 : 255));
+		if (rel == 0 && dy > 0)
+			root_alpha = (root_alpha * 165) >> 8;
+		int tip_rem = bh - 1 - dy;
+		int tip_alpha = (tip_rem == 0) ? 105 : (tip_rem == 1 ? 185 : (tip_rem == 2 ? 235 : 255));
+		int base_alpha = (root_alpha * tip_alpha) >> 8;
+
+		/* Taper width from ~1.55px at base down to 0.75px at tip with Wu sub-pixel edge anti-aliasing */
+		int width_q8 = 396 - ((t_q8 * 210) >> 8); /* 396 (~1.55px) -> 186 (~0.73px) */
+		if (is_plume && tip_rem >= 1 && tip_rem <= 3)
+			width_q8 += 72;
+
+		int a_main = (base_alpha * (256 - ((frac * (256 - (width_q8 >> 1))) >> 8))) >> 8;
+		int a_right = (base_alpha * ((frac * width_q8) >> 8)) >> 8;
+		int a_left = (width_q8 > 280 && frac < 96) ? ((base_alpha * (96 - frac)) >> 8) : 0;
+
+		if (ix >= 1 && ix < (int)rect_w - 1)
+			atlas_put_px_alpha((uint16_t)(bx + ix), (uint16_t)(by + py), col, a_main);
+		if (a_right > 16 && ix + 1 >= 1 && ix + 1 < (int)rect_w - 1)
+			atlas_put_px_alpha((uint16_t)(bx + ix + 1), (uint16_t)(by + py), col, a_right);
+		if (a_left > 16 && ix - 1 >= 1 && ix - 1 < (int)rect_w - 1)
+			atlas_put_px_alpha((uint16_t)(bx + ix - 1), (uint16_t)(by + py), col, a_left);
+	}
 }
 
 static void synthesize_botanical_shelf(void)
 {
-	const uint32_t c_root  = RGB(28, 52, 28);
-	const uint32_t c_deep  = RGB(40, 82, 38);
-	const uint32_t c_mid   = RGB(62, 126, 54);
-	const uint32_t c_lush  = RGB(86, 162, 66);
-	const uint32_t c_tip   = RGB(130, 196, 84);
-	const uint32_t c_plume = RGB(178, 210, 98);
-	const uint32_t c_stalk = RGB(72, 120, 60);
-	const uint32_t c_head1 = RGB(116, 74, 40);
-	const uint32_t c_head2 = RGB(84, 52, 26);
+	/* Terrain-harmonized palette matching s_fs_terrain deepMoss / lushTurf / sunlit tips */
+	const uint32_t c_root  = RGB(74, 124, 58);
+	const uint32_t c_deep  = RGB(82, 138, 62);
+	const uint32_t c_mid   = RGB(94, 156, 68);
+	const uint32_t c_lush  = RGB(112, 178, 76);
+	const uint32_t c_tip   = RGB(148, 206, 90);
+	const uint32_t c_plume = RGB(182, 214, 102);
+	const uint32_t c_stalk = RGB(84, 136, 64);
+	const uint32_t c_head1 = RGB(122, 80, 44);
+	const uint32_t c_head2 = RGB(92, 58, 30);
 
 	/* Clear reserved botanical shelf row (y: ND_SEVEN_ATLAS_H_PX .. +23) */
 	memset(&s_atlas_rgba[(size_t)ND_SEVEN_ATLAS_H_PX * ND_SEVEN_ATLAS_W], 0,
 	       24u * ND_SEVEN_ATLAS_W * sizeof(uint32_t));
 
-	/* Synthesize 3 dense multi-blade meadow turf swatches (20x18 each, 11 overlapping blades) */
+	/* Synthesize 3 fine, tapered multi-blade meadow turf swatches (20x18 each, 11 overlapping curved blades) */
 	for (int v = 0; v < 3; v++) {
 		uint16_t bx = s_botanical_rects[NDB_GRASS_TUFT_1 + v].x;
 		uint16_t by = s_botanical_rects[NDB_GRASS_TUFT_1 + v].y;
 		static const int8_t blade_x[3][11] = {
-			{ 2, 3, 5, 7, 8, 10, 11, 13, 14, 16, 17 },
-			{ 2, 4, 5, 7, 9, 10, 12, 13, 15, 16, 17 },
-			{ 1, 3, 5, 6, 8,  9, 11, 12, 14, 15, 17 }
+			{ 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16 },
+			{ 3, 5, 6, 8, 9, 10, 12, 13, 14, 15, 16 },
+			{ 2, 4, 6, 7, 9, 10, 11, 13, 14, 15, 17 }
+		};
+		static const int8_t blade_y0[3][11] = {
+			{ 2, 1, 0, 1, 0, 0, 1, 0, 1, 2, 2 },
+			{ 2, 0, 1, 0, 1, 0, 0, 1, 0, 1, 2 },
+			{ 2, 1, 0, 0, 1, 0, 1, 0, 1, 2, 2 }
 		};
 		static const int8_t blade_h[3][11] = {
 			{ 9, 12, 14, 11, 16, 13, 17, 12, 15, 11, 9 },
@@ -66,37 +165,23 @@ static void synthesize_botanical_shelf(void)
 			{ -3, -1, -2,  0,  1, -1, 1, 2, 1, 3, 2 }
 		};
 		for (int b = 0; b < 11; b++) {
-			int x0 = blade_x[v][b];
-			int bh = blade_h[v][b];
-			int lean = blade_lean[v][b];
-			for (int dy = 0; dy < bh; dy++) {
-				int py = 17 - dy;
-				int px = x0 + (lean * dy) / (bh > 1 ? bh - 1 : 1);
-				if (px < 1) px = 1;
-				if (px > 18) px = 18;
-				uint32_t col = (dy < 3) ? c_root :
-				               (dy < 6) ? c_deep :
-				               (dy < bh - 4) ? c_mid :
-				               (dy < bh - 1) ? c_lush : c_tip;
-				atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), col);
-				if (dy < bh - 2 && px + 1 < 19) {
-					uint32_t side_col = (dy < 4) ? c_root : (dy < 8 ? c_deep : c_mid);
-					atlas_put_px((uint16_t)(bx + px + 1), (uint16_t)(by + py), side_col);
-				}
-				if (dy < 5 && px > 1) {
-					atlas_put_px((uint16_t)(bx + px - 1), (uint16_t)(by + py), c_root);
-				}
-			}
+			draw_tapered_blade(bx, by, 20, 18,
+			                   blade_x[v][b], blade_y0[v][b], blade_h[v][b], blade_lean[v][b],
+			                   c_root, c_deep, c_mid, c_lush, c_tip, 0);
 		}
 	}
 
-	/* Synthesize 2 tall meadow grass clusters with arching seed plumes (18x22 each, 9 blades) */
+	/* Synthesize 2 tall meadow grass clusters with arching tapered seed plumes (18x22 each, 9 blades) */
 	for (int v = 0; v < 2; v++) {
 		uint16_t bx = s_botanical_rects[NDB_TALL_GRASS_1 + v].x;
 		uint16_t by = s_botanical_rects[NDB_TALL_GRASS_1 + v].y;
 		static const int8_t tall_x[2][9] = {
-			{ 2, 4, 6, 7, 9, 10, 12, 14, 15 },
-			{ 2, 3, 5, 7, 9, 11, 12, 14, 15 }
+			{ 3, 5, 6, 8, 9, 10, 12, 13, 14 },
+			{ 3, 4, 6, 7, 9, 11, 12, 13, 15 }
+		};
+		static const int8_t tall_y0[2][9] = {
+			{ 2, 1, 0, 1, 0, 0, 1, 1, 2 },
+			{ 2, 1, 1, 0, 0, 1, 0, 1, 2 }
 		};
 		static const int8_t tall_h[2][9] = {
 			{ 13, 16, 19, 15, 21, 17, 20, 16, 12 },
@@ -107,37 +192,26 @@ static void synthesize_botanical_shelf(void)
 			{ -2, -3, -1, -1, 1, 1, 2, 3, 2 }
 		};
 		for (int b = 0; b < 9; b++) {
-			int x0 = tall_x[v][b];
 			int bh = tall_h[v][b];
-			int lean = tall_lean[v][b];
 			int has_plume = (bh >= 19);
-			for (int dy = 0; dy < bh; dy++) {
-				int py = 21 - dy;
-				int px = x0 + (lean * dy * dy) / ((bh > 1 ? bh - 1 : 1) * (bh > 1 ? bh - 1 : 1));
-				if (px < 1) px = 1;
-				if (px > 16) px = 16;
-				uint32_t col = (dy < 3) ? c_root :
-				               (dy < 7) ? c_deep :
-				               (dy < bh - 5) ? c_mid :
-				               (dy < bh - 2) ? c_lush :
-				               (has_plume ? c_plume : c_tip);
-				atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), col);
-				if (dy < bh - 2 && px + 1 < 17) {
-					uint32_t side_col = ( has_plume && dy >= bh - 4 ) ? c_tip :
-					                    (dy < 4 ? c_root : (dy < 9 ? c_deep : c_mid));
-					atlas_put_px((uint16_t)(bx + px + 1), (uint16_t)(by + py), side_col);
-				}
-			}
+			draw_tapered_blade(bx, by, 18, 22,
+			                   tall_x[v][b], tall_y0[v][b], bh, tall_lean[v][b],
+			                   c_root, c_deep, c_mid, c_lush,
+			                   has_plume ? c_plume : c_tip, has_plume);
 		}
 	}
 
-	/* Synthesize 2 dense littoral shoreline reed / cattail clusters (16x24 each, 6 stalks) */
+	/* Synthesize 2 dense littoral shoreline reed / cattail clusters (16x24 each, 6 tapered stalks) */
 	for (int r = 0; r < 2; r++) {
 		uint16_t bx = s_botanical_rects[NDB_REED_1 + r].x;
 		uint16_t by = s_botanical_rects[NDB_REED_1 + r].y;
 		static const int8_t stalk_x[2][6] = {
-			{ 2, 4, 7, 9, 11, 13 },
-			{ 2, 5, 7, 10, 12, 14 }
+			{ 3, 5, 7, 9, 11, 13 },
+			{ 3, 5, 7, 10, 11, 13 }
+		};
+		static const int8_t stalk_y0[2][6] = {
+			{ 2, 0, 0, 1, 0, 2 },
+			{ 2, 0, 1, 0, 1, 2 }
 		};
 		static const int8_t stalk_h[2][6] = {
 			{ 16, 20, 23, 18, 22, 15 },
@@ -149,24 +223,21 @@ static void synthesize_botanical_shelf(void)
 		};
 		for (int s = 0; s < 6; s++) {
 			int sx = stalk_x[r][s];
+			int sy0 = stalk_y0[r][s];
 			int sh = stalk_h[r][s];
 			int lean = (s < 2) ? -1 : (s > 3 ? 1 : 0);
-			for (int dy = 0; dy < sh; dy++) {
-				int py = 23 - dy;
-				int px = sx + (lean * dy) / 14;
-				if (px < 1) px = 1;
-				if (px > 14) px = 14;
-				uint32_t col = (dy < 4) ? c_root :
-				               (dy < 9) ? c_deep :
-				               (dy < sh - 2) ? c_stalk : c_tip;
-				atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), col);
-				if (dy < 6 && px + 1 < 15)
-					atlas_put_px((uint16_t)(bx + px + 1), (uint16_t)(by + py), c_deep);
-				/* Brown cylindrical cattail seed-head near upper third */
-				if (has_cattail[r][s] && dy >= sh - 9 && dy <= sh - 4) {
-					atlas_put_px((uint16_t)(bx + px), (uint16_t)(by + py), c_head1);
-					if (px > 0)
-						atlas_put_px((uint16_t)(bx + px - 1), (uint16_t)(by + py), c_head2);
+			draw_tapered_blade(bx, by, 16, 24,
+			                   sx, sy0, sh, lean,
+			                   c_root, c_deep, c_stalk, c_lush, c_tip, 0);
+			if (has_cattail[r][s]) {
+				for (int dy = sh - 8; dy <= sh - 4; dy++) {
+					int py = 23 - dy;
+					int px = sx + (lean * dy) / 14;
+					if (px >= 1 && px < 15) {
+						atlas_put_px_alpha((uint16_t)(bx + px), (uint16_t)(by + py), c_head1, 245);
+						if (px > 1)
+							atlas_put_px_alpha((uint16_t)(bx + px - 1), (uint16_t)(by + py), c_head2, 185);
+					}
 				}
 			}
 		}
