@@ -262,16 +262,6 @@ static inline bool seven_test_frustum_xy(float min_x, float min_y, float max_x, 
 	                           max_x, max_y, base_z_max + 256.0f);
 }
 
-static inline float seven_billboard_lod_scale(float d_cam, int is_landmark)
-{
-	if (d_cam <= 360.0f)
-		return 1.0f;
-	float ratio = d_cam / 360.0f;
-	float s = 1.0f + 0.44f * sqrtf(ratio - 1.0f);
-	float max_s = is_landmark ? 15.0f : 8.5f;
-	return (s > max_s) ? max_s : s;
-}
-
 /* Uniform altitude fade: all scenery fades out simultaneously across the screen
  * starting around -20x (24,000), remaining visible at -22x (~37,947), and fully
  * dissolving before -23x (44,000) with zero radial distance rings. */
@@ -413,7 +403,6 @@ static uint32_t s_last_mid_gpu_count = 0;
 
 static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node_t *node,
                                       const int16_t pos[4], int16_t w_level,
-                                      float eye_x, float eye_y, float eye_z,
                                       uint32_t tint)
 {
 	if (tint == 0)
@@ -428,17 +417,6 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 	int32_t base_wx = (int32_t)pos[0] * NDW_TILE_W;
 	int32_t base_wy = -(int32_t)pos[1] * NDW_TILE_H;
 	int emitted = 0;
-
-	/* Hoist camera distance and LOD scale once per room center */
-	float room_cx = (float)(base_wx + (NDW_TILE_W / 2));
-	float room_cy = (float)(base_wy + (NDW_TILE_H / 2));
-	float room_cz = (float)(node->min_val + node->max_val) * (0.5f / 16.0f);
-	float rex = eye_x - room_cx;
-	float rey = eye_y - room_cy;
-	float rez = eye_z - room_cz;
-	float d_cam = sqrtf(rex * rex + rey * rey + rez * rez);
-	float lod_s_landmark = seven_billboard_lod_scale(d_cam, 1);
-	float lod_s_small = seven_billboard_lod_scale(d_cam, 0);
 
 	/* Homogeneous 1:1 room emission: every room emits its objects with the exact
 	 * same rule and uniform altitude alpha across the entire visible screen. */
@@ -464,14 +442,7 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 		    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS)
 			continue; /* Anti-submersion for flora */
 
-		int is_landmark = raw_objs[k].big ||
-		                  raw_objs[k].kind == NDW_K_BOULDER || raw_objs[k].kind == NDW_K_ROCK ||
-		                  raw_objs[k].kind == NDW_K_FIR || raw_objs[k].kind == NDW_K_DECID ||
-		                  raw_objs[k].kind == NDW_K_TALL || raw_objs[k].kind == NDW_K_CACTUS ||
-		                  raw_objs[k].kind == NDW_K_SHOP;
-
 		float z_f = (float)elev_q / 16.0f;
-		float lod_s = is_landmark ? lod_s_landmark : lod_s_small;
 
 		if (s_mid_batch_len == MID_STREAM_CHUNK) {
 			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
@@ -483,8 +454,8 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 		bb.x = (float)wx;
 		bb.y = (float)wy;
 		bb.z = z_f;
-		bb.width = (float)sr->w * lod_s;
-		bb.height = (float)sr->h * lod_s;
+		bb.width = (float)sr->w;
+		bb.height = (float)sr->h;
 		if (flip) {
 			bb.u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
 			bb.u1 = (float)sr->x / (float)ND_SEVEN_ATLAS_W;
@@ -811,21 +782,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 			}
 
 			if (has_sprite) {
-				int64_t lwx_b = 0, lwy_b = 0;
-				nd_seven_world_pos(st, &lwx_b, &lwy_b);
-				float lwz_b = nd_seven_ground_elevation_f((int32_t)lwx_b, (int32_t)lwy_b);
-				float pitch_b = ND_SEVEN_DIORAMA_PITCH * (3.14159265358979323846f / 180.0f);
 				float dist_b = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
-				float ex = (float)lwx_b - (float)dr[a].wx;
-				float ey = ((float)lwy_b + dist_b * cosf(pitch_b)) - (float)dr[a].wy;
-				float ez = (lwz_b + dist_b * sinf(pitch_b)) - dr[a].z_f;
-				float d_cam = sqrtf(ex * ex + ey * ey + ez * ez);
-				int is_landmark = (dr[a].what != D_OBJ) || dr[a].obj.big ||
-				                  dr[a].obj.kind == NDW_K_BOULDER || dr[a].obj.kind == NDW_K_ROCK ||
-				                  dr[a].obj.kind == NDW_K_FIR || dr[a].obj.kind == NDW_K_DECID ||
-				                  dr[a].obj.kind == NDW_K_TALL || dr[a].obj.kind == NDW_K_CACTUS ||
-				                  dr[a].obj.kind == NDW_K_SHOP;
-				float lod_s = seven_billboard_lod_scale(d_cam, is_landmark);
 				float alt_fade_b = (dr[a].what == D_LAMB) ? 1.0f : seven_smooth_fade(dist_b, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
 				uint32_t tint_b = seven_pack_white_alpha(alt_fade_b);
 				if (tint_b == 0)
@@ -835,8 +792,8 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 				/* Give the lamb a microscopic +0.01f wy bias so it always wins exact row ties */
 				s_all_gpu_batch[all_gpu_count].y = (float)dr[a].wy + (dr[a].what == D_LAMB ? 0.01f : 0.0f);
 				s_all_gpu_batch[all_gpu_count].z = dr[a].z_f;
-				s_all_gpu_batch[all_gpu_count].width = bw * lod_s;
-				s_all_gpu_batch[all_gpu_count].height = bh * lod_s;
+				s_all_gpu_batch[all_gpu_count].width = bw;
+				s_all_gpu_batch[all_gpu_count].height = bh;
 				s_all_gpu_batch[all_gpu_count].u0 = u0;
 				s_all_gpu_batch[all_gpu_count].v0 = v0;
 				s_all_gpu_batch[all_gpu_count].u1 = u1;
@@ -882,12 +839,6 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 
 		int64_t lwx = 0, lwy = 0;
 		nd_seven_world_pos(st, &lwx, &lwy);
-		float lwz = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
-		float pitch = ND_SEVEN_DIORAMA_PITCH * (3.14159265358979323846f / 180.0f);
-		float dist = dist_scenery;
-		float eye_x = (float)lwx;
-		float eye_y = (float)lwy + dist * cosf(pitch);
-		float eye_z = lwz + dist * sinf(pitch);
 
 		/* Sort visible leaves back-to-front (North-to-South: oy ascending, tie-break by ox ascending)
 		 * so distant northern tree crowns render before nearer southern crowns. */
@@ -988,7 +939,7 @@ void nd_seven_render(uint32_t *fb, uint32_t wu, uint32_t hu, const nd_client_sta
 									continue;
 							}
 
-							seven_emit_room_billboards(st, node, pos, w_level, eye_x, eye_y, eye_z, tint_scenery);
+							seven_emit_room_billboards(st, node, pos, w_level, tint_scenery);
 						}
 					}
 				}

@@ -2352,7 +2352,7 @@ int main(void)
 		int far_horizon_cnt = 0;
 		int deep_horizon_30_cnt = 0;
 		int max_cheb_seen = 0;
-		int scaled_landmark_cnt = 0;
+		int unscaled_cnt = 0;
 		for (uint32_t i = 0; i < mid_cnt; i++) {
 			float bx = 0, by = 0, bz = 0, bw = 0, bh = 0;
 			if (nd_seven_last_mid_billboard(i, &bx, &by, &bz, &bw, &bh)) {
@@ -2369,15 +2369,15 @@ int main(void)
 					far_horizon_cnt++;
 				if (cheb > 30)
 					deep_horizon_30_cnt++;
-				if (bh > 46.0f) /* Scaled above tallest base sprite height (46px) by seven_billboard_lod_scale */
-					scaled_landmark_cnt++;
+				assert(bw > 0.0f && bh > 0.0f && bh <= 46.0f); /* True 1:1 physical world-space dimensions */
+				unscaled_cnt++;
 			}
 		}
 		assert(ring_4_12_far_zoom >= ring_4_12_mid_zoom);
 		assert(far_horizon_cnt > 1000);
 		assert(deep_horizon_30_cnt > 1000);
 		assert(max_cheb_seen > 100 && max_cheb_seen <= 255);
-		assert(scaled_landmark_cnt > 500);
+		assert(unscaled_cnt == (int)mid_cnt);
 
 		/* By -23x zoom (0.0059f, eff_cam_dist ~47,457 > 44,000), all scenery has uniformly faded out together */
 		nd_seven_set_zoom(0.0059f);
