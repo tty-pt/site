@@ -726,20 +726,19 @@ export class SteleWasmClient {
 					if (!el && typeof root.querySelector === 'function') {
 						el = root.querySelector(msg.fit ? 'canvas[data-bud-canvas-fit]' : 'canvas[data-bud-canvas]');
 					}
-					if (el) {
-						if (el.width !== msg.width) el.width = msg.width;
-						if (el.height !== msg.height) el.height = msg.height;
-						if (!el.__stele_bmp_ctx) {
-							try {
-								el.__stele_bmp_ctx = el.getContext('bitmaprenderer');
-							} catch (_) {}
-						}
-						if (el.__stele_bmp_ctx && typeof el.__stele_bmp_ctx.transferFromImageBitmap === 'function') {
-							try {
+					if (el && !el.__stele_transferred) {
+						try {
+							if (el.width !== msg.width) el.width = msg.width;
+							if (el.height !== msg.height) el.height = msg.height;
+							if (!el.__stele_bmp_ctx) {
+								try {
+									el.__stele_bmp_ctx = el.getContext('bitmaprenderer');
+								} catch (_) {}
+							}
+							if (el.__stele_bmp_ctx && typeof el.__stele_bmp_ctx.transferFromImageBitmap === 'function') {
 								el.__stele_bmp_ctx.transferFromImageBitmap(msg.bmp);
-								break;
-							} catch (_) {}
-						}
+							}
+						} catch (_) {}
 					}
 					if (typeof msg.bmp.close === 'function') msg.bmp.close();
 				}
@@ -832,6 +831,7 @@ export class SteleWasmClient {
 				webgl,
 				width,
 				height,
+				transferred: !!offscreen,
 				canvas: offscreen
 			}, transferList);
 		}
@@ -1731,7 +1731,8 @@ if (isWorkerContext) {
 	function flushWorkerCanvases(defaultSlot = 1) {
 		for (const entry of globalScope.__stele_worker_canvases.values()) {
 			const c = entry?.canvas;
-			if (c && c.__stele_dirty && typeof c.transferToImageBitmap === 'function') {
+			if (!c || entry.transferred || c.__stele_transferred) continue;
+			if (c.__stele_dirty && typeof c.transferToImageBitmap === 'function') {
 				c.__stele_dirty = false;
 				try {
 					const bmp = c.transferToImageBitmap();
@@ -1837,6 +1838,7 @@ if (isWorkerContext) {
 			const w = msg.width || 800;
 			const h = msg.height || 600;
 			let c = msg.canvas || null;
+			const isTransferred = !!msg.transferred || !!msg.canvas;
 			if (!c && typeof OffscreenCanvas !== 'undefined') {
 				const key = msg.id || msg.budId || `slot-${msg.slot}`;
 				const existing = globalScope.__stele_worker_canvases.get(key);
@@ -1850,6 +1852,7 @@ if (isWorkerContext) {
 				c.__stele_fit = !!msg.fit;
 				c.__stele_webgl = !!msg.webgl;
 				c.__stele_id = msg.id || '';
+				c.__stele_transferred = isTransferred;
 				const key = msg.id || msg.budId || `slot-${msg.slot}`;
 				globalScope.__stele_worker_canvases.set(key, {
 					canvas: c,
@@ -1857,6 +1860,7 @@ if (isWorkerContext) {
 					budId: msg.budId || '',
 					fit: !!msg.fit,
 					webgl: !!msg.webgl,
+					transferred: isTransferred,
 					width: w,
 					height: h,
 					slot: msg.slot
@@ -1866,10 +1870,19 @@ if (isWorkerContext) {
 		}
 		case 'stele:resize': {
 			if (typeof msg.slot === 'number') {
-				workerClient._slotDimensions.set(msg.slot, {
-					w: msg.width || 1400,
-					h: msg.height || 900
-				});
+				const w = msg.width || 1400;
+				const h = msg.height || 900;
+				workerClient._slotDimensions.set(msg.slot, { w, h });
+				for (const entry of globalScope.__stele_worker_canvases.values()) {
+					if (entry && entry.slot === msg.slot && entry.canvas && entry.fit) {
+						try {
+							if (entry.canvas.width !== w) entry.canvas.width = w;
+							if (entry.canvas.height !== h) entry.canvas.height = h;
+							entry.width = w;
+							entry.height = h;
+						} catch (_) {}
+					}
+				}
 			}
 			if (typeof msg.hidden === 'boolean') {
 				const wasHidden = workerClient._hidden;
