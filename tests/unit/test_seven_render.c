@@ -3031,21 +3031,43 @@ int main(void)
 		lam_billboard_gpu_t std_shrub_bb = shrub_bb;
 		std_shrub_bb.style = ND_BB_STYLE_STANDARD;
 
+		lam_billboard_gpu_t herb_obj_bb = std_bb;
+		herb_obj_bb.style = ND_BB_STYLE_FLORA;
+		herb_obj_bb.width = 24.0f;
+		herb_obj_bb.height = 38.0f;
+		herb_obj_bb.pad0 = 1u; /* non-trunk herbaceous/stem object plant (cattail/daisy/flax) */
+
+		lam_billboard_gpu_t std_herb_obj_bb = herb_obj_bb;
+		std_herb_obj_bb.style = ND_BB_STYLE_STANDARD;
+		std_herb_obj_bb.pad0 = 0u;
+
 		lam_billboard_gpu_t tall_tree_bb = std_bb;
 		tall_tree_bb.style = ND_BB_STYLE_LEAF_TINT;
 		tall_tree_bb.width = 61.0f;
 		tall_tree_bb.height = 74.0f;
+		tall_tree_bb.pad0 = 2u; /* trunked tree */
 
 		lam_billboard_gpu_t std_tree_bb = tall_tree_bb;
 		std_tree_bb.style = ND_BB_STYLE_STANDARD;
+		std_tree_bb.pad0 = 0u;
 
-		nd_seven_gl_bb_vert_t v_std[6], v_grs[6], v_shr[6], v_std_shr[6], v_tree[6], v_std_tree[6];
+		lam_billboard_gpu_t short_grass_bb = grass_bb;
+		short_grass_bb.width = 6.0f;
+		short_grass_bb.height = 5.0f;
+		lam_billboard_gpu_t std_short_bb = short_grass_bb;
+		std_short_bb.style = ND_BB_STYLE_STANDARD;
+
+		nd_seven_gl_bb_vert_t v_std[6], v_grs[6], v_shr[6], v_std_shr[6], v_herb[6], v_std_herb[6], v_tree[6], v_std_tree[6], v_short_grs[6], v_short_std[6];
 		nd_seven_gl_eval_billboard_quad(&std_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std);
 		nd_seven_gl_eval_billboard_quad(&grass_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_grs);
 		nd_seven_gl_eval_billboard_quad(&shrub_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_shr);
 		nd_seven_gl_eval_billboard_quad(&std_shrub_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std_shr);
+		nd_seven_gl_eval_billboard_quad(&herb_obj_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_herb);
+		nd_seven_gl_eval_billboard_quad(&std_herb_obj_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std_herb);
 		nd_seven_gl_eval_billboard_quad(&tall_tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_tree);
 		nd_seven_gl_eval_billboard_quad(&std_tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std_tree);
+		nd_seven_gl_eval_billboard_quad(&short_grass_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_short_grs);
+		nd_seven_gl_eval_billboard_quad(&std_short_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_short_std);
 
 		/* Bottom vertices BL (idx 0) and BR (idx 1, 3) have qy == 0 and must remain 100% pinned to ground */
 		assert(fabsf(v_grs[0].quad_uv[1] - 0.0f) < 1e-5f);
@@ -3055,6 +3077,7 @@ int main(void)
 			assert(fabsf(v_grs[1].world_pos[c] - v_std[1].world_pos[c]) < 1e-5f);
 			assert(fabsf(v_grs[0].local_pos[c] - v_std[0].local_pos[c]) < 1e-5f);
 			assert(fabsf(v_shr[0].world_pos[c] - v_std_shr[0].world_pos[c]) < 1e-5f);
+			assert(fabsf(v_herb[0].world_pos[c] - v_std_herb[0].world_pos[c]) < 1e-5f);
 			/* Tall tree quad vertices stay 100% rigid so the wooden trunk never tilts */
 			assert(fabsf(v_tree[2].world_pos[c] - v_std_tree[2].world_pos[c]) < 1e-5f);
 		}
@@ -3062,16 +3085,29 @@ int main(void)
 		assert(fabsf(v_grs[2].quad_uv[1] - 1.0f) < 1e-5f);
 		float grass_disp_x = v_grs[2].local_pos[0] - v_std[2].local_pos[0];
 		float shrub_disp_x = v_shr[2].local_pos[0] - v_std_shr[2].local_pos[0];
+		float herb_disp_x = v_herb[2].local_pos[0] - v_std_herb[2].local_pos[0];
 		assert(grass_disp_x > 0.8f);
 		assert(shrub_disp_x > 0.25f && shrub_disp_x < grass_disp_x);
+		/* True object-type herbaceous/stem plant (height 38, pad0=1) visibly sways from its pinned root */
+		assert(herb_disp_x > 0.7f);
 		assert(v_grs[2].local_pos[2] < v_std[2].local_pos[2] - 0.4f);
+
+		/* Short scaled meadow tufts (5px) must never collapse to zero vertical screen height when trampled */
+		float short_std_dz = v_short_std[2].local_pos[2] - v_short_std[0].local_pos[2];
+		float short_grs_dz = v_short_grs[2].local_pos[2] - v_short_grs[0].local_pos[2];
+		assert(short_std_dz > 3.0f);
+		assert(short_grs_dz >= short_std_dz * 0.55f);
 
 		const char *fs_b = nd_seven_gl_fs_billboard();
 		assert(strstr(fs_b, "canopyHeightMask") != NULL);
 		assert(strstr(fs_b, "canopyTexShift") != NULL);
+		assert(strstr(fs_b, "trunkZone") != NULL);
+		assert(strstr(fs_b, "wavePhase") != NULL);
+		assert(strstr(fs_b, "boughPhase") != NULL);
+		assert(strstr(fs_b, "baseIsBark") != NULL);
 
-		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f, shrub=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
-		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, shrub_disp_x, dz_t0, dz_t1, dz_t2);
+		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f, shrub=+%.2f, herb_obj=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
+		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, shrub_disp_x, herb_disp_x, dz_t0, dz_t1, dz_t2);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

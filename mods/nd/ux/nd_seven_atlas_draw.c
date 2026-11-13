@@ -316,24 +316,34 @@ int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
 		uint32_t iw = 0, ih = 0;
 		if (lam_image_read(slot->img_id, s_decode_scratch, sizeof(s_decode_scratch), &iw, &ih) &&
 		    iw > 0 && ih > 0 && iw <= 160 && ih <= 160) {
-			if ((uint32_t)s_shelf_x + iw > ND_SEVEN_ATLAS_W) {
+			/* Pad left/right by 4px and top by 2px of transparent texels (bottom pad = 0 so
+			 * ground root anchor_y is unchanged) so waving canopy leaves never clip at rect edges */
+			const uint32_t pad_x = 4u;
+			const uint32_t pad_top = 2u;
+			uint32_t slot_w = iw + pad_x * 2u;
+			uint32_t slot_h = ih + pad_top;
+			if ((uint32_t)s_shelf_x + slot_w > ND_SEVEN_ATLAS_W) {
 				s_shelf_x = 0;
 				s_shelf_y = (uint16_t)(s_shelf_y + s_shelf_h);
 				s_shelf_h = 0;
 			}
-			if ((uint32_t)s_shelf_y + ih <= ND_SEVEN_RUNTIME_ATLAS_H) {
+			if ((uint32_t)s_shelf_y + slot_h <= ND_SEVEN_RUNTIME_ATLAS_H) {
+				for (uint32_t ry = 0; ry < slot_h; ry++) {
+					memset(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
+					       0, slot_w * sizeof(uint32_t));
+				}
 				for (uint32_t ry = 0; ry < ih; ry++) {
-					memcpy(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
+					memcpy(&s_atlas_rgba[(s_shelf_y + pad_top + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + pad_x],
 					       &s_decode_scratch[ry * iw],
 					       iw * sizeof(uint32_t));
 				}
 				slot->rect.x = s_shelf_x;
 				slot->rect.y = s_shelf_y;
-				slot->rect.w = (uint16_t)iw;
-				slot->rect.h = (uint16_t)ih;
-				s_shelf_x = (uint16_t)(s_shelf_x + iw);
-				if (ih > s_shelf_h)
-					s_shelf_h = (uint16_t)ih;
+				slot->rect.w = (uint16_t)slot_w;
+				slot->rect.h = (uint16_t)slot_h;
+				s_shelf_x = (uint16_t)(s_shelf_x + slot_w);
+				if (slot_h > s_shelf_h)
+					s_shelf_h = (uint16_t)slot_h;
 				slot->loaded = 1;
 				s_atlas_ver++;
 				if (out_rect) *out_rect = slot->rect;

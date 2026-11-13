@@ -52,7 +52,7 @@
 
 #define MAX_CHUNK_TEXTURES 192
 #define MAX_WATER_QUEUE 192
-#define MAX_BB_VERTS 24576
+#define MAX_BB_VERTS 65536
 
 /* --- GLSL 300 es Shaders --- */
 
@@ -2500,33 +2500,40 @@ static const char *s_fs_billboard =
 	"    vec4 fWind = vec4(0.7071, -0.7071, 0.75, 0.0);\n"
 	"    float canopyHeightMask = 0.0;\n"
 	"    float rawLeafMask = 0.0;\n"
-	"    if (isFloraObj && vDist < 1800.0) {\n"
-	"        /* Tree & Shrub Canopy Wind Sway: trunks (qy < 0.35 & non-green bark) remain 100% stationary\n"
-	"         * while upper leafy crowns sway and rustle with the travelling eval_recursive_wind field */\n"
+	"    if (isFloraObj && vDist < 3600.0) {\n"
+	"        /* Tree & Flora Canopy Wind Wave: lower base (qy < 0.24) and central woody trunk column\n"
+	"         * (|qx| < 0.36, qy < 0.62 with non-green bark chroma) remain 100% stationary while upper\n"
+	"         * leafy crowns and outer boughs wave visibly with the travelling eval_recursive_wind field */\n"
+	"        float qx_c = clamp(vQuadUV.x, -1.0, 1.0);\n"
 	"        float qy_c = clamp(vQuadUV.y, 0.0, 1.0);\n"
-	"        canopyHeightMask = smoothstep(0.35, 0.72, qy_c);\n"
-	"        float rawLeafDom = baseCol.g - max(baseCol.r, baseCol.b) * 0.90;\n"
-	"        rawLeafMask = smoothstep(-0.02, 0.07, rawLeafDom);\n"
-	"        if (canopyHeightMask * rawLeafMask > 0.01) {\n"
+	"        float trunkZone = smoothstep(0.36, 0.08, abs(qx_c)) * smoothstep(0.62, 0.20, qy_c);\n"
+	"        canopyHeightMask = smoothstep(0.22, 0.56, qy_c) * (1.0 - trunkZone * 0.88);\n"
+	"        if (canopyHeightMask > 0.01) {\n"
 	"            fWind = eval_recursive_wind(vLocalPos.xy, uAnimTime);\n"
 	"            vec2 atlasSizeC = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
-	"            float leafFlutter = sin(uAnimTime * 2.8 + vLocalPos.x * 0.09 + vLocalPos.z * 0.14) * (0.20 + 0.32 * fWind.w);\n"
-	"            float swayEnv = canopyHeightMask * rawLeafMask * clamp((1800.0 - vDist) / 1200.0, 0.0, 1.0);\n"
+	"            float distEnv = clamp((3600.0 - vDist) / 2000.0, 0.0, 1.0);\n"
+	"            float windProj = dot(vLocalPos.xy, fWind.xy) * 0.045;\n"
+	"            float wavePhase = uAnimTime * 2.35 - windProj + qy_c * 1.65;\n"
+	"            float boughPhase = uAnimTime * 3.70 + vLocalPos.x * 0.095 - vLocalPos.y * 0.075 + qx_c * 2.80 + qy_c * 2.40;\n"
+	"            float gustAmp = 0.75 + 0.85 * fWind.z + 0.55 * fWind.w;\n"
+	"            float swayX = fWind.x * (fWind.z - 0.45) * 1.40\n"
+	"                        + sin(wavePhase) * (1.55 * gustAmp)\n"
+	"                        + sin(boughPhase) * (0.65 + 0.60 * fWind.w);\n"
+	"            float swayY = cos(wavePhase * 0.90 + 0.70) * (0.42 * gustAmp)\n"
+	"                        + sin(boughPhase * 1.15) * (0.28 + 0.25 * fWind.w);\n"
+	"            float swayEnv = canopyHeightMask * distEnv;\n"
 	"            float uSign = (dFdx(vUV.x) >= 0.0) ? 1.0 : -1.0;\n"
-	"            vec2 canopyTexShift = vec2(\n"
-	"                -(fWind.x * (0.68 * fWind.z + 0.42 * fWind.w) + leafFlutter * 0.38) * uSign,\n"
-	"                abs(fWind.x) * 0.14 * fWind.z + leafFlutter * 0.12\n"
-	"            ) * swayEnv;\n"
+	"            vec2 canopyTexShift = vec2(-swayX * uSign, swayY) * swayEnv;\n"
 	"            vec2 swayedUV = vUV + canopyTexShift / atlasSizeC;\n"
-	"            if (vSpriteBounds.z > vSpriteBounds.x && vSpriteBounds.w > vSpriteBounds.y) {\n"
-	"                vec2 halfTexC = 0.5 / atlasSizeC;\n"
-	"                swayedUV = clamp(swayedUV, vSpriteBounds.xy + halfTexC, vSpriteBounds.zw - halfTexC);\n"
-	"            }\n"
 	"            vec4 swayedCol = sampleAtlasSmooth(swayedUV, vSpriteBounds, style);\n"
-	"            float swayedLeafDom = swayedCol.g - max(swayedCol.r, swayedCol.b) * 0.90;\n"
-	"            float useSway = smoothstep(0.15, 0.45, swayedCol.a) * smoothstep(-0.03, 0.06, swayedLeafDom);\n"
+	"            float baseLeafDom = baseCol.g - max(baseCol.r, baseCol.b) * 0.92;\n"
+	"            float swayedLeafDom = swayedCol.g - max(swayedCol.r, swayedCol.b) * 0.92;\n"
+	"            bool baseIsBark = (baseCol.a > 0.15) && (qy_c < 0.62) && (abs(qx_c) < 0.36) && (baseLeafDom < -0.01);\n"
+	"            bool swayedIsBark = (swayedCol.a > 0.15) && (qy_c < 0.62) && (abs(qx_c) < 0.36) && (swayedLeafDom < -0.01);\n"
+	"            float useSway = (baseIsBark || swayedIsBark) ? 0.0 : smoothstep(0.01, 0.12, swayEnv);\n"
 	"            baseCol = mix(baseCol, swayedCol, useSway);\n"
 	"            baseSampleUV = mix(vUV, swayedUV, useSway);\n"
+	"            rawLeafMask = smoothstep(0.10, 0.40, baseCol.a) * (1.0 - trunkZone);\n"
 	"        }\n"
 	"    }\n"
 	"    vec2 sampleUV = baseSampleUV;\n"
@@ -3007,15 +3014,23 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 	float grass_sx = 0.0f, grass_sy = 0.0f, grass_dz = 0.0f, grass_rustle = 0.0f;
 	float flora_sway_scale = 0.0f;
 	if (b->style == ND_BB_STYLE_GRASS) {
-		flora_sway_scale = 1.0f;
-	} else if ((b->style == ND_BB_STYLE_LEAF_TINT || b->style == ND_BB_STYLE_FLORA) &&
-	           b->height > 0.0f && b->height <= 28.0f) {
-		/* Small real-object flora (wildflowers, ferns, bushes/shrubs <= 28px) sway from their
-		 * ground-pinned roots with stiffness proportional to size (delicate stems sway more than woody shrubs). */
-		float size_t = (28.0f - b->height) * (1.0f / 16.0f);
-		if (size_t < 0.0f) size_t = 0.0f;
-		if (size_t > 1.0f) size_t = 1.0f;
-		flora_sway_scale = 0.32f + 0.53f * size_t;
+		flora_sway_scale = (b->height > 0.0f && b->height < 14.0f)
+		                   ? fmaxf(0.36f, b->height * (1.0f / 14.0f))
+		                   : 1.0f;
+	} else if (b->style == ND_BB_STYLE_LEAF_TINT || b->style == ND_BB_STYLE_FLORA) {
+		if (b->pad0 == 1u && b->height > 0.0f) {
+			/* Non-trunk real-object plants (daisies, cattails, flax, wild carrot, nightshade, bushes):
+			 * full ground-pinned top-vertex wind & contact sway scaled to plant height so their
+			 * angular bend matches the surrounding meadow grass */
+			float h_norm = fminf(1.25f, fmaxf(0.55f, b->height * (1.0f / 26.0f)));
+			flora_sway_scale = 0.92f * h_norm;
+		} else if (b->pad0 == 0u && b->height > 0.0f && b->height <= 30.0f) {
+			/* Fallback for untagged small shrub/flora billboards */
+			float size_t = (30.0f - b->height) * (1.0f / 18.0f);
+			if (size_t < 0.0f) size_t = 0.0f;
+			if (size_t > 1.0f) size_t = 1.0f;
+			flora_sway_scale = 0.52f + 0.33f * size_t;
+		}
 	}
 	if (flora_sway_scale > 0.0f) {
 		nd_seven_gl_eval_grass_displacement(b->x, b->y, s_grass_anim_time,
@@ -3023,8 +3038,20 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 		                                    &grass_sx, &grass_sy, &grass_dz, &grass_rustle);
 		grass_sx *= flora_sway_scale;
 		grass_sy *= flora_sway_scale;
-		grass_dz *= (b->style == ND_BB_STYLE_GRASS) ? 1.0f : (flora_sway_scale * 0.45f);
-		grass_rustle *= flora_sway_scale;
+		grass_dz *= (b->style == ND_BB_STYLE_GRASS) ? flora_sway_scale : (flora_sway_scale * 0.45f);
+		grass_rustle *= fminf(1.0f, flora_sway_scale);
+
+		/* Prevent vertical screen-height collapse (-sy * sin_p - dz * cos_p) on short scaled meadow tufts
+		 * so trampled or wind-bent tufts always retain at least 60% of their vertical screen height */
+		if (h > 0.0f) {
+			float max_vert_loss = 0.40f * h;
+			float vert_loss = grass_sy * sin_p + grass_dz * cos_p;
+			if (vert_loss > max_vert_loss && vert_loss > 1e-4f) {
+				float keep = max_vert_loss / vert_loss;
+				grass_sy *= keep;
+				grass_dz *= keep;
+			}
+		}
 	}
 
 	for (int i = 0; i < 6; i++) {
@@ -3041,7 +3068,7 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
 
-		float sheen = (b->style == ND_BB_STYLE_GRASS) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
+		float sheen = (b->style == ND_BB_STYLE_GRASS || b->pad0 == 1u) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
 		out_verts[i].tint[0] = fminf(1.0f, tint[0] + sheen);
 		out_verts[i].tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
 		out_verts[i].tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
@@ -4107,27 +4134,6 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	uint32_t out_verts_count = 0;
 	bool emit_shadows = (s_gl.cur_dist < 16000.0f);
 
-	for (uint32_t i = 0; i < count; i++) {
-		bool want_shadow = emit_shadows &&
-		                   (batch[i].style != ND_BB_STYLE_GLOW) &&
-		                   (batch[i].style != ND_BB_STYLE_GRASS) &&
-		                   (batch[i].style != ND_BB_STYLE_PARTICLE) &&
-		                   (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
-		uint32_t needed = want_shadow ? 12u : 6u;
-		if (out_verts_count + needed > MAX_BB_VERTS)
-			break;
-		if (want_shadow) {
-			eval_billboard_shadow_quad_with_origin(&batch[i], &s_gl.cur_pdef,
-			                                       s_gl.cur_origin, &bb_verts[out_verts_count]);
-			out_verts_count += 6u;
-		}
-		eval_billboard_quad_with_origin(&batch[i], s_gl.cur_pitch_deg, &s_gl.cur_pdef,
-		                                s_gl.cur_origin, &bb_verts[out_verts_count]);
-		out_verts_count += 6u;
-	}
-	if (out_verts_count == 0)
-		return;
-
 	glUseProgram(s_gl.bb_pipe.prog);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
@@ -4159,7 +4165,6 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
-	glBufferData(GL_ARRAY_BUFFER, bb_verts, out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), 0);
@@ -4179,7 +4184,35 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glEnableVertexAttribArray(5);
 	glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)64);
 
-	glDrawArrays(GL_TRIANGLES, 0, (GLsizei)out_verts_count);
+	for (uint32_t i = 0; i < count; i++) {
+		bool want_shadow = emit_shadows &&
+		                   (batch[i].style != ND_BB_STYLE_GLOW) &&
+		                   (batch[i].style != ND_BB_STYLE_GRASS) &&
+		                   (batch[i].style != ND_BB_STYLE_PARTICLE) &&
+		                   (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
+		uint32_t needed = want_shadow ? 12u : 6u;
+		if (out_verts_count + needed > MAX_BB_VERTS) {
+			if (out_verts_count > 0) {
+				glBufferData(GL_ARRAY_BUFFER, bb_verts,
+				             out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)out_verts_count);
+			}
+			out_verts_count = 0;
+		}
+		if (want_shadow) {
+			eval_billboard_shadow_quad_with_origin(&batch[i], &s_gl.cur_pdef,
+			                                       s_gl.cur_origin, &bb_verts[out_verts_count]);
+			out_verts_count += 6u;
+		}
+		eval_billboard_quad_with_origin(&batch[i], s_gl.cur_pitch_deg, &s_gl.cur_pdef,
+		                                s_gl.cur_origin, &bb_verts[out_verts_count]);
+		out_verts_count += 6u;
+	}
+	if (out_verts_count > 0) {
+		glBufferData(GL_ARRAY_BUFFER, bb_verts,
+		             out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)out_verts_count);
+	}
 
 	glDisableVertexAttribArray(1);
 	glDisableVertexAttribArray(2);
@@ -4586,8 +4619,10 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 	float phase = (float)(h & 0xFFFFu) * (TWO_PI_F / 65536.0f);
 	float stiff = 0.82f + 0.36f * ((float)((h >> 16u) & 0xFFu) / 255.0f);
 
+	float wind_proj = wx * wDirX + wy * wDirY;
+	float gust_wave = sinf(anim_time * 2.15f - wind_proj * 0.045f + phase * 0.35f) * (0.28f + 0.32f * gust);
 	float flutter = sinf(anim_time * 3.2f + wx * 0.08f + wy * 0.06f + phase) * (0.18f + 0.28f * catspaw);
-	float wind_mag = (1.05f * gust + 0.70f * catspaw + flutter) * stiff;
+	float wind_mag = (1.00f * gust + 0.68f * catspaw + gust_wave + flutter) * stiff;
 	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.30f);
 	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.30f);
 	float dz = (wind_mag * wind_mag) * 0.06f;

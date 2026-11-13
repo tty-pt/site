@@ -678,11 +678,17 @@ static void seven_apply_obj_billboard_style(const ndw_obj_t *o,
 	if (!o)
 		return;
 
+	bool is_non_trunk_plant =
+		(ND_PLANT_UNPACK_PRESENT(o->plant_id) && o->col_mask == ND_PLANT_COL_NONE) ||
+		(o->glyph == 'f' || o->glyph == 'F' || o->glyph == 'r' || o->glyph == 'R') ||
+		(sr && sr->h <= 30 && o->kind != NDW_K_CACTUS);
+
 	switch (o->kind) {
 	case NDW_K_DECID:
 	case NDW_K_TALL:
-		bb->shadow_rx = (uint8_t)(o->big ? 14 : 10);
-		bb->shadow_ry = (uint8_t)(o->big ? 6 : 4);
+		bb->shadow_rx = (uint8_t)(is_non_trunk_plant ? (o->big ? 8 : 5) : (o->big ? 14 : 10));
+		bb->shadow_ry = (uint8_t)(is_non_trunk_plant ? 3 : (o->big ? 6 : 4));
+		bb->pad0 = is_non_trunk_plant ? 1u : 2u;
 		if (!sr || sr->y < ND_SEVEN_ATLAS_H_PX) {
 			tint_t pt;
 			plant_tint(o->fg, &pt);
@@ -699,11 +705,13 @@ static void seven_apply_obj_billboard_style(const ndw_obj_t *o,
 		bb->shadow_rx = (uint8_t)(o->big ? 10 : 7);
 		bb->shadow_ry = 4;
 		bb->style = ND_BB_STYLE_FLORA;
+		bb->pad0 = is_non_trunk_plant ? 1u : 2u;
 		break;
 	case NDW_K_CACTUS:
 		bb->shadow_rx = (uint8_t)(o->big ? 9 : 6);
 		bb->shadow_ry = 4;
 		bb->style = ND_BB_STYLE_FLORA;
+		bb->pad0 = 0;
 		break;
 	case NDW_K_STONE:
 		bb->shadow_rx = 4;
@@ -1210,8 +1218,8 @@ int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
 	return 1;
 }
 
-#define MAX_DRAW 192
-#define ALL_GPU_MAX_DRAW 8192
+#define MAX_DRAW 512
+#define ALL_GPU_MAX_DRAW 24576
 
 void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
@@ -1437,18 +1445,20 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					dst_bb->pad0 = 0;
 				} else {
 					dst_bb->tint_rgba = tint_b;
+					dst_bb->pad0 = 0;
 					if (entity_spr >= NDS_ROCK_TAN_BIG && entity_spr <= NDS_STONE_TINY) {
 						dst_bb->style = ND_BB_STYLE_MINERAL;
 					} else if (entity_spr >= NDS_DECOR_YEL && entity_spr <= NDS_DECOR_PINK) {
 						dst_bb->style = ND_BB_STYLE_GRASS;
+						dst_bb->pad0 = 1u;
 					} else if (entity_spr >= NDS_TREE_OAK && entity_spr <= NDS_BUSH_TEAL) {
 						dst_bb->style = ND_BB_STYLE_FLORA;
+						dst_bb->pad0 = (bh <= 30.0f) ? 1u : 2u;
 					} else {
 						dst_bb->style = ND_BB_STYLE_STANDARD;
 					}
 					dst_bb->shadow_rx = (uint8_t)(bw * 0.34f > 4.0f ? bw * 0.34f : 4.0f);
 					dst_bb->shadow_ry = (uint8_t)(dst_bb->shadow_rx * 0.45f > 2.0f ? dst_bb->shadow_rx * 0.45f : 2.0f);
-					dst_bb->pad0 = 0;
 				}
 				all_gpu_count++;
 			}
@@ -1468,25 +1478,12 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float lwx_f = (float)lwx;
 		float lwy_f = (float)lwy;
 
-		/* Cache near-field tree trunk positions for canopy understory zoning */
-		int32_t tree_wx[64], tree_wy[64];
-		int tree_n = 0;
-		for (uint32_t a = 0; a < all_gpu_count && tree_n < 64; a++) {
-			if (s_all_gpu_batch[a].style == ND_BB_STYLE_LEAF_TINT ||
-			    s_all_gpu_batch[a].style == ND_BB_STYLE_FLORA) {
-				if (s_all_gpu_batch[a].height >= 36.0f) {
-					tree_wx[tree_n] = (int32_t)s_all_gpu_batch[a].x;
-					tree_wy[tree_n] = (int32_t)s_all_gpu_batch[a].y;
-					tree_n++;
-				}
-			}
-		}
-
-		/* Sample a high-frequency 6-unit grid within [-252..+252] with 2..3 micro-tufts per fertile cell */
+		/* Sample a high-frequency 6-unit world-locked lattice within [-252..+252] using ndw_fdiv
+		 * so grid coordinates are 100% invariant across negative/positive world axes and room transitions */
 		const int32_t step = 6;
 		const int32_t rad = 252;
-		int32_t cx0 = ((lwx - rad) / step) * step;
-		int32_t cy0 = ((lwy - rad) / step) * step;
+		int32_t cx0 = ndw_fdiv(lwx - rad, step) * step;
+		int32_t cy0 = ndw_fdiv(lwy - rad, step) * step;
 
 		for (int32_t gy = cy0; gy <= lwy + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gy += step) {
 			for (int32_t gx = cx0; gx <= lwx + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gx += step) {
@@ -1520,20 +1517,11 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
 					bio = mt.biome;
 
-				float min_tree_d2 = 999999.0f;
-				for (int t = 0; t < tree_n; t++) {
-					float tx = (float)(wx - tree_wx[t]);
-					float ty = (float)(wy - tree_wy[t]);
-					float td2 = tx * tx + ty * ty;
-					if (td2 < min_tree_d2)
-						min_tree_d2 = td2;
-				}
-
 				int zone = ND_MEADOW_NONE;
 				float scale_m = 1.0f;
 				int flip = 0;
 				if (!nd_seven_eval_meadow_area(wx, wy, z_f, (float)local_wl, slope_mag,
-				                               bio, min_tree_d2, &zone, &scale_m, &flip))
+				                               bio, 999999.0f, &zone, &scale_m, &flip))
 					continue;
 
 				nd_seven_sprite_rect_t sr;
