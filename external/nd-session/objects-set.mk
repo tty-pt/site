@@ -1,2 +1,2 @@
-CFLAGS-libnd-session-o := -fPIC -I../axil-nd/include -I../axil-tty/include -D_GNU_SOURCE
-CFLAGS-session-o := -fPIC -I../axil-nd/include -I../axil-tty/include -D_GNU_SOURCE
+CFLAGS-libnd-session-o := -fPIC -I../axil-nd/include -I../axil-tty/include -I../nd-world/include -I../nd-region/include -I../nd-region/include/nd -I../nd-obj/include -I../nd-mcp/include -I../nd-speech/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE
+CFLAGS-session-o := -fPIC -I../axil-nd/include -I../axil-tty/include -I../nd-world/include -I../nd-region/include -I../nd-region/include/nd -I../nd-obj/include -I../nd-mcp/include -I../nd-speech/include -I../nd-view/include -I../libchaff/include -D_GNU_SOURCE

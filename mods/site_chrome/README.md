@@ -4,7 +4,7 @@ Browser-side WebAssembly enhancement for global site navigation, mobile menu dra
 
 ## Overview
 
-`mods/site_chrome` is a **WASM-only module** (`WASM_ONLY=1` in its Makefile). It has no native `.so` companion on the server. Instead, it compiles `mods/site_chrome/ux/site_chrome.c` to `htdocs/site_chrome.wasm` for progressive enhancement in the browser.
+`mods/site_chrome` is a **WASM-only module** (`WASM_ONLY=1` in its Makefile). It has no native `.so` companion on the server. Instead, it compiles `mods/site_chrome/ux/chrome.c` (with `mods/common/ux/site_chrome.c`) to `htdocs/site_chrome.wasm` for progressive enhancement in the browser.
 
 ## Features
 
@@ -15,10 +15,10 @@ Browser-side WebAssembly enhancement for global site navigation, mobile menu dra
 ## Architecture
 
 - **Entry point:** Compiled to `wasm32-wasi` reactor format.
-- **Hydration:** Loaded by `htdocs/bud-client.js` on pages with `data-modules="site_chrome"` or combined with module WASMs.
-- **Purity:** Strict C-isomorphic WASM purity (depends only on `bud.h`, `bud_app.h`, and pure C standard library).
+- **Hydration:** Loaded by `htdocs/stele-client.js` on pages with `data-modules="site_chrome"` or combined with module WASMs.
+- **Purity:** Strict C-isomorphic WASM purity (depends only on `bud.h`, `bud_app.h`, `<ttypt/stele_wasm.h>`, and pure C standard library).
 
 ## Related Docs
 
-- `docs/WASM-BRIDGE.md` — Client-side WASM loader and event hydration.
-- `docs/C-ISOMORPHIC-BUD.md` — C-isomorphic compilation rules.
+- `docs/WEB_HAL_SPECIFICATION.md` — Client-side WASM substrate and event hydration.
+- `docs/CONVENTIONS.md` — C-isomorphic compilation rules.

@@ -1,365 +1,242 @@
 #include "nd_seven_ground.h"
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_motion.h"
+#include <ttypt/areole.h>
+#include <nd/field.h>
 #include <string.h>
 
-static uint32_t unit_noise(uint32_t h, int ux, int uy)
+__attribute__((weak)) ar_system_t *nd_seven_get_chunk_sys(void) { return NULL; }
+__attribute__((weak)) void ar_system_clear(ar_system_t *cs) { (void)cs; }
+__attribute__((weak)) bool ar_system_probe_view(ar_system_t *cs, uint8_t view_id, uint16_t world, int32_t wx, int32_t wy, ar_sample_t *out)
 {
-	return ndw_mix(h ^ (uint32_t)(uy * 16 + ux + 1) * 0x9E3779B1u);
+	(void)cs; (void)view_id; (void)world; (void)wx; (void)wy; (void)out;
+	return false;
 }
 
-void ground_cell(uint32_t *fb, int w, int h, const ndw_ground_t *g,
-                 const int16_t pos[4], int cx, int cy, int px, int py, uint32_t anim)
+uint32_t alpha_blend_rgb(uint32_t bg, uint32_t fg, int alpha)
 {
-	ctx_t c = { fb, w, h, px, py };
-	uint32_t hash = ndw_cell_hash(pos, cx, cy);
-	uint32_t base, alt1, alt2, alt3 = 0;
-	int r = g->r, gg = g->g, b = g->b;
+	if (alpha <= 0) return bg;
+	if (alpha >= 256) return fg;
+	uint32_t inv = (uint32_t)(256 - alpha);
+	uint32_t a   = (uint32_t)alpha;
+	uint32_t rb  = (((bg & 0x00FF00FFu) * inv + (fg & 0x00FF00FFu) * a) >> 8) & 0x00FF00FFu;
+	uint32_t g   = (((bg & 0x0000FF00u) * inv + (fg & 0x0000FF00u) * a) >> 8) & 0x0000FF00u;
+	return 0xFF000000u | rb | g;
+}
 
-	if (px >= w || py >= h || px + NDW_CELL_PX * SCALE <= 0 || py + NDW_CELL_PX * SCALE <= 0)
-		return;
+static inline uint32_t lerp_rgb(uint32_t c1, uint32_t c2, int num, int den)
+{
+	if (num <= 0) return c1;
+	if (num >= den) return c2;
+	int r1 = (int)(c1 & 0xFF), g1 = (int)((c1 >> 8) & 0xFF), b1 = (int)((c1 >> 16) & 0xFF);
+	int r2 = (int)(c2 & 0xFF), g2 = (int)((c2 >> 8) & 0xFF), b2 = (int)((c2 >> 16) & 0xFF);
+	int r = r1 + ((r2 - r1) * num) / den;
+	int g = g1 + ((g2 - g1) * num) / den;
+	int b = b1 + ((b2 - b1) * num) / den;
+	return RGB(r, g, b);
+}
 
-	if (g->kind == NDW_G_GRASS) {
-		tint_t t = { g->r, g->g, g->b, 0 };
-		blit_all(fb, w, h, NDS_GRASS, 0, 0, px, py, SCALE, &t);
-		if ((hash % 100) < 6) {
-			int id = NDS_DECOR_YEL + (int)((hash >> 8) & 1);
-			const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[id];
-			blit_all(fb, w, h, id, sr->w / 2, sr->h - 1,
-			         px + (4 + (int)((hash >> 12) & 7)) * SCALE, py + 14 * SCALE, SCALE, NULL);
-		}
-		return;
+uint32_t water_color_at_depth(int depth, int r, int gg, int b)
+{
+	static const uint32_t C_SHALLOW = RGB(64, 218, 235);
+	static const uint32_t C_SHELF   = RGB(52, 178, 228);
+	static const uint32_t C_OUTER   = RGB(36, 122, 202);
+	static const uint32_t C_ABYSS   = RGB(14, 50, 135);
+	const int shallow_max = 4;
+	const int shelf_max   = 11;
+	const int max_depth   = 28;
+
+	uint32_t water_col;
+	if (depth <= shallow_max) {
+		water_col = lerp_rgb(C_SHALLOW, C_SHELF, depth - 1, shallow_max - 1);
+	} else if (depth <= shelf_max) {
+		water_col = lerp_rgb(C_SHELF, C_OUTER, depth - shallow_max, shelf_max - shallow_max);
+	} else {
+		int t = depth - shelf_max;
+		int span = max_depth - shelf_max;
+		if (t > span) t = span;
+		water_col = lerp_rgb(C_OUTER, C_ABYSS, t, span);
 	}
+	return tint_col(water_col, r, gg, b);
+}
 
+uint32_t shade_rgb(uint32_t col, int shade256)
+{
+	if (shade256 == 256) return col;
+	int r = (int)(col & 0xFF) * shade256 / 256;
+	int g = (int)((col >> 8) & 0xFF) * shade256 / 256;
+	int b = (int)((col >> 16) & 0xFF) * shade256 / 256;
+	if (r > 255) r = 255;
+	if (g > 255) g = 255;
+	if (b > 255) b = 255;
+	return RGB(r, g, b);
+}
+
+int water_alpha_at_depth(int depth)
+{
+	static const uint8_t s_beer_lambert_alpha[33] = {
+		0,
+		32,  48,  64,  82, 102, 124, 146, 168, 188, 206,
+		220, 232, 240, 246, 250, 252, 253, 254, 254, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255
+	};
+	if (depth <= 0) return 0;
+	if (depth >= 28) return 255;
+	return (int)s_beer_lambert_alpha[depth];
+}
+
+static uint32_t ndw_ground_base_rgb(const ndw_ground_t *g)
+{
+	int r, gg, b;
 	switch (g->kind) {
-	case NDW_G_SAND:
-		base = RGB(226, 200, 140); alt1 = RGB(210, 182, 122); alt2 = RGB(238, 214, 160);
-		break;
-	case NDW_G_SNOW:
-		base = RGB(234, 240, 250); alt1 = RGB(210, 222, 240); alt2 = RGB(252, 252, 255);
-		break;
-	case NDW_G_TUNDRA:
-		base = RGB(150, 166, 148); alt1 = RGB(128, 148, 126); alt2 = RGB(180, 190, 176);
-		break;
 	case NDW_G_WATER:
-		base = RGB(36, 78, 148);   /* deep sapphire */
-		alt1 = RGB(48, 112, 186);  /* mid azure body */
-		alt2 = RGB(88, 170, 232);  /* luminous wave crest */
-		alt3 = RGB(220, 245, 255); /* specular foam / glint */
-		break;
-	default: /* ash */
-		base = RGB(54, 48, 52); alt1 = RGB(40, 36, 40); alt2 = RGB(76, 66, 68);
-		break;
+	case NDW_G_SHALLOW_WATER:
+	case NDW_G_SAND:   r = 226; gg = 200; b = 140; break;
+	case NDW_G_SNOW:   r = 234; gg = 240; b = 250; break;
+	case NDW_G_TUNDRA: r = 150; gg = 166; b = 148; break;
+	case NDW_G_ASH:    r = 54;  gg = 48;  b = 52;  break;
+	default:           r = 78;  gg = 128; b = 60;  break;
 	}
-	base = tint_col(base, r, gg, b);
-	alt1 = tint_col(alt1, r, gg, b);
-	alt2 = tint_col(alt2, r, gg, b);
-	if (alt3) alt3 = tint_col(alt3, r, gg, b);
+	r = r * g->r / 128; gg = gg * g->g / 128; b = b * g->b / 128;
+	if (r > 255) r = 255;
+	if (gg > 255) gg = 255;
+	if (b > 255) b = 255;
+	return RGB(r, gg, b);
+}
 
-	urect(&c, 0, 0, NDW_CELL_PX, NDW_CELL_PX, base);
-	for (int uy = 0; uy < NDW_CELL_PX; uy++)
-		for (int ux = 0; ux < NDW_CELL_PX; ux++) {
-			uint32_t n = unit_noise(hash, ux, uy) & 31;
-			if (g->kind == NDW_G_WATER) {
-				int gx = (int)pos[0] * NDW_TILE_W + cx * NDW_CELL_PX + ux;
-				int gy = -(int)pos[1] * NDW_TILE_H + cy * NDW_CELL_PX + uy;
-				int drift = (int)(anim / 6);
-
-				/* Wave 1: primary gentle undulating wave crest */
-				int wave_y = gy + ((((gx >> 2) ^ (gx >> 4)) * 3) & 3);
-				int w1 = (wave_y + (gx >> 3) - drift) % 12;
-				if (w1 < 0) w1 += 12;
-
-				int chop = ((gx * 3) / 4 + (gy >> 1) + (drift >> 1)) % 14;
-				if (chop < 0) chop += 14;
-
-				/* Secondary swell for natural surface depth */
-				int w2 = (gy * 2 - gx + (drift >> 1)) % 19;
-				if (w2 < 0) w2 += 19;
-				int chop2 = (gx + gy * 2) % 15;
-				if (chop2 < 0) chop2 += 15;
-
-				if (w1 == 0 && chop < 8) {
-					if (chop < 3)
-						urect(&c, ux, uy, 1, 1, alt3);
-					else
-						urect(&c, ux, uy, 1, 1, alt2);
-				} else if (w1 == 1 && chop < 7) {
-					urect(&c, ux, uy, 1, 1, alt1);
-				} else if (w2 == 0 && chop2 < 5) {
-					urect(&c, ux, uy, 1, 1, alt1);
-				} else if (n == 0) {
-					urect(&c, ux, uy, 1, 1, alt1);
-				}
-			} else if (n < 2) {
-				urect(&c, ux, uy, 1, 1, alt1);
-			} else if (n == 2) {
-				urect(&c, ux, uy, 1, 1, alt2);
-			}
-		}
-
-	if (g->kind == NDW_G_SAND && (((hash >> 8) & 3) == 0)) {
-		static const int8_t arc[8] = { 1, 0, 0, -1, -1, 0, 0, 1 };
-		int ux0 = 2 + (int)((hash >> 12) & 3), uy0 = 5 + (int)((hash >> 15) & 7);
-		for (int k = 0; k < 8; k++) {
-			urect(&c, ux0 + k, uy0 + arc[k], 1, 1, shade(alt1, 92));
-			urect(&c, ux0 + k, uy0 + arc[k] - 1, 1, 1, alt2);
-		}
-	}
-	if (g->kind == NDW_G_ASH && (hash % 23) == 0) {
-		int ux0 = 3 + (int)((hash >> 8) & 3), uy0 = 4 + (int)((hash >> 12) & 7);
-		for (int k = 0; k < 8; k++)
-			urect(&c, ux0 + k, uy0 + ((k >> 1) & 1), 1, 1, RGB(226, 96, 28));
-	}
-	if (g->kind == NDW_G_SNOW && (hash % 17) == 0)
-		urect(&c, 3 + (int)((hash >> 8) & 7), 3 + (int)((hash >> 12) & 7), 2, 1, RGB(255, 255, 255));
+uint32_t ndw_biome_base_rgb(unsigned biome)
+{
+	ndw_ground_t g = ndw_biome_style(biome);
+	return ndw_ground_base_rgb(&g);
 }
 
 #define BORDER_CACHE 64
 typedef struct {
 	int16_t pos[4];
 	uint8_t used;
-	uint8_t act_valid;
-	uint64_t act_mask;
-	uint8_t act[NDW_ROWS * NDW_COLS];
 	ndw_warp_grid_t grid;
 } border_ent_t;
 static border_ent_t s_border[BORDER_CACHE];
 static unsigned s_border_next;
 
-static border_ent_t *border_find(const int16_t pos[4])
-{
-	border_ent_t *e;
-
-	for (int i = 0; i < BORDER_CACHE; i++)
-		if (s_border[i].used && !memcmp(s_border[i].pos, pos, sizeof(s_border[i].pos)))
-			return &s_border[i];
-	e = &s_border[s_border_next++ % BORDER_CACHE];
-	memcpy(e->pos, pos, sizeof(e->pos));
-	e->used = 1;
-	e->act_valid = 0;
-	ndw_warp_grid_fill(&e->grid, pos);
-	return e;
-}
-
 const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4])
 {
-	return &border_find(pos)->grid;
-}
-
-static int border_q(int cell, int s)
-{
-	return cell * NDW_CELL_PX * NDW_SUB + (s * 2 + 1) * NDW_SUB / (2 * SCALE);
-}
-
-static const uint8_t *border_active(border_ent_t *e, const uint8_t grp[9], unsigned no_blend)
-{
-	uint64_t key = (uint64_t)no_blend << 40;
-
-	for (int k = 0; k < 9; k++)
-		key |= (uint64_t)(grp[k] & 15) << (4 * k);
-	if (e->act_valid && e->act_mask == key)
-		return e->act;
-	for (int cy = 0; cy < NDW_ROWS; cy++)
-		for (int cx = 0; cx < NDW_COLS; cx++) {
-			int any = 0;
-
-			for (int sy = 0; sy < NDW_CELL_PX * SCALE && !any; sy++)
-				for (int sx = 0; sx < NDW_CELL_PX * SCALE && !any; sx++) {
-					uint16_t w[9];
-					any = ndw_ground_weights(&e->grid, border_q(cx, sx), border_q(cy, sy), grp, no_blend, w);
-				}
-			e->act[cy * NDW_COLS + cx] = (uint8_t)any;
-		}
-	e->act_mask = key;
-	e->act_valid = 1;
-	return e->act;
-}
-
-static int same_ground(const ndw_ground_t *a, const ndw_ground_t *b)
-{
-	return a->kind == b->kind && a->r == b->r && a->g == b->g && a->b == b->b;
-}
-
-void ground_blend(uint32_t *fb, int w, int h, const nd_client_state_t *st,
-                  int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
-                  int tx, int ty)
-{
-	static uint32_t scratch[9][NDW_CELL_PX * SCALE * NDW_CELL_PX * SCALE];
-	const int cpx = NDW_CELL_PX * SCALE;
-	ndw_ground_t style[9];
-	unsigned no_blend = 0;
-	uint8_t grp[9];
-	const uint8_t *act;
-	border_ent_t *ent;
-	int differs = 0;
-
-	style[4] = ndw_biome_style(own->biome);
-	for (int dj = -1; dj <= 1; dj++)
-		for (int di = -1; di <= 1; di++) {
-			ndw_tile_t nt;
-			int16_t np[4];
-			int k = (dj + 1) * 3 + (di + 1);
-
-			if (!di && !dj) {
-				nt = *own;
-			} else {
-				nd_seven_tile_at(st, ti + di, tj + dj, &nt, np);
-			}
-			style[k] = ndw_biome_style(nt.biome);
-			differs |= !same_ground(&style[k], &style[4]);
-			if (style[k].kind == NDW_G_WATER)
-				no_blend |= NDW_WATER_BIT(di, dj);
-		}
-	for (int k = 0; k < 9; k++) {
-		grp[k] = (uint8_t)k;
-		for (int j = 0; j < k; j++)
-			if (same_ground(&style[j], &style[k])) {
-				grp[k] = grp[j];
-				break;
-			}
+	for (int i = 0; i < BORDER_CACHE; i++) {
+		if (s_border[i].used && !memcmp(s_border[i].pos, pos, sizeof(s_border[i].pos)))
+			return &s_border[i].grid;
 	}
-	if (!differs)
-		return;
-	ent = border_find(pos);
-	act = border_active(ent, grp, no_blend);
-
-	for (int cy = 0; cy < NDW_ROWS; cy++)
-		for (int cx = 0; cx < NDW_COLS; cx++) {
-			int px = tx + cx * cpx, py = ty + cy * cpx;
-			int have[9] = { 0 };
-
-			if (!act[cy * NDW_COLS + cx])
-				continue;
-			if (px >= w || py >= h || px + cpx <= 0 || py + cpx <= 0)
-				continue;
-			for (int sy = 0; sy < cpx; sy++) {
-				int y = py + sy;
-				if (y < 0 || y >= h)
-					continue;
-				for (int sx = 0; sx < cpx; sx++) {
-					int x = px + sx;
-					uint16_t wt[9];
-					int own_k = 4;
-
-					if (x < 0 || x >= w)
-						continue;
-					ndw_ground_weights(&ent->grid, border_q(cx, sx), border_q(cy, sy), grp, no_blend, wt);
-					for (int k = 0; k < 9; k++)
-						if (wt[k])
-							own_k = k;
-					if (!have[own_k]) {
-						ground_cell(scratch[own_k], cpx, cpx, &style[own_k], pos, cx, cy, 0, 0, nd_seven_get_anim());
-						have[own_k] = 1;
-					}
-					fb[y * w + x] = scratch[own_k][sy * cpx + sx];
-				}
-			}
-		}
+	border_ent_t *e = &s_border[s_border_next++ % BORDER_CACHE];
+	memcpy(e->pos, pos, sizeof(e->pos));
+	e->used = 1;
+	ndw_warp_grid_fill(&e->grid, pos);
+	return &e->grid;
 }
 
-#define TILE_GROUND_CACHE_SIZE 16
-#define TILE_PX_W (NDW_TILE_W * SCALE)
-#define TILE_PX_H (NDW_TILE_H * SCALE)
+int nd_seven_pos_in_map(const int16_t pos[4], const nd_map_data_t *map)
+{
+	if (!map || map->width == 0 || map->height == 0)
+		return 0;
+	if (pos[2] != map->pos[2] || pos[3] != map->pos[3])
+		return 0;
 
-typedef struct {
-	int16_t pos[4];
-	uint8_t nbiomes[9];
-	uint32_t anim_key;
-	uint8_t valid;
-	uint32_t pixels[TILE_PX_W * TILE_PX_H];
-} tile_ground_cache_entry_t;
+	int ti = (int)pos[0] - (int)map->pos[0];
+	int tj = (int)map->pos[1] - (int)pos[1];
+	int col = (int)map->player_x + ti;
+	int row = (int)map->player_y + tj;
 
-static tile_ground_cache_entry_t s_tile_cache[TILE_GROUND_CACHE_SIZE];
-static unsigned s_tile_cache_next = 0;
+	return (col >= 0 && col < (int)map->width && row >= 0 && row < (int)map->height);
+}
+
+static float s_camera_zoom = 1.0f;
+
+void nd_seven_set_zoom(float zoom)
+{
+	if (zoom < ND_SEVEN_ZOOM_MIN) zoom = ND_SEVEN_ZOOM_MIN;
+	if (zoom > ND_SEVEN_ZOOM_MAX) zoom = ND_SEVEN_ZOOM_MAX;
+	if (s_camera_zoom != zoom) {
+		s_camera_zoom = zoom;
+	}
+}
+
+float nd_seven_get_zoom(void)
+{
+	return s_camera_zoom;
+}
+
+void nd_seven_zoom_in(void)
+{
+	nd_seven_set_zoom(s_camera_zoom * 1.15f);
+}
+
+void nd_seven_zoom_out(void)
+{
+	nd_seven_set_zoom(s_camera_zoom / 1.15f);
+}
 
 void nd_seven_ground_cache_forget(void)
 {
-	memset(s_tile_cache, 0, sizeof(s_tile_cache));
-	s_tile_cache_next = 0;
+	memset(s_border, 0, sizeof(s_border));
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	if (cs) {
+		ar_system_clear(cs);
+	}
 }
 
-void nd_seven_ground_tile_render(uint32_t *fb, int w, int h, const nd_client_state_t *st,
-                                 int ti, int tj, const int16_t pos[4], const ndw_tile_t *own,
-                                 int tx, int ty)
+int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 {
-	if (tx + TILE_PX_W <= 0 || tx >= w || ty + TILE_PX_H <= 0 || ty >= h)
-		return;
-
-	uint8_t nbiomes[9];
-	int has_water = (ndw_biome_style(own->biome).kind == NDW_G_WATER);
-	nbiomes[4] = own->biome;
-
-	for (int dj = -1; dj <= 1; dj++) {
-		for (int di = -1; di <= 1; di++) {
-			int k = (dj + 1) * 3 + (di + 1);
-			if (di == 0 && dj == 0) continue;
-			ndw_tile_t nt;
-			int16_t np[4];
-			nd_seven_tile_at(st, ti + di, tj + dj, &nt, np);
-			nbiomes[k] = nt.biome;
-			if (ndw_biome_style(nt.biome).kind == NDW_G_WATER)
-				has_water = 1;
-		}
+	uint16_t world = (uint16_t)nd_seven_get_world();
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	if (cs) {
+		ar_sample_t s;
+		if (ar_system_probe_view(cs, 0, world, wx, wy, &s))
+			return s.val;
 	}
 
-	uint32_t anim_key = has_water ? ((nd_seven_get_anim() / 6) % 12 + 1) : 0;
-	tile_ground_cache_entry_t *entry = NULL;
+	int32_t cx = morton_fdiv(wx, NDW_TILE_W);
+	int32_t cy = morton_fdiv(wy, NDW_TILE_H);
+	int32_t ox = cx * NDW_TILE_W;
+	int32_t oy = cy * NDW_TILE_H;
+	const int gdim = 48;
 
-	for (int i = 0; i < TILE_GROUND_CACHE_SIZE; i++) {
-		if (s_tile_cache[i].valid &&
-		    memcmp(s_tile_cache[i].pos, pos, sizeof(s_tile_cache[i].pos)) == 0 &&
-		    memcmp(s_tile_cache[i].nbiomes, nbiomes, sizeof(nbiomes)) == 0 &&
-		    s_tile_cache[i].anim_key == anim_key) {
-			entry = &s_tile_cache[i];
-			break;
-		}
-	}
+	float fx = ((float)(wx - ox) / (float)NDW_TILE_W) * (float)gdim;
+	float fy = ((float)(wy - oy) / (float)NDW_TILE_H) * (float)gdim;
+	int col0 = (int)fx;
+	int row0 = (int)fy;
+	if (col0 < 0) col0 = 0;
+	if (col0 >= gdim) col0 = gdim - 1;
+	if (row0 < 0) row0 = 0;
+	if (row0 >= gdim) row0 = gdim - 1;
+	int col1 = col0 + 1;
+	int row1 = row0 + 1;
 
-	if (!entry) {
-		entry = &s_tile_cache[s_tile_cache_next++ % TILE_GROUND_CACHE_SIZE];
-		memcpy(entry->pos, pos, sizeof(entry->pos));
-		memcpy(entry->nbiomes, nbiomes, sizeof(entry->nbiomes));
-		entry->anim_key = anim_key;
-		entry->valid = 1;
+	float u = fx - (float)col0;
+	float v = fy - (float)row0;
+	float wu = u * u * (3.0f - 2.0f * u);
+	float wv = v * v * (3.0f - 2.0f * v);
 
-		ndw_ground_t g = ndw_biome_style(own->biome);
-		for (int cy = 0; cy < NDW_ROWS; cy++) {
-			for (int cx = 0; cx < NDW_COLS; cx++) {
-				ground_cell(entry->pixels, TILE_PX_W, TILE_PX_H, &g, pos, cx, cy,
-				            cx * NDW_CELL_PX * SCALE, cy * NDW_CELL_PX * SCALE,
-				            nd_seven_get_anim());
-			}
-		}
-		ground_blend(entry->pixels, TILE_PX_W, TILE_PX_H, st, ti, tj, pos, own, 0, 0);
-	}
+	int32_t x0 = ox + (int32_t)(((int64_t)col0 * NDW_TILE_W) / gdim);
+	int32_t x1 = ox + (int32_t)(((int64_t)col1 * NDW_TILE_W) / gdim);
+	int32_t y0 = oy + (int32_t)(((int64_t)row0 * NDW_TILE_H) / gdim);
+	int32_t y1 = oy + (int32_t)(((int64_t)row1 * NDW_TILE_H) / gdim);
+	float v00 = (float)nd_field_sample(world, 3, x0, y0).elevation_q12_4;
+	float v10 = (float)nd_field_sample(world, 3, x1, y0).elevation_q12_4;
+	float v01 = (float)nd_field_sample(world, 3, x0, y1).elevation_q12_4;
+	float v11 = (float)nd_field_sample(world, 3, x1, y1).elevation_q12_4;
 
-	int src_x0 = 0, src_y0 = 0;
-	int dst_x0 = tx, dst_y0 = ty;
-	int bw = TILE_PX_W;
-	int bh = TILE_PX_H;
+	float h0 = v00 * (1.0f - wu) + v10 * wu;
+	float h1 = v01 * (1.0f - wu) + v11 * wu;
+	float h  = h0 * (1.0f - wv) + h1 * wv;
+	return (int16_t)(h >= 0.0f ? (h + 0.5f) : (h - 0.5f));
+}
 
-	if (dst_x0 < 0) {
-		src_x0 -= dst_x0;
-		bw += dst_x0;
-		dst_x0 = 0;
-	}
-	if (dst_y0 < 0) {
-		src_y0 -= dst_y0;
-		bh += dst_y0;
-		dst_y0 = 0;
-	}
-	if (dst_x0 + bw > w)
-		bw = w - dst_x0;
-	if (dst_y0 + bh > h)
-		bh = h - dst_y0;
+int16_t nd_seven_ground_elevation(int32_t wx, int32_t wy)
+{
+	return nd_field_elevation_to_block(nd_seven_ground_elevation_q12_4(wx, wy));
+}
 
-	if (bw <= 0 || bh <= 0)
-		return;
-
-	for (int r = 0; r < bh; r++) {
-		const uint32_t *src_row = &entry->pixels[(src_y0 + r) * TILE_PX_W + src_x0];
-		uint32_t *dst_row = &fb[(dst_y0 + r) * w + dst_x0];
-		memcpy(dst_row, src_row, (size_t)bw * sizeof(uint32_t));
-	}
+float nd_seven_ground_elevation_f(int32_t wx, int32_t wy)
+{
+	int16_t q = nd_seven_ground_elevation_q12_4(wx, wy);
+	return (float)q / 16.0f;
 }

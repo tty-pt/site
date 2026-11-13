@@ -23,6 +23,7 @@ XY_DECL(int, str_list_for_each, const char *, list, str_list_cb, cb, void *, use
 XY_DECL(int, respond_html, int, fd, const char *, html);
 XY_DECL(const char *, require_user, int, fd);
 XY_DECL(int, respond_json, int, fd, int, status, const char *, msg);
+XY_DECL(int, respond_bin, int, fd, int, status, const void *, data, size_t, len);
 XY_DECL(int, respond_error, int, fd, int, status, const char *, msg);
 XY_DECL(int, bad_request, int, fd, const char *, msg);  /* 400; NULL -> "Bad request" */
 XY_DECL(int, server_error, int, fd, const char *, msg); /* 500; NULL -> "Internal server error" */

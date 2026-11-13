@@ -9,7 +9,9 @@ check_view(){
   fields_re=$3
   desc=$4
 
-  body=$(curl -fsS "$BASE$route") || fail "$route fetch failed"
+  sep="&"
+  case "$route" in *\?*) sep="&" ;; *) sep="?" ;; esac
+  body=$(curl -fsS "$BASE${route}${sep}format=json") || fail "$route fetch failed"
   printf '%s' "$body" | grep -q "\"display_name\":\"$display\"" ||
     fail "$route missing source-owned display name ($desc)"
   printf '%s' "$body" | grep -q -E "$fields_re" ||
@@ -32,11 +34,15 @@ check_view "/grp?custom=1" "group" \
   '"ncols":1,"cols":\[\{"key":"title","label":"Title"' \
   "group display metadata"
 
-song=$(curl -fsS "$BASE/song?custom=1") || fail "/song fetch failed"
+song=$(curl -fsS "$BASE/song?custom=1&format=json") || fail "/song fetch failed"
 printf '%s' "$song" | grep -q '"content_field":"lyrics"' ||
   fail "/song missing source-owned content field"
-printf '%s' "$song" | grep -q 'name="lyrics"' ||
+
+html=$(curl -fsS "$BASE/song?custom=1") || fail "/song HTML fetch failed"
+printf '%s' "$html" | grep -q 'name="lyrics"' ||
   fail "/song did not render source-owned content field"
+printf '%s' "$html" | grep -q 'meta name="bud-state-src"' ||
+  fail "/song missing binary state preload link"
 
 if grep -E 'idx_select_fields_for|idx_display_name|strcmp\([^)]*"(song|poem|gig|grp)"' \
   mods/index/index.c mods/index/ux/list.c >/dev/null; then

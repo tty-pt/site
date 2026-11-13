@@ -210,7 +210,7 @@ static const char *idx_resolve_refs(const col_t *col, const char *raw)
  *    reserved single-letter pref keys. */
 
 static const char *const LF_PREF_KEYS[] = {
-	"t", "b", "f", "l", "m", "z", NULL
+	"t", "b", "f", "l", "m", "z", "format", NULL
 };
 
 static int lf_key_is(const char *k, size_t n, const char *name)
@@ -245,6 +245,67 @@ static void lf_qs_rewrite_per_page(char *qs, size_t cap, unsigned v)
 	memcpy(p, val, vl);
 }
 
+static int lf_str_case_cmp(const char *s1, const char *s2)
+{
+	if (!s1) s1 = "";
+	if (!s2) s2 = "";
+	while (*s1 && *s2) {
+		unsigned char c1 = (unsigned char)*s1;
+		unsigned char c2 = (unsigned char)*s2;
+		if (c1 >= 'A' && c1 <= 'Z') c1 += ('a' - 'A');
+		if (c2 >= 'A' && c2 <= 'Z') c2 += ('a' - 'A');
+		if (c1 != c2)
+			return (int)c1 - (int)c2;
+		s1++;
+		s2++;
+	}
+	return (int)(unsigned char)*s1 - (int)(unsigned char)*s2;
+}
+
+static void lf_sort_ids(const char **ids, int nids, unsigned fields_hd,
+                        const char *sort_field, int sort_asc)
+{
+	if (!ids || nids <= 1 || !sort_field || !sort_field[0] || !fields_hd)
+		return;
+
+	const char **vals = (const char **)malloc((size_t)nids * sizeof(char *));
+	if (!vals)
+		return;
+
+	for (int i = 0; i < nids; i++) {
+		if (!ids[i]) {
+			vals[i] = "";
+			continue;
+		}
+		char fkey[256];
+		snprintf(fkey, sizeof(fkey), "%s:%s", ids[i], sort_field);
+		const char *v = (const char *)corm_get(fields_hd, fkey);
+		vals[i] = (v && v[0]) ? v : ids[i];
+	}
+
+	for (int gap = nids / 2; gap > 0; gap /= 2) {
+		for (int i = gap; i < nids; i++) {
+			const char *temp_id = ids[i];
+			const char *temp_val = vals[i];
+			int j;
+			for (j = i; j >= gap; j -= gap) {
+				int cmp = lf_str_case_cmp(vals[j - gap], temp_val);
+				if (!sort_asc)
+					cmp = -cmp;
+				if (cmp > 0) {
+					ids[j] = ids[j - gap];
+					vals[j] = vals[j - gap];
+				} else {
+					break;
+				}
+			}
+			ids[j] = temp_id;
+			vals[j] = temp_val;
+		}
+	}
+	free(vals);
+}
+
 static void list_fill_qs_clean(const char *raw, char *out, size_t outlen)
 {
 	const char *p;
@@ -269,6 +330,7 @@ static void list_fill_qs_clean(const char *raw, char *out, size_t outlen)
 			       lf_key_is(p, klen, "page") ||
 			       lf_key_is(p, klen, "per_page") ||
 			       lf_key_is(p, klen, "data") ||
+			       lf_key_is(p, klen, "format") ||
 			       lf_key_is(p, klen, "type");
 		}
 		if (keep && plen > 0) {
@@ -480,7 +542,34 @@ XY_IMPL(int, list_fill_state,
 	else
 		list_fill_qs_clean(raw_qs, state->query, sizeof(state->query));
 
-	result_hd = source_query(dataset_id, state->query);
+	char query_for_source[512] = { 0 };
+	const char *qp = state->query;
+	size_t qpos = 0;
+	int qfirst = 1;
+	while (*qp) {
+		const char *amp = strchr(qp, '&');
+		size_t seg_len = amp ? (size_t)(amp - qp) : strlen(qp);
+		if (seg_len > 0) {
+			int is_p = (seg_len >= 5 && strncmp(qp, "page=", 5) == 0) ||
+			           (seg_len >= 9 && strncmp(qp, "per_page=", 9) == 0);
+			if (!is_p) {
+				if (!qfirst && qpos + 1 < sizeof(query_for_source) - 1)
+					query_for_source[qpos++] = '&';
+				size_t cp = (qpos + seg_len < sizeof(query_for_source) - 1)
+				        ? seg_len
+				        : (sizeof(query_for_source) - 1 - qpos);
+				memcpy(query_for_source + qpos, qp, cp);
+				qpos += cp;
+				query_for_source[qpos] = '\0';
+				qfirst = 0;
+			}
+		}
+		qp += seg_len;
+		if (*qp == '&')
+			qp++;
+	}
+
+	result_hd = source_query(dataset_id, query_for_source);
 	if (!result_hd) {
 		state->nids = 0;
 		state->total = 0;
@@ -498,23 +587,23 @@ XY_IMPL(int, list_fill_state,
 	}
 	corm_fin(cur);
 
-	/* Local slicing. When the request carries an explicit ?page=, the
-	 * source engine already applied the page/per_page window to the
-	 * result set (nid_all IS the page) — slicing again would empty it.
-	 * Without ?page=, nid_all is the full match set and we slice
-	 * locally. disp_count is clamped to LIST_MAX_ROWS either way:
-	 * state->ids/values are fixed-size arrays and a wider window
-	 * overflows into values[] and corrupts the heap (double free in
-	 * list_fill_free). */
+	fields_hd = source_get_fields_hd(dataset_id);
+	if (state->sort_field[0] && nid_all > 1)
+		lf_sort_ids(all_ids, nid_all, fields_hd, state->sort_field, state->sort_asc);
+
+	/* Local slicing: apply page/per_page window over all matching ids.
+	 * disp_count is clamped to LIST_MAX_ROWS: state->ids/values are
+	 * fixed-size arrays and a wider window overflows into values[] and
+	 * corrupts the heap (double free in list_fill_free). */
 	if (per_page_clamped)
 		lf_qs_rewrite_per_page(
 		        state->query, sizeof(state->query), per_page);
-	offset = 0;
-	disp_count = (uint32_t)nid_all;
-	if (!state->has_page) {
-		offset = (page - 1) * per_page;
-		if (offset > (uint32_t)nid_all)
-			offset = 0;
+
+	offset = (page > 0 ? page - 1 : 0) * per_page;
+	if (offset >= (uint32_t)nid_all) {
+		offset = 0;
+		disp_count = 0;
+	} else {
 		disp_count = per_page;
 		if (offset + disp_count > (uint32_t)nid_all)
 			disp_count = (uint32_t)nid_all - offset;
@@ -523,7 +612,6 @@ XY_IMPL(int, list_fill_state,
 		disp_count = LIST_MAX_ROWS;
 
 	disp_nids = (int)disp_count;
-	fields_hd = source_get_fields_hd(dataset_id);
 	for (i = 0; i < disp_nids; i++) {
 		state->ids[i] = strdup(all_ids[offset + i]);
 		if (!state->ids[i])

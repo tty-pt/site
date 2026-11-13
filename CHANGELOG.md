@@ -5,6 +5,49 @@ All notable changes to the site and NeverDark platform will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] (target: v1.3.0)
+
+- **NeverDark 2.5D Seven Continuous Toroidal Planetary & Terrain Engine**:
+  - Implemented continuous 3D toroidal geometry ($R=2,000,000$, $r=1,335,000$) with periodic coordinate wrapping, analytical normals, tangent frames, and metric positivity across world boundaries without topological seams.
+  - Geometrically accurate **toroidal solar incidence & climate integration** (`external/nd-world/include/nd/field.h`, `external/libnoise/include/ttypt/chaff.h`): replaced flat Y-boundary polar temperature assumptions with 3D torus surface normals, inner-ring hole illumination and outer-ring self-shadowing (`R - r cos(theta)`), planetary rotation/azimuth, and continuous X/Y periodic wrapping integrated into the biome and flora climate system (`nd-biome` alpine meadow, mediterranean, and wetland; `nd-plant` 16 flora species and coastal water transitions).
+  - Multi-scale continuous 1/f procedural noise engine (`external/libnoise` / `libchaff`): continental mega-octaves, intermediate ridged mountain octaves (`shifts 6..9`), Mount Everest benchmark alpine peak (+1854 units), abyssal trenches (-2000 units), altitude lapse rate, soil/sand micro-materials, and continuous $C^2$ intra-room procedural elevation relief ($|H_{\text{fine}} - H_{\text{coarse}}| \le 63$).
+  - Physical water optics: Beer-Lambert volumetric absorption ($I(d) = I_0 e^{-\alpha d}$), shallow seabed visibility with turquoise absorption gradients, shoreline foam swash, dynamic wave perturbation, and zero-arithmetic water depth calculation.
+  - 2D/3D WebGL rendering pipeline (`external/liblamina/htdocs/lamina-bridge.js`, `mods/nd/ux/nd_seven_ground.c`): branchless bilinear heightfield reconstruction, analytical surface normals, `uSeaLevel` fragment shader uniform support (`FS_TERRAIN_3D`), and linear substrate texture filtering.
+  - Organic 2D dispersion and natural object placement: blue-noise spacing, expanded slot domains (slot 0: 72, slot 1: 44–116, slot 2: 98–138), arrival clear box flank occupancy, and deterministic grove/outcrop placement.
+- **Multi-Scale Spatial Hierarchy Engine (`external/libchunk`)**:
+  - 16-level quadtree LOD cascade, analytic unprojection, frustum culling, priority queue refinement, and guaranteed 4-quadrant continuous coverage across extreme camera sweeps (4.0x down to 0.00001x).
+  - GLSL shader parity headers (`ttypt/chunk_glsl.h`, `ttypt/chaff_glsl.h`) for identical client-server procedural evaluation.
+- **Dynamic Viewport Driver Registry & HUD Lifecycle**:
+  - Dynamic runtime switching between ANSI TTY terminal mode and Lamina Seven 2.5D graphical mode via action dock (`mods/nd/ux/nd_ui.c`, `nd_dock_ui.c`).
+  - Self-healing Web HAL bridge remounting with write buffering during DOM patch replay (`htdocs/stele-client.js`, `htdocs/axil-tty-bridge.js`, `external/libbud`).
+  - RPG HUD: collapsible chat console (`#rpg-chat`), room header, and live entity status.
+- **Local In-Browser LLM Inference Engine (`axil-auren` & `mods/auren`)**:
+  - Integrated in-browser WebAssembly LLM inference via Wllama / Qwen / Llama models.
+  - Dedicated UI frontend (`mods/auren/ux/auren_fe.c`, `auren_ui.c`) and styles.
+- **Hyle Data Engine & Bud Binary Streaming (`HYLT`)**:
+  - High-throughput binary list serialization protocol (`HYLT` format, `mods/common/ux/list_bin.c`, `tests/pages/26-binary-table-streaming.sh`).
+  - Interactive multi-column table sorting (`mods/index/ux/list_sort.c`, `tests/pages/27-column-sorting.sh`).
+  - In-memory caching and fragment streaming (`external/libhyle-bud`, `htdocs/hyle-fragments.js`).
+  - Sovereign design system stylesheet (`mods/common/htdocs/styles.css`).
+  - React/Next.js binding library (`external/libhyle-react`).
+- **Developer Experience & Tooling Hardening (`.pi/extensions/pi-quest` & `.pi/extensions/pi-mm`)**:
+  - `pi-quest` (unreleased, target v1.12.0): implemented scratch workspace leasing pool (`.pi/scratch/slot-*`), git worktree isolation, unified `/quest` operator command surface (consolidating `garden` into `/quest list` & `/quest del`, default disabled mode, zip-less archive), `@tty-pt` worktree symlink isolation, `core.worktree` restoration, empty-tree commit guards, and automatic `git submodule update` alignment after merge/squash/sanitization.
+  - `pi-mm` (unreleased, target v0.7.0): implemented multi-axis codebase mipmap graph & lore fusion (`scope: "code"`, replacing `pi-cbm`), ephemeral semantic session memory & mipmap compaction (`scope: "session"`, replacing `pi-vcc`), L0 consolidation backlog unwedging, zero-config local synthesis, and unified `mm-judge` status bar telemetry.
+- **Synchronized Unreleased Submodule Updates**:
+  - `axil` (target v1.8.0): packaged `@tty-pt/axil` with AxilClient, Web HAL bridge, and libstele integration in `libaxil.c`.
+  - `axil-hyle` (target v1.1.2): updated packaging dependencies to explicitly include libstele.
+  - `axil-nd` (target v1.4.0): introduced BCP macro view and sparsity packets (`include/nd/bcp-meta.h`, `include/nd/bcp-types.h`), water map flag, and fallback UI scripts.
+  - `axil-tty` (target v1.6.0): standardized Web HAL bridge and TerminalController under `@tty-pt/axil-tty` (`cjs/axil-tty.js`), enhanced unmount detachment and remount with write buffering (`htdocs/axil-tty-bridge.js`), and tracked generated web assets.
+  - `libbud` (target v1.3.0): client-side hydration engine (`htdocs/bud-hydrate.js`), state serialization enhancements (`include/bud/bud_state.h`), and batched capability remounting on patch replay boundaries (`src/libbud.c`).
+  - `libhyle` (target v1.7.0): sovereign design system stylesheet and styling assets (`htdocs/hyle.css`).
+  - `libhyle-bud` (target v1.2.0): fragment engine (`htdocs/hyle-fragments.js`), in-memory cache (`src/hyle-bud-cache.c`), and form/table/filter enhancements (`src/filter.c`, `src/form.c`, `src/table.c`).
+  - `libhyle-source` (target v1.4.0): packaged `@tty-pt/hyle-source`, implemented optimistic cache (`src/cache.c`), browser bundling, N-API native bindings (`npm/native/hyle_source_napi.c`), WebAssembly compilation (`npm/wasm/hyle_source_wasm.c`), and picker/store interfaces.
+  - `libislet` (target v1.4.0): implemented `islet_box_is_empty` Morton box spatial query test (`include/ttypt/islet.h`, `src/libislet.c`).
+  - `libstele` (target v1.6.0): zero-reload SPA navigation, warm-memory slot swapping, event bus (`src/stele_event.c`, `src/stele_wasm_kernel.c`), and active capability bridge synchronization with DOM patch remounting (`htdocs/stele-client.js`).
+  - `libxylem` (target v1.8.0): standardized Web HAL capability bridge under `@tty-pt/xylem` (`npm/dist/index.js`, `wasm-allowed-imports.lst`).
+  - `mk` (target v0.4.0): centralized WASM toolchain, BSD make optimizations, local `add-prefix-dirs` and `npm_inc` priority before system `PREFIX`, worktree support, and wasm export auditing (`scripts/wasm-allowed-exports.lst`, `scripts/wasm-audit.sh`).
+  - 19 NeverDark Tenant Modules (`nd-attr`, `nd-biome`, `nd-class`, `nd-core`, `nd-drink`, `nd-equip`, `nd-fight`, `nd-level`, `nd-mob`, `nd-mortal`, `nd-other`, `nd-plant`, `nd-race`, `nd-seat`, `nd-shop`, `nd-spell`, `nd-stone`, `nd-vanilla`, `nd-wts`): updated `stllog` comments, removed `add-prefix` paths, cleaned module dependencies, expanded `nd-biome` (`alpine meadow`, `mediterranean`, `wetland`), and expanded `nd-plant` (16 species + coastal water transition).
+
 ## [1.2.1] - 2026-11-04
 
 - **Release Wave 2026.12.1 — Universal Substrate & Package Ecosystem Synchronization**:

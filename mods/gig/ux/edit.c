@@ -6,9 +6,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include <transp/music.h>
+#include <pitch/music.h>
 #include "../../common/ux/site_music.h"
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 #include "../../index/ux/list.c"
 
 typedef struct {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
-// 1. Verify export from htdocs/axil-tty-bridge.js
-const { createAxilTtyBridge } = await import('../../external/axil-tty/htdocs/axil-tty-bridge.js');
+// 1. Verify export from htdocs/axil-tty-cap.js
+const { createAxilTtyBridge } = await import('../../external/axil-tty/htdocs/axil-tty-cap.js');
 assert.equal(typeof createAxilTtyBridge, 'function', 'createAxilTtyBridge should be exported');
 
 // 2. Verify export from CJS bundle
@@ -47,20 +47,110 @@ globalThis.document = {
 	head: { appendChild() {} }
 };
 
-// 4. Test bridge instantiation and imports
+// 4. Test bridge instantiation, imports, and unmount/remount lifecycle
 const memory = new WebAssembly.Memory({ initial: 1 });
 const encoder = new TextEncoder();
 const testStr = 'Hello from WASM!';
 const encoded = encoder.encode(testStr);
 new Uint8Array(memory.buffer, 128, encoded.length).set(encoded);
 
+let activeContainer = {
+	id: 'term-1',
+	__attached: false,
+	addEventListener() {},
+	getAttribute() { return 'false'; }
+};
+const liveElements = new Set([activeContainer]);
+
+globalThis.document.contains = (el) => liveElements.has(el);
+globalThis.document.querySelector = (sel) => {
+	if (sel === '[data-bud-terminal]') return activeContainer;
+	return null;
+};
+
+const termsCreated = [];
+globalThis.Terminal = class {
+	constructor(options) {
+		this.options = options;
+		this.written = [];
+		this.element = { addEventListener() {} };
+		this.disposed = false;
+		this.open = (el) => {
+			this.element = el;
+			if (!this.element.addEventListener) {
+				this.element.addEventListener = () => {};
+			}
+		};
+		this.write = (txt) => {
+			this.written.push(txt);
+			written.push(txt);
+		};
+		this.onData = () => {};
+		this.onResize = () => {};
+		this.loadAddon = () => {};
+		this.dispose = () => {
+			this.disposed = true;
+		};
+		termsCreated.push(this);
+	}
+};
+globalThis.window.Terminal = globalThis.Terminal;
+
 const bridge = createAxilTtyBridge(null, () => ({ memory }));
 bridge.mount();
 const imports = bridge.makeImports();
 assert.equal(typeof imports.term_write, 'function');
+assert.equal(termsCreated.length, 1, 'First terminal should be created');
+assert.equal(termsCreated[0].element, activeContainer, 'Terminal 1 mounted to activeContainer 1');
 
 imports.term_write(128, encoded.length);
-assert.deepEqual(written, [testStr]);
+assert.deepEqual(termsCreated[0].written, [testStr]);
+
+// Test unmount/remount lifecycle:
+// Simulate region switch where activeContainer is removed from DOM and replaced by a fresh one
+liveElements.delete(activeContainer);
+const newContainer = {
+	id: 'term-2',
+	__attached: false,
+	addEventListener() {},
+	getAttribute() { return 'false'; }
+};
+liveElements.add(newContainer);
+activeContainer = newContainer;
+
+// Call mount() again as replay() or host would after region returns to terminal
+bridge.mount();
+
+assert.equal(termsCreated.length, 2, 'Second terminal should be created when previous element was detached');
+assert.equal(termsCreated[0].disposed, true, 'First terminal should have been disposed');
+assert.equal(termsCreated[1].element, newContainer, 'Terminal 2 mounted to newContainer');
+
+// Writes should now go to terminal 2
+const testStr2 = 'Welcome back to terminal!';
+const encoded2 = encoder.encode(testStr2);
+new Uint8Array(memory.buffer, 256, encoded2.length).set(encoded2);
+imports.term_write(256, encoded2.length);
+assert.deepEqual(termsCreated[1].written, [testStr2]);
+
+// Test idempotence: repeated mount() on the same live container does not re-create or dispose
+bridge.mount();
+assert.equal(termsCreated.length, 2, 'Should not create a 3rd terminal when already attached');
+assert.equal(termsCreated[1].disposed, false, 'Terminal 2 should remain active');
+
+// Test resilience against stale __attached flag on a new container
+liveElements.delete(newContainer);
+const staleFlagContainer = {
+	id: 'term-3',
+	__attached: true,
+	addEventListener() {},
+	getAttribute() { return 'false'; }
+};
+liveElements.add(staleFlagContainer);
+activeContainer = staleFlagContainer;
+bridge.mount();
+assert.equal(termsCreated.length, 3, 'Terminal 3 should be created despite stale __attached flag');
+assert.equal(termsCreated[1].disposed, true, 'Terminal 2 should have been disposed');
+assert.equal(termsCreated[2].element, staleFlagContainer, 'Terminal 3 mounted to staleFlagContainer');
 
 bridge.destroy();
 

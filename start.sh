@@ -8,7 +8,9 @@ PORT=${PORT:-8080}
 # runs. `make install-libs` publishes a rebuilt library there.
 
 . "$SCRIPT_DIR/scripts/nd-kernel-mods.sh"
-export LD_LIBRARY_PATH="$(nd_local_ld_path "$SCRIPT_DIR")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+LOCAL_LD_PATH="$(nd_local_ld_path "$SCRIPT_DIR")"
+export LD_LIBRARY_PATH="$LOCAL_LD_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export CORM_AXIS_PATH="${CORM_AXIS_PATH:-$LOCAL_LD_PATH}"
 mkdir -p "$SCRIPT_DIR/var/nd"
 mkdir -p "$SCRIPT_DIR/var/software"
 if [ ! -d "$SCRIPT_DIR/var/software/corm" ]; then

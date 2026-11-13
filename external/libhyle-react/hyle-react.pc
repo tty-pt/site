@@ -1,0 +1,10 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libhyle-react
+Description: React 19 component library and substrate cache hooks for Hyle datasets
+Version: 1.0.0
+Libs: -L${libdir}
+Cflags: -I${includedir}

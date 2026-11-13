@@ -23,7 +23,7 @@ unsigned fd_player(unsigned fd);
 void eng_nd_rwrite(unsigned room_ref, unsigned exception_ref, char *str, size_t len);
 unsigned room_clean(unsigned loc_ref);
 
-unsigned me = -1;
+static unsigned me = -1;
 
 unsigned eng_me_get(void) {
 	return me;

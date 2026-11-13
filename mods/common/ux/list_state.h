@@ -2,6 +2,7 @@
 #define COMMON_LIST_STATE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* Neutral, framework-free list state — COMPLY.md §6.3. No
  * axil/corm/source/hyle/XY. */
@@ -57,6 +58,62 @@ typedef struct {
 	const char *values[LIST_MAX_ROWS * LIST_MAX_COLS];
 } list_state_t;
 
+/* ── Canonical Binary Table Wire Protocol (HYLT) ─────────────── */
+
+#define HYLT_MAGIC 0x544C5948 /* 'H' 'Y' 'L' 'T' in little-endian byte order (0x48594C54) */
+#define HYLT_VERSION 1
+
+#define HYLT_FLAG_SORT_ASC  0x0001
+#define HYLT_FLAG_CUSTOM    0x0002
+#define HYLT_FLAG_HAS_PAGE  0x0004
+
+#pragma pack(push, 1)
+typedef struct {
+	uint32_t magic;         /* 0x48594C54 */
+	uint16_t version;       /* 1 */
+	uint16_t flags;         /* HYLT_FLAG_* */
+	uint32_t total;         /* Total items in dataset */
+	uint16_t page;          /* Current page number */
+	uint16_t per_page;      /* Items per page */
+	uint16_t ncols;         /* Number of columns */
+	uint16_t nids;          /* Number of rows (IDs) */
+	uint16_t nopts;         /* Number of options */
+	uint16_t reserved;      /* Padding / reserved */
+	uint32_t arena_offset;  /* Byte offset to string arena */
+	uint32_t arena_size;    /* Size of string arena in bytes */
+} hylt_header_t;
+
+typedef struct {
+	uint32_t module_offset;
+	uint32_t display_name_offset;
+	uint32_t content_field_offset;
+	uint32_t content_label_offset;
+	uint32_t content_placeholder_offset;
+	uint32_t username_offset;
+	uint32_t query_offset;
+	uint32_t q_offset;
+	uint32_t sort_field_offset;
+	uint32_t lang_offset;
+} hylt_meta_t;
+
+typedef struct {
+	uint32_t key_offset;
+	uint32_t label_offset;
+	uint32_t target_source_offset;
+	uint32_t filter_offset;
+	uint32_t current_offset;
+	uint16_t type;
+	uint16_t opt_start;
+	uint16_t opt_count;
+	uint16_t reserved;
+} hylt_col_wire_t;
+
+typedef struct {
+	uint32_t id_offset;
+	uint32_t label_offset;
+} hylt_opt_wire_t;
+#pragma pack(pop)
+
 #ifndef LIST_WEAK
 #define LIST_WEAK __attribute__((weak))
 #endif
@@ -68,7 +125,10 @@ LIST_WEAK int list_state_to_json(const list_state_t *state, char *out, size_t ou
 LIST_WEAK void list_state_from_json(list_state_t *state, const char *json);
 LIST_WEAK void list_state_from_json_len(
         list_state_t *state, const char *json, size_t len);
+LIST_WEAK int list_state_to_bin(const list_state_t *state, void *out, size_t out_sz);
+LIST_WEAK int list_state_from_bin(list_state_t *state, const void *buf, size_t len);
 LIST_WEAK int list_has_query(const list_state_t *st);
+LIST_WEAK int list_state_sort(list_state_t *state, const char *field);
 LIST_WEAK struct bud_node *list_render(const list_state_t *state);
 
 #endif

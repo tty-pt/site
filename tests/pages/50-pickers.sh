@@ -76,7 +76,7 @@ grep -q 'name="pick_q_type"' "$BODY" ||
   fail "song/add missing picker search box for type"
 grep -q 'name="pick_q_author"' "$BODY" ||
   fail "song/add missing picker search box for author"
-grep -q 'hyle-fragments.js' "$BODY" ||
+grep -qE 'hyle-(cap|fragments)\.js' "$BODY" ||
   fail "song/add missing fragments transport script"
 pass "song/add picker markup complete"
 

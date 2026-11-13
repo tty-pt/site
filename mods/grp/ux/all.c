@@ -8,11 +8,11 @@
 
 #include "../../common/viewer_zoom.h"
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 
 #include "../../index/ux/list.c"
 
-#include <transp/music.h>
+#include <pitch/music.h>
 #include "../../common/ux/site_music.h"
 
 #include "detail.c"

@@ -3,7 +3,9 @@ set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="$ROOT/tests/unit/test_map_noise"
 
-gcc -O2 -DND_WORLD_PROVIDER \
+gcc -O2 -Wall -DND_WORLD_PROVIDER \
+    -DWORLDGEN_GOLDEN="\"$ROOT/tests/unit/data/worldgen_golden.txt\"" \
+    -I"$ROOT/external/libchaff/include" \
     -I"$ROOT/external/nd-world/include" \
     -I"$ROOT/external/nd-world/src" \
     -I"$ROOT/external/axil-nd/include" \

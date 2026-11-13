@@ -18,7 +18,7 @@ The systems libraries powering this stack—**`corm`**, **`xylem`**, **`lamina`*
 +=============================================================================+
 |                      THE WEB HAL (CAPABILITY BRIDGES)                       |
 +----------------+---------------+----------------+-------------+-------------+
-| axil-bridge.js | corm-bridge.js|lamina-bridge.js|webgl-bridge |bud-hydrate  |
+|  axil-cap.js   |  corm-cap.js  | lamina-cap.js  |webgl-cap.js | bud-cap.js  |
 | Binary Sockets | Persistence   |Zero-Copy Canvas|GPU Context  |Micro-Patches|
 +----------------+---------------+----------------+-------------+-------------+
 |                              BROWSER PLATFORM                               |
@@ -88,12 +88,13 @@ Capabilities are loaded declaratively via `body[data-capabilities]`:
 
 | Capability | Bridge Script | WASM C Header | Primary Responsibility |
 | :--- | :--- | :--- | :--- |
-| **`axil-ws`** | `htdocs/axil-bridge.js` | `<ttypt/axil-ws.h>` | Binary WebSocket multiplexing, auto-reconnect |
-| **`lamina`** | `htdocs/lamina-bridge.js` | `<ttypt/lam.h>` | Zero-copy canvas framebuffer blitting |
-| **`webgl`** | `htdocs/webgl-bridge.js` | `<ttypt/webgl.h>` | Hardware-accelerated 3D shader pipeline |
-| **`xylem`** | `htdocs/xylem-bridge.js` | `<ttypt/xy.h>` | In-WASM hook registry and event routing |
-| **`corm`** | `htdocs/corm-bridge.js` | `<ttypt/corm.h>` | In-memory relational tables & persistence |
-| **`bud`** | `htdocs/bud-hydrate.js` | `<bud/bud_app.h>` | SSR hydration, DOM micro-patching |
+| **`axil-ws`** | `htdocs/axil-cap.js` | `<ttypt/axil-ws.h>` | Binary WebSocket multiplexing, auto-reconnect |
+| **`lamina`** | `htdocs/lamina-cap.js` | `<ttypt/lam.h>` | Zero-copy canvas framebuffer blitting |
+| **`webgl`** | `htdocs/webgl-cap.js` | `<ttypt/webgl.h>` | Hardware-accelerated 3D shader pipeline |
+| **`xylem`** | `htdocs/xylem-cap.js` | `<ttypt/xy.h>` | In-WASM hook registry and event routing |
+| **`corm`** | `htdocs/corm-cap.js` | `<ttypt/corm.h>` | In-memory relational tables & persistence |
+| **`bud`** | `htdocs/bud-cap.js` | `<bud/bud_app.h>` | SSR hydration, DOM micro-patching |
+| **`hyle`** | `htdocs/hyle-cap.js` | `<hyle-bud/hyle-bud.h>` | Partial-refresh fragment & picker transport |
 
 ---
 

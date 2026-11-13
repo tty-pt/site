@@ -1,3 +1,0 @@
-PROJECT_NAME           = "transp"
-@INCLUDE = ../mk/Doxyfile
-INPUT                  = include/transp/

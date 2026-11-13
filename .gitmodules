@@ -34,6 +34,9 @@
 [submodule "external/libbud"]
 	path = external/libbud
 	url = git@github.com:tty-pt/libbud.git
+[submodule "external/libpitch"]
+	path = external/libpitch
+	url = git@github.com:tty-pt/libpitch.git
 [submodule "external/libhyle-source"]
 	path = external/libhyle-source
 	url = git@github.com:tty-pt/libhyle-source.git
@@ -115,3 +118,12 @@
 [submodule "external/pi-instruct"]
 	path = external/pi-instruct
 	url = https://github.com/tty-pt/pi-instruct.git
+[submodule "external/libchaff"]
+	path = external/libchaff
+	url = git@github.com:tty-pt/libchaff.git
+[submodule "external/libareole"]
+	path = external/libareole
+	url = git@github.com:tty-pt/libareole.git
+[submodule "external/liblamina"]
+	path = external/liblamina
+	url = git@github.com:tty-pt/liblamina.git

@@ -20,7 +20,6 @@
 
 extern nd_client_state_t client_state;
 extern nd_scene_t g_scene;
-extern uint32_t *g_lamina_fb;
 extern int g_stage_w, g_stage_h;
 extern int g_ui_initialized;
 extern char g_active_modal[32];
@@ -31,6 +30,10 @@ extern int g_active_driver_idx;
 /* Map UI */
 bud_node *render_room_map(const nd_client_state_t *st);
 void nd_map_canvas_redraw(const nd_client_state_t *st);
+int nd_map_canvas_enabled(const nd_client_state_t *st);
+/* Set by the websocket handler; the next wasm_tick redraws the map. The
+ * handler itself never renders or builds chunks. */
+extern int g_map_dirty;
 
 /* Dock & Keypad UI */
 bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler);
@@ -38,6 +41,7 @@ bud_node *render_direction_keypad(void);
 bud_node *render_action_bar(const nd_client_state_t *st);
 bud_node *render_gauges_slot(const nd_client_state_t *st);
 int on_dock_action(bud_event *ev);
+int on_cycle_viewport(bud_event *ev);
 
 /* State I/O */
 void parse_json_entities(const char *json, nd_client_state_t *st);

@@ -1,6 +1,7 @@
 #include "nd_seven_motion.h"
 #include "nd_seven_objects.h"
 #include "nd_seven_ground.h"
+#include <nd/field.h>
 #include <string.h>
 
 #define SCALE 2
@@ -20,13 +21,57 @@ static int s_pending_key;      /* move key sent, waiting for the new map */
 static float s_pending_t;
 static float s_acc;
 static uint32_t s_anim;
+static float s_anim_sec;
+
+static nd_grass_wake_step_t s_wake_ring[ND_SEVEN_WAKE_MAX];
+static int s_wake_head = 0;
+static int s_wake_count = 0;
+
+void nd_seven_clear_wake(void)
+{
+	memset(s_wake_ring, 0, sizeof(s_wake_ring));
+	s_wake_head = 0;
+	s_wake_count = 0;
+}
+
+void nd_seven_record_wake_step(float wx, float wy, float vx, float vy, float t_sec)
+{
+	if (s_wake_count > 0) {
+		int prev_idx = (s_wake_head + ND_SEVEN_WAKE_MAX - 1) % ND_SEVEN_WAKE_MAX;
+		const nd_grass_wake_step_t *prev = &s_wake_ring[prev_idx];
+		if (prev->valid) {
+			float dx = wx - prev->wx;
+			float dy = wy - prev->wy;
+			float dt = t_sec - prev->t_sec;
+			if (dx * dx + dy * dy < 9.0f && dt >= 0.0f && dt < 0.12f)
+				return;
+		}
+	}
+	s_wake_ring[s_wake_head].wx = wx;
+	s_wake_ring[s_wake_head].wy = wy;
+	s_wake_ring[s_wake_head].vx = vx;
+	s_wake_ring[s_wake_head].vy = vy;
+	s_wake_ring[s_wake_head].t_sec = t_sec;
+	s_wake_ring[s_wake_head].valid = 1;
+	s_wake_head = (s_wake_head + 1) % ND_SEVEN_WAKE_MAX;
+	if (s_wake_count < ND_SEVEN_WAKE_MAX)
+		s_wake_count++;
+}
+
+const nd_grass_wake_step_t *nd_seven_get_wake_steps(int *out_count)
+{
+	if (out_count)
+		*out_count = s_wake_count;
+	return s_wake_ring;
+}
 
 int nd_seven_get_lx(void) { return s_lx; }
 int nd_seven_get_ly(void) { return s_ly; }
 int nd_seven_get_dir(void) { return s_dir; }
 int nd_seven_get_walking(void) { return s_walking; }
 uint32_t nd_seven_get_anim(void) { return s_anim; }
-void nd_seven_step_anim(uint32_t delta) { s_anim += delta; }
+float nd_seven_get_anim_time(void) { return s_anim_sec; }
+void nd_seven_step_anim(uint32_t delta) { s_anim += delta; s_anim_sec += (float)delta * (1.0f / 60.0f); }
 
 void nd_seven_reset_input(void)
 {
@@ -50,6 +95,8 @@ static void recentre(int drop_keys)
 	}
 }
 
+static void known_tile_ingest_map(const nd_client_state_t *st);
+
 void nd_seven_sync_origin(const nd_client_state_t *st)
 {
 	const int16_t *pos;
@@ -63,6 +110,7 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		}
 		return;
 	}
+	known_tile_ingest_map(st);
 	pos = st->map_data.pos;
 	if (!s_have) {
 		memcpy(s_pos, pos, sizeof(s_pos));
@@ -148,8 +196,13 @@ ndw_tile_t nd_seven_convert_tile(const nd_map_tile_t *m)
 	if (m->flags & ND_MAP_FLAG_ROOM)   t.flags |= NDW_F_ROOM;
 	if (m->flags & ND_MAP_FLAG_PLAYER) t.flags |= NDW_F_PLAYER;
 	if (m->flags & ND_MAP_FLAG_ENTITY) t.flags |= NDW_F_ENTITY;
+	if ((m->flags & ND_MAP_FLAG_WATER) || m->bio_idx == 0) t.flags |= NDW_F_WATER;
 	t.glyph[0] = m->side_l; t.glyph[1] = m->symbol; t.glyph[2] = m->side_r;
 	t.fg[0] = m->fg_l & 15; t.fg[1] = m->fg & 15; t.fg[2] = m->fg_r & 15;
+	for (int s = 0; s < 3; s++) {
+		t.plant_id[s] = m->plant_id[s];
+		t.col_mask[s] = m->col_mask[s];
+	}
 	return t;
 }
 
@@ -182,7 +235,13 @@ static void centre_remember(const nd_client_state_t *st, const int16_t pos[4], n
 	centre_ent_t *e = centre_find(set, pos);
 
 	if (t->glyph[1] == '!') {
-		if (e) {
+		if (ND_PLANT_UNPACK_PRESENT(t->plant_id[1])) {
+			unsigned sp_idx = ND_PLANT_UNPACK_IDX(t->plant_id[1]);
+			unsigned is_big = ND_PLANT_UNPACK_BIG(t->plant_id[1]);
+			const nd_plant_spec_t *sp = &s_nd_plant_specs[sp_idx];
+			t->glyph[1] = (uint8_t)(is_big ? sp->big : sp->small);
+			t->fg[1] = sp->fg;
+		} else if (e) {
 			t->glyph[1] = e->glyph;
 			t->fg[1] = e->fg;
 		} else {
@@ -242,15 +301,326 @@ int nd_seven_centre_restore(const int16_t pos[4], uint8_t *glyph, uint8_t *fg)
 	return 0;
 }
 
+#define KNOWN_SETS 256
+#define KNOWN_WAYS 4
+typedef struct {
+	int16_t    pos[4];
+	ndw_tile_t tile;
+	uint32_t   seq;
+	uint8_t    valid;
+} known_tile_ent_t;
+
+static known_tile_ent_t s_known_tiles[KNOWN_SETS][KNOWN_WAYS];
+static uint32_t s_known_seq = 0;
+static int16_t s_known_min_x = 32767, s_known_max_x = -32768;
+static int16_t s_known_min_y = 32767, s_known_max_y = -32768;
+
+static unsigned known_tile_set(const int16_t pos[4])
+{
+	uint32_t h = (uint32_t)(uint16_t)pos[0] * 73856093u ^ (uint32_t)(uint16_t)pos[1] * 19349663u ^
+	             (uint32_t)(uint16_t)pos[2] * 83492791u ^ (uint32_t)(uint16_t)pos[3] * 2654435761u;
+	return (h ^ (h >> 15)) % KNOWN_SETS;
+}
+
+static void known_tile_apply_harvested(const int16_t pos[4], ndw_tile_t *t)
+{
+	for (uint8_t s = 0; s < 3; s++) {
+		if (t->glyph[s] && nd_seven_is_tile_obj_picked(pos, s)) {
+			t->glyph[s] = 0;
+			t->fg[s] = 0;
+		}
+	}
+}
+
+static void known_tile_remember(const int16_t pos[4], const ndw_tile_t *t)
+{
+	unsigned set = known_tile_set(pos);
+	known_tile_ent_t *target = NULL;
+	uint32_t oldest_seq = 0xFFFFFFFFu;
+	int oldest_w = 0;
+
+	for (int w = 0; w < KNOWN_WAYS; w++) {
+		known_tile_ent_t *e = &s_known_tiles[set][w];
+		if (e->valid && !memcmp(e->pos, pos, sizeof(e->pos))) {
+			target = e;
+			break;
+		}
+		if (!e->valid && !target)
+			target = e;
+		if (e->valid && e->seq < oldest_seq) {
+			oldest_seq = e->seq;
+			oldest_w = w;
+		}
+	}
+	if (!target)
+		target = &s_known_tiles[set][oldest_w];
+
+	memcpy(target->pos, pos, sizeof(target->pos));
+	if (pos[0] < s_known_min_x) s_known_min_x = pos[0];
+	if (pos[0] > s_known_max_x) s_known_max_x = pos[0];
+	if (pos[1] < s_known_min_y) s_known_min_y = pos[1];
+	if (pos[1] > s_known_max_y) s_known_max_y = pos[1];
+
+	target->tile = *t;
+	target->tile.flags &= (uint8_t)~(NDW_F_PLAYER | NDW_F_ENTITY);
+	for (int s = 0; s < 3; s++) {
+		if (target->tile.glyph[s] == ' ' || target->tile.glyph[s] == '!') {
+			target->tile.glyph[s] = 0;
+			target->tile.fg[s] = 0;
+		}
+	}
+	known_tile_apply_harvested(pos, &target->tile);
+	target->seq = ++s_known_seq;
+	target->valid = 1;
+}
+
+static void known_tile_ingest_map(const nd_client_state_t *st)
+{
+	if (!st || st->map_data.width == 0 || st->map_data.height == 0)
+		return;
+	int w = (int)st->map_data.width;
+	int h = (int)st->map_data.height;
+	for (int row = 0; row < h; row++) {
+		for (int col = 0; col < w; col++) {
+			int ti = col - (int)st->map_data.player_x;
+			int tj = row - (int)st->map_data.player_y;
+			int16_t tpos[4] = {
+				(int16_t)(st->map_data.pos[0] + ti),
+				(int16_t)(st->map_data.pos[1] - tj),
+				st->map_data.pos[2],
+				st->map_data.pos[3],
+			};
+			ndw_tile_t t = nd_seven_convert_tile(&st->map_data.tiles[row * w + col]);
+			centre_remember(st, tpos, &t);
+			known_tile_remember(tpos, &t);
+		}
+	}
+}
+
+int nd_seven_lookup_known_tile(const int16_t pos[4], ndw_tile_t *out)
+{
+	if (!pos || s_known_seq == 0 ||
+	    pos[0] < s_known_min_x || pos[0] > s_known_max_x ||
+	    pos[1] < s_known_min_y || pos[1] > s_known_max_y)
+		return 0;
+	unsigned set = known_tile_set(pos);
+	for (int w = 0; w < KNOWN_WAYS; w++) {
+		known_tile_ent_t *e = &s_known_tiles[set][w];
+		if (e->valid && !memcmp(e->pos, pos, sizeof(e->pos))) {
+			if (out) {
+				*out = e->tile;
+				known_tile_apply_harvested(pos, out);
+			}
+			return 1;
+		}
+	}
+	return 0;
+}
+
+#define VIRGIN_MEMO_SIZE   262144
+#define VIRGIN_MEMO_MAX_OBJ 9
+typedef struct {
+	int16_t    pos[4];
+	ndw_tile_t tile;
+	uint8_t    valid;
+	uint8_t    objs_valid;
+	uint8_t    obj_count;
+	ndw_obj_t  objs[VIRGIN_MEMO_MAX_OBJ];
+} virgin_memo_ent_t;
+
+static virgin_memo_ent_t s_virgin_memo[VIRGIN_MEMO_SIZE];
+static uint32_t s_scenery_synth_budget = 0xFFFFFFFFu;
+
+void nd_seven_set_scenery_synth_budget(uint32_t budget)
+{
+	s_scenery_synth_budget = budget;
+}
+
+static inline virgin_memo_ent_t *lookup_virgin_entry(const int16_t pos[4], unsigned *out_idx)
+{
+	/* Collision-free 512x512 2D spatial torus index across full-screen frustums */
+	unsigned idx = (((unsigned)(uint16_t)pos[0] & 511u) |
+	                (((unsigned)(uint16_t)pos[1] & 511u) << 9)) ^
+	               (((unsigned)(uint16_t)pos[3] & 3u) << 16);
+	if (out_idx)
+		*out_idx = idx;
+	virgin_memo_ent_t *m = &s_virgin_memo[idx];
+	if (m->valid &&
+	    m->pos[0] == pos[0] && m->pos[1] == pos[1] &&
+	    m->pos[2] == pos[2] && m->pos[3] == pos[3])
+		return m;
+	return NULL;
+}
+
+static inline virgin_memo_ent_t *synth_virgin_entry(const int16_t pos[4])
+{
+	unsigned idx = 0;
+	virgin_memo_ent_t *m = lookup_virgin_entry(pos, &idx);
+	if (m)
+		return m;
+	m = &s_virgin_memo[idx];
+	ndw_synth_virgin_tile(pos, &m->tile);
+	memcpy(m->pos, pos, sizeof(m->pos));
+	m->valid = 1;
+	m->objs_valid = 0;
+	m->obj_count = 0;
+	return m;
+}
+
+static void synth_virgin_cached(const int16_t pos[4], ndw_tile_t *out)
+{
+	virgin_memo_ent_t *m = synth_virgin_entry(pos);
+	*out = m->tile;
+}
+
+int nd_seven_resolve_tile_at_pos(const nd_client_state_t *st, const int16_t pos[4], ndw_tile_t *out)
+{
+	if (!pos || !out)
+		return 0;
+
+	if (st && st->map_data.width > 0 && st->map_data.height > 0 &&
+	    pos[2] == st->map_data.pos[2] && pos[3] == st->map_data.pos[3]) {
+		int ti = (int)pos[0] - (int)st->map_data.pos[0];
+		int tj = (int)st->map_data.pos[1] - (int)pos[1];
+		int col = (int)st->map_data.player_x + ti;
+		int row = (int)st->map_data.player_y + tj;
+		if (col >= 0 && col < (int)st->map_data.width &&
+		    row >= 0 && row < (int)st->map_data.height) {
+			*out = nd_seven_convert_tile(&st->map_data.tiles[row * st->map_data.width + col]);
+			centre_remember(st, pos, out);
+			known_tile_remember(pos, out);
+			known_tile_apply_harvested(pos, out);
+			return 1;
+		}
+	}
+
+	if (nd_seven_lookup_known_tile(pos, out))
+		return 1;
+
+	synth_virgin_cached(pos, out);
+	known_tile_apply_harvested(pos, out);
+	return 2;
+}
+
+const ndw_obj_t *nd_seven_resolve_room_objects_fast(const nd_client_state_t *st, const int16_t pos[4],
+                                                    ndw_obj_t scratch_objs[NDW_MAX_OBJ], int *out_count)
+{
+	if (!pos || !out_count) {
+		if (out_count) *out_count = 0;
+		return NULL;
+	}
+
+	ndw_tile_t t;
+	if (st && st->map_data.width > 0 && st->map_data.height > 0 &&
+	    pos[2] == st->map_data.pos[2] && pos[3] == st->map_data.pos[3]) {
+		int ti = (int)pos[0] - (int)st->map_data.pos[0];
+		int tj = (int)st->map_data.pos[1] - (int)pos[1];
+		int col = (int)st->map_data.player_x + ti;
+		int row = (int)st->map_data.player_y + tj;
+		if (col >= 0 && col < (int)st->map_data.width &&
+		    row >= 0 && row < (int)st->map_data.height) {
+			t = nd_seven_convert_tile(&st->map_data.tiles[row * st->map_data.width + col]);
+			centre_remember(st, pos, &t);
+			known_tile_remember(pos, &t);
+			known_tile_apply_harvested(pos, &t);
+			if (!t.glyph[0] && !t.glyph[1] && !t.glyph[2]) {
+				*out_count = 0;
+				return NULL;
+			}
+			*out_count = ndw_tile_objects(&t, pos, 0, scratch_objs);
+			return scratch_objs;
+		}
+	}
+
+	if (nd_seven_lookup_known_tile(pos, &t)) {
+		if (!t.glyph[0] && !t.glyph[1] && !t.glyph[2]) {
+			*out_count = 0;
+			return NULL;
+		}
+		*out_count = ndw_tile_objects(&t, pos, 0, scratch_objs);
+		return scratch_objs;
+	}
+
+	unsigned idx = 0;
+	virgin_memo_ent_t *m = lookup_virgin_entry(pos, &idx);
+	if (!m) {
+		if (s_scenery_synth_budget == 0) {
+			*out_count = 0;
+			return NULL;
+		}
+		if (s_scenery_synth_budget != 0xFFFFFFFFu)
+			s_scenery_synth_budget--;
+		m = &s_virgin_memo[idx];
+		ndw_synth_virgin_tile(pos, &m->tile);
+		memcpy(m->pos, pos, sizeof(m->pos));
+		m->valid = 1;
+		m->objs_valid = 0;
+		m->obj_count = 0;
+	}
+	if (nd_seven_is_tile_obj_picked(pos, 0) ||
+	    nd_seven_is_tile_obj_picked(pos, 1) ||
+	    nd_seven_is_tile_obj_picked(pos, 2)) {
+		t = m->tile;
+		for (uint8_t s = 0; s < 3; s++) {
+			if (t.glyph[s] && nd_seven_is_tile_obj_picked(pos, s)) {
+				t.glyph[s] = 0;
+				t.fg[s] = 0;
+			}
+		}
+		if (!t.glyph[0] && !t.glyph[1] && !t.glyph[2]) {
+			*out_count = 0;
+			return NULL;
+		}
+		*out_count = ndw_tile_objects(&t, pos, 0, scratch_objs);
+		return scratch_objs;
+	}
+
+	if (!m->objs_valid) {
+		if (m->tile.glyph[0] || m->tile.glyph[1] || m->tile.glyph[2]) {
+			ndw_obj_t tmp[NDW_MAX_OBJ];
+			int n = ndw_tile_objects(&m->tile, pos, 0, tmp);
+			if (n > VIRGIN_MEMO_MAX_OBJ) n = VIRGIN_MEMO_MAX_OBJ;
+			if (n > 0) memcpy(m->objs, tmp, (size_t)n * sizeof(ndw_obj_t));
+			m->obj_count = (uint8_t)n;
+		} else {
+			m->obj_count = 0;
+		}
+		m->objs_valid = 1;
+	}
+	*out_count = (int)m->obj_count;
+	return m->objs;
+}
+
+int nd_seven_resolve_room_objects(const nd_client_state_t *st, const int16_t pos[4],
+                                  ndw_tile_t *out_tile, ndw_obj_t out_objs[NDW_MAX_OBJ])
+{
+	if (!pos || !out_objs)
+		return 0;
+	if (out_tile)
+		nd_seven_resolve_tile_at_pos(st, pos, out_tile);
+	int count = 0;
+	const ndw_obj_t *ptr = nd_seven_resolve_room_objects_fast(st, pos, out_objs, &count);
+	if (ptr && ptr != out_objs && count > 0)
+		memcpy(out_objs, ptr, (size_t)count * sizeof(ndw_obj_t));
+	return count;
+}
+
 void nd_seven_forget(void)
 {
 	memset(s_centre, 0, sizeof(s_centre));
 	memset(s_centre_next, 0, sizeof(s_centre_next));
+	memset(s_known_tiles, 0, sizeof(s_known_tiles));
+	s_known_seq = 0;
+	s_known_min_x = 32767;
+	s_known_max_x = -32768;
+	s_known_min_y = 32767;
+	s_known_max_y = -32768;
 	nd_seven_objects_forget();
 	nd_seven_ground_cache_forget();
 	nd_seven_collision_invalidate();
 	nd_spatial_resolver_invalidate();
 	nd_seven_reset_input();
+	nd_seven_clear_wake();
 	s_have = 0;
 	recentre(1);
 }
@@ -281,17 +651,13 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 	if (known) {
 		*t = nd_seven_convert_tile(&md->tiles[row * w + col]);
 		centre_remember(st, pos, t);
+		known_tile_remember(pos, t);
 		return 1;
 	} else {
-		if (col < 0) col = 0;
-		if (row < 0) row = 0;
-		if (col >= w) col = w - 1;
-		if (row >= h) row = h - 1;
-		*t = nd_seven_convert_tile(&md->tiles[row * md->width + col]);
-		t->flags &= (uint8_t)~(NDW_F_ROOM | NDW_F_PLAYER);
-		t->exits = NDW_EXIT_W | NDW_EXIT_N | NDW_EXIT_E | NDW_EXIT_S;
-		memset(t->glyph, 0, sizeof(t->glyph));
-		memset(t->fg, 0, sizeof(t->fg));
+		if (nd_seven_lookup_known_tile(pos, t))
+			return 1;
+		synth_virgin_cached(pos, t);
+		known_tile_apply_harvested(pos, t);
 		return 2;
 	}
 }
@@ -322,6 +688,11 @@ void nd_seven_world_pos(const nd_client_state_t *st, int64_t *wx, int64_t *wy)
 	nd_seven_sync_origin(st);
 	if (wx) *wx = (int64_t)s_pos[0] * NDW_TILE_W + s_lx;
 	if (wy) *wy = (int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly;
+}
+
+int nd_seven_get_world(void)
+{
+	return (int)s_pos[3];
 }
 
 void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room)
@@ -503,8 +874,14 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 
 	s_anim++;
 	nd_seven_sync_origin(st);
+	if (dt < 0.0f)
+		dt = 0.0f;
 	if (dt > 0.1f)
 		dt = 0.1f;
+	/* Advance continuous animation clock strictly by wall-clock dt (capped at 1/30s per frame
+	 * so frame-rate changes from 15fps chunk baking to 60/120fps steady state never speed up wind/water) */
+	float anim_dt = (dt > 0.033f) ? 0.033f : ((dt > 0.0f) ? dt : (1.0f / 60.0f));
+	s_anim_sec += anim_dt * 1.4f;
 
 	if (s_pending_key) {
 		s_pending_t -= dt;
@@ -534,6 +911,11 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 		move_axis(st, dx, dy);
 		if (ox != s_lx || oy != s_ly)
 			s_walking = 1;
+	}
+	if (s_walking) {
+		float wwx = (float)((int64_t)s_pos[0] * NDW_TILE_W + s_lx);
+		float wwy = (float)((int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly);
+		nd_seven_record_wake_step(wwx, wwy, (float)dx * SPEED, (float)dy * SPEED, s_anim_sec);
 	}
 
 	if (!s_pending_key) {

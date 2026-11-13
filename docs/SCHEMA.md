@@ -122,4 +122,4 @@ Guard: no `bud`/component symbols may appear in `external/libhyle/src` or
 
 - `docs/FILTERS.md` — how filters use this metadata (multi-ref, repeated keys).
 - `docs/ARCHITECTURE.md` — why the data layer stays neutral.
-- `docs/SSR-CONTRACT.md` — what the component layer emits from the hint.
+- `docs/PICKERS.md` — what the component layer emits from the hint.

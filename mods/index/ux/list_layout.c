@@ -12,14 +12,26 @@ static bud_node *idx_list_layout(const list_state_t *state)
 
 	filter_wrap = idx_filter_chrome(state);
 
+	bud_node *sort_hidden = NULL;
+	if (state->sort_field[0]) {
+		char sort_val[128];
+		snprintf(sort_val, sizeof(sort_val), "%s:%s",
+		         state->sort_field, state->sort_asc ? "asc" : "desc");
+		sort_hidden = bud_tpl(
+		        "<input type='hidden' name='sort' value='%s'/>",
+		        sort_val);
+	}
+
 	if (state->nids == 0) {
 		form = bud_tpl(
 		        "<form method='get' action='' class='list-form'>"
 		        "  %node"
 		        "  %node"
+		        "  %node"
 		        "</form>",
 		        filter_wrap,
-		        site_ui_empty_state(ui_t("No items found")));
+		        site_ui_empty_state(ui_t("No items found")),
+		        sort_hidden);
 	} else {
 		const char *col_keys[LIST_MAX_COLS];
 		const char *col_labels[LIST_MAX_COLS];
@@ -55,8 +67,9 @@ static bud_node *idx_list_layout(const list_state_t *state)
 		        "  %node"
 		        "  %node"
 		        "  %node"
+		        "  %node"
 		        "</form>",
-		        filter_wrap, table, pagination);
+		        filter_wrap, table, pagination, sort_hidden);
 	}
 
 	snprintf(title, sizeof(title), "%ss", state->display_name);

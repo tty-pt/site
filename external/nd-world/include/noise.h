@@ -19,4 +19,6 @@ _bio_idx(
 	return rn_bit + (tmp_bit << 2);
 }
 
+struct bio nd_worldgen_point_sample(pos_t p);
+
 #endif

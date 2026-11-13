@@ -99,11 +99,18 @@ eng_mcp_action(unsigned player_ref, unsigned id,
 }
 
 static uint16_t
-compute_entity_flags(const OBJ *obj)
+compute_entity_flags(unsigned obj_ref, const OBJ *obj)
 {
 	uint16_t flags = 0;
 	if (obj->flags & OF_PLAYER) {
 		flags |= ND_EF_PLAYER;
+		uint64_t rid = 0;
+		uint8_t rplen = ST_PLEN_ROOT;
+		if (st_can_region(obj_ref, 0, ST_PLEN_ROOT) ||
+		    (st_region_of_player(obj_ref, &rid, &rplen) == 0 &&
+		     st_can_region(obj_ref, rid, rplen))) {
+			flags |= ND_EF_UNIVERSE_OWNER;
+		}
 	} else if (obj->type == TYPE_ENTITY) {
 		flags |= ND_EF_CREATURE;
 	}
@@ -146,7 +153,7 @@ _fbcp_item(char *bcp_buf, unsigned player_ref, unsigned obj_ref, unsigned char d
 	};
 	nd_get(HD_OBJ, &obj, &obj_ref);
 	struct icon ico = object_icon(player_ref, obj_ref);
-	ico.pi.flags = compute_entity_flags(&obj);
+	ico.pi.flags = compute_entity_flags(obj_ref, &obj);
 	unsigned char iden = BCP_ITEM;
 	char *p = bcp_buf, *aux2;
 	memcpy(p, "#b", 2);
@@ -202,7 +209,7 @@ eng_fbcp_item(unsigned player_ref, unsigned obj_ref, unsigned char dynflags)
 	pkt.type = obj.type;
 	pkt.actions = ico.actions;
 	pkt.fg = (uint16_t)ico.pi.fg;
-	pkt.flags = compute_entity_flags(&obj);
+	pkt.flags = compute_entity_flags(obj_ref, &obj);
 	pkt.dynflags = dynflags;
 	pkt.ch = ico.ch;
 	pkt.side = (uint8_t)obj.data[0];

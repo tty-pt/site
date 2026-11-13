@@ -5,7 +5,7 @@
 #include <string.h>
 
 #define SCALE 2
-#define LAMB_AY 23
+#define LAMB_AY 16
 
 static const int8_t s_spots[16][2] = {
 	{ -16, 26 }, { 16, 26 }, { -28, 12 }, { 28, 12 }, { -38, -6 }, { 38, -6 }, { -22, -18 }, { 22, -18 },
@@ -187,6 +187,16 @@ typedef struct {
 
 static room_entity_cache_entry_t s_room_cache[MULTI_ROOM_CACHE_SIZE];
 static unsigned s_room_cache_next = 0;
+static int16_t s_rc_min_x = 32767, s_rc_max_x = -32768;
+static int16_t s_rc_min_y = 32767, s_rc_max_y = -32768;
+
+static inline void rc_update_bounds(const int16_t pos[4])
+{
+	if (pos[0] < s_rc_min_x) s_rc_min_x = pos[0];
+	if (pos[0] > s_rc_max_x) s_rc_max_x = pos[0];
+	if (pos[1] < s_rc_min_y) s_rc_min_y = pos[1];
+	if (pos[1] > s_rc_max_y) s_rc_max_y = pos[1];
+}
 
 void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id)
 {
@@ -207,6 +217,7 @@ void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id)
 		memcpy(entry->pos, pos, sizeof(entry->pos));
 		entry->valid = 1;
 	}
+	rc_update_bounds(pos);
 	entry->slot_harvested[slot_id] = 1;
 	nd_spatial_resolver_invalidate();
 	nd_seven_collision_invalidate();
@@ -233,6 +244,7 @@ void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
 	}
 	entry->room_ref = room_ref;
 	memcpy(entry->pos, pos, sizeof(entry->pos));
+	rc_update_bounds(pos);
 	entry->entity_count = (count > ND_MAX_ENTITIES) ? ND_MAX_ENTITIES : count;
 	if (entities && count > 0) {
 		memcpy(entry->entities, entities, entry->entity_count * sizeof(nd_entity_desc_t));
@@ -270,7 +282,9 @@ const nd_entity_desc_t *nd_seven_get_cached_entities(const int16_t pos[4], size_
 
 int nd_seven_is_tile_obj_picked(const int16_t pos[4], uint8_t slot_id)
 {
-	if (!pos)
+	if (!pos || s_room_cache_next == 0 ||
+	    pos[0] < s_rc_min_x || pos[0] > s_rc_max_x ||
+	    pos[1] < s_rc_min_y || pos[1] > s_rc_max_y)
 		return 0;
 	for (size_t i = 0; i < MULTI_ROOM_CACHE_SIZE; i++) {
 		if (s_room_cache[i].valid &&
@@ -295,6 +309,10 @@ void nd_seven_objects_forget(void)
 	nd_seven_action_cooldown_reset();
 	memset(s_room_cache, 0, sizeof(s_room_cache));
 	s_room_cache_next = 0;
+	s_rc_min_x = 32767;
+	s_rc_max_x = -32768;
+	s_rc_min_y = 32767;
+	s_rc_max_y = -32768;
 	nd_spatial_resolver_invalidate();
 	nd_seven_collision_invalidate();
 }
@@ -375,7 +393,8 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 	if (ti == 0 && tj == 0 && st && st->room.ref) {
 		const nd_scenery_def_t *def = nd_seven_get_scenery_def(o->kind);
 		if (def) {
-			for (size_t i = 0; i < st->entity_count; i++) {
+			size_t ec = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
+			for (size_t i = 0; i < ec; i++) {
 				const nd_entity_desc_t *e = &st->entities[i];
 				if (e->ref != st->me && e->location == st->room.ref &&
 				    !nd_seven_is_picked(e->ref) &&
@@ -386,6 +405,8 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 			}
 		}
 	}
+	if (ND_PLANT_UNPACK_PRESENT(o->plant_id))
+		return s_nd_plant_specs[ND_PLANT_UNPACK_IDX(o->plant_id)].name;
 	const nd_scenery_def_t *def = nd_seven_get_scenery_def(o->kind);
 	if (def && def->default_name)
 		return def->default_name;
@@ -408,7 +429,10 @@ void sync_room_objects(const nd_client_state_t *st)
 		return;
 
 	uint32_t ent_hash = 0;
-	for (size_t i = 0; i < st->entity_count; i++) {
+	size_t ec = st->entity_count;
+	if (ec > ND_MAX_ENTITIES)
+		ec = ND_MAX_ENTITIES;
+	for (size_t i = 0; i < ec; i++) {
 		ent_hash ^= (uint32_t)st->entities[i].ref * 31u + (uint32_t)st->entities[i].ch + (uint32_t)st->entities[i].location;
 		for (const char *p = st->entities[i].name; *p; p++)
 			ent_hash = ent_hash * 33u + (uint8_t)*p;
@@ -425,12 +449,12 @@ void sync_room_objects(const nd_client_state_t *st)
 	if (!need_sync)
 		return;
 
-	nd_seven_cache_room_entities(st->room.ref, pos, st->entities, st->entity_count);
+	nd_seven_cache_room_entities(st->room.ref, pos, st->entities, ec);
 
 	s_tracker.room_ref = st->room.ref;
 	memcpy(s_tracker.pos, pos, sizeof(pos));
 	memcpy(s_tracker.glyphs, t.glyph, 3);
-	s_tracker.last_entity_count = st->entity_count;
+	s_tracker.last_entity_count = ec;
 	s_tracker.last_entity_hash = ent_hash;
 	s_tracker.count = 0;
 	s_tracker.bound_entities = 0;
@@ -462,7 +486,7 @@ void sync_room_objects(const nd_client_state_t *st)
 		if (is_depletable && nd_seven_is_tile_obj_picked(pos, obj_slot))
 			s_tracker.objs[k].harvested = 1;
 
-		for (size_t ei = 0; ei < st->entity_count; ei++) {
+		for (size_t ei = 0; ei < ec; ei++) {
 			if (used_entity[ei])
 				continue;
 			const nd_entity_desc_t *e = &st->entities[ei];
@@ -487,7 +511,7 @@ void sync_room_objects(const nd_client_state_t *st)
 		int is_depletable = nd_seven_has_scenery_trait(s_tracker.objs[k].kind, ND_SCENERY_TRAIT_DEPLETABLE);
 		const nd_scenery_def_t *def = nd_seven_get_scenery_def(s_tracker.objs[k].kind);
 
-		for (size_t ei = 0; ei < st->entity_count; ei++) {
+		for (size_t ei = 0; ei < ec; ei++) {
 			if (used_entity[ei])
 				continue;
 			const nd_entity_desc_t *e = &st->entities[ei];
@@ -508,7 +532,7 @@ void sync_room_objects(const nd_client_state_t *st)
 	/* Finalize names and child drop harvest */
 	for (int k = 0; k < cnt; k++) {
 		if (s_tracker.objs[k].entity_ref) {
-			for (size_t si = 0; si < st->entity_count; si++) {
+			for (size_t si = 0; si < ec; si++) {
 				if (st->entities[si].location == s_tracker.objs[k].entity_ref &&
 				    nd_seven_is_picked(st->entities[si].ref)) {
 					s_tracker.objs[k].drop_harvested = 1;
@@ -551,7 +575,8 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	if (s_tracker.objs[k].entity_ref != 0) {
 		if (nd_seven_is_picked(s_tracker.objs[k].entity_ref))
 			return 0;
-		for (size_t ei = 0; ei < st->entity_count; ei++) {
+		size_t ec = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
+		for (size_t ei = 0; ei < ec; ei++) {
 			if (st->entities[ei].ref == s_tracker.objs[k].entity_ref &&
 			    st->entities[ei].location == st->room.ref)
 				return 1;
@@ -560,169 +585,6 @@ int is_tracked_obj_present(const nd_client_state_t *st, int k)
 	}
 
 	return 1;
-}
-
-static inline void put_px(uint32_t *fb, int w, int h, int x, int y, uint32_t c)
-{
-	if ((unsigned)x < (unsigned)w && (unsigned)y < (unsigned)h)
-		fb[y * w + x] = c;
-}
-
-static inline void fill_px(uint32_t *fb, int w, int h, int x0, int y0, int x1, int y1, uint32_t c)
-{
-	if (x0 < 0) x0 = 0;
-	if (y0 < 0) y0 = 0;
-	if (x1 > w) x1 = w;
-	if (y1 > h) y1 = h;
-	for (int y = y0; y < y1; y++) {
-		uint32_t *row = &fb[y * w + x0];
-		int n = x1 - x0;
-		while (n-- > 0) *row++ = c;
-	}
-}
-
-static inline const uint8_t *font_rows(char ch)
-{
-	static const uint8_t f[][5] = {
-		[' '] = { 0, 0, 0, 0, 0 },
-		['*'] = { 0, 5, 2, 5, 0 },
-		['!'] = { 2, 2, 2, 0, 2 },
-		['$'] = { 2, 7, 2, 7, 2 },
-		['<'] = { 1, 2, 4, 2, 1 },
-		['>'] = { 4, 2, 1, 2, 4 },
-		['~'] = { 0, 5, 7, 2, 0 },
-		['a'] = { 2, 5, 7, 5, 5 },
-		['b'] = { 6, 5, 6, 5, 6 },
-		['c'] = { 3, 4, 4, 4, 3 },
-		['d'] = { 6, 5, 5, 5, 6 },
-		['e'] = { 7, 4, 6, 4, 7 },
-		['f'] = { 7, 4, 6, 4, 4 },
-		['g'] = { 3, 4, 5, 5, 3 },
-		['h'] = { 5, 5, 7, 5, 5 },
-		['i'] = { 7, 2, 2, 2, 7 },
-		['j'] = { 1, 1, 1, 5, 2 },
-		['k'] = { 5, 6, 4, 6, 5 },
-		['l'] = { 4, 4, 4, 4, 7 },
-		['m'] = { 5, 7, 5, 5, 5 },
-		['n'] = { 6, 5, 5, 5, 5 },
-		['o'] = { 2, 5, 5, 5, 2 },
-		['p'] = { 6, 5, 6, 4, 4 },
-		['q'] = { 2, 5, 5, 6, 3 },
-		['r'] = { 6, 5, 6, 5, 5 },
-		['s'] = { 3, 4, 2, 1, 6 },
-		['t'] = { 7, 2, 2, 2, 2 },
-		['u'] = { 5, 5, 5, 5, 2 },
-		['v'] = { 5, 5, 5, 5, 2 },
-		['w'] = { 5, 5, 5, 7, 5 },
-		['x'] = { 5, 5, 2, 5, 5 },
-		['y'] = { 5, 5, 2, 2, 2 },
-		['z'] = { 7, 1, 2, 4, 7 },
-		['O'] = { 7, 5, 5, 5, 7 },
-		['#'] = { 5, 7, 5, 7, 5 },
-	};
-	unsigned char uc = (unsigned char)ch;
-	if (uc >= 'A' && uc <= 'Z' && uc != 'O')
-		uc = (unsigned char)(uc + 32);
-	if (uc < sizeof(f)/sizeof(f[0]))
-		return f[uc];
-	return NULL;
-}
-
-void draw_object_name(uint32_t *fb, int w, int h, int cx, int top_y, const char *name)
-{
-	if (!name || !*name || !fb || w <= 0 || h <= 0)
-		return;
-
-	int len = (int)strlen(name);
-	int tw = len > 0 ? len * 8 - 2 : 0;
-	int x0 = cx - tw / 2;
-	int y0 = top_y - 15;
-
-	if (x0 < 3) x0 = 3;
-	if (x0 + tw >= w - 3) x0 = w - tw - 4;
-	if (y0 < 3) y0 = 3;
-	if (y0 + 10 >= h - 3) y0 = h - 14;
-
-	fill_px(fb, w, h, x0 - 3, y0 - 2, x0 + tw + 3, y0 + 12, 0xEE0E1018u);
-	put_px(fb, w, h, x0 - 3, y0 - 2, 0x55FFFFFFu);
-	put_px(fb, w, h, x0 + tw + 2, y0 - 2, 0x55FFFFFFu);
-
-	int cur_x = x0;
-	for (const char *p = name; *p; p++) {
-		const uint8_t *rows = font_rows(*p);
-		if (rows) {
-			for (int r = 0; r < 5; r++)
-				for (int k = 0; k < 3; k++)
-					if (rows[r] & (4 >> k))
-						fill_px(fb, w, h, cur_x + k * 2, y0 + r * 2,
-						        cur_x + k * 2 + 2, y0 + r * 2 + 2, 0xFFFAF0E6u);
-		}
-		cur_x += 8;
-	}
-}
-
-void draw_thinking_balloon(uint32_t *fb, int w, int h, int hx, int hy, const char *action)
-{
-	(void)action;
-	int hover = (int)((nd_seven_get_anim() / 20) & 1);
-	int bw = 28, bh = 15;
-	int bx0 = hx - bw / 2;
-	int by0 = hy - bh - 10 - hover;
-
-	if (by0 < 4) by0 = 4;
-	if (by0 + bh >= h - 4) by0 = h - bh - 5;
-	if (bx0 < 4) bx0 = 4;
-	if (bx0 + bw >= w - 4) bx0 = w - bw - 5;
-
-	int bx1 = bx0 + bw, by1 = by0 + bh;
-
-	uint32_t c_border = 0xFF24262E;
-	uint32_t c_bg = 0xFFFDFBF7;
-	uint32_t c_shadow = 0xFFE2DDD3;
-
-	int tx = hx;
-	int ty0 = by1;
-	put_px(fb, w, h, tx - 2, ty0,     c_border);
-	put_px(fb, w, h, tx - 1, ty0,     c_bg);
-	put_px(fb, w, h, tx,     ty0,     c_bg);
-	put_px(fb, w, h, tx + 1, ty0,     c_border);
-	put_px(fb, w, h, tx - 1, ty0 + 1, c_border);
-	put_px(fb, w, h, tx,     ty0 + 1, c_bg);
-	put_px(fb, w, h, tx + 1, ty0 + 1, c_border);
-	put_px(fb, w, h, tx,     ty0 + 2, c_border);
-
-	fill_px(fb, w, h, bx0 + 2, by0, bx1 - 2, by1, c_border);
-	fill_px(fb, w, h, bx0, by0 + 2, bx1, by1 - 2, c_border);
-	put_px(fb, w, h, bx0 + 1, by0 + 1, c_border);
-	put_px(fb, w, h, bx1 - 2, by0 + 1, c_border);
-	put_px(fb, w, h, bx0 + 1, by1 - 2, c_border);
-	put_px(fb, w, h, bx1 - 2, by1 - 2, c_border);
-
-	put_px(fb, w, h, bx1 - 1, by0 + 3, c_shadow);
-	fill_px(fb, w, h, bx0 + 3, by1 - 2, bx1 - 3, by1 - 1, c_shadow);
-
-	fill_px(fb, w, h, bx0 + 2, by0 + 1, bx1 - 2, by1 - 2, c_bg);
-	fill_px(fb, w, h, bx0 + 1, by0 + 2, bx1 - 1, by1 - 2, c_bg);
-
-	int cx = (bx0 + bx1) / 2;
-	int cy = (by0 + by1) / 2 - 1;
-
-	uint32_t c_gold = 0xFFFFC820;
-	uint32_t c_spark = 0xFFFFF6A0;
-	put_px(fb, w, h, cx - 6, cy - 2, c_gold);
-	put_px(fb, w, h, cx - 7, cy - 1, c_gold);
-	put_px(fb, w, h, cx - 6, cy - 1, c_spark);
-	put_px(fb, w, h, cx - 5, cy - 1, c_gold);
-	put_px(fb, w, h, cx - 6, cy,     c_gold);
-
-	uint32_t c_key = 0xFF4A4E5C;
-	put_px(fb, w, h, cx - 1, cy - 1, c_key);
-	put_px(fb, w, h, cx - 1, cy,     c_key);
-	put_px(fb, w, h, cx - 1, cy + 1, c_key);
-	fill_px(fb, w, h, cx,    cy + 1, cx + 6, cy + 2, c_key);
-	put_px(fb, w, h, cx + 6, cy - 1, c_key);
-	put_px(fb, w, h, cx + 6, cy,     c_key);
-	put_px(fb, w, h, cx + 6, cy + 1, c_key);
 }
 
 static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, int execute)
@@ -777,7 +639,8 @@ static int seven_action_impl(const nd_client_state_t *st, char *out, size_t sz, 
 
 	uint32_t room = st->room.ref;
 	if (room) {
-		for (size_t i = 0; i < st->entity_count; i++) {
+		size_t ec = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
+		for (size_t i = 0; i < ec; i++) {
 			const nd_entity_desc_t *e = &st->entities[i];
 			if (st->me && e->ref == st->me)
 				continue;
@@ -915,7 +778,7 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 	uint32_t room_ref = 0;
 	if (ti == 0 && tj == 0) {
 		ents = st->entities;
-		ent_count = st->entity_count;
+		ent_count = st->entity_count > ND_MAX_ENTITIES ? ND_MAX_ENTITIES : st->entity_count;
 		room_ref = st->room.ref;
 	} else {
 		ents = nd_seven_get_cached_entities(pos, &ent_count, &room_ref);
@@ -935,10 +798,16 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 		so->big = raw_objs[i].big;
 		so->is_entity = 0;
 		so->harvested = 0;
+		so->plant_id = raw_objs[i].plant_id;
+		so->col_mask = raw_objs[i].col_mask;
+		so->hw = raw_objs[i].hw;
+		so->hh = raw_objs[i].hh;
+		so->anchor_y = raw_objs[i].anchor_y;
 		so->entity_ref = 0;
 		so->flip = 0;
 		so->sprite_id = 0;
 		so->name[0] = '\0';
+		so->art[0] = '\0';
 
 		if (ti == 0 && tj == 0) {
 			const room_tracker_t *tr = nd_seven_get_tracker();
@@ -948,6 +817,14 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 					so->harvested = 1;
 				if (tr->objs[i].name[0])
 					snprintf(so->name, sizeof(so->name), "%s", tr->objs[i].name);
+				if (so->entity_ref && ents) {
+					for (size_t ei = 0; ei < ent_count; ei++) {
+						if (ents[ei].ref == so->entity_ref && ents[ei].art[0]) {
+							snprintf(so->art, sizeof(so->art), "%s", ents[ei].art);
+							break;
+						}
+					}
+				}
 			} else {
 				if (!is_tracked_obj_present(st, i))
 					so->harvested = 1;
@@ -1051,10 +928,16 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 			so->big = 0;
 			so->is_entity = 1;
 			so->harvested = 0;
+			so->plant_id = 0;
+			so->col_mask = 0;
+			so->hw = 0;
+			so->hh = 0;
+			so->anchor_y = 6;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);
 			snprintf(so->name, sizeof(so->name), "%s", e->name);
+			snprintf(so->art, sizeof(so->art), "%s", e->art);
 			out->obj_count++;
 		}
 	}
@@ -1110,10 +993,16 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 		so->big = raw_objs[i].big;
 		so->is_entity = 0;
 		so->harvested = 0;
+		so->plant_id = raw_objs[i].plant_id;
+		so->col_mask = raw_objs[i].col_mask;
+		so->hw = raw_objs[i].hw;
+		so->hh = raw_objs[i].hh;
+		so->anchor_y = raw_objs[i].anchor_y;
 		so->entity_ref = 0;
 		so->flip = 0;
 		so->sprite_id = 0;
 		so->name[0] = '\0';
+		so->art[0] = '\0';
 
 		if (is_player_tile && tr && i < tr->count) {
 			so->entity_ref = tr->objs[i].entity_ref;
@@ -1182,10 +1071,16 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 			so->big = 0;
 			so->is_entity = 1;
 			so->harvested = 0;
+			so->plant_id = 0;
+			so->col_mask = 0;
+			so->hw = 0;
+			so->hh = 0;
+			so->anchor_y = 6;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);
 			snprintf(so->name, sizeof(so->name), "%s", e->name);
+			snprintf(so->art, sizeof(so->art), "%s", e->art);
 			out->obj_count++;
 		}
 	}

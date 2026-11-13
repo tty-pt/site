@@ -1,6 +1,6 @@
 # Advanced Git Recovery — How the Pi-Quest Plan Was Recovered and How to Recover Anything
 
-> **Context:** `2026-09-01` `pi-quest` `docs/HIGH_LEVEL_PLAN_CONFIGURABLE_REVIEWER.md` (`743 lines` `B3 1788269285`) + `src/logging` `src/hooks` `src/persistence` B2/B3 edits were lost after `git reset --hard HEAD 2719b52 pi-quest refactor`. Plan was recovered byte-identical via `git fsck --lost-found`, src was not — this doc explains why and how to recover/prevent any case.
+> **Context:** `2026-09-01` `pi-quest` `docs/archive/HIGH_LEVEL_PLAN_CONFIGURABLE_REVIEWER.md` (`743 lines` `B3 1788269285`) + `src/logging` `src/hooks` `src/persistence` B2/B3 edits were lost after `git reset --hard HEAD 2719b52 pi-quest refactor`. Plan was recovered byte-identical via `git fsck --lost-found`, src was not — this doc explains why and how to recover/prevent any case.
 
 ## 1. How we recovered the situation
 
@@ -11,7 +11,7 @@
 ### 1.2 How the plan came back
 - `git fsck --lost-found --no-reflogs` (`man git-fsck --lost-found Write dangling objects into .git/lost-found/other/`) found `1446` dangling `blob` (`ls .git/lost-found/other | wc -l`).
 - `grep -r intentHash .git/lost-found/other` → single `da871cb1fd5fb73cda525585f409d3bfc80133f0 121054 B 743 lines` `head -1 # High-Level Plan — Configurable Reviewer` `Status BUILD B3` — the plan had been `git hash-object -w`/`git add`’d as a new untracked file before the reset, so it existed as a loose `blob` in `.git/objects/da/871cb…`.
-- `git cat-file -p da871cb1 > docs/HIGH_LEVEL_PLAN_CONFIGURABLE_REVIEWER.md && wc -l 743` — byte-identical, no reconstruction.
+- `git cat-file -p da871cb1 > docs/archive/HIGH_LEVEL_PLAN_CONFIGURABLE_REVIEWER.md && wc -l 743` — byte-identical, no reconstruction.
 
 ### 1.3 Why the rest did not come back the same way
 - `src/logging/types.ts:172` `c5c020923… INITIAL_PROMPT/intentHash` + `src/persistence.ts bef6633… future_draft_exists` were **unstaged worktree** (`git diff --stat 2 files`, `git diff --cached --stat (empty)`, `git hash-object types.ts → c5c0209… missing` `git cat-file -e` fails, not in `.git/objects`, not in `verify-pack` 4048 packed blobs, not in `lost-found/other` — `grep intentHash` across `1446` blobs `0 src hits`, only `da871cb1` plan line).
@@ -39,7 +39,7 @@ grep -r <string> .git/lost-found/other
 
 ## 3. When git cannot help — recover outside git
 
-1. **Opencode transcript** `~/.local/share/opencode/log/opencode.log` `57M` + `/tmp/opencode/tool-output/` + `.pi/quest/current/*/execution.log` — often echoes the diff verbatim.
+1. **Opencode transcript** `~/.local/share/opencode/log/opencode.log` `57M` + `/tmp/opencode/tool-output/` + `.pi/quest/future/*.md` / handoffs — often echoes the diff verbatim.
 2. **Editor local history** `~/.config/Code/Backups/` JetBrains `Local History` `~/.local/state/nvim/backup/` `.swp`.
 3. **Filesystem undelete** `extundelete /dev/nvme0n1p2 --restore-file <path>` (needs `sudo`, low odds after `reset` on `97%` full, blocks overwritten).
 4. **No btrfs/zfs snapshot** on this host (`df -T ext4` `mountinfo` no `lvm`).

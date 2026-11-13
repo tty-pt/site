@@ -184,6 +184,7 @@ XY_DECL(int, st_v, unsigned, player_ref, const char *, dir);
 #define ND_REGION_DRIVER_INHERIT    0x00
 #define ND_REGION_ALLOW_CHOICE      0x01
 #define ND_REGION_LOCKED            0x02
+#define ND_REGION_UNIVERSE_OWNER    0x04
 
 #define ND_LAYOUT_STANDARD_HYBRID   0
 #define ND_LAYOUT_STAGE_EXPANDED    1
@@ -207,7 +208,7 @@ struct st_rec {
 		char driver[16]; /* preferred stage driver ("lamina-2d", "tty", "bud") */
 		char stage_driver[16];
 	};
-	char     map_driver[16]; /* preferred map driver ("ascii-bud", "canvas-lamina", "none") */
+	char     map_driver[16]; /* preferred map driver ("ascii-bud", "lamina", "none"); empty = inherit, default "ascii-bud" */
 	char     mods[ND_ST_MAX_MODS][ND_ST_MOD_NAME];
 };
 

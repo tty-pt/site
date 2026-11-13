@@ -25,9 +25,11 @@ int main(void)
 	const char *map = strstr(html, "id=\"room-map-canvas\"");
 	assert(stage && map);
 	assert(strstr(html, "game-2d-mode"));
-	assert(strstr(html, "id=\"term\"") == NULL);
-	assert(strstr(html, "data-bud-terminal") == NULL);   /* no live xterm host left */
-	assert(strstr(html, "<nd-stage") != NULL);          /* a tag the terminal <div> is replaced by */
+	assert(strstr(html, "id=\"term\"") != NULL);
+	assert(strstr(html, "data-bud-terminal") != NULL);   /* live xterm host in floating RPG chat */
+	assert(strstr(html, "<nd-stage") != NULL);          /* a tag for the game stage */
+	assert(strstr(html, "id=\"seven-shader-status\"") != NULL);
+	assert(strstr(html, "Compiling shaders...") != NULL);
 	/* each canvas tag carries its own size attribute */
 	const char *tag_end = strchr(stage, '>');
 	char *s_tag = strndup(stage, (size_t)(tag_end - stage));
@@ -50,9 +52,31 @@ int main(void)
 		const char *ov_end = strchr(ov, '>');
 		char *ov_tag = strndup(ov, (size_t)(ov_end - ov));
 		assert(strstr(ov_tag, "absolute") && strstr(ov_tag, "z-10"));
-		assert(strstr(ov_tag, "top:12px") && strstr(ov_tag, "right:12px"));
+		assert(strstr(ov_tag, "top:12px") && strstr(ov_tag, "right:12px") && strstr(ov_tag, "bottom:76px"));
 		free(ov_tag);
 		assert(map > ov);
+		const char *rh = strstr(html, "id=\"room-header\"");
+		const char *bra = strstr(html, "id=\"bottom-right-actions\"");
+		assert(rh != NULL && rh < ov);
+		assert(bra != NULL && bra > ov);
+		assert(strstr(html, "max-h-[36vh]"));
+		assert(strstr(html, "id=\"chat-resize-ne\""));
+		assert(strstr(html, "id=\"hud-win-map\""));
+		assert(strstr(html, "id=\"hud-win-target\"") == NULL);
+		assert(strstr(html, "id=\"hud-win-contents\""));
+		assert(strstr(html, "id=\"bottom-left-windows\""));
+		assert(strstr(html, "hud-win-toolbar"));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-chat\""));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-title\""));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-map\""));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-target\"") == NULL);
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-contents\""));
+		assert(strstr(html, "data-bud-persist-key=\"nd-win-actions\"") == NULL);
+		assert(strstr(html, "id=\"actions-toolbar\"") == NULL);
+		assert(strstr(html, "id=\"toggle-3d-btn\"") == NULL);
+		assert(strstr(html, "data-bud-action=\"cycle-viewport\"") == NULL);
+		assert(strstr(html, "equip-socket"));
+		assert(strstr(html, "rpg-stat-row"));
 		assert(strstr(html, "game-2d-mode relative"));
 	}
 

@@ -42,6 +42,26 @@ static void test_table_render(void)
 
 	bud_free_string(html);
 	printf("PASS table rendering with sorting and row actions\n");
+
+	/* Test sort toggling and clean query string without leading/double & */
+	bud_node *hdr = hyle_bud_table_header(
+		col_keys, col_labels, 3,
+		"title", 1, "sort=title:asc&type=comunhao&page=2"
+	);
+	assert(hdr != NULL);
+	char *hdr_html = bud_render_html(hdr);
+	assert(hdr_html != NULL);
+	/* Clicking active title should toggle to desc, preserving type and resetting page */
+	assert(strstr(hdr_html, "href=\"?type=comunhao&amp;sort=title:desc\"") != NULL ||
+	       strstr(hdr_html, "href=\"?type=comunhao&sort=title:desc\"") != NULL);
+	assert(strstr(hdr_html, "?&") == NULL);
+	assert(strstr(hdr_html, "&&") == NULL);
+	assert(strstr(hdr_html, "page=") == NULL);
+	/* Clicking inactive author should sort asc, preserving type and resetting page */
+	assert(strstr(hdr_html, "href=\"?type=comunhao&amp;sort=author:asc\"") != NULL ||
+	       strstr(hdr_html, "href=\"?type=comunhao&sort=author:asc\"") != NULL);
+	bud_free_string(hdr_html);
+	printf("PASS table header clean query string and sort toggling\n");
 }
 
 static void test_pagination_render(void)

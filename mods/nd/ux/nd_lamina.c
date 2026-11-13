@@ -1,8 +1,10 @@
 #include <string.h>
 #include <stdint.h>
+#include <nd/field.h>
 #include "nd_lamina.h"
 #include "nd_scene.h"
 #include "nd_seven.h"
+#include "nd_seven_ground.h"
 #include "nd_seven_objects.h"
 #include "nd_seven_motion.h"
 
@@ -313,7 +315,7 @@ static void draw_mineral(uint32_t *fb, uint32_t w, uint32_t h, uint32_t tile_sz,
 		int boulder = kind == NDW_K_BOULDER;
 		int rw = tile_px(tile_sz, boulder ? 7 : 4) + 1;
 		int rh = rw * 3 / 4 + 1;
-		uint32_t base = (variant & 1) ? 0xFF6E8CB0 : 0xFF959AA4;   /* tan / cold grey */
+		uint32_t base = (variant & 1) ? 0xFF96989A : 0xFF9A9896;   /* warm grey / cold grey */
 		int x = fx - rw / 2, y = fy - rh;
 
 		fill_rect_blend(fb, w, h, (uint32_t)(x - 1), (uint32_t)(fy - 1), (uint32_t)(rw + 2), 2u, 0x55000000);
@@ -451,75 +453,19 @@ static inline uint32_t tod_brightness(uint32_t tod)
 	return 255 - (uint32_t)((diff * 115) / 43200);
 }
 
-/*
- * Organic biome borders. The tile at grid (gx, gy) was filled with its own
- * biome colour; where a neighbouring tile has another one, the pixels near
- * that edge are repainted with the neighbour's colour wherever the shared
- * ndw_ground_weights (the very contour Seven's ground uses, evaluated at the
- * pixel's world position) hands the point to that neighbour: crisp, no mixed
- * colours. Rooms and the grid's outside never blend.
- */
-static void blend_tile_border(uint32_t *fb, uint32_t w, uint32_t h, const nd_map_data_t *map,
-                              uint32_t cols, uint32_t rows, int gx, int gy,
-                              int tx, int ty, int tile_sz, uint32_t amb)
+static inline uint32_t lamina_alpha_blend(uint32_t bg, uint32_t fg, int alpha)
 {
-	const nd_map_tile_t *own = &map->tiles[gy * (int)cols + gx];
-	uint32_t col[9];
-	unsigned no_blend = 0;
-	uint8_t grp[9];
-	int differs = 0;
-	int16_t pos[4];
-	int band = (NDW_BLEND_BAND * tile_sz + NDW_TILE_W - 1) / NDW_TILE_W + 1;
-	const ndw_warp_grid_t *grid;
-
-	for (int dj = -1; dj <= 1; dj++)
-		for (int di = -1; di <= 1; di++) {
-			int nx = gx + di, ny = gy + dj, k = (dj + 1) * 3 + (di + 1);
-			const nd_map_tile_t *nt = own;
-
-			if (di || dj) {
-				if (nx < 0 || ny < 0 || nx >= (int)cols || ny >= (int)rows) {
-					no_blend |= NDW_OWN_BIT(di, dj);
-				} else {
-					nt = &map->tiles[ny * (int)cols + nx];
-				}
-			}
-			col[k] = shade(ansi_rgb(nt->bg & 7), amb, 255);
-			differs |= ((nt->bg & 7) != (own->bg & 7));
-			grp[k] = (uint8_t)(nt->bg & 7);
-			if (nt->bio_idx == 0 || (nt->bg & 7) == 4)
-				no_blend |= NDW_WATER_BIT(di, dj);
-		}
-	if (!differs)
-		return;
-	pos[0] = (int16_t)(map->pos[0] + gx - map->player_x);
-	pos[1] = (int16_t)(map->pos[1] - (gy - map->player_y));
-	pos[2] = map->pos[2];
-	pos[3] = map->pos[3];
-	grid = nd_seven_warp_grid(pos);
-
-	for (int py = 0; py < tile_sz; py++) {
-		int qy = ((py * 2 + 1) * (NDW_TILE_H * NDW_SUB)) / (2 * tile_sz);
-		int row_edge = py < band || py >= tile_sz - band;
-
-		for (int px = 0; px < tile_sz; px++) {
-			int qx;
-			uint16_t wt[9];
-
-			if (!row_edge && px >= band && px < tile_sz - band)
-				continue;
-			qx = ((px * 2 + 1) * (NDW_TILE_W * NDW_SUB)) / (2 * tile_sz);
-			if (ndw_ground_weights(grid, qx, qy, grp, no_blend, wt)) {
-				int own_k = 4;
-
-				for (int k = 0; k < 9; k++)
-					if (wt[k])
-						own_k = k;
-				fill_rect(fb, w, h, tx + px, ty + py, 1, 1, col[own_k]);
-			}
-		}
-	}
+	if (alpha <= 0) return bg;
+	if (alpha >= 255) return fg;
+	int r_bg = (int)(bg & 0xFF), g_bg = (int)((bg >> 8) & 0xFF), b_bg = (int)((bg >> 16) & 0xFF);
+	int r_fg = (int)(fg & 0xFF), g_fg = (int)((fg >> 8) & 0xFF), b_fg = (int)((fg >> 16) & 0xFF);
+	int r = r_bg + ((r_fg - r_bg) * alpha) / 255;
+	int g = g_bg + ((g_fg - g_bg) * alpha) / 255;
+	int b = b_bg + ((b_fg - b_bg) * alpha) / 255;
+	return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
 }
+
+
 
 void nd_lamina_render_map_themed(uint32_t *fb, uint32_t w, uint32_t h,
                                  const nd_map_data_t *map,
@@ -608,6 +554,16 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 	 * colour on EVERY tile (wilderness as well as rooms), three cells per tile
 	 * (left / centre / right) showing plants, stairs, shops, ponds and entities
 	 * in their own colours, and walls in the wall-paint colour around rooms. */
+	ar_system_t *cs = nd_seven_get_chunk_sys();
+	if (cs) {
+		float center_wx = ((float)map->pos[0] + 0.5f) * (float)NDW_TILE_W;
+		float center_wy = (-(float)map->pos[1] + 0.5f) * (float)NDW_TILE_H;
+		ar_eval_ortho(cs, 1, (uint16_t)map->pos[3],
+		              center_wx, center_wy,
+		              (float)(cols * NDW_TILE_W), (float)(rows * NDW_TILE_H),
+		              (float)(cols * tile_sz), (float)(rows * tile_sz));
+	}
+
 	for (uint32_t y = 0; y < rows; y++) {
 		for (uint32_t x = 0; x < cols; x++) {
 			const nd_map_tile_t *tile = &map->tiles[y * cols + x];
@@ -623,10 +579,44 @@ void nd_lamina_render_map_live(uint32_t *fb, uint32_t w, uint32_t h,
 			int is_room = (tile->flags & ND_MAP_FLAG_ROOM);
 			int is_player = (tile->flags & ND_MAP_FLAG_PLAYER);
 
-			/* Biome background (ANSI 0..7), dimmed by time of day. */
-			uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
-			fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
-			blend_tile_border(fb, w, h, map, cols, rows, (int)x, (int)y, tx, ty, (int)tile_sz, amb);
+			if (is_room) {
+				uint32_t tile_col = shade(ansi_rgb(tile->bg & 7), amb, 255);
+				fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, tile_col);
+			} else {
+				/* Wilderness: render via libareole orthographic minimap view (view_id = 1) */
+				int16_t room_pos[4] = {
+					(int16_t)(map->pos[0] + (int)x - (int)map->player_x),
+					(int16_t)(map->pos[1] - ((int)y - (int)map->player_y)),
+					map->pos[2],
+					map->pos[3]
+				};
+				int32_t ox = (int32_t)room_pos[0] * NDW_TILE_W;
+				int32_t oy = -(int32_t)room_pos[1] * NDW_TILE_H;
+				uint16_t world = (uint16_t)room_pos[3];
+
+				if (cs) {
+					for (uint32_t py = 0; py < tile_sz; py++) {
+						int32_t wy = oy + ((int32_t)py * NDW_TILE_H) / (int32_t)tile_sz;
+						for (uint32_t px = 0; px < tile_sz; px++) {
+							int32_t wx = ox + ((int32_t)px * NDW_TILE_W) / (int32_t)tile_sz;
+							ar_sample_t s;
+							if (ar_probe_view(cs, 1, world, wx, wy, &s)) {
+								uint32_t col;
+								uint8_t wdepth = s.attr[3];
+								if (wdepth > 0) {
+									col = water_color_at_depth(wdepth > 28 ? 28 : wdepth, 128, 128, 128);
+								} else {
+									col = s.rgba;
+								}
+								fill_rect(fb, w, h, tx + (int)px, ty + (int)py, 1, 1, shade(col, amb, 255));
+							}
+						}
+					}
+				} else {
+					uint32_t col = ndw_biome_base_rgb(tile->bio_idx);
+					fill_rect(fb, w, h, tx, ty, (int)tile_sz, (int)tile_sz, shade(col, amb, 255));
+				}
+			}
 
 			/* Rooms get a soft outline; wilderness stays seamless. */
 			if (is_room && theme->grid_border && !is_live_centered) {

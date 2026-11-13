@@ -66,8 +66,13 @@ typedef struct {
 	uint8_t flip;             /* flip sprite horizontal */
 	uint8_t sprite_id;        /* mineral sprite id (1..8) */
 	uint8_t harvested;        /* 1 if picked/harvested */
+	uint8_t plant_id;         /* packed flora species/stage/variant */
+	uint8_t col_mask;         /* programmer-defined collision footprint */
+	uint8_t hw, hh;           /* collision half-extents */
+	uint8_t anchor_y;         /* downward screen-Y anchor offset from bottom of sprite */
 	uint32_t entity_ref;      /* Corm DB entity ref if known */
 	char name[32];            /* display name */
+	char art[64];             /* staged art path if known */
 } nd_spatial_obj_t;
 
 #define ND_SPATIAL_MAX_OBJS (NDW_MAX_OBJ + 16)
@@ -116,8 +121,5 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz);
 int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 void nd_seven_action_cooldown_reset(void);
-
-void draw_object_name(uint32_t *fb, int w, int h, int cx, int top_y, const char *name);
-void draw_thinking_balloon(uint32_t *fb, int w, int h, int hx, int hy, const char *action);
 
 #endif /* ND_SEVEN_OBJECTS_H */
