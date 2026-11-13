@@ -431,7 +431,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                : (float)lamb_wl;
 		float eff_wl = fmaxf((float)lamb_wl, live_wl);
 		bool lamb_in_water = has_loc_water && (lwz < eff_wl + 0.65f);
-		if (has_loc_water) {
+		if (lamb_in_water) {
 			nd_seven_gl_set_focal_water(eff_wl);
 		}
 		float wake_ground_z = lamb_in_water ? (lwz - ((float)lamb_wl - (float)base_wl)) : (float)base_wl + 10.0f;
