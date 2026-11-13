@@ -147,8 +147,14 @@ for sub_path in "${SUBMODULE_PATHS[@]}"; do
 	fi
 
 	if ! git -C "$sub_path" merge-base --is-ancestor "$sub_base_hash" "$sub_head_hash"; then
-		echo "Error: Submodule '$sub_path' base $sub_base_hash is not an ancestor of its checked-out HEAD $sub_head_hash." >&2
-		exit 1
+		common_base="$(git -C "$sub_path" merge-base "$sub_base_hash" "$sub_head_hash" 2>/dev/null || true)"
+		if [ -n "$common_base" ]; then
+			echo "[notice] Submodule '$sub_path' base ${sub_base_hash:0:8} diverged from HEAD; falling back to merge-base ${common_base:0:8}"
+			sub_base_hash="$common_base"
+		else
+			echo "Error: Submodule '$sub_path' base $sub_base_hash is not an ancestor of its checked-out HEAD $sub_head_hash." >&2
+			exit 1
+		fi
 	fi
 
 	# Ensure the submodule's checked-out HEAD is not behind the gitlink recorded at root HEAD
