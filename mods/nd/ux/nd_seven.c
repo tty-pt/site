@@ -986,32 +986,22 @@ static uint32_t meadow_biome_tint(unsigned biome, int zone, uint32_t h, uint8_t 
 	return rgb | (uint32_t)alpha;
 }
 
-/* Prevent grass tufts from poking through or drawing on top of the Lamb sprite:
- * 1. Suppress spawning upright tufts inside the Lamb's hoof/body core footprint.
- * 2. For tufts in the Lamb's upper-body screen overlap band (-11.0 <= dy <= 6.0, |dx| < 11.5),
- *    clamp their painter's-order sort key y <= lwy - 0.5f so they strictly draw BEHIND the Lamb,
- *    and attenuate their height so blades behind the Lamb never poke through its silhouette. */
+/* Position-invariant ground-cover painter's order helper:
+ * Never culls (returns 1) and never shrinks (*io_scale unchanged) grass tufts near the Lamb.
+ * Instead, ground-rooted tufts use a constant position-invariant painter's sort offset (-8.5f,
+ * matching the 9px hoof-to-center offset LAMB_FOOT_Y - LAMB_AY = 25 - 16) so tufts rooted north
+ * of the Lamb's hooves sort behind the Lamb without ever jumping or shrinking as the Lamb walks,
+ * while 3D vertex trampling flattens blades directly underfoot. */
 int nd_seven_eval_meadow_lamb_occlusion(float wx_f, float wy_f,
                                         float lwx_f, float lwy_f,
                                         float *io_sort_y, float *io_scale)
 {
-	float dx = wx_f - lwx_f;
-	float dy = wy_f - lwy_f;
-	float ell_y = dy * 1.35f;
-	if (dx * dx + ell_y * ell_y < 4.5f * 4.5f)
-		return 0;
-	float body_nx = dx * (1.0f / 7.2f);
-	float body_ny = (dy - 1.5f) * (1.0f / 6.0f);
-	if (body_nx * body_nx + body_ny * body_ny < 1.0f)
-		return 0;
-	if (dy >= -11.0f && dy <= 6.0f && fabsf(dx) < 11.5f) {
-		if (io_sort_y && *io_sort_y > lwy_f - 0.5f)
-			*io_sort_y = lwy_f - 0.5f;
-		if (io_scale) {
-			float h_atten = 0.45f + 0.40f * fminf(1.0f, fabsf(dx) * (1.0f / 11.5f));
-			*io_scale *= h_atten;
-		}
-	}
+	(void)wx_f;
+	(void)lwx_f;
+	(void)lwy_f;
+	(void)io_scale;
+	if (io_sort_y)
+		*io_sort_y = wy_f;
 	return 1;
 }
 
@@ -1447,8 +1437,15 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					dst_bb->pad0 = 0;
 				} else {
 					dst_bb->tint_rgba = tint_b;
-					dst_bb->style = (entity_spr >= NDS_ROCK_TAN_BIG && entity_spr <= NDS_STONE_TINY)
-					                ? ND_BB_STYLE_MINERAL : ND_BB_STYLE_STANDARD;
+					if (entity_spr >= NDS_ROCK_TAN_BIG && entity_spr <= NDS_STONE_TINY) {
+						dst_bb->style = ND_BB_STYLE_MINERAL;
+					} else if (entity_spr >= NDS_DECOR_YEL && entity_spr <= NDS_DECOR_PINK) {
+						dst_bb->style = ND_BB_STYLE_GRASS;
+					} else if (entity_spr >= NDS_TREE_OAK && entity_spr <= NDS_BUSH_TEAL) {
+						dst_bb->style = ND_BB_STYLE_FLORA;
+					} else {
+						dst_bb->style = ND_BB_STYLE_STANDARD;
+					}
 					dst_bb->shadow_rx = (uint8_t)(bw * 0.34f > 4.0f ? bw * 0.34f : 4.0f);
 					dst_bb->shadow_ry = (uint8_t)(dst_bb->shadow_rx * 0.45f > 2.0f ? dst_bb->shadow_rx * 0.45f : 2.0f);
 					dst_bb->pad0 = 0;
@@ -1709,18 +1706,23 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 	/* Sort near-field 3D billboards globally back-to-front by world wy ascending (tie-break by wx ascending).
 	 * Give airborne splash droplets (ND_BB_STYLE_PARTICLE) a +14.0f painter-order key offset so droplets
-	 * splashing around the lamb's feet render in front of the 32x32 lamb sprite instead of behind it. */
+	 * splashing around the lamb's feet render in front of the 32x32 lamb sprite instead of behind it,
+	 * and give ground-rooted grass/groundcover tufts (ND_BB_STYLE_GRASS) a constant -8.5f painter-order
+	 * offset matching LAMB_FOOT_Y - LAMB_AY (9px) so tufts rooted north of the lamb's hooves sort cleanly
+	 * behind the lamb without ever jumping or shrinking as the lamb walks. */
 	if (all_gpu_count > 1) {
 		static const uint32_t gaps[8] = { 701, 301, 132, 57, 23, 10, 4, 1 };
 		for (int gi = 0; gi < 8; gi++) {
 			uint32_t gap = gaps[gi];
 			for (uint32_t a = gap; a < all_gpu_count; a++) {
 				lam_billboard_gpu_t k = s_all_gpu_batch[a];
-				float ky = k.y + ((k.style == ND_BB_STYLE_PARTICLE) ? 14.0f : 0.0f);
+				float ky = k.y + ((k.style == ND_BB_STYLE_PARTICLE) ? 14.0f
+				                : (k.style == ND_BB_STYLE_GRASS ? -8.5f : 0.0f));
 				uint32_t b = a;
 				while (b >= gap) {
 					float by = s_all_gpu_batch[b - gap].y +
-					           ((s_all_gpu_batch[b - gap].style == ND_BB_STYLE_PARTICLE) ? 14.0f : 0.0f);
+					           ((s_all_gpu_batch[b - gap].style == ND_BB_STYLE_PARTICLE) ? 14.0f
+					          : (s_all_gpu_batch[b - gap].style == ND_BB_STYLE_GRASS ? -8.5f : 0.0f));
 					if (by < ky || (by == ky && s_all_gpu_batch[b - gap].x <= k.x))
 						break;
 					s_all_gpu_batch[b] = s_all_gpu_batch[b - gap];

@@ -2941,15 +2941,18 @@ int main(void)
 		assert(tundra_avg_sc < boreal_avg_sc);
 		assert(boreal_avg_sc < savanna_avg_sc && boreal_avg_sc < jungle_avg_sc);
 
-		/* Verify Lamb occlusion helper: core hoof/body ellipse suppresses tufts; north overlap band clamps sort_y <= lwy - 0.5f */
+		/* Verify non-disappearing & non-shrinking tuft invariance near the Lamb (D14/D15/D16):
+		 * Tufts never disappear (always return 1) and never shrink (*io_scale unchanged) at any distance to the Lamb */
 		{
-			float sy_core = 500.0f, sc_core = 0.5f;
-			assert(nd_seven_eval_meadow_lamb_occlusion(500.0f, 500.0f, 500.0f, 500.0f, &sy_core, &sc_core) == 0);
-			assert(nd_seven_eval_meadow_lamb_occlusion(502.0f, 503.0f, 500.0f, 500.0f, &sy_core, &sc_core) == 0);
+			float sy_core = 500.0f, sc_core = 0.50f;
+			assert(nd_seven_eval_meadow_lamb_occlusion(500.0f, 500.0f, 500.0f, 500.0f, &sy_core, &sc_core) == 1);
+			assert(fabsf(sc_core - 0.50f) < 1e-6f);
+			assert(nd_seven_eval_meadow_lamb_occlusion(502.0f, 503.0f, 500.0f, 500.0f, &sy_core, &sc_core) == 1);
+			assert(fabsf(sc_core - 0.50f) < 1e-6f);
 			float sy_overlap = 504.0f, sc_overlap = 0.50f;
 			assert(nd_seven_eval_meadow_lamb_occlusion(508.0f, 504.0f, 500.0f, 500.0f, &sy_overlap, &sc_overlap) == 1);
-			assert(sy_overlap <= 499.5f);
-			assert(sc_overlap < 0.50f);
+			assert(fabsf(sy_overlap - 504.0f) < 1e-6f);
+			assert(fabsf(sc_overlap - 0.50f) < 1e-6f);
 		}
 
 		/* Verify contiguous area fill: inside a fertile meadow patch, a 5x5 local 8-unit grid fills >= 22/25 cells */
@@ -3005,7 +3008,8 @@ int main(void)
 		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 22.0f, 900.0f, 900.0f, NULL, NULL, &dz_t2, NULL);
 		assert(dz_t0 > dz_t1 && dz_t1 > dz_t2);
 
-		/* 4. R4: Verify ND_BB_STYLE_GRASS ground-pinned bottom vertices (qy == 0) vs sheared top vertices (qy == 1) */
+		/* 4. R4: Verify ND_BB_STYLE_GRASS ground-pinned bottom vertices (qy == 0) vs sheared top vertices (qy == 1),
+		 *    plus unified real-object flora sway (small bushes/shrubs sway with stiffness, tall tree trunks stay rigid) */
 		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
 		nd_seven_gl_set_lamb_light(495.0f, 500.0f, 12.0f, 1.0f);
 		lam_billboard_gpu_t std_bb = {
@@ -3019,9 +3023,29 @@ int main(void)
 		lam_billboard_gpu_t grass_bb = std_bb;
 		grass_bb.style = ND_BB_STYLE_GRASS;
 
-		nd_seven_gl_bb_vert_t v_std[6], v_grs[6];
+		lam_billboard_gpu_t shrub_bb = std_bb;
+		shrub_bb.style = ND_BB_STYLE_FLORA;
+		shrub_bb.width = 27.0f;
+		shrub_bb.height = 25.0f;
+
+		lam_billboard_gpu_t std_shrub_bb = shrub_bb;
+		std_shrub_bb.style = ND_BB_STYLE_STANDARD;
+
+		lam_billboard_gpu_t tall_tree_bb = std_bb;
+		tall_tree_bb.style = ND_BB_STYLE_LEAF_TINT;
+		tall_tree_bb.width = 61.0f;
+		tall_tree_bb.height = 74.0f;
+
+		lam_billboard_gpu_t std_tree_bb = tall_tree_bb;
+		std_tree_bb.style = ND_BB_STYLE_STANDARD;
+
+		nd_seven_gl_bb_vert_t v_std[6], v_grs[6], v_shr[6], v_std_shr[6], v_tree[6], v_std_tree[6];
 		nd_seven_gl_eval_billboard_quad(&std_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std);
 		nd_seven_gl_eval_billboard_quad(&grass_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_grs);
+		nd_seven_gl_eval_billboard_quad(&shrub_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_shr);
+		nd_seven_gl_eval_billboard_quad(&std_shrub_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std_shr);
+		nd_seven_gl_eval_billboard_quad(&tall_tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_tree);
+		nd_seven_gl_eval_billboard_quad(&std_tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_std_tree);
 
 		/* Bottom vertices BL (idx 0) and BR (idx 1, 3) have qy == 0 and must remain 100% pinned to ground */
 		assert(fabsf(v_grs[0].quad_uv[1] - 0.0f) < 1e-5f);
@@ -3030,14 +3054,24 @@ int main(void)
 			assert(fabsf(v_grs[0].world_pos[c] - v_std[0].world_pos[c]) < 1e-5f);
 			assert(fabsf(v_grs[1].world_pos[c] - v_std[1].world_pos[c]) < 1e-5f);
 			assert(fabsf(v_grs[0].local_pos[c] - v_std[0].local_pos[c]) < 1e-5f);
+			assert(fabsf(v_shr[0].world_pos[c] - v_std_shr[0].world_pos[c]) < 1e-5f);
+			/* Tall tree quad vertices stay 100% rigid so the wooden trunk never tilts */
+			assert(fabsf(v_tree[2].world_pos[c] - v_std_tree[2].world_pos[c]) < 1e-5f);
 		}
 		/* Top vertex TL (idx 2, qy == 1) must be sheared away from the Lamb (+x direction since Lamb is at 495 < 500) */
 		assert(fabsf(v_grs[2].quad_uv[1] - 1.0f) < 1e-5f);
-		assert(v_grs[2].local_pos[0] > v_std[2].local_pos[0] + 0.8f);
+		float grass_disp_x = v_grs[2].local_pos[0] - v_std[2].local_pos[0];
+		float shrub_disp_x = v_shr[2].local_pos[0] - v_std_shr[2].local_pos[0];
+		assert(grass_disp_x > 0.8f);
+		assert(shrub_disp_x > 0.25f && shrub_disp_x < grass_disp_x);
 		assert(v_grs[2].local_pos[2] < v_std[2].local_pos[2] - 0.4f);
 
-		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
-		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, dz_t0, dz_t1, dz_t2);
+		const char *fs_b = nd_seven_gl_fs_billboard();
+		assert(strstr(fs_b, "canopyHeightMask") != NULL);
+		assert(strstr(fs_b, "canopyTexShift") != NULL);
+
+		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f, shrub=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
+		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, shrub_disp_x, dz_t0, dz_t1, dz_t2);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
