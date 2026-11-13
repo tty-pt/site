@@ -26,6 +26,7 @@ int nd_seven_tick(const nd_client_state_t *st, float dt);
 
 /* Render the 3D WebGL world around the lamb for a w x h viewport. */
 void nd_seven_render(uint32_t w, uint32_t h, const nd_client_state_t *st);
+int nd_seven_shaders_ready(void);
 
 /* Forget remembered tile glyphs (new session or world). */
 void nd_seven_forget(void);

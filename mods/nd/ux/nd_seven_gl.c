@@ -11,6 +11,7 @@
 #include "nd_seven_atlas_draw.h"
 #include <ttypt/webgl.h>
 #include <ttypt/areole.h>
+#include <ttypt/chaff_glsl.h>
 #include <nd/field.h>
 #include <math.h>
 #include <string.h>
@@ -89,51 +90,8 @@ static const char *s_vs_terrain =
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
 	"}\n"
-	"uint chaff_rotl32(uint x, int r) {\n"
-	"    return (x << uint(r)) | (x >> uint(32 - r));\n"
-	"}\n"
-	"uint chaff_hash3(ivec3 p, uint seed) {\n"
-	"    uint v1 = (uint(p.y) & 0xFFFFu) | ((uint(p.x) & 0xFFFFu) << 16u);\n"
-	"    uint v2 = (uint(p.z) & 0xFFFFu);\n"
-	"    uint h = seed + 0x165667B1u + 6u;\n"
-	"    h += v1 * 0xC2B2AE3Du;\n"
-	"    h = chaff_rotl32(h, 17) * 0x27D4EB2Fu;\n"
-	"    h += v2 * 0x85EBCA77u;\n"
-	"    h = chaff_rotl32(h, 13) * 0xC2B2AE3Du;\n"
-	"    h ^= h >> 15u;\n"
-	"    h *= 0x85EBCA77u;\n"
-	"    h ^= h >> 16u;\n"
-	"    return h;\n"
-	"}\n"
-	"vec2 chaff_grad_dir(int cx, int cy, uint seed) {\n"
-	"    uint h = chaff_hash3(ivec3(cx, cy, 0), seed);\n"
-	"    float gx = float(int(h & 0xFFFFu) - 32768) * (1.0 / 32768.0);\n"
-	"    float gy = float(int(h >> 16u) - 32768) * (1.0 / 32768.0);\n"
-	"    vec2 g = vec2(gx, gy);\n"
-	"    return g * inversesqrt(dot(g, g) + 1e-6);\n"
-	"}\n"
-	"vec3 chaff_grad_noise2d(vec2 p, uint seed) {\n"
-	"    vec2 ip = floor(p);\n"
-	"    vec2 fp = p - ip;\n"
-	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
-	"    vec2 du = 30.0 * fp * fp * (fp * (fp - 2.0) + 1.0);\n"
-	"    ivec2 c = ivec2(ip);\n"
-	"    vec2 g00 = chaff_grad_dir(c.x,     c.y,     seed);\n"
-	"    vec2 g10 = chaff_grad_dir(c.x + 1, c.y,     seed);\n"
-	"    vec2 g01 = chaff_grad_dir(c.x,     c.y + 1, seed);\n"
-	"    vec2 g11 = chaff_grad_dir(c.x + 1, c.y + 1, seed);\n"
-	"    float v00 = dot(g00, fp);\n"
-	"    float v10 = dot(g10, fp - vec2(1.0, 0.0));\n"
-	"    float v01 = dot(g01, fp - vec2(0.0, 1.0));\n"
-	"    float v11 = dot(g11, fp - vec2(1.0, 1.0));\n"
-	"    float k0 = v10 - v00;\n"
-	"    float k1 = v01 - v00;\n"
-	"    float k2 = v11 - v01 - k0;\n"
-	"    float val = 0.5 + 0.70710678 * (v00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y);\n"
-	"    vec2 gInterp = g00 + (g10 - g00) * u.x + (g01 - g00) * u.y + (g11 - g01 - g10 + g00) * (u.x * u.y);\n"
-	"    vec2 grad = 0.70710678 * (gInterp + du * vec2(k0 + k2 * u.y, k1 + k2 * u.x));\n"
-	"    return vec3(clamp(val, 0.0, 1.0), grad.x, grad.y);\n"
-	"}\n"
+	CHAFF_GLSL_HASH_FN
+	CHAFF_GLSL_GRAD_NOISE_FN
 	"/* 4x4 Catmull-Rom bicubic spline: smooth non-stair-stepped C1 height field & exact analytic gradients */\n"
 	"float sampleHeightSmooth(vec2 uv, out vec2 out_grad) {\n"
 	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
@@ -793,14 +751,14 @@ static const char *s_fs_terrain =
 	"    float w1_nyq = smoothstep(0.65, 0.18, 0.0280 * fw) * smoothstep(32000.0, 8000.0, dist);\n"
 	"    float w2_nyq = smoothstep(0.65, 0.18, 0.1200 * fw) * smoothstep(10000.0, 2400.0, dist);\n"
 	"    if (w0_nyq <= 0.001) return vec4(dir0.x, dir0.y, 0.65, 0.0);\n"
-	"    float t0 = mod(anim_time * 0.08, 1024.0);\n"
+	"    float t0 = mod(anim_time * 0.05, 1024.0);\n"
 	"    vec2 p0 = worldPos * 0.0055 - dir0 * t0;\n"
 	"    vec3 w0 = chaff_grad_noise2d(p0, 0x57494E44u);\n"
 	"    vec2 baseWind = normalize(dir0 + vec2(-w0.z, w0.y) * (0.28 * w0_nyq));\n"
 	"    vec3 w1 = vec3(0.5, 0.0, 0.0);\n"
 	"    vec2 localWind1 = baseWind;\n"
 	"    if (w1_nyq > 0.001) {\n"
-	"        float t1 = mod(anim_time * 0.22, 1024.0);\n"
+	"        float t1 = mod(anim_time * 0.12, 1024.0);\n"
 	"        vec2 p1 = rot * (worldPos * 0.028 + w0.yz * 0.65) - dir1 * t1;\n"
 	"        w1 = chaff_grad_noise2d(p1, 0x47555354u);\n"
 	"        vec2 mesoGrad = irot * w1.yz;\n"
@@ -809,7 +767,7 @@ static const char *s_fs_terrain =
 	"    vec3 w2 = vec3(0.5, 0.0, 0.0);\n"
 	"    vec2 windDir = localWind1;\n"
 	"    if (w2_nyq > 0.001) {\n"
-	"        float t2 = mod(anim_time * 0.48, 1024.0);\n"
+	"        float t2 = mod(anim_time * 0.22, 1024.0);\n"
 	"        vec2 p2 = rot * (rot * (worldPos * 0.120) + w0.yz * 0.45 + w1.yz * 0.55) - dir2 * t2;\n"
 	"        w2 = chaff_grad_noise2d(p2, 0x45444459u);\n"
 	"        vec2 microGrad = (irot * irot) * w2.yz;\n"
@@ -1740,16 +1698,16 @@ static const char *s_fs_water =
 	"    const vec2 dir0 = vec2(0.741, -0.671);\n"
 	"    const vec2 dir1 = vec2(0.822, -0.569);\n"
 	"    const vec2 dir2 = vec2(0.640, -0.768);\n"
-	"    float t0 = mod(anim_time * 0.08, 1024.0);\n"
+	"    float t0 = mod(anim_time * 0.05, 1024.0);\n"
 	"    vec2 p0 = worldPos * 0.0055 - dir0 * t0;\n"
 	"    vec3 w0 = chaff_grad_noise2d(p0, 0x57494E44u);\n"
 	"    vec2 baseWind = normalize(dir0 + vec2(-w0.z, w0.y) * 0.28);\n"
-	"    float t1 = mod(anim_time * 0.22, 1024.0);\n"
+	"    float t1 = mod(anim_time * 0.12, 1024.0);\n"
 	"    vec2 p1 = rot * (worldPos * 0.028 + w0.yz * 0.65) - dir1 * t1;\n"
 	"    vec3 w1 = chaff_grad_noise2d(p1, 0x47555354u);\n"
 	"    vec2 mesoGrad = irot * w1.yz;\n"
 	"    vec2 localWind1 = normalize(baseWind + vec2(-mesoGrad.y, mesoGrad.x) * 0.22);\n"
-	"    float t2 = mod(anim_time * 0.48, 1024.0);\n"
+	"    float t2 = mod(anim_time * 0.22, 1024.0);\n"
 	"    vec2 p2 = rot * (rot * (worldPos * 0.120) + w0.yz * 0.45 + w1.yz * 0.55) - dir2 * t2;\n"
 	"    vec3 w2 = chaff_grad_noise2d(p2, 0x45444459u);\n"
 	"    vec2 microGrad = (irot * irot) * w2.yz;\n"
@@ -2282,7 +2240,8 @@ static const char *s_fs_billboard =
 	"    ivec2 i0 = ivec2(floor(p));\n"
 	"    vec2 f = p - vec2(i0);\n"
 	"    vec2 fw = fwidth(p);\n"
-	"    vec2 filterW = clamp(fw * 0.90, vec2(0.26), vec2(0.50));\n"
+	"    float minFilterW = ((style > 0.5 && style < 2.5) || (style > 4.5 && style < 5.5)) ? 0.36 : 0.26;\n"
+	"    vec2 filterW = clamp(fw * 0.92, vec2(minFilterW), vec2(0.50));\n"
 	"    vec2 u = smoothstep(0.5 - filterW, 0.5 + filterW, f);\n"
 	"    vec4 c00 = fetchBoundedTexel(i0,                iBounds, maxTex);\n"
 	"    vec4 c10 = fetchBoundedTexel(i0 + ivec2(1, 0),  iBounds, maxTex);\n"
@@ -2331,16 +2290,16 @@ static const char *s_fs_billboard =
 	"    const vec2 dir0 = vec2(0.741, -0.671);\n"
 	"    const vec2 dir1 = vec2(0.822, -0.569);\n"
 	"    const vec2 dir2 = vec2(0.640, -0.768);\n"
-	"    float t0 = mod(anim_time * 0.08, 1024.0);\n"
+	"    float t0 = mod(anim_time * 0.05, 1024.0);\n"
 	"    vec2 p0 = worldPos * 0.0055 - dir0 * t0;\n"
 	"    vec3 w0 = chaff_grad_noise2d(p0, 0x57494E44u);\n"
 	"    vec2 baseWind = normalize(dir0 + vec2(-w0.z, w0.y) * 0.28);\n"
-	"    float t1 = mod(anim_time * 0.22, 1024.0);\n"
+	"    float t1 = mod(anim_time * 0.12, 1024.0);\n"
 	"    vec2 p1 = rot * (worldPos * 0.028 + w0.yz * 0.65) - dir1 * t1;\n"
 	"    vec3 w1 = chaff_grad_noise2d(p1, 0x47555354u);\n"
 	"    vec2 mesoGrad = irot * w1.yz;\n"
 	"    vec2 localWind1 = normalize(baseWind + vec2(-mesoGrad.y, mesoGrad.x) * 0.22);\n"
-	"    float t2 = mod(anim_time * 0.48, 1024.0);\n"
+	"    float t2 = mod(anim_time * 0.22, 1024.0);\n"
 	"    vec2 p2 = rot * (rot * (worldPos * 0.120) + w0.yz * 0.45 + w1.yz * 0.55) - dir2 * t2;\n"
 	"    vec3 w2 = chaff_grad_noise2d(p2, 0x45444459u);\n"
 	"    vec2 microGrad = (irot * irot) * w2.yz;\n"
@@ -2996,10 +2955,9 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 		} else if (b->pad0 == 2u && b->height > 0.0f) {
 			/* Woody trunked trees (oaks, birches, pines, firs, willows, maples, olives):
 			 * homogeneous ground-pinned quad shear evaluated once at the tree root (b->x, b->y)
-			 * with heavy woody stiffness (~1.5-2.5 world units at the top of a 70-100px tree)
-			 * and wind-only response (ignoring Lamb ankle-parting / wake trampling) */
+			 * with heavy woody stiffness, slow pendulum period, and wind-only response */
 			float h_norm = fminf(1.30f, fmaxf(0.75f, b->height * (1.0f / 80.0f)));
-			flora_sway_scale = 1.65f * h_norm;
+			flora_sway_scale = 1.05f * h_norm;
 			is_woody_tree = 1;
 		}
 	}
@@ -3009,15 +2967,15 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 			gl_eval_recursive_wind(b->x, b->y, s_grass_anim_time, &wDirX, &wDirY, &gust, &catspaw);
 			uint32_t th = gl_chaff_hash3((int32_t)floorf(b->x), (int32_t)floorf(b->y), 0, 0x54524545u);
 			float phase = (float)(th & 0xFFFFu) * (TWO_PI_F / 65536.0f);
-			float stiff = 0.92f + 0.20f * ((float)((th >> 16u) & 0xFFu) / 255.0f);
+			float stiff = 0.92f + 0.16f * ((float)((th >> 16u) & 0xFFu) / 255.0f);
 			float wind_proj = b->x * wDirX + b->y * wDirY;
-			float slow_sway = sinf(s_grass_anim_time * 1.15f - wind_proj * 0.032f + phase) * (0.32f + 0.30f * gust);
-			float bough_nod = sinf(s_grass_anim_time * 1.85f + b->x * 0.045f + b->y * 0.035f + phase * 0.6f) * (0.12f + 0.16f * catspaw);
-			float wind_mag = (0.72f + 0.85f * gust + 0.35f * catspaw + slow_sway + bough_nod) * stiff * flora_sway_scale;
-			grass_sx = wDirX * wind_mag + (-wDirY) * (bough_nod * 0.20f * flora_sway_scale);
-			grass_sy = wDirY * wind_mag + ( wDirX) * (bough_nod * 0.20f * flora_sway_scale);
+			float slow_sway = sinf(s_grass_anim_time * 0.42f - wind_proj * 0.024f + phase * 0.25f) * (0.14f + 0.14f * gust);
+			float bough_nod = sinf(s_grass_anim_time * 0.72f - wind_proj * 0.038f + phase * 0.20f) * (0.05f + 0.07f * catspaw);
+			float wind_mag = (0.52f + 0.58f * gust + 0.20f * catspaw + slow_sway + bough_nod) * stiff * flora_sway_scale;
+			grass_sx = wDirX * wind_mag + (-wDirY) * (bough_nod * 0.10f * flora_sway_scale);
+			grass_sy = wDirY * wind_mag + ( wDirX) * (bough_nod * 0.10f * flora_sway_scale);
 			grass_dz = 0.0f;
-			grass_rustle = 0.06f * catspaw;
+			grass_rustle = 0.04f * catspaw;
 		} else {
 			nd_seven_gl_eval_grass_displacement(b->x, b->y, s_grass_anim_time,
 			                                    s_grass_lamb_wx, s_grass_lamb_wy,
@@ -3677,6 +3635,13 @@ static bool check_pipelines_ready(void)
 
 	s_gl.pipelines_ready = true;
 	return true;
+}
+
+bool nd_seven_gl_pipelines_ready(void)
+{
+	if (!s_gl.initialized)
+		init_pipelines();
+	return check_pipelines_ready();
 }
 
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
@@ -4375,7 +4340,7 @@ static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
                                           float *out_dir_x, float *out_dir_y,
                                           float *out_gust, float *out_catspaw)
 {
-	float raw_t0 = anim_time * 0.08f;
+	float raw_t0 = anim_time * 0.05f;
 	float t0 = raw_t0 - 1024.0f * floorf(raw_t0 / 1024.0f);
 	float p0x = wx * 0.0055f - 0.741f * t0;
 	float p0y = wy * 0.0055f + 0.671f * t0;
@@ -4388,7 +4353,7 @@ static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
 	bwx *= bw_inv;
 	bwy *= bw_inv;
 
-	float raw_t1 = anim_time * 0.22f;
+	float raw_t1 = anim_time * 0.12f;
 	float t1 = raw_t1 - 1024.0f * floorf(raw_t1 / 1024.0f);
 	float u1x = wx * 0.028f + w0gx * 0.65f;
 	float u1y = wy * 0.028f + w0gy * 0.65f;
@@ -4405,7 +4370,7 @@ static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
 	lwx *= lw_inv;
 	lwy *= lw_inv;
 
-	float raw_t2 = anim_time * 0.48f;
+	float raw_t2 = anim_time * 0.22f;
 	float t2 = raw_t2 - 1024.0f * floorf(raw_t2 / 1024.0f);
 	float r1x =  0.8f * (wx * 0.120f) + 0.6f * (wy * 0.120f) + w0gx * 0.45f + w1gx * 0.55f;
 	float r1y = -0.6f * (wx * 0.120f) + 0.8f * (wy * 0.120f) + w0gy * 0.45f + w1gy * 0.55f;
@@ -4601,19 +4566,20 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 	float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
 	gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
 
-	/* Per-tuft deterministic phase & stiffness from chaff_hash3 */
+	/* Per-tuft deterministic phase & stiffness from chaff_hash3 (subtle offset so neighbors move in cohesive waves) */
 	uint32_t h = gl_chaff_hash3((int32_t)floorf(wx), (int32_t)floorf(wy), 0, 0x47524153u);
 	float phase = (float)(h & 0xFFFFu) * (TWO_PI_F / 65536.0f);
-	float stiff = 0.82f + 0.36f * ((float)((h >> 16u) & 0xFFu) / 255.0f);
+	float stiff = 0.86f + 0.28f * ((float)((h >> 16u) & 0xFFu) / 255.0f);
 
 	float wind_proj = wx * wDirX + wy * wDirY;
-	float gust_wave = sinf(anim_time * 2.15f - wind_proj * 0.045f + phase * 0.35f) * (0.28f + 0.32f * gust);
-	float flutter = sinf(anim_time * 3.2f + wx * 0.08f + wy * 0.06f + phase) * (0.18f + 0.28f * catspaw);
-	float wind_mag = (1.00f * gust + 0.68f * catspaw + gust_wave + flutter) * stiff;
-	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.30f);
-	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.30f);
+	float cross_proj = wx * (-wDirY) + wy * wDirX;
+	float gust_wave = sinf(anim_time * 0.80f - wind_proj * 0.035f + phase * 0.16f) * (0.20f + 0.22f * gust);
+	float flutter = sinf(anim_time * 1.30f - wind_proj * 0.055f + cross_proj * 0.025f + phase * 0.20f) * (0.06f + 0.10f * catspaw);
+	float wind_mag = (0.88f * gust + 0.48f * catspaw + gust_wave + flutter) * stiff;
+	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.12f);
+	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.12f);
 	float dz = (wind_mag * wind_mag) * 0.06f;
-	float rustle = 0.12f * catspaw;
+	float rustle = 0.09f * catspaw;
 
 	/* 2. Calm physical hoof/ankle contact parting & trampling within R = 11.0 world units
 	 *    (no artificial high-frequency sine tremor so blades close to the Lamb never tremble) */
@@ -4643,7 +4609,7 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 			sy = 0.35f;
 	}
 
-	/* 3. Smooth viscoelastic footstep wake trail recovery over 1.4s */
+	/* 3. Smooth over-damped viscoelastic footstep wake trail recovery over 1.4s (zero cosine ringing) */
 	int wake_n = 0;
 	const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
 	if (wake && wake_n > 0) {
@@ -4663,9 +4629,9 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 			float wdist = sqrtf(wd2);
 			float wt = 1.0f - (wdist / R_wake);
 			float w_spatial = wt * wt * (3.0f - 2.0f * wt);
-			float decay = expf(-2.6f * tau) * (1.0f - (tau / tau_max));
-			/* Gentle viscoelastic rebound curve without high-frequency ringing */
-			float rebound = cosf(3.2f * tau + phase * 0.15f);
+			float decay = expf(-2.2f * tau) * (1.0f - (tau / tau_max));
+			/* Over-damped monotonic recovery curve without sign-flipping cosine oscillation */
+			float rebound = expf(-1.6f * tau);
 			float wrx = (wdist > 0.25f) ? (wdx / wdist) : (((h & 2u) != 0u) ? 1.0f : -1.0f);
 			float wry = (wdist > 0.25f) ? (wdy / wdist) : 0.0f;
 

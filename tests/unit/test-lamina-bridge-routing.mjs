@@ -72,3 +72,105 @@ assert.equal(lam_image_request(0, 0), 0);
 assert.equal(lam_image_read(0, 0, 0, 0, 0, 0), 0);
 console.log('PASS: generic lam_image_request and lam_image_read imports verified');
 
+// Verify webgl-bridge.js offloads shader compilation to a separate Worker while glGetProgramParameter(GL_COMPLETION_STATUS_KHR) stays 0 until worker completes
+{
+	const { createWebGlBridge } = await import('../../external/liblamina/htdocs/webgl-bridge.js');
+	let localCompileCalls = 0;
+	let localLinkCalls = 0;
+	let workerMessages = [];
+	let activeWorker = null;
+
+	const mockGl = {
+		VERTEX_SHADER: 0x8B31,
+		FRAGMENT_SHADER: 0x8B30,
+		COMPILE_STATUS: 0x8B81,
+		LINK_STATUS: 0x8B82,
+		getExtension(name) { return null; },
+		createShader(type) { return { type }; },
+		shaderSource() {},
+		compileShader() { localCompileCalls++; },
+		getShaderParameter() { return true; },
+		createProgram() { return { prog: true }; },
+		attachShader() {},
+		bindAttribLocation() {},
+		linkProgram() { localLinkCalls++; },
+		getProgramParameter() { return true; },
+		deleteShader() {},
+		deleteProgram() {}
+	};
+	const mockGlCanvas = {
+		width: 640,
+		height: 480,
+		hasAttribute(name) { return name === 'data-bud-webgl'; },
+		getContext(kind) { return kind === 'webgl2' ? mockGl : null; }
+	};
+
+	globalThis.OffscreenCanvas = class { constructor(w, h) { this.width = w; this.height = h; } };
+	globalThis.Blob = class { constructor(parts) { this.parts = parts; } };
+	globalThis.URL.createObjectURL = () => 'blob:mock-shader-worker';
+	globalThis.URL.revokeObjectURL = () => {};
+	globalThis.Worker = class {
+		constructor(url) {
+			this.url = url;
+			this.onmessage = null;
+			this.onerror = null;
+			activeWorker = this;
+		}
+		postMessage(msg) {
+			workerMessages.push(msg);
+		}
+		terminate() {}
+	};
+
+	const wglMem = { buffer: new ArrayBuffer(1024) };
+	const enc = new TextEncoder();
+	const vsBytes = enc.encode('#version 300 es\nvoid main(){gl_Position=vec4(0.0);}');
+	const fsBytes = enc.encode('#version 300 es\nprecision highp float;out vec4 c;void main(){c=vec4(1.0);}');
+	new Uint8Array(wglMem.buffer, 16, vsBytes.length).set(vsBytes);
+	new Uint8Array(wglMem.buffer, 128, fsBytes.length).set(fsBytes);
+
+	const wglRoot = { querySelector: () => mockGlCanvas };
+	const wglBridge = createWebGlBridge(wglRoot, () => ({ memory: wglMem }));
+	wglBridge.mount();
+	const glImp = wglBridge.makeImports();
+
+	const vsId = glImp.glCreateShader(0x8B31);
+	const fsId = glImp.glCreateShader(0x8B30);
+	glImp.glShaderSource(vsId, 16, vsBytes.length);
+	glImp.glCompileShader(vsId);
+	glImp.glShaderSource(fsId, 128, fsBytes.length);
+	glImp.glCompileShader(fsId);
+
+	const progId = glImp.glCreateProgram();
+	glImp.glAttachShader(progId, vsId);
+	glImp.glAttachShader(progId, fsId);
+	glImp.glLinkProgram(progId);
+	glImp.glDeleteShader(vsId);
+	glImp.glDeleteShader(fsId);
+
+	// Local GL must NOT have compiled or linked yet — work was offloaded to the shader worker!
+	assert.equal(localCompileCalls, 0, 'glCompileShader must be offloaded to the shader worker');
+	assert.equal(localLinkCalls, 0, 'glLinkProgram must be offloaded to the shader worker');
+	assert.equal(workerMessages.length, 1, 'shader worker must receive webgl:compile message');
+	assert.equal(workerMessages[0].type, 'webgl:compile');
+	assert.equal(workerMessages[0].programId, progId);
+
+	// While worker is compiling, GL_COMPLETION_STATUS_KHR (0x91B1) must return 0
+	assert.equal(glImp.glGetProgramParameter(progId, 0x91B1), 0);
+	assert.equal(glImp.glGetProgramParameter(progId, 0x91B1), 0);
+	assert.equal(localLinkCalls, 0);
+
+	// Simulate shader worker finishing background compilation
+	activeWorker.onmessage({ data: { type: 'webgl:compiled', programId: progId, rev: workerMessages[0].rev, ok: true } });
+
+	// Now GL_COMPLETION_STATUS_KHR returns 1 and local program is linked from warm driver cache
+	assert.equal(glImp.glGetProgramParameter(progId, 0x91B1), 1);
+	assert.equal(glImp.glGetProgramParameter(progId, 0x8B82), 1);
+	assert.equal(localCompileCalls, 2);
+	assert.equal(localLinkCalls, 1);
+
+	wglBridge.destroy();
+	console.log('PASS: webgl-bridge.js offloads shader compilation to background Worker and reports completion via GL_COMPLETION_STATUS_KHR');
+}
+
+

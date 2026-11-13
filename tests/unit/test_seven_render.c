@@ -2994,19 +2994,28 @@ int main(void)
 		nd_seven_gl_eval_grass_displacement(487.0f, 500.0f, 10.0f, 900.0f, 900.0f, &sx_out2, NULL, NULL, NULL);
 		assert(fabsf(sx_out1 - sx_out2) < 1e-5f);
 
-		/* Verify no high-frequency trembling near the Lamb across a 0.08s frame interval */
-		float sx_t_a = 0.0f, sx_t_b = 0.0f;
-		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.00f, 500.0f, 500.0f, &sx_t_a, NULL, NULL, NULL);
-		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.08f, 500.0f, 500.0f, &sx_t_b, NULL, NULL, NULL);
-		assert(fabsf(sx_t_b - sx_t_a) < 0.25f);
+		/* Verify no high-frequency trembling near or far from the Lamb across a 0.08s frame interval,
+		 * and verify adjacent tufts move cohesively rather than in uncorrelated opposite directions */
+		float sx_t_a = 0.0f, sx_t_b = 0.0f, sy_t_a = 0.0f, sy_t_b = 0.0f;
+		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.00f, 500.0f, 500.0f, &sx_t_a, &sy_t_a, NULL, NULL);
+		nd_seven_gl_eval_grass_displacement(495.0f, 500.0f, 10.08f, 500.0f, 500.0f, &sx_t_b, &sy_t_b, NULL, NULL);
+		assert(fabsf(sx_t_b - sx_t_a) < 0.06f && fabsf(sy_t_b - sy_t_a) < 0.06f);
 
-		/* Record a footstep wake at (600, 600) at t=20.0s and verify depression decays from t=20.1s to t=22.0s */
+		float sx_n0 = 0.0f, sy_n0 = 0.0f, sx_n1 = 0.0f, sy_n1 = 0.0f;
+		nd_seven_gl_eval_grass_displacement(300.0f, 300.0f, 10.00f, 900.0f, 900.0f, &sx_n0, &sy_n0, NULL, NULL);
+		nd_seven_gl_eval_grass_displacement(302.0f, 300.0f, 10.00f, 900.0f, 900.0f, &sx_n1, &sy_n1, NULL, NULL);
+		assert(sx_n0 * sx_n1 > 0.0f && sy_n0 * sy_n1 > 0.0f);
+
+		/* Record a footstep wake at (600, 600) at t=20.0s and verify both depression and shear decay monotonically without cosine ringing */
 		nd_seven_record_wake_step(600.0f, 600.0f, 72.0f, 0.0f, 20.0f);
+		float sx_w0 = 0.0f, sx_w1 = 0.0f, sx_w2 = 0.0f, sx_w3 = 0.0f;
 		float dz_t0 = 0.0f, dz_t1 = 0.0f, dz_t2 = 0.0f;
-		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 20.1f, 900.0f, 900.0f, NULL, NULL, &dz_t0, NULL);
-		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 20.7f, 900.0f, 900.0f, NULL, NULL, &dz_t1, NULL);
-		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 22.0f, 900.0f, 900.0f, NULL, NULL, &dz_t2, NULL);
+		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 20.1f, 900.0f, 900.0f, &sx_w0, NULL, &dz_t0, NULL);
+		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 20.4f, 900.0f, 900.0f, &sx_w1, NULL, NULL, NULL);
+		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 20.7f, 900.0f, 900.0f, &sx_w2, NULL, &dz_t1, NULL);
+		nd_seven_gl_eval_grass_displacement(602.0f, 600.0f, 22.0f, 900.0f, 900.0f, &sx_w3, NULL, &dz_t2, NULL);
 		assert(dz_t0 > dz_t1 && dz_t1 > dz_t2);
+		assert(sx_w0 > sx_w1 && sx_w1 > sx_w2 && sx_w2 > sx_w3);
 
 		/* 4. R4: Verify ND_BB_STYLE_GRASS ground-pinned bottom vertices (qy == 0) vs sheared top vertices (qy == 1),
 		 *    plus unified real-object flora sway (small bushes/shrubs sway with stiffness, tall tree trunks stay rigid) */

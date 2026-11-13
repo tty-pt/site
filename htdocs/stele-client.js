@@ -1770,6 +1770,12 @@ if (isWorkerContext) {
 				} finally {
 					workerClient.flushTurn();
 				}
+				const bridges = comp.activeBridges || workerClient.activeBridges || [];
+				for (const cap of bridges) {
+					if (cap && typeof cap.afterTick === 'function') {
+						try { cap.afterTick(slot); } catch (_) {}
+					}
+				}
 				flushWorkerCanvases(slot);
 			}
 		} finally {

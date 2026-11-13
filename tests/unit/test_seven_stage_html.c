@@ -28,6 +28,8 @@ int main(void)
 	assert(strstr(html, "id=\"term\"") != NULL);
 	assert(strstr(html, "data-bud-terminal") != NULL);   /* live xterm host in floating RPG chat */
 	assert(strstr(html, "<nd-stage") != NULL);          /* a tag for the game stage */
+	assert(strstr(html, "id=\"seven-shader-status\"") != NULL);
+	assert(strstr(html, "Compiling shaders...") != NULL);
 	/* each canvas tag carries its own size attribute */
 	const char *tag_end = strchr(stage, '>');
 	char *s_tag = strndup(stage, (size_t)(tag_end - stage));

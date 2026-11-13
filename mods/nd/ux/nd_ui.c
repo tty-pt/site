@@ -803,6 +803,8 @@ const nd_viewport_driver_t *nd_get_viewport_driver_at(int idx)
 	return &g_viewport_drivers[idx];
 }
 
+static int s_seven_shaders_ready_ui = 0;
+
 static bud_node *mount_seven_stage(void)
 {
 	/* A different tag than the terminal's <div>: swapping stages must replace
@@ -822,7 +824,14 @@ static bud_node *mount_seven_stage(void)
 			lx_attr("data-bud-canvas-fit", "1"),
 			lx_attr("width", "640"),
 			lx_attr("height", "480"),
-			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))));
+			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))),
+		lx_node(lx_n("div",
+			lx_attr("id", "seven-shader-status"),
+			lx_attr("data-bud-key", "seven-shader-status"),
+			lx_attr("class", s_seven_shaders_ready_ui
+				? "hidden"
+				: "absolute inset-0 flex items-center justify-center pointer-events-none select-none font-mono text-sm text-neutral-300 z-10"),
+			lx_text("Compiling shaders..."))));
 
 	return stage;
 }
@@ -1707,6 +1716,12 @@ static void seven_stage_redraw(void)
 	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_YAW, ND_SEVEN_CAM_FOV);
 	nd_seven_render((uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
 	lam_cam_set_2d();
+
+	int ready_now = nd_seven_shaders_ready();
+	if (ready_now != s_seven_shaders_ready_ui) {
+		s_seven_shaders_ready_ui = ready_now;
+		bud_app_set_state();
+	}
 }
 
 int g_map_dirty = 0;

@@ -11,6 +11,7 @@
 #include "nd_seven_motion.h"
 #include "nd_seven_objects.h"
 #include "nd_seven_gl.h"
+#include <ttypt/webgl.h>
 
 /* --- macro chunk hierarchy integration ---------------------------------- */
 
@@ -1221,6 +1222,11 @@ int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
 #define MAX_DRAW 512
 #define ALL_GPU_MAX_DRAW 24576
 
+int nd_seven_shaders_ready(void)
+{
+	return nd_seven_gl_pipelines_ready() ? 1 : 0;
+}
+
 void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
 	int w = (int)wu, h = (int)hu;
@@ -1230,8 +1236,16 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (w <= 0 || h <= 0)
 		return;
 
-	atlas_load();
 	nd_seven_sync_origin(st);
+
+	if (!nd_seven_gl_pipelines_ready()) {
+		glViewport(0, 0, (GLsizei)w, (GLsizei)h);
+		glClearColor(0.039f, 0.039f, 0.047f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		return;
+	}
+
+	atlas_load();
 
 	float zoom = nd_seven_get_zoom();
 	float eff_cam_dist = ND_SEVEN_CAM_DIST / zoom;

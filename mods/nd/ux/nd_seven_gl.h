@@ -126,6 +126,7 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
                                     float *out_wz, float *out_water_depth);
 
 /* 3D WebGL2 Frame & Pass Dispatchers */
+bool nd_seven_gl_pipelines_ready(void);
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity);
 float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
                                   float lamb_wx, float lamb_wy, float lamb_wz,
@@ -147,6 +148,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 void nd_seven_gl_flush_water(void);
 
+void nd_seven_gl_flush_clouds(void);
+
 void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   uint32_t count,
                                   const uint32_t *atlas_rgba);
@@ -158,6 +161,8 @@ const char *nd_seven_gl_vs_water(void);
 const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
+const char *nd_seven_gl_vs_cloud(void);
+const char *nd_seven_gl_fs_cloud(void);
 
 /* Query active GPU mesh quad resolution for a given LOD level and camera distance:
  * Level 0 at mid-near zoom (340 < cam_dist < 5000) returns 48 (48x48 quads = 4,608 triangles);
@@ -196,6 +201,25 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
                                          float lamb_wx, float lamb_wy,
                                          float *out_shear_x, float *out_shear_y,
                                          float *out_depress_z, float *out_rustle);
+
+/* Pure-C reference mirror of the 8-octave observer-gated ("quantum") 4D wind-coupled
+ * fractal cloud cascade in s_fs_cloud / s_fs_terrain / s_fs_water / s_fs_billboard:
+ * Gates fine fractal octaves by camera distance (cam_dist) and screen-space Nyquist
+ * footprint (pixel_footprint), early-outing in clear-sky synoptic regions while
+ * preserving large-scale weather systems and resolving close-up billow detail
+ * where observed. */
+float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
+                                          float anim_time,
+                                          float climate_humidity,
+                                          float cam_dist, float pixel_footprint,
+                                          float *out_grad_x, float *out_grad_y,
+                                          float *out_grad_z, float *out_grad_t);
+
+float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
+                                     float anim_time,
+                                     float climate_humidity,
+                                     float *out_grad_x, float *out_grad_y,
+                                     float *out_grad_z, float *out_grad_t);
 
 /* 4x Real-Life Astronomical Solar & Lunar Cycle Constants:
  * - Solar Day (1/4 real day = 4x real speed): 86,400 / 4 = 21,600 seconds (6.0 real hours)
