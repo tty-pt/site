@@ -19,6 +19,15 @@ static inline int bud_slot_dispatch_event(int slot, unsigned int node_id, const 
 static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_name, int bubbles, void *event_data) { (void)node_id; (void)event_name; (void)bubbles; (void)event_data; return 0; }
 #endif
 
+#if defined(__wasm__)
+#define _BUD_WASM_MOD_REGISTER(mod_name) \
+    __attribute__((constructor)) static void _bud_mod_##mod_name##_register(void) { \
+        stl_kernel_register_module(&stl_mod_##mod_name); \
+    }
+#else
+#define _BUD_WASM_MOD_REGISTER(mod_name)
+#endif
+
 #define BUD_WASM_MODULE(mod_name, init_fn, render_fn, action_fn) \
     static int _bud_mod_##mod_name##_mount(int slot) { \
         return bud_slot_mount(slot, (bud_node *(*)(void))render_fn); \
@@ -52,23 +61,23 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
         .cleanup = NULL, \
         .fetch_callback = NULL, \
         .render = (void *(*)(void))(render_fn) \
-    }
+    }; \
+    _BUD_WASM_MOD_REGISTER(mod_name)
 
 #if defined(__wasm__)
 #define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
-    __attribute__((weak)) bud_node *bud_app_render(void) { \
+    _BUD_WASM_MOD_REGISTER(mod_name) \
+    __attribute__((weak)) ISO_EXPORT(bud_node *, bud_app_render, void) { \
         bud_node *(*_rnd_fn)(void) = (bud_node *(*)(void))(render_fn); \
         return _rnd_fn ? _rnd_fn() : NULL; \
     } \
     __attribute__((weak)) ISO_EXPORT(int, wasm_init, const char *json, int len) { \
-        int (*_in_fn)(const char *, int) = (int (*)(const char *, int))(init_fn); \
-        if (_in_fn) _in_fn(json, len); \
-        return _bud_mod_##mod_name##_mount(1); \
+        stl_kernel_register_module(&stl_mod_##mod_name); \
+        return stl_kernel_mount(1, #mod_name, json, len); \
     } \
     __attribute__((weak)) ISO_EXPORT(int, wasm_init_bin, const void *bin, int len) { \
-        int (*_in_fn)(const char *, int) = (int (*)(const char *, int))(init_fn); \
-        if (_in_fn) _in_fn((const char *)bin, len); \
-        return _bud_mod_##mod_name##_mount(1); \
+        stl_kernel_register_module(&stl_mod_##mod_name); \
+        return stl_kernel_mount_bin(1, #mod_name, bin, (size_t)len); \
     } \
     __attribute__((weak)) ISO_EXPORT(void, wasm_action, int action_id, const char *data) { \
         void (*_act_fn)(int, const char *) = (void (*)(int, const char *))(action_fn); \
@@ -79,7 +88,11 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
         if (_f_fn) _f_fn(req_id, data, len); \
     }
 #else
-#define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn)
+#define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
+    __attribute__((weak)) int wasm_init(const char *json, int len) { \
+        int (*_init_fn)(const char *, int) = (int (*)(const char *, int))(init_fn); \
+        return _init_fn ? _init_fn(json, len) : 0; \
+    }
 #endif
 
 #define BUD_WASM_MODULE_EXT(mod_name, init_fn, render_fn, action_fn, tick_fn, cleanup_fn, fetch_fn) \
