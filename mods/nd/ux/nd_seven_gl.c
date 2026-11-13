@@ -2496,47 +2496,7 @@ static const char *s_fs_billboard =
 	"    bool isGrass = (style > 4.5 && style < 5.5);\n"
 	"    bool isFloraObj = (style > 0.5 && style < 2.5);\n"
 	"    vec4 baseCol = sampleAtlasSmooth(vUV, vSpriteBounds, style);\n"
-	"    vec2 baseSampleUV = vUV;\n"
-	"    vec4 fWind = vec4(0.7071, -0.7071, 0.75, 0.0);\n"
-	"    float canopyHeightMask = 0.0;\n"
-	"    float rawLeafMask = 0.0;\n"
-	"    if (isFloraObj && vDist < 3600.0) {\n"
-	"        /* Tree & Flora Canopy Wind Wave: lower base (qy < 0.24) and central woody trunk column\n"
-	"         * (|qx| < 0.36, qy < 0.62 with non-green bark chroma) remain 100% stationary while upper\n"
-	"         * leafy crowns and outer boughs wave visibly with the travelling eval_recursive_wind field */\n"
-	"        float qx_c = clamp(vQuadUV.x, -1.0, 1.0);\n"
-	"        float qy_c = clamp(vQuadUV.y, 0.0, 1.0);\n"
-	"        float trunkZone = smoothstep(0.36, 0.08, abs(qx_c)) * smoothstep(0.62, 0.20, qy_c);\n"
-	"        canopyHeightMask = smoothstep(0.22, 0.56, qy_c) * (1.0 - trunkZone * 0.88);\n"
-	"        if (canopyHeightMask > 0.01) {\n"
-	"            fWind = eval_recursive_wind(vLocalPos.xy, uAnimTime);\n"
-	"            vec2 atlasSizeC = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
-	"            float distEnv = clamp((3600.0 - vDist) / 2000.0, 0.0, 1.0);\n"
-	"            float windProj = dot(vLocalPos.xy, fWind.xy) * 0.045;\n"
-	"            float wavePhase = uAnimTime * 2.35 - windProj + qy_c * 1.65;\n"
-	"            float boughPhase = uAnimTime * 3.70 + vLocalPos.x * 0.095 - vLocalPos.y * 0.075 + qx_c * 2.80 + qy_c * 2.40;\n"
-	"            float gustAmp = 0.75 + 0.85 * fWind.z + 0.55 * fWind.w;\n"
-	"            float swayX = fWind.x * (fWind.z - 0.45) * 1.40\n"
-	"                        + sin(wavePhase) * (1.55 * gustAmp)\n"
-	"                        + sin(boughPhase) * (0.65 + 0.60 * fWind.w);\n"
-	"            float swayY = cos(wavePhase * 0.90 + 0.70) * (0.42 * gustAmp)\n"
-	"                        + sin(boughPhase * 1.15) * (0.28 + 0.25 * fWind.w);\n"
-	"            float swayEnv = canopyHeightMask * distEnv;\n"
-	"            float uSign = (dFdx(vUV.x) >= 0.0) ? 1.0 : -1.0;\n"
-	"            vec2 canopyTexShift = vec2(-swayX * uSign, swayY) * swayEnv;\n"
-	"            vec2 swayedUV = vUV + canopyTexShift / atlasSizeC;\n"
-	"            vec4 swayedCol = sampleAtlasSmooth(swayedUV, vSpriteBounds, style);\n"
-	"            float baseLeafDom = baseCol.g - max(baseCol.r, baseCol.b) * 0.92;\n"
-	"            float swayedLeafDom = swayedCol.g - max(swayedCol.r, swayedCol.b) * 0.92;\n"
-	"            bool baseIsBark = (baseCol.a > 0.15) && (qy_c < 0.62) && (abs(qx_c) < 0.36) && (baseLeafDom < -0.01);\n"
-	"            bool swayedIsBark = (swayedCol.a > 0.15) && (qy_c < 0.62) && (abs(qx_c) < 0.36) && (swayedLeafDom < -0.01);\n"
-	"            float useSway = (baseIsBark || swayedIsBark) ? 0.0 : smoothstep(0.01, 0.12, swayEnv);\n"
-	"            baseCol = mix(baseCol, swayedCol, useSway);\n"
-	"            baseSampleUV = mix(vUV, swayedUV, useSway);\n"
-	"            rawLeafMask = smoothstep(0.10, 0.40, baseCol.a) * (1.0 - trunkZone);\n"
-	"        }\n"
-	"    }\n"
-	"    vec2 sampleUV = baseSampleUV;\n"
+	"    vec2 sampleUV = vUV;\n"
 	"    if (isSubmerged) {\n"
 	"        vec2 atlasSize = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
 	"        float depthRamp = smoothstep(0.0, 1.4, d) * (0.48 + 0.52 * smoothstep(1.0, 7.0, d));\n"
@@ -2546,7 +2506,7 @@ static const char *s_fs_billboard =
 	"            -waveRefGrad.x * (3.20 * depthRamp),\n"
 	"            -waveRefGrad.y * (2.20 * depthRamp) - clamp(d * 0.10, 0.0, 0.75) * smoothstep(0.0, 1.0, d)\n"
 	"        ) * refractDistFade;\n"
-	"        sampleUV = baseSampleUV + snellTexelShift / atlasSize;\n"
+	"        sampleUV = vUV + snellTexelShift / atlasSize;\n"
 	"        if (vSpriteBounds.z > vSpriteBounds.x && vSpriteBounds.w > vSpriteBounds.y) {\n"
 	"            vec2 halfTexel = 0.5 / atlasSize;\n"
 	"            sampleUV = clamp(sampleUV, vSpriteBounds.xy + halfTexel, vSpriteBounds.zw - halfTexel);\n"
@@ -2610,9 +2570,6 @@ static const char *s_fs_billboard =
 	"            vec3 groundTurf = mix(vec3(0.29, 0.49, 0.23), vec3(0.37, 0.60, 0.27), smoothstep(0.25, 0.75, g1.x)) * vTint.rgb;\n"
 	"            vec3 bladeBody  = mix(albedo * vec3(0.98, 1.02, 0.92), albedo * vec3(1.16, 1.14, 0.88), smoothstep(0.18, 0.92, qy + tipSheen * 0.32));\n"
 	"            albedo = mix(groundTurf, bladeBody, smoothstep(0.0, 0.30, qy));\n"
-	"        } else if (isFloraObj && canopyHeightMask * rawLeafMask > 0.01) {\n"
-	"            float crownSheen = canopyHeightMask * rawLeafMask * clamp((fWind.z - 0.50) * 0.42 + fWind.w * 0.38, 0.0, 1.0);\n"
-	"            albedo = mix(albedo, albedo * vec3(1.12, 1.10, 0.90), crownSheen * 0.35);\n"
 	"        }\n"
 	"    } else if (isMineral && distFade > 0.01) {\n"
 	"        /* Harmonize mineral sprites with terrain slate/granite strata & fracture crevices */\n"
@@ -2789,6 +2746,11 @@ const char *nd_seven_gl_fs_billboard(void) { return s_fs_billboard; }
 static float s_grass_lamb_wx = 0.0f;
 static float s_grass_lamb_wy = 0.0f;
 static float s_grass_anim_time = 0.0f;
+
+static inline uint32_t gl_chaff_hash3(int32_t px, int32_t py, int32_t pz, uint32_t seed);
+static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
+                                          float *out_dir_x, float *out_dir_y,
+                                          float *out_gust, float *out_catspaw);
 
 static void torus_frame_double(double wx, double wy, double wz,
                                const nd_planet_def_t *pdef,
@@ -3013,6 +2975,7 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 
 	float grass_sx = 0.0f, grass_sy = 0.0f, grass_dz = 0.0f, grass_rustle = 0.0f;
 	float flora_sway_scale = 0.0f;
+	int is_woody_tree = 0;
 	if (b->style == ND_BB_STYLE_GRASS) {
 		flora_sway_scale = (b->height > 0.0f && b->height < 14.0f)
 		                   ? fmaxf(0.36f, b->height * (1.0f / 14.0f))
@@ -3030,16 +2993,40 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 			if (size_t < 0.0f) size_t = 0.0f;
 			if (size_t > 1.0f) size_t = 1.0f;
 			flora_sway_scale = 0.52f + 0.33f * size_t;
+		} else if (b->pad0 == 2u && b->height > 0.0f) {
+			/* Woody trunked trees (oaks, birches, pines, firs, willows, maples, olives):
+			 * homogeneous ground-pinned quad shear evaluated once at the tree root (b->x, b->y)
+			 * with heavy woody stiffness (~1.5-2.5 world units at the top of a 70-100px tree)
+			 * and wind-only response (ignoring Lamb ankle-parting / wake trampling) */
+			float h_norm = fminf(1.30f, fmaxf(0.75f, b->height * (1.0f / 80.0f)));
+			flora_sway_scale = 1.65f * h_norm;
+			is_woody_tree = 1;
 		}
 	}
 	if (flora_sway_scale > 0.0f) {
-		nd_seven_gl_eval_grass_displacement(b->x, b->y, s_grass_anim_time,
-		                                    s_grass_lamb_wx, s_grass_lamb_wy,
-		                                    &grass_sx, &grass_sy, &grass_dz, &grass_rustle);
-		grass_sx *= flora_sway_scale;
-		grass_sy *= flora_sway_scale;
-		grass_dz *= (b->style == ND_BB_STYLE_GRASS) ? flora_sway_scale : (flora_sway_scale * 0.45f);
-		grass_rustle *= fminf(1.0f, flora_sway_scale);
+		if (is_woody_tree) {
+			float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
+			gl_eval_recursive_wind(b->x, b->y, s_grass_anim_time, &wDirX, &wDirY, &gust, &catspaw);
+			uint32_t th = gl_chaff_hash3((int32_t)floorf(b->x), (int32_t)floorf(b->y), 0, 0x54524545u);
+			float phase = (float)(th & 0xFFFFu) * (TWO_PI_F / 65536.0f);
+			float stiff = 0.92f + 0.20f * ((float)((th >> 16u) & 0xFFu) / 255.0f);
+			float wind_proj = b->x * wDirX + b->y * wDirY;
+			float slow_sway = sinf(s_grass_anim_time * 1.15f - wind_proj * 0.032f + phase) * (0.32f + 0.30f * gust);
+			float bough_nod = sinf(s_grass_anim_time * 1.85f + b->x * 0.045f + b->y * 0.035f + phase * 0.6f) * (0.12f + 0.16f * catspaw);
+			float wind_mag = (0.72f + 0.85f * gust + 0.35f * catspaw + slow_sway + bough_nod) * stiff * flora_sway_scale;
+			grass_sx = wDirX * wind_mag + (-wDirY) * (bough_nod * 0.20f * flora_sway_scale);
+			grass_sy = wDirY * wind_mag + ( wDirX) * (bough_nod * 0.20f * flora_sway_scale);
+			grass_dz = 0.0f;
+			grass_rustle = 0.06f * catspaw;
+		} else {
+			nd_seven_gl_eval_grass_displacement(b->x, b->y, s_grass_anim_time,
+			                                    s_grass_lamb_wx, s_grass_lamb_wy,
+			                                    &grass_sx, &grass_sy, &grass_dz, &grass_rustle);
+			grass_sx *= flora_sway_scale;
+			grass_sy *= flora_sway_scale;
+			grass_dz *= (b->style == ND_BB_STYLE_GRASS) ? flora_sway_scale : (flora_sway_scale * 0.45f);
+			grass_rustle *= fminf(1.0f, flora_sway_scale);
+		}
 
 		/* Prevent vertical screen-height collapse (-sy * sin_p - dz * cos_p) on short scaled meadow tufts
 		 * so trampled or wind-bent tufts always retain at least 60% of their vertical screen height */

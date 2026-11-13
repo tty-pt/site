@@ -3078,19 +3078,36 @@ int main(void)
 			assert(fabsf(v_grs[0].local_pos[c] - v_std[0].local_pos[c]) < 1e-5f);
 			assert(fabsf(v_shr[0].world_pos[c] - v_std_shr[0].world_pos[c]) < 1e-5f);
 			assert(fabsf(v_herb[0].world_pos[c] - v_std_herb[0].world_pos[c]) < 1e-5f);
-			/* Tall tree quad vertices stay 100% rigid so the wooden trunk never tilts */
-			assert(fabsf(v_tree[2].world_pos[c] - v_std_tree[2].world_pos[c]) < 1e-5f);
+			/* Tall tree bottom vertices (qy == 0) remain 100% pinned at the trunk base */
+			assert(fabsf(v_tree[0].world_pos[c] - v_std_tree[0].world_pos[c]) < 1e-5f);
+			assert(fabsf(v_tree[1].world_pos[c] - v_std_tree[1].world_pos[c]) < 1e-5f);
 		}
 		/* Top vertex TL (idx 2, qy == 1) must be sheared away from the Lamb (+x direction since Lamb is at 495 < 500) */
 		assert(fabsf(v_grs[2].quad_uv[1] - 1.0f) < 1e-5f);
 		float grass_disp_x = v_grs[2].local_pos[0] - v_std[2].local_pos[0];
 		float shrub_disp_x = v_shr[2].local_pos[0] - v_std_shr[2].local_pos[0];
 		float herb_disp_x = v_herb[2].local_pos[0] - v_std_herb[2].local_pos[0];
+		float tree_disp_x = v_tree[2].local_pos[0] - v_std_tree[2].local_pos[0];
+		float tree_disp_y = v_tree[2].local_pos[1] - v_std_tree[2].local_pos[1];
+		float tree_disp_mag = sqrtf(tree_disp_x * tree_disp_x + tree_disp_y * tree_disp_y);
 		assert(grass_disp_x > 0.8f);
 		assert(shrub_disp_x > 0.25f && shrub_disp_x < grass_disp_x);
 		/* True object-type herbaceous/stem plant (height 38, pad0=1) visibly sways from its pinned root */
 		assert(herb_disp_x > 0.7f);
 		assert(v_grs[2].local_pos[2] < v_std[2].local_pos[2] - 0.4f);
+
+		/* Tall tree (pad0=2) sways homogeneously across TL (idx 2) and TR (idx 4) with heavy woody stiffness,
+		 * and ignores Lamb footstep trampling when the Lamb moves away */
+		assert(tree_disp_mag > 0.35f && tree_disp_mag < 3.0f);
+		assert(fabsf((v_tree[4].local_pos[0] - v_std_tree[4].local_pos[0]) - tree_disp_x) < 1e-5f);
+		assert(fabsf((v_tree[4].local_pos[1] - v_std_tree[4].local_pos[1]) - tree_disp_y) < 1e-5f);
+		nd_seven_gl_set_lamb_light(0.0f, 0.0f, 12.0f, 1.0f);
+		nd_seven_gl_bb_vert_t v_tree_far_lamb[6];
+		nd_seven_gl_eval_billboard_quad(&tall_tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_tree_far_lamb);
+		for (int c = 0; c < 3; c++) {
+			assert(fabsf(v_tree_far_lamb[2].world_pos[c] - v_tree[2].world_pos[c]) < 1e-5f);
+		}
+		nd_seven_gl_set_lamb_light(495.0f, 500.0f, 12.0f, 1.0f);
 
 		/* Short scaled meadow tufts (5px) must never collapse to zero vertical screen height when trampled */
 		float short_std_dz = v_short_std[2].local_pos[2] - v_short_std[0].local_pos[2];
@@ -3099,15 +3116,12 @@ int main(void)
 		assert(short_grs_dz >= short_std_dz * 0.55f);
 
 		const char *fs_b = nd_seven_gl_fs_billboard();
-		assert(strstr(fs_b, "canopyHeightMask") != NULL);
-		assert(strstr(fs_b, "canopyTexShift") != NULL);
-		assert(strstr(fs_b, "trunkZone") != NULL);
-		assert(strstr(fs_b, "wavePhase") != NULL);
-		assert(strstr(fs_b, "boughPhase") != NULL);
-		assert(strstr(fs_b, "baseIsBark") != NULL);
+		assert(strstr(fs_b, "canopyTexShift") == NULL);
+		assert(strstr(fs_b, "swayedUV") == NULL);
+		assert(strstr(fs_b, "boughPhase") == NULL);
 
-		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f, shrub=+%.2f, herb_obj=+%.2f), wake decay (%.2f->%.2f->%.2f), and ground-pinned quad shear verified\n",
-		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, shrub_disp_x, herb_disp_x, dz_t0, dz_t1, dz_t2);
+		printf("PASS: Living Meadow botanical atlas (%d swatches), biome variety (tundra=%d/sc=%.2f, boreal=%d/sc=%.2f, savanna=%d/sc=%.2f, jungle=%d/sc=%.2f), calm contact parting (W=%.2f, E=+%.2f, shrub=+%.2f, herb_obj=+%.2f, tree_wind=%.2f), wake decay (%.2f->%.2f->%.2f), and homogeneous ground-pinned quad shear verified\n",
+		       NDB_COUNT, tundra_cnt, tundra_avg_sc, boreal_cnt, boreal_avg_sc, savanna_cnt, savanna_avg_sc, jungle_cnt, jungle_avg_sc, sx_w, sx_e, shrub_disp_x, herb_disp_x, tree_disp_mag, dz_t0, dz_t1, dz_t2);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
