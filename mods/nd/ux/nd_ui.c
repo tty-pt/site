@@ -1364,12 +1364,6 @@ static int on_key_down(bud_event *e)
 			seven_stage_redraw();
 			return 1;
 		}
-		if (strcmp(key, "q") == 0 || strcmp(key, "Q") == 0) {
-			nd_seven_cycle_quality();
-			bud_app_set_state();
-			seven_stage_redraw();
-			return 1;
-		}
 		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
 			char act[64];
 			if (nd_seven_action_execute(&client_state, act, sizeof(act)) > 0) {

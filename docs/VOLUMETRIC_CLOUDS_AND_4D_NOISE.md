@@ -173,19 +173,12 @@ The atmospheric noise spectrum spans 10 continuous octaves combining 4 macro/syn
   - Verifies Nyquist filter width band-limiting suppresses high frequencies cleanly (`sum_nyq_fine > sum_nyq_coarse * 1.35`).
   - Verifies continent-scale spatial coherence at orbital zoom ($\lambda_0 = 2{,}400{,}000\text{ units}$, step diff $< 0.030$).
 
-## Vertical 4D decorrelation, crown erosion & solar lighting
+## Layer separation, fixed performance budget & solar lighting
 
-- **No more "identical slices" from above.** `zBaseSlice = hNorm * 28` and an extra `w` offset `hNorm * 11.5 * zScale[j]` make consecutive raymarch slices of a deck sample independent 3D cross-sections of the 4D noise (CPU mirror `nd_seven_gl_eval_zoom_cloud_density` is kept in sync; verified by the slice-correlation test).
-- **Crown erosion.** `hLocal` (0 at a deck's condensation base, 1 at its crown) erodes `baseCloud` by `crownErode` and weights `billowFbm` by `0.62 + 0.55 * hLocal`, so decks are broad at the base and only buoyant turrets reach the top.
-- **Octave range.** `dFar/dNear` were widened (650 km … 420 wu) so the coarse 4D octaves stay active at stratospheric altitude.
+- **Wide 4D slice separation.** `zBaseSlice = hNorm * 64 + deckIdx * 19.3`, `wSlice = hNorm * 37 + deckIdx * 13.7`: consecutive slices advance >= 4.5 z-cells / 2.5 w-cells, and each deck is offset by a further 19.3 / 13.7 cells. The primary 4D octave is evaluated once at the un-warped column; its analytical gradient (`n4_0.yz * 950`) plus `wind * hNorm * 1400` is an altitude-dependent horizontal domain warp (`hWarp`), so every height has a different, overhanging footprint.
+- **Per-deck meteorology.** Deck 1 = cumulus cells of the synoptic macro field; Deck 2 = baroclinic altocumulus bands displaced 4.8 km cross-wind / 3.2 km along-wind plus only the deepest convective cores (`smoothstep(0.62, 0.92, coreStrength)`); Deck 3 = downwind anvil plumes (coarse macro sampled 38 km upwind, no cumulus-core term) plus jet-stream cirrus.
+- **Crown erosion.** `hLocal` erodes `baseCloud` by `crownErode` and weights the 4D turbulence by `0.62 + 0.55 * hLocal`.
 - **Lighting.** `sunSlopeOcc` (density derivative toward the sun) + self/tower/inter-deck occlusion form `tauSun`; colour is a three-zone blend of Rayleigh shadow, multiply-scattered interior (`multiScatter`) and direct sun (`directSun`) plus a thin-edge Mie `silverLining`.
-- **Clear-sky early-out.** Four coarse synoptic probes (slab entry/mid/exit + upwind anvil offset) discard pixels that are deep in the clear regime before any raymarch step (`anyCloud`).
-- **Graphics quality tiers** (`nd_seven_set_quality`, dock button, `Q` key): Low / Balanced (default) / High.
-
-| Parameter | Low | Balanced | High |
-|---|---|---|---|
-| Cloud raymarch steps | 3 | 6 | 12 |
-| Cloud 4D octaves | 2 | 4 | 6 |
-| Billboard cloud-shadow range | off | < 4000 wu | < 6000 wu |
-| Close-zoom terrain subdivision | 48x48 | 96x96 | 144x144 |
-| Living Meadow radius / lattice | 156 wu / 9 | 216 wu / 7 | 252 wu / 6 |
+- **Fixed performance budget (formerly the "Low" tier; there is no runtime quality switch):** 3 raymarch steps (one per deck), 2 4D octaves, no billboard cloud shadows, level-0 terrain grid capped at 48x48, Living Meadow radius 156 wu on a 9-unit lattice.
+- **Shader hoists.** The 5 wind-flow noises are sampled once per pixel (`nd_cloud_wind_column`) and the Ekman veer/shear/gust/updraft are derived analytically per step (`nd_cloud_wind_at_height`); the sun-ward tower probe is lazy (`towerReady`); cirrus noises are evaluated only for Deck 3 samples (`eval_synoptic_macro_cloud_core(..., wantCirrus, ...)`).
+- **Ground/terrain.** Cloud shadow uses a single projection slice at `zk = 920` and the water reflection reuses that density; shore swash is gated to 2.4 units above / 4.5 below tide; terrain micro-detail is 2 octaves (3 inside 420 wu); caustics use `nd_caustic_web` (2D gradient-noise iso-contours) instead of four 3D hash noises; the duplicate substrate sample is gone.

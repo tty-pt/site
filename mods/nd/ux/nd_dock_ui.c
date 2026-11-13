@@ -1,6 +1,5 @@
 #include "nd_ui_internal.h"
 #include <ttypt/axil-ws.h>
-#include "nd_seven.h"
 
 int on_dock_action(bud_event *ev)
 {
@@ -35,29 +34,6 @@ static int on_action_spells(bud_event *e) { (void)e; nd_ui_toggle_modal("spell")
 static int on_action_inv(bud_event *e) { (void)e; ws_send("inventory\n", 10); return 0; }
 static int on_action_look(bud_event *e) { (void)e; ws_send("look\n", 5); return 0; }
 
-/* Cycles the Seven graphics quality tier (Low -> Balanced -> High); the stage re-renders on the next tick */
-static int on_action_quality(bud_event *e)
-{
-	(void)e;
-	nd_seven_cycle_quality();
-	bud_app_set_state();
-	return 0;
-}
-
-static bud_node *make_quality_btn(void)
-{
-	static const char *labels[ND_SEVEN_QUALITY_COUNT] = { "⚡ Low", "✨ Bal", "💎 High" };
-	static const char *titles[ND_SEVEN_QUALITY_COUNT] = {
-		"Graphics Quality: Low (click or press Q to cycle)",
-		"Graphics Quality: Balanced (click or press Q to cycle)",
-		"Graphics Quality: High (click or press Q to cycle)"
-	};
-	int q = nd_seven_get_quality();
-	if (q < 0 || q >= ND_SEVEN_QUALITY_COUNT) q = ND_SEVEN_QUALITY_BALANCED;
-	bud_node *btn = make_btn(labels[q], titles[q], on_action_quality);
-	bud_set_attr(btn, "id", "btn-quality");
-	return btn;
-}
 
 int on_cycle_viewport(bud_event *e)
 {
@@ -123,8 +99,6 @@ bud_node *render_action_bar(const nd_client_state_t *st)
 
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
 	bud_append(dock, make_btn("👁️", "Look", on_action_look));
-	if (st && (strcmp(st->preferred_driver, "lamina-seven") == 0 || st->layout_mode == ND_LAYOUT_GAME_2D))
-		bud_append(dock, make_quality_btn());
 
 	return dock;
 }
