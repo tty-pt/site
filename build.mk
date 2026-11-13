@@ -62,7 +62,7 @@ WASM_LDFLAGS := -mexec-model=reactor \
 # No --allow-undefined: host imports must be declared with an explicit
 # import_module (ISO_IMPORT); anything else is a link error instead of a
 # silent `env.*` import the browser host would have to stub.
-WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/mods/common/ux/site_ui.c
+WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libstele/src/stele_wasm_kernel.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/mods/common/ux/site_ui.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
 
 # BSD/GNU portable: keep `all` as first target
