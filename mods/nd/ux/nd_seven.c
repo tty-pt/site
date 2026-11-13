@@ -352,15 +352,15 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 	float r_planet = 0.0f;
 	float z_min_cull = lwz_est - 96.0f;
-	float z_max_cull = lwz_est + 96.0f;
-	float cull_margin = 48.0f;
+	float z_max_cull = lwz_est + 360.0f;
+	float cull_margin = 64.0f;
 	if (dist >= 1200.0f) {
 		r_planet = dist * 1.25f;
 		if (r_planet < 16000.0f) r_planet = 16000.0f;
 		if (r_planet > 80000.0f) r_planet = 80000.0f;
-		z_min_cull = -2000.0f;
-		z_max_cull = 2000.0f;
-		cull_margin = 150.0f;
+		z_min_cull = -2600.0f;
+		z_max_cull = 2600.0f;
+		cull_margin = 180.0f;
 	}
 	s_frame_sag_radius = r_planet;
 
@@ -373,7 +373,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	if (dist >= 2500.0f) {
 		float atmo_t = fminf(1.0f, fmaxf(0.0f, (dist - 2500.0f) / 42000.0f));
 		target_quad_px = 1.80f + 10.20f * atmo_t;
-		max_leaves = (size_t)(96.0f - 56.0f * atmo_t);
 		int lvl_step = (int)floorf(log2f(dist * (1.0f / 2000.0f)));
 		if (lvl_step < 1) lvl_step = 1;
 		if (lvl_step > 6) lvl_step = 6;
