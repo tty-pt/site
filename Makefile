@@ -116,6 +116,13 @@ stage-assets:
 	@ln -sfn ../../external/libchaff/npm node_modules/@tty-pt/noise
 	@ln -sfn ../../external/libareole/npm node_modules/@tty-pt/areole
 	@ln -sfn ../../external/libareole/npm node_modules/@tty-pt/chunk
+	@ln -sfn ../../external/axil-auren/npm node_modules/@tty-pt/auren
+	@for d in external/*/npm; do \
+		if [ -d "$$d/node_modules/@tty-pt" ]; then \
+			rm -rf "$$d/node_modules/@tty-pt/stele" && \
+			ln -sfn "$$PWD/external/libstele/npm" "$$d/node_modules/@tty-pt/stele"; \
+		fi; \
+	done
 	@for d in external/* mods/*; do \
 		if [ -d "$$d/htdocs" ]; then \
 			cp -u -R "$$d/htdocs/." htdocs/ 2>/dev/null || true; \
@@ -455,7 +462,7 @@ test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e
 # depends on mods: check-no-tree-rpath inspects built artifacts, which must not
 # be mid-relink when the check runs under -j
 boundary-check: mods
-	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh && sh scripts/check-pkgconfig-versions.sh
+	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh external/mk/scripts/wasm-audit.sh --check-substrate && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh && sh scripts/check-pkgconfig-versions.sh
 
 watch:
 	./scripts/watch.sh

@@ -129,7 +129,7 @@ export class SteleWasmClient {
 	constructor(options = {}) {
 		this.instance = null;
 		this.sharedMemory = (typeof WebAssembly !== 'undefined' && typeof WebAssembly.Memory === 'function')
-			? new WebAssembly.Memory({ initial: 256, maximum: 4096 })
+			? new WebAssembly.Memory(options.maxMemoryPages ? { initial: 256, maximum: options.maxMemoryPages } : { initial: 256 })
 			: null;
 		this.memory = this.sharedMemory;
 		this.slotInstances = new Map(); // slot -> { instance, memory, moduleName, hasTick }
