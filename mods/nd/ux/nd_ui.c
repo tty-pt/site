@@ -1786,7 +1786,12 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	}
 }
 
-ISO_EXPORT(bud_node *, bud_app_render, void)
+#include "../../common/site_wasm_app.h"
+
+static bud_node *nd_stl_render(void)
 {
 	return nd_ui_render(&client_state);
 }
+
+BUD_WASM_MODULE_EXT(nd, nd_stl_init, nd_stl_render, NULL, wasm_tick, NULL, NULL);
+

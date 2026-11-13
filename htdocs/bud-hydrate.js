@@ -220,7 +220,7 @@ function buildEventPayload(info, event) {
 	return buildControlValue(event && event.target);
 }
 
-function hydratePersistNodes(root, wasm = null, memory = null) {
+function hydratePersistNodes(root, wasm = null, memory = null, dispatchCb = null) {
 	if (!root || typeof window === 'undefined' || !window.localStorage) return;
 	const list = typeof root.querySelectorAll === 'function' ? root.querySelectorAll('[data-bud-persist-key]') : [];
 	for (const el of list) {
@@ -239,12 +239,16 @@ function hydratePersistNodes(root, wasm = null, memory = null) {
 					el.setAttribute('class', saved.class);
 					el.setAttribute('data-bud-persisted-class', saved.class);
 				}
+				const vStr = `${key}|${saved.style || ''}|${saved.class || ''}`;
+				if (typeof dispatchCb === 'function') {
+					dispatchCb(0, 'restore-persist', true, vStr);
+					continue;
+				}
 				const dispatchFn = getWasmExport(wasm, ['bud_app_dispatch']);
 				const malloc = getWasmExport(wasm, ['malloc']);
 				const free = getWasmExport(wasm, ['free']);
 				if (dispatchFn && malloc && memory) {
 					const nameBytes = new TextEncoder().encode('restore-persist\0');
-					const vStr = `${key}|${saved.style || ''}|${saved.class || ''}`;
 					const vBytes = new TextEncoder().encode(vStr + '\0');
 					const namePtr = malloc(nameBytes.length);
 					const vPtr = malloc(vBytes.length);
@@ -1012,10 +1016,16 @@ export class BudWasmBridge {
 		this.wasm = wasm || null;
 		this.memory = this.wasm && this.wasm.memory ? this.wasm.memory : null;
 		this.listenerResolver = listenerResolver;
+		this.onDispatch = null;
 		this.host = new BudPatchApplier(root, (info) => this.resolveListener(info));
 		this._debugged = false;
 		this._ws = null;
 		this._term = null;
+	}
+
+	setDispatcher(fn) {
+		this.onDispatch = typeof fn === 'function' ? fn : null;
+		return this;
 	}
 
 	mount(instance, state) {
@@ -1065,7 +1075,9 @@ export class BudWasmBridge {
 
 	mount() {
 		if (this.root) {
-			hydratePersistNodes(this.root, this.wasm, this.memory);
+			hydratePersistNodes(this.root, this.wasm, this.memory, (nodeId, eventName, bubbles, valStr) => {
+				this.dispatch(nodeId, eventName, bubbles, valStr);
+			});
 		}
 		const fn = getWasmExport(this.wasm, ['bud_app_mount', 'bud_demo_mount']);
 		if (fn) {
@@ -1079,28 +1091,11 @@ export class BudWasmBridge {
 				const path = typeof evt.composedPath === 'function' ? evt.composedPath() : [evt.target];
 				for (const candidate of path) {
 					if (!candidate || candidate.nodeType !== Node.ELEMENT_NODE) continue;
+					if (this.root && typeof this.root.contains === 'function' && !this.root.contains(candidate)) continue;
 					const action = candidate.getAttribute('data-bud-action') || (candidate.hasAttribute('data-cmd') ? 'cmd' : null);
 					if (action) {
 						const value = candidate.getAttribute('data-bud-value') || candidate.getAttribute('data-cmd') || '';
-						const wasm = this.wasm;
-						if (wasm && typeof wasm.bud_app_dispatch === 'function') {
-							const malloc = getWasmExport(wasm, ['malloc']);
-							const free = getWasmExport(wasm, ['free']);
-							let valPtr = 0;
-							if (malloc && value) {
-								const bytes = new TextEncoder().encode(value + '\0');
-								valPtr = malloc(bytes.length);
-								if (valPtr) new Uint8Array(this.memory.buffer, valPtr, bytes.length).set(bytes);
-							}
-							const nameBytes = new TextEncoder().encode(action + '\0');
-							const namePtr = malloc ? malloc(nameBytes.length) : 0;
-							if (namePtr) new Uint8Array(this.memory.buffer, namePtr, nameBytes.length).set(nameBytes);
-							wasm.bud_app_dispatch(0, namePtr, 1, valPtr);
-							if (free) {
-								if (valPtr) free(valPtr);
-								if (namePtr) free(namePtr);
-							}
-						}
+						this.dispatch(0, action, true, value);
 						evt.stopPropagation();
 						return;
 					}
@@ -1112,34 +1107,8 @@ export class BudWasmBridge {
 	}
 
 	resolveListener(info) {
-		if (this.wasm && typeof this.wasm.bud_app_dispatch === 'function') {
-			return (evt) => {
-				if (!info.bubbles && info.target !== 'window' && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
-					return;
-				}
-				const malloc = getWasmExport(this.wasm, ['malloc']);
-				const free = getWasmExport(this.wasm, ['free']);
-				const value = buildEventPayload(info, evt);
-				let eventData = null;
-				let eventDataPtr = 0;
-
-				if (value && malloc) {
-					const bytes = new TextEncoder().encode(value + '\0');
-					eventDataPtr = malloc(bytes.length);
-					if (eventDataPtr) {
-						new Uint8Array(this.memory.buffer, eventDataPtr, bytes.length).set(bytes);
-						eventData = eventDataPtr;
-					}
-				}
-				this.dispatchEvent(
-					info.id, info.rawEvent || info.event, info.bubbles,
-					eventData);
-				if (free && eventDataPtr) {
-					free(eventDataPtr);
-				}
-			};
-		}
-		if (typeof this.listenerResolver === 'function') {
+		const hasWasmDispatch = Boolean(this.onDispatch || getWasmExport(this.wasm, ['bud_app_dispatch']));
+		if (!hasWasmDispatch && typeof this.listenerResolver === 'function') {
 			const resolved = this.listenerResolver(info);
 			if (typeof resolved === 'function') {
 				return resolved;
@@ -1151,25 +1120,7 @@ export class BudWasmBridge {
 				return;
 			}
 			const value = buildEventPayload(info, evt);
-			let eventData = null;
-			if (value) {
-				const malloc = getWasmExport(this.wasm, ['malloc']);
-				if (malloc) {
-					const bytes = new TextEncoder().encode(value + '\0');
-					const ptr = malloc(bytes.length);
-					if (ptr) {
-						new Uint8Array(this.memory.buffer, ptr, bytes.length).set(bytes);
-						eventData = ptr;
-					}
-				}
-			}
-			this.dispatchEvent(
-				info.id, info.rawEvent || info.event, info.bubbles,
-				eventData);
-			if (eventData) {
-				const free = getWasmExport(this.wasm, ['free']);
-				if (free) free(eventData);
-			}
+			this.dispatch(info.id, info.rawEvent || info.event, info.bubbles, value || '');
 		};
 	}
 
@@ -1275,31 +1226,45 @@ export class BudWasmBridge {
 		return this;
 	}
 
-	dispatchEvent(nodeId, eventName, bubbles = true, eventInit = null) {
+	dispatch(nodeId, eventName, bubbles = true, valueStr = '') {
+		if (typeof this.onDispatch === 'function') {
+			return this.onDispatch(nodeId, eventName, !!bubbles, valueStr || '');
+		}
 		const fn = getWasmExport(this.wasm, ['bud_app_dispatch']);
 		if (fn) {
 			const malloc = getWasmExport(this.wasm, ['malloc']);
 			const free = getWasmExport(this.wasm, ['free']);
 			let namePtr = 0;
-			
-			if (malloc) {
-				const bytes = new TextEncoder().encode(eventName + '\0');
-				namePtr = malloc(bytes.length);
+			let valPtr = 0;
+
+			if (malloc && this.memory) {
+				const nameBytes = new TextEncoder().encode((eventName || '') + '\0');
+				namePtr = malloc(nameBytes.length);
 				if (namePtr) {
-					const view = new Uint8Array(this.memory.buffer, namePtr, bytes.length);
-					view.set(bytes);
+					new Uint8Array(this.memory.buffer, namePtr, nameBytes.length).set(nameBytes);
+				}
+				if (valueStr) {
+					const valBytes = new TextEncoder().encode(String(valueStr) + '\0');
+					valPtr = malloc(valBytes.length);
+					if (valPtr) {
+						new Uint8Array(this.memory.buffer, valPtr, valBytes.length).set(valBytes);
+					}
 				}
 			}
 
-			const ret = fn(nodeId, namePtr || 0, bubbles ? 1 : 0, eventInit || 0);
+			const ret = fn(nodeId, namePtr || 0, bubbles ? 1 : 0, valPtr || 0);
 
-			if (free && namePtr) {
-				free(namePtr);
+			if (free) {
+				if (valPtr) free(valPtr);
+				if (namePtr) free(namePtr);
 			}
 
 			return ret;
 		}
+		return this._dispatchDomFallback(nodeId, eventName, bubbles, null);
+	}
 
+	_dispatchDomFallback(nodeId, eventName, bubbles = true, eventInit = null) {
 		const node = this.host.getNode(nodeId);
 		if (!node) {
 			return false;
@@ -1317,6 +1282,38 @@ export class BudWasmBridge {
 			Object.assign(event, safe);
 		}
 		return node.dispatchEvent(event);
+	}
+
+	dispatchEvent(nodeId, eventName, bubbles = true, eventInit = null) {
+		if (typeof eventInit === 'string' || eventInit === null || eventInit === undefined) {
+			if (typeof this.onDispatch === 'function' || getWasmExport(this.wasm, ['bud_app_dispatch'])) {
+				return this.dispatch(nodeId, eventName, bubbles, eventInit || '');
+			}
+			return this._dispatchDomFallback(nodeId, eventName, bubbles, null);
+		}
+		if (typeof eventInit === 'number') {
+			if (typeof this.onDispatch === 'function') {
+				const str = this.memory ? readWasmCString(this.memory, eventInit) : '';
+				return this.onDispatch(nodeId, eventName, !!bubbles, str);
+			}
+			const fn = getWasmExport(this.wasm, ['bud_app_dispatch']);
+			if (fn) {
+				const malloc = getWasmExport(this.wasm, ['malloc']);
+				const free = getWasmExport(this.wasm, ['free']);
+				let namePtr = 0;
+				if (malloc && this.memory) {
+					const bytes = new TextEncoder().encode((eventName || '') + '\0');
+					namePtr = malloc(bytes.length);
+					if (namePtr) {
+						new Uint8Array(this.memory.buffer, namePtr, bytes.length).set(bytes);
+					}
+				}
+				const ret = fn(nodeId, namePtr || 0, bubbles ? 1 : 0, eventInit || 0);
+				if (free && namePtr) free(namePtr);
+				return ret;
+			}
+		}
+		return this._dispatchDomFallback(nodeId, eventName, bubbles, eventInit);
 	}
 
 	/* ── Tree debugging ── */

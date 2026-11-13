@@ -13,7 +13,10 @@ globalScope.registerWasmCapability = (namespace, factory) => {
 	globalScope.__wasm_capability_registry[namespace] = factory;
 };
 
+const isWorkerContext = typeof WorkerGlobalScope !== 'undefined' && globalScope instanceof WorkerGlobalScope;
+
 let s_bridgeFactory = null;
+const s_wasmModuleCache = new Map();
 
 function createSlotBridge(root) {
 	if (typeof s_bridgeFactory === 'function') {
@@ -25,6 +28,57 @@ function createSlotBridge(root) {
 	return null;
 }
 
+function getOrigin() {
+	if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
+	if (globalScope.__stele_origin) return globalScope.__stele_origin;
+	if (typeof self !== 'undefined' && self.location?.origin && self.location.origin !== 'null') return self.location.origin;
+	return '';
+}
+
+function resolveFullUrl(url) {
+	if (typeof url !== 'string' || !url) return '';
+	if (!url.startsWith('/')) return url;
+	const origin = getOrigin();
+	return origin ? `${origin}${url}` : '';
+}
+
+/**
+ * Compiles and caches a WebAssembly.Module using WebAssembly.compileStreaming
+ * with fallback to arrayBuffer + WebAssembly.compile.
+ *
+ * @param {string} url - WASM resource URL
+ * @returns {Promise<WebAssembly.Module|null>}
+ */
+async function compileWasmModuleCached(url) {
+	const fullUrl = resolveFullUrl(url);
+	if (!fullUrl) return null;
+	if (s_wasmModuleCache.has(fullUrl)) {
+		return s_wasmModuleCache.get(fullUrl);
+	}
+	const promise = (async () => {
+		try {
+			const res = await fetch(fullUrl);
+			if (!res || !res.ok) return null;
+			if (typeof WebAssembly.compileStreaming === 'function' && typeof res.clone === 'function') {
+				try {
+					return await WebAssembly.compileStreaming(res.clone());
+				} catch (_) {
+					// Fall back to arrayBuffer compile
+				}
+			}
+			const buf = await res.arrayBuffer();
+			if (typeof WebAssembly.compile === 'function') {
+				return await WebAssembly.compile(buf);
+			}
+		} catch (_) {}
+		return null;
+	})();
+	s_wasmModuleCache.set(fullUrl, promise);
+	const mod = await promise;
+	if (!mod) s_wasmModuleCache.delete(fullUrl);
+	return mod;
+}
+
 /**
  * Modernizes WASM module instantiation to prioritize WebAssembly.instantiateStreaming(fetch(url), imports)
  * with robust fallback to fetch(url).then(r => r.arrayBuffer()).then(buf => WebAssembly.instantiate(buf, imports)).
@@ -34,12 +88,8 @@ function createSlotBridge(root) {
  * @returns {Promise<WebAssembly.WebAssemblyInstantiatedSource|null>}
  */
 async function instantiateWasmStreamingWithFallback(url, imports) {
-	if (typeof url === 'string' && url.startsWith('/') && (typeof window === 'undefined' || !window.location?.origin)) {
-		return null;
-	}
-	const fullUrl = (typeof window !== 'undefined' && window.location?.origin && url.startsWith('/'))
-		? `${window.location.origin}${url}`
-		: url;
+	const fullUrl = resolveFullUrl(url);
+	if (!fullUrl) return null;
 	try {
 		if (typeof WebAssembly.instantiateStreaming === 'function') {
 			const res = await fetch(fullUrl);
@@ -82,7 +132,7 @@ export class SteleWasmClient {
 			? new WebAssembly.Memory({ initial: 256, maximum: 4096 })
 			: null;
 		this.memory = this.sharedMemory;
-		this.slotInstances = new Map(); // slot -> { instance, memory, moduleName }
+		this.slotInstances = new Map(); // slot -> { instance, memory, moduleName, hasTick }
 		this.slotBridges = new Map();
 		this.activeBridges = [];
 		if (typeof window !== 'undefined') {
@@ -94,6 +144,50 @@ export class SteleWasmClient {
 			...(options.capabilityUrls || {})
 		};
 		this.fallbackWasmUrl = options.fallbackWasmUrl || null;
+		this.useWorker = options.useWorker !== undefined ? options.useWorker : !isWorkerContext;
+		this.isWorkerHost = !!options.isWorkerHost || isWorkerContext;
+		this.worker = null;
+		this._turnDepth = 0;
+		this._pendingPatches = new Map(); // slot -> Array<{ op, a, b, c }>
+		this._slotDimensions = new Map(); // slot -> { w, h }
+		this._hidden = false;
+	}
+
+	beginTurn() {
+		this._turnDepth++;
+	}
+
+	flushTurn() {
+		if (this._turnDepth > 0) {
+			this._turnDepth--;
+		}
+		if (this._turnDepth > 0) return;
+		if (this._pendingPatches.size === 0) return;
+
+		for (const [targetSlot, ops] of this._pendingPatches.entries()) {
+			if (!ops || ops.length === 0) continue;
+			if (this.isWorkerHost && typeof globalScope.__stele_worker_post === 'function') {
+				globalScope.__stele_worker_post({
+					type: 'stele:patches',
+					slot: targetSlot,
+					ops
+				});
+				continue;
+			}
+			const bridge = this.slotBridges.get(targetSlot);
+			if (!bridge) continue;
+			if (typeof bridge.host?.replay === 'function') {
+				bridge.host.replay(ops);
+			} else if (typeof bridge.emitPatch === 'function') {
+				for (const p of ops) {
+					bridge.emitPatch(p.op, p.a, p.b, p.c);
+				}
+			}
+		}
+		this._pendingPatches.clear();
+		if (!this.isWorkerHost) {
+			this._scheduleBatchRemount();
+		}
 	}
 
 	decodeString(memory, ptr, len) {
@@ -155,8 +249,8 @@ export class SteleWasmClient {
 		if (globalScope.__wasm_capability_registry[cap]) return;
 
 		const attrUrl = typeof document !== 'undefined'
-			? (document.body?.getAttribute(`data-capability-${cap}`) ||
-			   document.querySelector(`meta[name="capability-${cap}"]`)?.getAttribute('content') ||
+			? (document.body?.getAttribute?.(`data-capability-${cap}`) ||
+			   document.querySelector?.(`meta[name="capability-${cap}"]`)?.getAttribute?.('content') ||
 			   null)
 			: null;
 		const mappedUrl = this.capabilityUrls?.[cap] || globalScope.__wasm_capability_urls?.[cap] || attrUrl;
@@ -170,7 +264,8 @@ export class SteleWasmClient {
 
 		for (const url of candidates) {
 			try {
-				const mod = await import(url);
+				const fullUrl = resolveFullUrl(url) || url;
+				const mod = await import(fullUrl);
 				if (globalScope.__wasm_capability_registry[cap]) break;
 				if (typeof mod?.createSlotBridge === 'function') {
 					SteleWasmClient.registerBridgeFactory(mod.createSlotBridge);
@@ -180,25 +275,35 @@ export class SteleWasmClient {
 		}
 	}
 
-	async loadCapabilities() {
-		if (typeof document === 'undefined') return;
-		const capAttr = [
-			document.body?.getAttribute('data-capabilities') || '',
-			document.querySelector('[data-slot="1"], [data-capabilities]')?.getAttribute('data-capabilities') || '',
-			document.querySelector('[data-slot="0"]')?.getAttribute('data-capabilities') || ''
-		].join(' ');
-		const declaredCaps = [...new Set(capAttr.trim().split(/\s+/).filter(Boolean))];
+	async loadCapabilities(declaredList = null) {
+		let declaredCaps = Array.isArray(declaredList) ? declaredList : [];
+		if (typeof document !== 'undefined' && declaredCaps.length === 0) {
+			const capAttr = [
+				document.body?.getAttribute?.('data-capabilities') || '',
+				document.querySelector?.('[data-slot="1"], [data-capabilities]')?.getAttribute?.('data-capabilities') || '',
+				document.querySelector?.('[data-slot="0"]')?.getAttribute?.('data-capabilities') || ''
+			].join(' ');
+			declaredCaps = [...new Set(capAttr.trim().split(/\s+/).filter(Boolean))];
+		}
 		for (const cap of declaredCaps) {
+			if (this.worker && !this.isWorkerHost && cap !== 'axil-tty' && cap !== 'bud') {
+				// Worker-side capabilities are loaded inside the Worker; still load axil on main thread if needed for __axil_ws bus
+				if (cap === 'axil-ws' || cap === 'axil') {
+					await this.resolveCapability(cap);
+				}
+				continue;
+			}
 			await this.resolveCapability(cap);
 		}
 
-		if (!s_bridgeFactory && typeof globalScope.__wasm_slot_bridge_factory !== 'function') {
-			const bridgeSrc = document.body?.getAttribute('data-bridge') ||
-			                  document.querySelector('[data-bridge]')?.getAttribute('data-bridge') ||
-			                  document.querySelector('meta[name="slot-bridge"]')?.getAttribute('content');
+		if (!this.isWorkerHost && !s_bridgeFactory && typeof globalScope.__wasm_slot_bridge_factory !== 'function' && typeof document !== 'undefined') {
+			const bridgeSrc = document.body?.getAttribute?.('data-bridge') ||
+			                  document.querySelector?.('[data-bridge]')?.getAttribute?.('data-bridge') ||
+			                  document.querySelector?.('meta[name="slot-bridge"]')?.getAttribute?.('content') ||
+			                  '/bud-cap.js';
 			if (bridgeSrc) {
 				try {
-					const mod = await import(bridgeSrc);
+					const mod = await import(resolveFullUrl(bridgeSrc) || bridgeSrc);
 					if (typeof mod?.createSlotBridge === 'function') {
 						SteleWasmClient.registerBridgeFactory(mod.createSlotBridge);
 					}
@@ -207,20 +312,41 @@ export class SteleWasmClient {
 		}
 	}
 
-	buildSlotImports(slot, wasmModule = null) {
+	buildSlotImports(slot, wasmModule = null, extraCaps = []) {
 		const hostEmitPatch = (_slot, opPtr, opLen, aPtr, aLen, bPtr, bLen, cPtr, cLen) => {
 			const targetSlot = (typeof slot === 'number' && slot >= 0) ? slot : (typeof _slot === 'number' && _slot >= 0 ? _slot : 0);
-			const bridge = this.slotBridges.get(targetSlot) || this.slotBridges.get(slot);
-			if (!bridge) return;
 			const mem = this.slotInstances.get(slot)?.memory || this.slotInstances.get(targetSlot)?.memory || this.memory;
 			const op = this.decodeString(mem, opPtr, opLen);
 			const a = this.decodeString(mem, aPtr, aLen);
 			const b = this.decodeString(mem, bPtr, bLen);
 			const c = this.decodeString(mem, cPtr, cLen);
+			const record = { op, a, b, c };
+
+			if (this._turnDepth > 0) {
+				let list = this._pendingPatches.get(targetSlot);
+				if (!list) {
+					list = [];
+					this._pendingPatches.set(targetSlot, list);
+				}
+				list.push(record);
+				return;
+			}
+
+			if (this.isWorkerHost && typeof globalScope.__stele_worker_post === 'function') {
+				globalScope.__stele_worker_post({
+					type: 'stele:patches',
+					slot: targetSlot,
+					ops: [record]
+				});
+				return;
+			}
+
+			const bridge = this.slotBridges.get(targetSlot) || this.slotBridges.get(slot);
+			if (!bridge) return;
 			if (typeof bridge.emitPatch === 'function') {
 				bridge.emitPatch(op, a, b, c);
 			} else if (typeof bridge.host?.replay === 'function') {
-				bridge.host.replay([{ op, a, b, c }]);
+				bridge.host.replay([record]);
 			}
 			this._scheduleBatchRemount();
 		};
@@ -236,16 +362,15 @@ export class SteleWasmClient {
 			const mem = comp?.memory || this.memory;
 			if (!inst || !mem) return;
 			const url = this.decodeString(mem, urlPtr, len);
-			const fullUrl = (typeof window !== 'undefined' && window.location?.origin && url.startsWith('/'))
-				? `${window.location.origin}${url}`
-				: url;
+			const fullUrl = resolveFullUrl(url) || url;
 			fetch(fullUrl).then(async (r) => {
 				const status = r.status;
 				const malloc = inst.exports.malloc;
 				const fn = inst.exports.wasm_fetch_callback;
 				if (!malloc || !fn) return;
 				if (!r.ok) {
-					fn(reqId, 0, -status);
+					this.beginTurn();
+					try { fn(reqId, 0, -status); } finally { this.flushTurn(); }
 					return;
 				}
 				const ab = await r.arrayBuffer();
@@ -254,13 +379,21 @@ export class SteleWasmClient {
 				if (ptr) {
 					new Uint8Array(mem.buffer, ptr, bytes.length).set(bytes);
 					new Uint8Array(mem.buffer, ptr + bytes.length, 1)[0] = 0;
-					fn(reqId, ptr, bytes.length);
+					this.beginTurn();
+					try {
+						fn(reqId, ptr, bytes.length);
+					} finally {
+						this.flushTurn();
+					}
 					if (inst.exports.free) inst.exports.free(ptr);
 				}
 			}).catch(err => {
 				console.error('stl_host_fetch failed:', err);
 				const fn = inst.exports.wasm_fetch_callback;
-				if (fn) fn(reqId, 0, -1);
+				if (fn) {
+					this.beginTurn();
+					try { fn(reqId, 0, -1); } finally { this.flushTurn(); }
+				}
 			});
 		};
 
@@ -268,15 +401,21 @@ export class SteleWasmClient {
 			const mem = this.slotInstances.get(slot)?.memory || this.memory;
 			const url = this.decodeString(mem, urlPtr, len);
 			if (!url) return;
-			const resolved = new URL(url, window.location.href);
-			const nextPath = resolved.pathname + resolved.search;
-			if (window.location.pathname + window.location.search !== nextPath) {
-				if (typeof history !== 'undefined' && history.pushState) {
-					history.pushState(null, '', nextPath);
-				} else if (typeof history !== 'undefined' && history.replaceState) {
-					history.replaceState(null, '', nextPath);
-				} else if (typeof window !== 'undefined') {
-					window.location.href = nextPath;
+			if (this.isWorkerHost && typeof globalScope.__stele_worker_post === 'function') {
+				globalScope.__stele_worker_post({ type: 'stele:set_location', url });
+				return;
+			}
+			if (typeof window !== 'undefined' && window.location) {
+				const resolved = new URL(url, window.location.href);
+				const nextPath = resolved.pathname + resolved.search;
+				if (window.location.pathname + window.location.search !== nextPath) {
+					if (typeof history !== 'undefined' && history.pushState) {
+						history.pushState(null, '', nextPath);
+					} else if (typeof history !== 'undefined' && history.replaceState) {
+						history.replaceState(null, '', nextPath);
+					} else {
+						window.location.href = nextPath;
+					}
 				}
 			}
 		};
@@ -309,10 +448,13 @@ export class SteleWasmClient {
 						if (pBuf && payloadBytes.length > 0) {
 							new Uint8Array(comp.memory.buffer, pBuf, payloadBytes.length).set(payloadBytes);
 						}
+						this.beginTurn();
 						try {
 							onEventFn(tBuf, topic.length, pBuf, payloadBytes.length);
 						} catch (err) {
 							console.error(`[stele-client] Event delivery to slot ${targetSlot} failed:`, err);
+						} finally {
+							this.flushTurn();
 						}
 						if (comp.instance.exports.free) {
 							comp.instance.exports.free(tBuf);
@@ -320,6 +462,15 @@ export class SteleWasmClient {
 						}
 					}
 				}
+			}
+
+			if (this.isWorkerHost && typeof globalScope.__stele_worker_post === 'function') {
+				globalScope.__stele_worker_post({
+					type: 'stele:event_emit',
+					topic,
+					payload: payloadBytes,
+					senderSlot
+				});
 			}
 
 			// 2. Dispatch to registered host JS listeners
@@ -412,10 +563,11 @@ export class SteleWasmClient {
 			}
 		}
 
-		// Also discover from data-capabilities attribute
+		// Also discover from data-capabilities attribute or extraCaps
 		const slotCapsAttr = [
 			slotRoot?.getAttribute?.('data-capabilities') || '',
-			(slot === 1 && hasDoc) ? (document.body?.getAttribute?.('data-capabilities') || '') : ''
+			(slot === 1 && hasDoc) ? (document.body?.getAttribute?.('data-capabilities') || '') : '',
+			Array.isArray(extraCaps) ? extraCaps.join(' ') : ''
 		].join(' ');
 		const slotDeclared = new Set(slotCapsAttr.trim().split(/\s+/).filter(Boolean));
 
@@ -444,10 +596,285 @@ export class SteleWasmClient {
 		return imports;
 	}
 
+	_initWorkerCoordinator() {
+		if (this.worker || !this.useWorker || this.isWorkerHost) return false;
+		if (typeof window === 'undefined' || typeof Worker === 'undefined') return false;
+		if (!window.location?.origin || window.location.origin === 'null') return false;
+		if (this.slotInstances.size > 0) return false;
+
+		try {
+			const workerUrl = new URL(import.meta.url, window.location.href).href;
+			this.worker = new Worker(workerUrl, { type: 'module' });
+		} catch (e) {
+			console.warn('[stele-client] Worker spawn failed, falling back to in-process execution:', e);
+			this.worker = null;
+			return false;
+		}
+
+		this._pendingMountPromises = new Map();
+
+		window.__stele_ws_send = (data) => {
+			if (this.worker) {
+				this.worker.postMessage({ type: 'stele:ws_send', data });
+			}
+		};
+		window.__stele_tty_input = (data) => {
+			if (this.worker) {
+				this.worker.postMessage({ type: 'stele:tty_input', data });
+			}
+		};
+
+		this.worker.addEventListener('message', (evt) => {
+			const msg = evt.data;
+			if (!msg || typeof msg.type !== 'string') return;
+
+			switch (msg.type) {
+			case 'stele:mounted': {
+				const resolver = this._pendingMountPromises?.get(msg.slot);
+				if (resolver) {
+					this._pendingMountPromises.delete(msg.slot);
+					resolver(!!msg.ok);
+				}
+				break;
+			}
+			case 'stele:patches': {
+				const bridge = this.slotBridges.get(msg.slot);
+				if (bridge && Array.isArray(msg.ops) && msg.ops.length > 0) {
+					if (typeof bridge.host?.replay === 'function') {
+						bridge.host.replay(msg.ops);
+					} else if (typeof bridge.emitPatch === 'function') {
+						for (const p of msg.ops) {
+							bridge.emitPatch(p.op, p.a, p.b, p.c);
+						}
+					}
+					this._transferSlotCanvases(msg.slot);
+					this._scheduleBatchRemount();
+				}
+				break;
+			}
+			case 'stele:set_location': {
+				const url = msg.url;
+				if (url && typeof window !== 'undefined' && window.location) {
+					const resolved = new URL(url, window.location.href);
+					const nextPath = resolved.pathname + resolved.search;
+					if (window.location.pathname + window.location.search !== nextPath) {
+						if (typeof history !== 'undefined' && history.pushState) {
+							history.pushState(null, '', nextPath);
+						} else if (typeof history !== 'undefined' && history.replaceState) {
+							history.replaceState(null, '', nextPath);
+						} else {
+							window.location.href = nextPath;
+						}
+					}
+				}
+				break;
+			}
+			case 'stele:event_emit': {
+				const listeners = this.eventListeners.get(msg.topic);
+				if (listeners) {
+					for (const cb of listeners) {
+						try { cb(msg.topic, msg.payload, msg.senderSlot); } catch (e) { console.error(e); }
+					}
+				}
+				break;
+			}
+			case 'stele:ws_connect': {
+				if (window.__axil_ws && typeof window.__axil_ws.connectFromWorker === 'function') {
+					window.__axil_ws.connectFromWorker(msg.url);
+				}
+				break;
+			}
+			case 'stele:ws_send_from_worker': {
+				if (window.__axil_ws && typeof window.__axil_ws.send === 'function') {
+					window.__axil_ws.send(msg.data);
+				}
+				break;
+			}
+			case 'stele:ws_close_from_worker': {
+				if (window.__axil_ws && typeof window.__axil_ws.closeFromWorker === 'function') {
+					window.__axil_ws.closeFromWorker();
+				}
+				break;
+			}
+			case 'stele:ws_stream0': {
+				if (window.__axil_ws && typeof window.__axil_ws.deliverStream0 === 'function') {
+					window.__axil_ws.deliverStream0(msg.bytes, msg.isText);
+				}
+				break;
+			}
+			case 'stele:tty_write': {
+				if (window.__axil_tty_bridge && typeof window.__axil_tty_bridge.writeText === 'function') {
+					window.__axil_tty_bridge.writeText(msg.text);
+				}
+				break;
+			}
+			case 'stele:tick_state': {
+				this._workerTickActive = !!msg.active;
+				break;
+			}
+			case 'stele:canvas_bitmap': {
+				const bridge = this.slotBridges.get(msg.slot);
+				const root = bridge?.root || (typeof document !== 'undefined' ? document : null);
+				if (root && msg.bmp) {
+					let el = null;
+					if (msg.id && typeof document !== 'undefined') {
+						el = document.getElementById(msg.id);
+					}
+					if (!el && msg.budId && typeof root.querySelector === 'function') {
+						el = root.querySelector(`canvas[data-bud-id="${msg.budId}"]`);
+					}
+					if (!el && typeof root.querySelector === 'function') {
+						el = root.querySelector(msg.fit ? 'canvas[data-bud-canvas-fit]' : 'canvas[data-bud-canvas]');
+					}
+					if (el) {
+						if (el.width !== msg.width) el.width = msg.width;
+						if (el.height !== msg.height) el.height = msg.height;
+						if (!el.__stele_bmp_ctx) {
+							try {
+								el.__stele_bmp_ctx = el.getContext('bitmaprenderer');
+							} catch (_) {}
+						}
+						if (el.__stele_bmp_ctx && typeof el.__stele_bmp_ctx.transferFromImageBitmap === 'function') {
+							try {
+								el.__stele_bmp_ctx.transferFromImageBitmap(msg.bmp);
+								break;
+							} catch (_) {}
+						}
+					}
+					if (typeof msg.bmp.close === 'function') msg.bmp.close();
+				}
+				break;
+			}
+			default:
+				break;
+			}
+		});
+
+		this.worker.postMessage({
+			type: 'stele:init',
+			origin: window.location.origin,
+			capabilityUrls: this.capabilityUrls,
+			fallbackWasmUrl: this.fallbackWasmUrl || (typeof document !== 'undefined' && document.body?.getAttribute?.('data-wasm-bundle')) || null
+		});
+
+		this._setupViewportSync();
+		return true;
+	}
+
+	_setupViewportSync() {
+		if (!this.worker || typeof window === 'undefined' || typeof document === 'undefined') return;
+		const sendResize = (slot, el) => {
+			if (!this.worker) return;
+			const w = el?.clientWidth || window.innerWidth || 800;
+			const h = el?.clientHeight || window.innerHeight || 600;
+			this.worker.postMessage({
+				type: 'stele:resize',
+				slot,
+				width: w,
+				height: h,
+				hidden: !!document.hidden
+			});
+		};
+
+		if (typeof window.addEventListener === 'function') {
+			window.addEventListener('resize', () => {
+				for (const [slot, bridge] of this.slotBridges.entries()) {
+					sendResize(slot, bridge?.root || document.body);
+				}
+			});
+		}
+		if (typeof document.addEventListener === 'function') {
+			document.addEventListener('visibilitychange', () => {
+				for (const [slot, bridge] of this.slotBridges.entries()) {
+					sendResize(slot, bridge?.root || document.body);
+				}
+			});
+		}
+	}
+
+	_transferSlotCanvases(slot) {
+		if (!this.worker || typeof document === 'undefined') return;
+		const bridge = this.slotBridges.get(slot);
+		const root = bridge?.root || document.body;
+		if (!root || typeof root.querySelectorAll !== 'function') return;
+
+		const canvases = root.querySelectorAll('canvas[data-bud-canvas], canvas');
+		for (const c of canvases) {
+			if (c.__stele_registered) continue;
+			c.__stele_registered = true;
+			const id = c.getAttribute('id') || '';
+			const budId = c.getAttribute('data-bud-id') || '';
+			const fit = c.hasAttribute('data-bud-canvas-fit') || id === 'seven-stage-canvas';
+			const webgl = c.hasAttribute('data-bud-webgl') || fit;
+			const rect = typeof c.getBoundingClientRect === 'function' ? c.getBoundingClientRect() : null;
+			const width = Math.round(
+				(fit ? (rect?.width || c.clientWidth) : (parseInt(c.getAttribute('width') || '0', 10) || rect?.width || c.clientWidth)) ||
+				window.innerWidth || 800
+			);
+			const height = Math.round(
+				(fit ? (rect?.height || c.clientHeight) : (parseInt(c.getAttribute('height') || '0', 10) || rect?.height || c.clientHeight)) ||
+				window.innerHeight || 600
+			);
+			this.worker.postMessage({
+				type: 'stele:canvas_attach',
+				slot,
+				id,
+				budId,
+				fit,
+				webgl,
+				width,
+				height
+			});
+		}
+	}
+
+	_configureBridgeForWorker(slot, bridge) {
+		if (!bridge || !this.worker) return;
+		if (typeof bridge.setDispatcher === 'function') {
+			bridge.setDispatcher((nodeId, eventName, bubbles, valueStr) => {
+				this.worker.postMessage({
+					type: 'stele:dispatch',
+					slot,
+					nodeId,
+					eventName,
+					bubbles: !!bubbles,
+					valueStr: valueStr || ''
+				});
+			});
+		}
+		if (bridge.root) {
+			const rootEl = bridge.root;
+			const w = rootEl.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 800) || 800;
+			const h = rootEl.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 600) || 600;
+			this.worker.postMessage({
+				type: 'stele:resize',
+				slot,
+				width: w,
+				height: h,
+				hidden: typeof document !== 'undefined' ? !!document.hidden : false
+			});
+			if (typeof ResizeObserver !== 'undefined') {
+				try {
+					const ro = new ResizeObserver(() => {
+						this.worker?.postMessage({
+							type: 'stele:resize',
+							slot,
+							width: rootEl.clientWidth || window.innerWidth || 800,
+							height: rootEl.clientHeight || window.innerHeight || 600,
+							hidden: typeof document !== 'undefined' ? !!document.hidden : false
+						});
+					});
+					ro.observe(rootEl);
+				} catch (_) {}
+			}
+		}
+	}
+
 	async boot(wasmUrl = null) {
+		this._initWorkerCoordinator();
 		await this.loadCapabilities();
 
-		if (wasmUrl) {
+		if (!this.worker && wasmUrl) {
 			try {
 				const imports = this.buildSlotImports(0);
 				const source = await instantiateWasmStreamingWithFallback(wasmUrl, imports);
@@ -613,152 +1040,235 @@ export class SteleWasmClient {
 		};
 	}
 
-	async mountSlot(slot, moduleName, json) {
+	async mountSlot(slot, moduleName, json, extraCaps = []) {
+		// If running on Main Thread with a Worker coordinator, delegate slot mount to the Worker
+		if (this.worker && !this.isWorkerHost) {
+			const bridge = this.slotBridges.get(slot);
+			if (bridge) {
+				this._configureBridgeForWorker(slot, bridge);
+				if (typeof bridge.rescan === 'function') bridge.rescan();
+				if (typeof bridge.mount === 'function') bridge.mount();
+			}
+			this._transferSlotCanvases(slot);
+
+			const hasDoc = typeof document !== 'undefined';
+			const slotRoot = bridge?.root || (hasDoc
+				? (slot === 0 ? (document.querySelector?.('[data-slot="0"]') || document.getElementById?.('chrome-root')) : document.querySelector?.('[data-slot="1"], [data-slot]'))
+				: null);
+			const capStr = [
+				slotRoot?.getAttribute?.('data-capabilities') || '',
+				(slot === 1 && hasDoc) ? (document.body?.getAttribute?.('data-capabilities') || '') : ''
+			].join(' ');
+			const declaredCaps = [...new Set(capStr.trim().split(/\s+/).filter(Boolean))];
+
+			if (declaredCaps.includes('axil-tty') && typeof globalScope.__wasm_capability_registry['axil-tty'] === 'function') {
+				const ttyBridge = globalScope.__wasm_capability_registry['axil-tty'](slotRoot || document.body, () => null);
+				if (ttyBridge && !this.activeBridges.includes(ttyBridge)) {
+					this.activeBridges.push(ttyBridge);
+					window.__active_bridges = this.activeBridges;
+				}
+			}
+
+			const mountPromise = new Promise((resolve) => {
+				this._pendingMountPromises.set(slot, resolve);
+			});
+
+			this.worker.postMessage({
+				type: 'stele:mount_slot',
+				slot,
+				moduleName,
+				state: json,
+				declaredCaps
+			});
+
+			const ok = await mountPromise;
+			if (ok) {
+				this.slotInstances.set(slot, { workerProxy: true, moduleName });
+				if (typeof window !== 'undefined') {
+					window.__slot_bridges = window.__slot_bridges || {};
+					window.__slot_bridges[slot] = bridge || { workerProxy: true };
+				}
+				this._transferSlotCanvases(slot);
+				this._remountActiveBridges();
+			}
+			return ok;
+		}
+
 		// 1. Try on-demand dynamic component WASM instantiation with shared linear memory substrate
 		if (typeof fetch === 'function') {
 			try {
 				const configuredBundle = (typeof document !== 'undefined' && document.body?.getAttribute?.('data-wasm-bundle')) || this.fallbackWasmUrl;
 				const candidateUrls = [...new Set([
 					`/${moduleName}.wasm`,
-					`/${moduleName}_detail.wasm`,
 					configuredBundle
 				].filter(Boolean))];
 				for (const compUrl of candidateUrls) {
-				let wasmModule = null;
-				let wasmBuffer = null;
-				if (typeof compUrl === 'string' && compUrl.startsWith('/') && (typeof window === 'undefined' || !window.location?.origin)) {
-					continue;
-				}
-				try {
-					const fullUrl = (typeof window !== 'undefined' && window.location?.origin && compUrl.startsWith('/'))
-						? `${window.location.origin}${compUrl}`
-						: compUrl;
-					const res = await fetch(fullUrl);
-					if (res.ok) {
-						wasmBuffer = await res.arrayBuffer();
-						if (typeof WebAssembly.compile === 'function') {
-							wasmModule = await WebAssembly.compile(wasmBuffer);
-						}
-					}
-				} catch (_) {}
+					const fullUrl = resolveFullUrl(compUrl);
+					if (!fullUrl) continue;
 
-				if (wasmModule && typeof WebAssembly.Module.imports === 'function') {
-					const requiredNamespaces = new Set(
-						WebAssembly.Module.imports(wasmModule).map(i => i.module)
-					);
-					for (const ns of requiredNamespaces) {
-						if (!globalScope.__wasm_capability_registry[ns]) {
-							await this.resolveCapability(ns);
-						}
-					}
-				}
+					let wasmModule = await compileWasmModuleCached(compUrl);
+					let wasmBuffer = null;
 
-				const compImports = this.buildSlotImports(slot, wasmModule);
-				let instance = null;
-				if (wasmModule) {
-					instance = (await WebAssembly.instantiate(wasmModule, compImports));
-				} else if (wasmBuffer) {
-					const res = await WebAssembly.instantiate(wasmBuffer, compImports);
-					instance = res.instance;
-				} else {
-					const source = await instantiateWasmStreamingWithFallback(compUrl, compImports);
-					instance = source?.instance;
-				}
-				if (instance) {
-					const compMemory = instance.exports.memory || this.sharedMemory;
-					this.slotInstances.set(slot, { instance, memory: compMemory, moduleName });
-
-					if (compImports.__candidateBridges) {
-						this.activeBridges.push(...compImports.__candidateBridges);
-						if (typeof window !== 'undefined') {
-							window.__active_bridges = this.activeBridges;
-						}
+					if (!wasmModule) {
+						try {
+							const res = await fetch(fullUrl);
+							if (res.ok) {
+								wasmBuffer = await res.arrayBuffer();
+								if (typeof WebAssembly.compile === 'function') {
+									wasmModule = await WebAssembly.compile(wasmBuffer);
+								}
+							}
+						} catch (_) {}
 					}
 
-					if (instance.exports._initialize) instance.exports._initialize();
-
-					const isBin = (json instanceof Uint8Array) || (typeof json === 'object' && json?.type === 'bin');
-					const binBytes = isBin ? (json instanceof Uint8Array ? json : json.data) : null;
-					const jsonStr = isBin ? '{}' : (typeof json === 'string' ? json : (json?.data || JSON.stringify(json || {})));
-
-					if (isBin && binBytes && (instance.exports.wasm_init_bin || instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin)) {
-						const [binPtr, binLen] = this.writeBytes(instance, compMemory, binBytes);
-						if (instance.exports.wasm_init_bin) {
-							instance.exports.wasm_init_bin(binPtr, binLen);
-						} else {
-							const mountBinFn = instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin;
-							if (mountBinFn) {
-								const [namePtr] = this.encodeString(instance, compMemory, moduleName);
-								mountBinFn(slot, namePtr, binPtr, binLen);
-								if (instance.exports.free) instance.exports.free(namePtr);
+					if (Array.isArray(extraCaps) && extraCaps.length > 0) {
+						for (const cap of extraCaps) {
+							if (!globalScope.__wasm_capability_registry[cap]) {
+								await this.resolveCapability(cap);
 							}
 						}
-						if (instance.exports.free) instance.exports.free(binPtr);
-					} else if (instance.exports.wasm_init) {
-						const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
-						instance.exports.wasm_init(jsonPtr, jsonLen);
-						if (instance.exports.free) instance.exports.free(jsonPtr);
+					}
+
+					if (wasmModule && typeof WebAssembly.Module.imports === 'function') {
+						const requiredNamespaces = new Set(
+							WebAssembly.Module.imports(wasmModule).map(i => i.module)
+						);
+						for (const ns of requiredNamespaces) {
+							if (!globalScope.__wasm_capability_registry[ns]) {
+								await this.resolveCapability(ns);
+							}
+						}
+					}
+
+					const compImports = this.buildSlotImports(slot, wasmModule, extraCaps);
+					let instance = null;
+					if (wasmModule) {
+						instance = (await WebAssembly.instantiate(wasmModule, compImports));
+					} else if (wasmBuffer) {
+						const res = await WebAssembly.instantiate(wasmBuffer, compImports);
+						instance = res.instance;
 					} else {
-						const mountFn = instance.exports.stl_kernel_mount || instance.exports.stele_kernel_mount;
-						if (mountFn) {
-							const [namePtr] = this.encodeString(instance, compMemory, moduleName);
-							const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
-							mountFn(slot, namePtr, jsonPtr, jsonLen);
-							if (instance.exports.free) {
-								instance.exports.free(namePtr);
-								instance.exports.free(jsonPtr);
+						const source = await instantiateWasmStreamingWithFallback(compUrl, compImports);
+						instance = source?.instance;
+					}
+					if (instance) {
+						const compMemory = instance.exports.memory || this.sharedMemory;
+						this.slotInstances.set(slot, { instance, memory: compMemory, moduleName, hasTick: false });
+
+						if (compImports.__candidateBridges) {
+							this.activeBridges.push(...compImports.__candidateBridges);
+							if (typeof window !== 'undefined') {
+								window.__active_bridges = this.activeBridges;
 							}
 						}
-					}
 
-					const bridge = this.slotBridges.get(slot);
-					if (bridge) {
-						bridge.wasm = instance.exports;
-						bridge.memory = compMemory;
-						if (typeof bridge.setWasm === 'function') {
-							bridge.setWasm(instance.exports, compMemory);
-						}
-						if (typeof bridge.mount === 'function') {
-							bridge.mount();
-						}
-					}
+						if (instance.exports._initialize) instance.exports._initialize();
 
-					if (typeof window !== 'undefined') {
-						window.__slot_bridges = window.__slot_bridges || {};
-						window.__slot_bridges[slot] = bridge || { wasm: instance.exports, memory: compMemory };
-					}
+						const isBin = (json instanceof Uint8Array) || (typeof json === 'object' && json?.type === 'bin');
+						const binBytes = isBin ? (json instanceof Uint8Array ? json : json.data) : null;
+						const jsonStr = isBin ? '{}' : (typeof json === 'string' ? json : (json?.data || JSON.stringify(json || {})));
 
-					for (const cap of this.activeBridges) {
-						if (typeof cap.mount === 'function') {
-							try { cap.mount(); } catch (err) { console.error('cap.mount error:', err); }
-						}
-					}
-
-					let rafId = 0;
-					let lastTime = 0;
-					if (typeof instance.exports.wasm_tick === 'function') {
-						const tick = (now) => {
-							if (document.hidden) {
-								rafId = requestAnimationFrame(tick);
-								return;
+						this.beginTurn();
+						try {
+							if (isBin && binBytes && (instance.exports.wasm_init_bin || instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin)) {
+								const [binPtr, binLen] = this.writeBytes(instance, compMemory, binBytes);
+								if (instance.exports.wasm_init_bin) {
+									instance.exports.wasm_init_bin(binPtr, binLen);
+								} else {
+									const mountBinFn = instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin;
+									if (mountBinFn) {
+										const [namePtr] = this.encodeString(instance, compMemory, moduleName);
+										mountBinFn(slot, namePtr, binPtr, binLen);
+										if (instance.exports.free) instance.exports.free(namePtr);
+									}
+								}
+								if (instance.exports.free) instance.exports.free(binPtr);
+							} else if (instance.exports.wasm_init) {
+								const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
+								instance.exports.wasm_init(jsonPtr, jsonLen);
+								if (instance.exports.free) instance.exports.free(jsonPtr);
+							} else {
+								const mountFn = instance.exports.stl_kernel_mount || instance.exports.stele_kernel_mount;
+								if (mountFn) {
+									const [namePtr] = this.encodeString(instance, compMemory, moduleName);
+									const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
+									mountFn(slot, namePtr, jsonPtr, jsonLen);
+									if (instance.exports.free) {
+										instance.exports.free(namePtr);
+										instance.exports.free(jsonPtr);
+									}
+								}
 							}
-							const dt = lastTime ? (now - lastTime) / 1000 : 0.016;
-							lastTime = now;
-							const rootEl = this.slotBridges.get(slot)?.root || document.body;
-							const w = rootEl.clientWidth || window.innerWidth || 800;
-							const h = rootEl.clientHeight || window.innerHeight || 600;
-							try {
-								instance.exports.wasm_tick(dt, w, h);
-							} catch (e) {
-								console.error('wasm_tick error:', e);
+						} finally {
+							this.flushTurn();
+						}
+
+						const hasTickFn = instance.exports.stl_kernel_has_tick || instance.exports.stele_kernel_has_tick;
+						const hasTick = typeof hasTickFn === 'function'
+							? (hasTickFn() !== 0)
+							: (typeof instance.exports.wasm_tick === 'function');
+						const slotRec = this.slotInstances.get(slot);
+						if (slotRec) slotRec.hasTick = hasTick;
+
+						const bridge = this.slotBridges.get(slot);
+						if (bridge) {
+							bridge.wasm = instance.exports;
+							bridge.memory = compMemory;
+							if (typeof bridge.setWasm === 'function') {
+								bridge.setWasm(instance.exports, compMemory);
 							}
-							rafId = requestAnimationFrame(tick);
-						};
-						rafId = requestAnimationFrame(tick);
+							if (typeof bridge.mount === 'function') {
+								this.beginTurn();
+								try {
+									bridge.mount();
+								} finally {
+									this.flushTurn();
+								}
+							}
+						}
+
+						if (typeof window !== 'undefined') {
+							window.__slot_bridges = window.__slot_bridges || {};
+							window.__slot_bridges[slot] = bridge || { wasm: instance.exports, memory: compMemory };
+						}
+
+						for (const cap of this.activeBridges) {
+							if (typeof cap.mount === 'function') {
+								try { cap.mount(); } catch (err) { console.error('cap.mount error:', err); }
+							}
+						}
+
+						if (!this.isWorkerHost && hasTick && typeof requestAnimationFrame === 'function') {
+							let lastTime = 0;
+							const tick = (now) => {
+								if (typeof document !== 'undefined' && document.hidden) {
+									requestAnimationFrame(tick);
+									return;
+								}
+								const dt = lastTime ? (now - lastTime) / 1000 : 0.016;
+								lastTime = now;
+								const rootEl = this.slotBridges.get(slot)?.root || (typeof document !== 'undefined' ? document.body : null);
+								const w = rootEl?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 800) || 800;
+								const h = rootEl?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 600) || 600;
+								this.beginTurn();
+								try {
+									if (typeof instance.exports.wasm_tick === 'function') {
+										instance.exports.wasm_tick(dt, w, h);
+									} else if (typeof instance.exports.stl_kernel_tick === 'function') {
+										instance.exports.stl_kernel_tick(dt, w, h);
+									}
+								} catch (e) {
+									console.error('wasm_tick error:', e);
+								} finally {
+									this.flushTurn();
+								}
+								requestAnimationFrame(tick);
+							};
+							requestAnimationFrame(tick);
+						}
+						return true;
 					}
-					return true;
 				}
-			}
 			} catch (err) {
 				console.warn(`Dynamic component WASM load failed for ${moduleName}:`, err);
 			}
@@ -773,7 +1283,13 @@ export class SteleWasmClient {
 			const mountBinFn = this.instance.exports.stl_kernel_mount_bin || this.instance.exports.stele_kernel_mount_bin;
 			const [namePtr] = this.encodeString(this.instance, this.memory, moduleName);
 			const [binPtr, binLen] = this.writeBytes(this.instance, this.memory, binBytes);
-			const rc = mountBinFn(slot, namePtr, binPtr, binLen);
+			this.beginTurn();
+			let rc = -1;
+			try {
+				rc = mountBinFn(slot, namePtr, binPtr, binLen);
+			} finally {
+				this.flushTurn();
+			}
 			if (this.instance.exports.free) {
 				this.instance.exports.free(namePtr);
 				this.instance.exports.free(binPtr);
@@ -785,7 +1301,13 @@ export class SteleWasmClient {
 		if (mountFn) {
 			const [namePtr] = this.encodeString(this.instance, this.memory, moduleName);
 			const [jsonPtr, jsonLen] = this.encodeString(this.instance, this.memory, jsonStr);
-			const rc = mountFn(slot, namePtr, jsonPtr, jsonLen);
+			this.beginTurn();
+			let rc = -1;
+			try {
+				rc = mountFn(slot, namePtr, jsonPtr, jsonLen);
+			} finally {
+				this.flushTurn();
+			}
 			if (this.instance.exports.free) {
 				this.instance.exports.free(namePtr);
 				this.instance.exports.free(jsonPtr);
@@ -795,24 +1317,110 @@ export class SteleWasmClient {
 		return false;
 	}
 
+	invokeSlotAction(slot, actionId, actionData = '') {
+		const comp = this.slotInstances.get(slot);
+		if (comp?.instance?.exports?.wasm_action) {
+			const [dataPtr] = this.encodeString(comp.instance, comp.memory, actionData || '');
+			this.beginTurn();
+			try {
+				comp.instance.exports.wasm_action(actionId, dataPtr);
+				if (comp.instance.exports.free && dataPtr) comp.instance.exports.free(dataPtr);
+				this.updateSlot(slot);
+			} finally {
+				this.flushTurn();
+			}
+			return true;
+		}
+		const compActionFn = comp?.instance?.exports?.stl_kernel_action || comp?.instance?.exports?.stele_kernel_action;
+		if (compActionFn) {
+			const [dataPtr] = this.encodeString(comp.instance, comp.memory, actionData || '');
+			this.beginTurn();
+			try {
+				compActionFn(slot, actionId, dataPtr);
+			} finally {
+				this.flushTurn();
+			}
+			if (comp.instance.exports.free && dataPtr) comp.instance.exports.free(dataPtr);
+			this._scheduleBatchRemount();
+			return true;
+		}
+		const instActionFn = this.instance?.exports?.stl_kernel_action || this.instance?.exports?.stele_kernel_action;
+		if (instActionFn) {
+			const [dataPtr] = this.encodeString(this.instance, this.memory, actionData || '');
+			this.beginTurn();
+			try {
+				instActionFn(slot, actionId, dataPtr);
+			} finally {
+				this.flushTurn();
+			}
+			if (this.instance.exports.free && dataPtr) this.instance.exports.free(dataPtr);
+			this._scheduleBatchRemount();
+			return true;
+		}
+		return false;
+	}
+
+	dispatchToSlot(slot, nodeId, eventName, bubbles, valueStr) {
+		const comp = this.slotInstances.get(slot);
+		const inst = comp?.instance || this.instance;
+		const mem = comp?.memory || this.memory;
+		if (!inst || !mem) return 0;
+		const fn = inst.exports.bud_app_dispatch;
+		if (typeof fn !== 'function') return 0;
+
+		const [namePtr] = this.encodeString(inst, mem, eventName || '');
+		const [valPtr] = valueStr ? this.encodeString(inst, mem, String(valueStr)) : [0, 0];
+		this.beginTurn();
+		let ret = 0;
+		try {
+			ret = fn(nodeId, namePtr || 0, bubbles ? 1 : 0, valPtr || 0);
+		} finally {
+			this.flushTurn();
+		}
+		if (inst.exports.free) {
+			if (valPtr) inst.exports.free(valPtr);
+			if (namePtr) inst.exports.free(namePtr);
+		}
+		return ret;
+	}
+
 	updateSlot(slot) {
+		if (this.worker && !this.isWorkerHost) {
+			this.worker.postMessage({ type: 'stele:update_slot', slot });
+			return;
+		}
 		const comp = this.slotInstances.get(slot);
 		if (comp?.instance) {
 			if (comp.instance.exports.wasm_update) {
-				comp.instance.exports.wasm_update(slot);
+				this.beginTurn();
+				try {
+					comp.instance.exports.wasm_update(slot);
+				} finally {
+					this.flushTurn();
+				}
 				this._scheduleBatchRemount();
 				return;
 			}
 			const updateFn = comp.instance.exports.stl_kernel_update || comp.instance.exports.stele_kernel_update;
 			if (updateFn) {
-				updateFn(slot);
+				this.beginTurn();
+				try {
+					updateFn(slot);
+				} finally {
+					this.flushTurn();
+				}
 				this._scheduleBatchRemount();
 				return;
 			}
 		}
 		const instUpdateFn = this.instance?.exports.stl_kernel_update || this.instance?.exports.stele_kernel_update;
 		if (instUpdateFn) {
-			instUpdateFn(slot);
+			this.beginTurn();
+			try {
+				instUpdateFn(slot);
+			} finally {
+				this.flushTurn();
+			}
 			this._scheduleBatchRemount();
 			return;
 		}
@@ -861,6 +1469,14 @@ export class SteleWasmClient {
 			? new TextEncoder().encode(payload)
 			: (payload instanceof Uint8Array ? payload : new TextEncoder().encode(JSON.stringify(payload)));
 
+		if (this.worker && !this.isWorkerHost) {
+			this.worker.postMessage({
+				type: 'stele:emit',
+				topic,
+				payload: payloadBytes
+			});
+		}
+
 		for (const [targetSlot, comp] of this.slotInstances.entries()) {
 			const onEventFn = comp.instance?.exports.stl_on_event || comp.instance?.exports.stele_on_event;
 			if (onEventFn) {
@@ -873,10 +1489,13 @@ export class SteleWasmClient {
 					if (pBuf && payloadBytes.length > 0) {
 						new Uint8Array(comp.memory.buffer, pBuf, payloadBytes.length).set(payloadBytes);
 					}
+					this.beginTurn();
 					try {
 						onEventFn(tBuf, topic.length, pBuf, payloadBytes.length);
 					} catch (err) {
 						console.error(`[stele-client] Event delivery to slot ${targetSlot} failed:`, err);
+					} finally {
+						this.flushTurn();
 					}
 					if (comp.instance.exports.free) {
 						comp.instance.exports.free(tBuf);
@@ -895,6 +1514,8 @@ export class SteleWasmClient {
 	}
 
 	attachEventDelegation() {
+		if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+
 		document.addEventListener('click', (evt) => {
 			const actionEl = evt.target.closest('button[data-action], a[data-action]');
 			const rawAction = actionEl?.getAttribute('data-action');
@@ -910,26 +1531,25 @@ export class SteleWasmClient {
 				                   actionEl.getAttribute('data-page') || '';
 				const slotEl = actionEl.closest('[data-slot]');
 				let slot = slotEl ? parseInt(slotEl.getAttribute('data-slot'), 10) : (actionEl.closest('#chrome-root') ? 0 : 1);
+
+				if (this.worker && !this.isWorkerHost) {
+					if (!this.slotInstances.has(slot) && this.slotInstances.has(1)) slot = 1;
+					this.worker.postMessage({
+						type: 'stele:action',
+						slot,
+						actionId,
+						actionData
+					});
+					return;
+				}
+
 				let comp = this.slotInstances.get(slot);
 				if (!comp && this.slotInstances.has(1)) {
 					slot = 1;
 					comp = this.slotInstances.get(1);
 				}
 
-				if (comp?.instance?.exports.wasm_action) {
-					const [dataPtr] = this.encodeString(comp.instance, comp.memory, actionData);
-					comp.instance.exports.wasm_action(actionId, dataPtr);
-					if (comp.instance.exports.free) comp.instance.exports.free(dataPtr);
-					this.updateSlot(slot);
-					return;
-				}
-
-				const actionFn = this.instance?.exports.stl_kernel_action || this.instance?.exports.stele_kernel_action;
-				if (actionFn) {
-					const [dataPtr] = this.encodeString(this.instance, this.memory, actionData);
-					actionFn(slot, actionId, dataPtr);
-					if (this.instance.exports.free) this.instance.exports.free(dataPtr);
-				}
+				this.invokeSlotAction(slot, actionId, actionData);
 				return;
 			}
 		});
@@ -949,7 +1569,7 @@ export class SteleWasmClient {
 
 			// Handle GET search/filter forms
 			if (method === 'GET') {
-				if (comp?.instance?.exports?.wasm_action) {
+				if (this.worker && !this.isWorkerHost && comp) {
 					evt.preventDefault();
 					const formData = new FormData(form);
 					if (evt.submitter && evt.submitter.name && evt.submitter.value) {
@@ -959,10 +1579,25 @@ export class SteleWasmClient {
 					for (const [k, v] of formData.entries()) {
 						if (v !== '') params.append(k, v);
 					}
-					const qs = params.toString();
-					const [dataPtr] = this.encodeString(comp.instance, comp.memory, qs);
-					comp.instance.exports.wasm_action(3, dataPtr);
-					if (comp.instance.exports.free) comp.instance.exports.free(dataPtr);
+					this.worker.postMessage({
+						type: 'stele:action',
+						slot,
+						actionId: 3,
+						actionData: params.toString()
+					});
+					return;
+				}
+				if (comp?.instance?.exports?.wasm_action || comp?.instance?.exports?.stl_kernel_action || comp?.instance?.exports?.stele_kernel_action || this.instance?.exports?.stl_kernel_action || this.instance?.exports?.stele_kernel_action) {
+					evt.preventDefault();
+					const formData = new FormData(form);
+					if (evt.submitter && evt.submitter.name && evt.submitter.value) {
+						formData.set(evt.submitter.name, evt.submitter.value);
+					}
+					const params = new URLSearchParams();
+					for (const [k, v] of formData.entries()) {
+						if (v !== '') params.append(k, v);
+					}
+					this.invokeSlotAction(slot, 3, params.toString());
 					return;
 				}
 				return;
@@ -971,11 +1606,11 @@ export class SteleWasmClient {
 			// Handle POST forms with optimistic mutations & rollback
 			if (method === 'POST') {
 				const isOptimistic = form.hasAttribute('data-optimistic') || form.hasAttribute('data-dataset') || form.hasAttribute('data-table');
-				const actionUrl = form.getAttribute('action') || window.location.href;
+				const actionUrl = form.getAttribute('action') || (typeof window !== 'undefined' ? window.location.href : '');
 				const dataset = form.getAttribute('data-dataset') || form.getAttribute('data-table') || '';
 				const itemId = form.getAttribute('data-item') || '';
 
-				if (!isOptimistic && !comp?.instance?.exports?.wasm_action) return;
+				if (!isOptimistic && !comp?.instance?.exports?.wasm_action && !(this.worker && !this.isWorkerHost && comp)) return;
 
 				evt.preventDefault();
 				const formData = new FormData(form);
@@ -987,25 +1622,37 @@ export class SteleWasmClient {
 				const patchObj = Object.fromEntries(formData.entries());
 				const patchJson = JSON.stringify(patchObj);
 
-				const optUpdateFn = comp?.instance?.exports?.stl_optimistic_update || comp?.instance?.exports?.stele_optimistic_update;
-				if (optUpdateFn && dataset && itemId) {
-					const [dPtr] = this.encodeString(comp.instance, comp.memory, dataset);
-					const [iPtr] = this.encodeString(comp.instance, comp.memory, itemId);
-					const [pPtr] = this.encodeString(comp.instance, comp.memory, patchJson);
-					optUpdateFn(dPtr, iPtr, pPtr);
-					if (comp.instance.exports.free) {
-						comp.instance.exports.free(dPtr);
-						comp.instance.exports.free(iPtr);
-						comp.instance.exports.free(pPtr);
+				if (this.worker && !this.isWorkerHost) {
+					this.worker.postMessage({
+						type: 'stele:optimistic_update',
+						slot,
+						dataset,
+						itemId,
+						patchJson
+					});
+					this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
+				} else {
+					const optUpdateFn = comp?.instance?.exports?.stl_optimistic_update || comp?.instance?.exports?.stele_optimistic_update;
+					if (optUpdateFn && dataset && itemId) {
+						const [dPtr] = this.encodeString(comp.instance, comp.memory, dataset);
+						const [iPtr] = this.encodeString(comp.instance, comp.memory, itemId);
+						const [pPtr] = this.encodeString(comp.instance, comp.memory, patchJson);
+						this.beginTurn();
+						try {
+							optUpdateFn(dPtr, iPtr, pPtr);
+							this.updateSlot(slot);
+						} finally {
+							this.flushTurn();
+						}
+						if (comp.instance.exports.free) {
+							comp.instance.exports.free(dPtr);
+							comp.instance.exports.free(iPtr);
+							comp.instance.exports.free(pPtr);
+						}
+						this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
+					} else if (this.invokeSlotAction(slot, 4, patchJson)) {
+						this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
 					}
-					this.updateSlot(slot);
-					this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
-				} else if (comp?.instance?.exports?.wasm_action) {
-					const [dataPtr] = this.encodeString(comp.instance, comp.memory, patchJson);
-					comp.instance.exports.wasm_action(4, dataPtr); // action 4 = optimistic submit
-					if (comp.instance.exports.free) comp.instance.exports.free(dataPtr);
-					this.updateSlot(slot);
-					this.emit('stl:mutate', { dataset, itemId, patch: patchObj, slot });
 				}
 
 				// 2. Background HTTP fetch
@@ -1022,32 +1669,346 @@ export class SteleWasmClient {
 				} catch (err) {
 					console.warn('[stele-client] Form mutation failed, executing rollback:', err);
 					// 3. Rollback on failure
-					const optRollbackFn = comp?.instance?.exports?.stl_optimistic_rollback || comp?.instance?.exports?.stele_optimistic_rollback;
-					if (optRollbackFn && dataset && itemId) {
-						const [dPtr] = this.encodeString(comp.instance, comp.memory, dataset);
-						const [iPtr] = this.encodeString(comp.instance, comp.memory, itemId);
-						optRollbackFn(dPtr, iPtr);
-						if (comp.instance.exports.free) {
-							comp.instance.exports.free(dPtr);
-							comp.instance.exports.free(iPtr);
+					if (this.worker && !this.isWorkerHost) {
+						this.worker.postMessage({
+							type: 'stele:optimistic_rollback',
+							slot,
+							dataset,
+							itemId
+						});
+						this.emit('stl:rollback', { dataset, itemId, error: err.message, slot });
+					} else {
+						const optRollbackFn = comp?.instance?.exports?.stl_optimistic_rollback || comp?.instance?.exports?.stele_optimistic_rollback;
+						if (optRollbackFn && dataset && itemId) {
+							const [dPtr] = this.encodeString(comp.instance, comp.memory, dataset);
+							const [iPtr] = this.encodeString(comp.instance, comp.memory, itemId);
+							this.beginTurn();
+							try {
+								optRollbackFn(dPtr, iPtr);
+							} finally {
+								this.flushTurn();
+							}
+							if (comp.instance.exports.free) {
+								comp.instance.exports.free(dPtr);
+								comp.instance.exports.free(iPtr);
+							}
+						} else {
+							this.invokeSlotAction(slot, 5, itemId);
 						}
-					} else if (comp?.instance?.exports?.wasm_action) {
-						const [dataPtr] = this.encodeString(comp.instance, comp.memory, itemId);
-						comp.instance.exports.wasm_action(5, dataPtr); // action 5 = rollback
-						if (comp.instance.exports.free) comp.instance.exports.free(dataPtr);
+						this.updateSlot(slot);
+						this.emit('stl:rollback', { dataset, itemId, error: err.message, slot });
 					}
-					this.updateSlot(slot);
-					this.emit('stl:rollback', { dataset, itemId, error: err.message, slot });
 				}
 			}
 		});
 	}
 }
 
-export const steleClient = new SteleWasmClient();
+/* ── Self-Hosted Web Worker Execution Engine ── */
+if (isWorkerContext) {
+	const workerClient = new SteleWasmClient({ useWorker: false, isWorkerHost: true });
+	globalScope.__stele_worker_canvases = new Map();
+	globalScope.__stele_worker_post = (msg, transfer) => {
+		self.postMessage(msg, transfer || []);
+	};
+	globalScope.__stele_begin_turn = () => workerClient.beginTurn();
+	globalScope.__stele_flush_turn = () => workerClient.flushTurn();
+
+	let workerRafRunning = false;
+	let workerTickScheduled = false;
+	let workerLastTickTime = 0;
+	let workerTickBusy = false;
+
+	function flushWorkerCanvases(defaultSlot = 1) {
+		for (const entry of globalScope.__stele_worker_canvases.values()) {
+			const c = entry?.canvas;
+			if (c && c.__stele_dirty && typeof c.transferToImageBitmap === 'function') {
+				c.__stele_dirty = false;
+				try {
+					const bmp = c.transferToImageBitmap();
+					self.postMessage({
+						type: 'stele:canvas_bitmap',
+						slot: entry.slot ?? defaultSlot,
+						id: entry.id || '',
+						budId: entry.budId || '',
+						fit: !!entry.fit,
+						width: c.width,
+						height: c.height,
+						bmp
+					}, [bmp]);
+				} catch (_) {}
+			}
+		}
+	}
+
+	function runWorkerTick(now) {
+		if (workerClient._hidden || workerTickBusy) return;
+		let anyActive = false;
+		for (const comp of workerClient.slotInstances.values()) {
+			if (comp.hasTick) {
+				anyActive = true;
+				break;
+			}
+		}
+		if (!anyActive) return;
+		workerTickBusy = true;
+		try {
+			const dt = workerLastTickTime ? Math.min(0.1, Math.max(0.001, (now - workerLastTickTime) / 1000)) : 0.016;
+			workerLastTickTime = now;
+			for (const [slot, comp] of workerClient.slotInstances.entries()) {
+				if (!comp.hasTick || !comp.instance) continue;
+				const dims = workerClient._slotDimensions.get(slot) || { w: 1400, h: 836 };
+				workerClient.beginTurn();
+				try {
+					if (typeof comp.instance.exports.wasm_tick === 'function') {
+						comp.instance.exports.wasm_tick(dt, dims.w, dims.h);
+					} else if (typeof comp.instance.exports.stl_kernel_tick === 'function') {
+						comp.instance.exports.stl_kernel_tick(dt, dims.w, dims.h);
+					}
+				} catch (e) {
+					console.error('[stele-worker] wasm_tick error:', e);
+				} finally {
+					workerClient.flushTurn();
+				}
+				flushWorkerCanvases(slot);
+			}
+		} finally {
+			workerTickBusy = false;
+		}
+	}
+
+	function scheduleWorkerTick() {
+		if (!workerRafRunning || workerClient._hidden || workerTickScheduled) return;
+		workerTickScheduled = true;
+		const tickCallback = (now) => {
+			workerTickScheduled = false;
+			if (!workerRafRunning || workerClient._hidden) return;
+			const ts = typeof now === 'number' ? now : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+			runWorkerTick(ts);
+			if (workerRafRunning && !workerClient._hidden) {
+				scheduleWorkerTick();
+			}
+		};
+		if (typeof self.requestAnimationFrame === 'function') {
+			self.requestAnimationFrame(tickCallback);
+		} else {
+			setTimeout(() => tickCallback(typeof performance !== 'undefined' ? performance.now() : Date.now()), 16);
+		}
+	}
+
+	function ensureWorkerTickLoop() {
+		let anyHasTick = false;
+		for (const comp of workerClient.slotInstances.values()) {
+			if (comp.hasTick) {
+				anyHasTick = true;
+				break;
+			}
+		}
+		workerRafRunning = anyHasTick;
+		self.postMessage({ type: 'stele:tick_state', active: anyHasTick });
+		if (workerRafRunning && !workerClient._hidden) {
+			scheduleWorkerTick();
+		}
+	}
+
+	let initChain = Promise.resolve();
+
+	self.addEventListener('message', (evt) => {
+		const msg = evt.data;
+		if (!msg || typeof msg.type !== 'string') return;
+
+		switch (msg.type) {
+		case 'stele:init': {
+			if (msg.origin) globalScope.__stele_origin = msg.origin;
+			if (msg.capabilityUrls) Object.assign(workerClient.capabilityUrls, msg.capabilityUrls);
+			if (msg.fallbackWasmUrl) workerClient.fallbackWasmUrl = msg.fallbackWasmUrl;
+			break;
+		}
+		case 'stele:canvas_attach': {
+			const w = msg.width || 800;
+			const h = msg.height || 600;
+			let c = msg.canvas || null;
+			if (!c && typeof OffscreenCanvas !== 'undefined') {
+				const key = msg.id || msg.budId || `slot-${msg.slot}`;
+				const existing = globalScope.__stele_worker_canvases.get(key);
+				if (existing && existing.canvas) {
+					c = existing.canvas;
+				} else {
+					c = new OffscreenCanvas(w, h);
+				}
+			}
+			if (c) {
+				c.__stele_fit = !!msg.fit;
+				c.__stele_webgl = !!msg.webgl;
+				c.__stele_id = msg.id || '';
+				const key = msg.id || msg.budId || `slot-${msg.slot}`;
+				globalScope.__stele_worker_canvases.set(key, {
+					canvas: c,
+					id: msg.id || '',
+					budId: msg.budId || '',
+					fit: !!msg.fit,
+					webgl: !!msg.webgl,
+					width: w,
+					height: h,
+					slot: msg.slot
+				});
+			}
+			break;
+		}
+		case 'stele:resize': {
+			if (typeof msg.slot === 'number') {
+				workerClient._slotDimensions.set(msg.slot, {
+					w: msg.width || 1400,
+					h: msg.height || 900
+				});
+			}
+			if (typeof msg.hidden === 'boolean') {
+				const wasHidden = workerClient._hidden;
+				workerClient._hidden = msg.hidden;
+				if (wasHidden && !workerClient._hidden && workerRafRunning) {
+					workerLastTickTime = 0;
+					scheduleWorkerTick();
+				}
+			}
+			break;
+		}
+		case 'stele:tick': {
+			runWorkerTick(msg.now || (typeof performance !== 'undefined' ? performance.now() : Date.now()));
+			break;
+		}
+		case 'stele:mount_slot': {
+			initChain = initChain.then(async () => {
+				let ok = false;
+				try {
+					ok = await workerClient.mountSlot(msg.slot, msg.moduleName, msg.state, msg.declaredCaps || []);
+					if (ok) {
+						ensureWorkerTickLoop();
+						flushWorkerCanvases(msg.slot);
+					}
+				} catch (err) {
+					console.error('[stele-worker] mountSlot failed:', err);
+				}
+				self.postMessage({ type: 'stele:mounted', slot: msg.slot, ok });
+			});
+			break;
+		}
+		case 'stele:dispatch': {
+			initChain = initChain.then(() => {
+				workerClient.dispatchToSlot(msg.slot, msg.nodeId, msg.eventName, msg.bubbles, msg.valueStr);
+				flushWorkerCanvases(msg.slot);
+			});
+			break;
+		}
+		case 'stele:action': {
+			initChain = initChain.then(() => {
+				workerClient.invokeSlotAction(msg.slot, msg.actionId, msg.actionData || '');
+				flushWorkerCanvases(msg.slot);
+			});
+			break;
+		}
+		case 'stele:update_slot': {
+			initChain = initChain.then(() => {
+				workerClient.updateSlot(msg.slot);
+				flushWorkerCanvases(msg.slot);
+			});
+			break;
+		}
+		case 'stele:optimistic_update': {
+			initChain = initChain.then(() => {
+				const comp = workerClient.slotInstances.get(msg.slot);
+				const optUpdateFn = comp?.instance?.exports?.stl_optimistic_update || comp?.instance?.exports?.stele_optimistic_update;
+				if (optUpdateFn && msg.dataset && msg.itemId) {
+					const [dPtr] = workerClient.encodeString(comp.instance, comp.memory, msg.dataset);
+					const [iPtr] = workerClient.encodeString(comp.instance, comp.memory, msg.itemId);
+					const [pPtr] = workerClient.encodeString(comp.instance, comp.memory, msg.patchJson || '{}');
+					workerClient.beginTurn();
+					try {
+						optUpdateFn(dPtr, iPtr, pPtr);
+						workerClient.updateSlot(msg.slot);
+					} finally {
+						workerClient.flushTurn();
+					}
+					if (comp.instance.exports.free) {
+						comp.instance.exports.free(dPtr);
+						comp.instance.exports.free(iPtr);
+						comp.instance.exports.free(pPtr);
+					}
+				} else {
+					workerClient.invokeSlotAction(msg.slot, 4, msg.patchJson || '{}');
+				}
+			});
+			break;
+		}
+		case 'stele:optimistic_rollback': {
+			initChain = initChain.then(() => {
+				const comp = workerClient.slotInstances.get(msg.slot);
+				const optRollbackFn = comp?.instance?.exports?.stl_optimistic_rollback || comp?.instance?.exports?.stele_optimistic_rollback;
+				if (optRollbackFn && msg.dataset && msg.itemId) {
+					const [dPtr] = workerClient.encodeString(comp.instance, comp.memory, msg.dataset);
+					const [iPtr] = workerClient.encodeString(comp.instance, comp.memory, msg.itemId);
+					workerClient.beginTurn();
+					try {
+						optRollbackFn(dPtr, iPtr);
+						workerClient.updateSlot(msg.slot);
+					} finally {
+						workerClient.flushTurn();
+					}
+					if (comp.instance.exports.free) {
+						comp.instance.exports.free(dPtr);
+						comp.instance.exports.free(iPtr);
+					}
+				} else {
+					workerClient.invokeSlotAction(msg.slot, 5, msg.itemId || '');
+				}
+			});
+			break;
+		}
+		case 'stele:emit': {
+			initChain = initChain.then(() => {
+				workerClient.emit(msg.topic, msg.payload);
+			});
+			break;
+		}
+		case 'stele:ws_send': {
+			if (globalScope.__axil_ws && typeof globalScope.__axil_ws.send === 'function') {
+				globalScope.__axil_ws.send(msg.data);
+			}
+			break;
+		}
+		case 'stele:tty_input': {
+			initChain = initChain.then(() => {
+				for (const comp of workerClient.slotInstances.values()) {
+					const fn = comp?.instance?.exports?.wasm_term_on_input || comp?.instance?.exports?.wasm_tty_on_input;
+					const malloc = comp?.instance?.exports?.malloc;
+					const free = comp?.instance?.exports?.free;
+					if (fn && malloc && comp.memory) {
+						const bytes = new TextEncoder().encode(msg.data || '');
+						const ptr = malloc(bytes.length);
+						if (ptr) {
+							new Uint8Array(comp.memory.buffer, ptr, bytes.length).set(bytes);
+							workerClient.beginTurn();
+							try {
+								fn(ptr, bytes.length);
+							} finally {
+								workerClient.flushTurn();
+							}
+							if (free) free(ptr);
+						}
+					}
+				}
+			});
+			break;
+		}
+		default:
+			break;
+		}
+	});
+}
+
+export const steleClient = !isWorkerContext ? new SteleWasmClient() : null;
 export const stlClient = steleClient;
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && !isWorkerContext) {
 	window.SteleWasmClient = SteleWasmClient;
 	window.registerSlotBridge = (factory) => SteleWasmClient.registerBridgeFactory(factory);
 	window.steleClient = steleClient;

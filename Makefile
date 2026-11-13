@@ -7,10 +7,10 @@ WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
 	-Wl,--export=malloc -Wl,--export=free -Wl,--export=_initialize \
 	-Wl,--export=stl_kernel_boot -Wl,--export=stl_kernel_mount -Wl,--export=stl_kernel_mount_bin -Wl,--export=stl_kernel_unmount \
-	-Wl,--export=stl_kernel_update -Wl,--export=stl_kernel_action -Wl,--export=stl_kernel_tick \
+	-Wl,--export=stl_kernel_update -Wl,--export=stl_kernel_action -Wl,--export=stl_kernel_dispatch_event -Wl,--export=stl_kernel_tick -Wl,--export=stl_kernel_has_tick \
 	-Wl,--export=stl_kernel_version -Wl,--export=stl_kernel_register_module \
 	-Wl,--export=stele_kernel_boot -Wl,--export=stele_kernel_mount -Wl,--export=stele_kernel_unmount \
-	-Wl,--export=stele_kernel_update -Wl,--export=stele_kernel_action -Wl,--export=stele_kernel_tick \
+	-Wl,--export=stele_kernel_update -Wl,--export=stele_kernel_action -Wl,--export=stele_kernel_dispatch_event -Wl,--export=stele_kernel_tick -Wl,--export=stele_kernel_has_tick \
 	-Wl,--export=stele_kernel_version -Wl,--export=stele_kernel_register_module \
 	-Wl,--export=wasm_fetch_callback
 
@@ -35,60 +35,61 @@ SITE_WASM_INCLUDES = -Iexternal/libstele/include -Iexternal/libbud/include \
                      -I/usr/include/json-c -Imods/common -Imods/common/ux \
                      -Imods/song/include -Imods/gig/include -Imods/index/include -Imods/chat/include
 
+SITE_WASM_BUILD_DIR = /tmp/site_wasm_build_$(shell pwd | cksum | cut -d' ' -f1)
 SITE_WASM_OBJS = kernel.o stele_event.o bud.o site_wasm_app.o site_ui.o xylem.o \
                  modules.o site_chrome.o chrome.o song.o gig.o list.o \
                  chat.o chat_ui.o music.o hyle_bud.o filter.o table.o \
                  picker.o form.o hyle_bud_cache.o url.o
 
-/tmp/site_wasm_build/kernel.o: external/libstele/src/stele_wasm_kernel.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/stele_event.o: external/libstele/src/stele_event.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/bud.o: external/libbud/src/libbud.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/site_wasm_app.o: mods/common/site_wasm_app.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/site_ui.o: mods/common/ux/site_ui.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/xylem.o: external/libxylem/src/libxylem-wasm.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/modules.o: mods/common/ux/site_modules.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/site_chrome.o: mods/common/ux/site_chrome.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/chrome.o: mods/site_chrome/ux/chrome.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/song.o: mods/song/ux/detail.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/gig.o: mods/gig/ux/detail.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/list.o: mods/index/ux/list_fe.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/chat.o: mods/chat/ux/chat_fe.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/chat_ui.o: mods/chat/ux/chat_ui.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/music.o: external/libpitch/src/music.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/hyle_bud.o: external/libhyle-bud/src/libhyle-bud.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/filter.o: external/libhyle-bud/src/filter.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/table.o: external/libhyle-bud/src/table.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/picker.o: external/libhyle-bud/src/picker.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/form.o: external/libhyle-bud/src/form.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/hyle_bud_cache.o: external/libhyle-bud/src/hyle-bud-cache.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-/tmp/site_wasm_build/url.o: external/libhyle/src/url.c
-	@mkdir -p /tmp/site_wasm_build && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/kernel.o: external/libstele/src/stele_wasm_kernel.c external/libstele/include/ttypt/stele_wasm.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/stele_event.o: external/libstele/src/stele_event.c external/libstele/include/ttypt/stele_wasm.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/bud.o: external/libbud/src/libbud.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c mods/common/site_wasm_app.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/xylem.o: external/libxylem/src/libxylem-wasm.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/modules.o: mods/common/ux/site_modules.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/site_chrome.o: mods/common/ux/site_chrome.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/chrome.o: mods/site_chrome/ux/chrome.c mods/common/site_wasm_app.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.c mods/common/site_wasm_app.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.c mods/common/site_wasm_app.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_fe.c mods/common/site_wasm_app.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/chat.o: mods/chat/ux/chat_fe.c mods/common/site_wasm_app.h
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/chat_ui.o: mods/chat/ux/chat_ui.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/music.o: external/libpitch/src/music.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/hyle_bud.o: external/libhyle-bud/src/libhyle-bud.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/filter.o: external/libhyle-bud/src/filter.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/table.o: external/libhyle-bud/src/table.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/picker.o: external/libhyle-bud/src/picker.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/form.o: external/libhyle-bud/src/form.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/hyle_bud_cache.o: external/libhyle-bud/src/hyle-bud-cache.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/url.o: external/libhyle/src/url.c
+	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 
-htdocs/site.wasm: $(addprefix /tmp/site_wasm_build/,$(SITE_WASM_OBJS))
+htdocs/site.wasm: $(addprefix $(SITE_WASM_BUILD_DIR)/,$(SITE_WASM_OBJS))
 	@mkdir -p htdocs
 	$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
-	@sh external/mk/scripts/wasm-audit.sh $@
+	@sh external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }
 
 # Staged htdocs deploy assets. Exported from each library and module <pkg>/htdocs/.
 DEPLOY_ASSETS = styles.css hyle.css bud-cap.js hyle-cap.js axil-cap.js axil-tty-cap.js lamina-cap.js webgl-cap.js xylem-cap.js stele-client.js stele.wasm
