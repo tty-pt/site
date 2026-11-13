@@ -59,7 +59,9 @@ static bud_node *mount_tty(void)
 {
 	return lx_n("div",
 		lx_attr("id", "term"),
+		lx_attr("data-bud-key", "term"),
 		lx_attr("data-bud-terminal", "1"),
+		lx_attr("data-bud-foreign", "1"),
 		lx_attr("data-line-mode", "true"),
 		lx_attr("style", "border: thin solid #9589c5 !important;"),
 		lx_attr("class", "flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative"));
@@ -746,6 +748,7 @@ static bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
 		lx_attr("id", "term"),
 		lx_attr("data-bud-key", "term"),
 		lx_attr("data-bud-terminal", "1"),
+		lx_attr("data-bud-foreign", "1"),
 		lx_attr("data-line-mode", "true"),
 		lx_attr("class", "hud-win-body flex-1 w-full h-full min-h-0 font-mono text-neutral-200 overflow-hidden relative bg-transparent"));
 	bud_append(chat, term);
@@ -817,9 +820,11 @@ static bud_node *mount_seven_stage(void)
 	 * the screen, so the sprite scale never changes. */
 	bud_node *stage = lx_n("nd-stage",
 		lx_attr("id", "game-stage"),
+		lx_attr("data-bud-key", "game-stage"),
 		lx_attr("class", "absolute inset-0 min-w-0 min-h-0 overflow-hidden bg-neutral-950"),
 		lx_node(lx_n("canvas",
 			lx_attr("id", "seven-stage-canvas"),
+			lx_attr("data-bud-key", "seven-stage-canvas"),
 			lx_attr("data-bud-canvas", "1"),
 			lx_attr("data-bud-canvas-fit", "1"),
 			lx_attr("width", "640"),
@@ -1461,6 +1466,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		/* Full Seven Stage with floating movable & resizable HUD windows */
 		bud_node *holder = bud_element("div");
 		bud_set_attr(holder, "id", "holder");
+		bud_set_attr(holder, "data-bud-key", "holder");
 		bud_set_attr(holder, "class", "nd game-2d-mode relative flex flex-col flex-1 min-h-0 w-full overflow-hidden");
 		bud_append(holder, vport);
 
@@ -1601,6 +1607,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 		bud_node *main_box = bud_element("div");
 		bud_set_attr(main_box, "id", "main");
+		bud_set_attr(main_box, "data-bud-key", "main");
 		bud_set_attr(main_box, "class", "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100");
 		bud_append(main_box, holder);
 		bud_append(main_box, modals);
@@ -1647,6 +1654,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *rp = bud_element("div");
 	bud_set_attr(rp, "id", "right-panel");
+	bud_set_attr(rp, "data-bud-key", "right-panel");
 	const char *rp_class = "flex flex-col gap-2 w-80 max-w-[340px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden";
 	if (st && st->layout_mode == ND_LAYOUT_STAGE_EXPANDED) {
 		rp_class = "flex flex-col gap-2 w-52 max-w-[220px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden text-xs";
@@ -1657,6 +1665,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *holder = bud_element("div");
 	bud_set_attr(holder, "id", "holder");
+	bud_set_attr(holder, "data-bud-key", "holder");
 	char hcls[160];
 	snprintf(hcls, sizeof(hcls), "nd terminal-mode flex flex-1 gap-2 p-2 min-h-0 h-full overflow-hidden %s %s",
 		(st && st->target_ref) ? "targetting" : "",
@@ -1669,6 +1678,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_node *main_box = bud_element("div");
 	bud_set_attr(main_box, "id", "main");
+	bud_set_attr(main_box, "data-bud-key", "main");
 	apply_room_backdrop(main_box, st);
 	char mcls[128];
 	snprintf(mcls, sizeof(mcls), "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 %s",

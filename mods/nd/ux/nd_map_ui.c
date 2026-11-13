@@ -243,6 +243,7 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	if (!nd_map_canvas_enabled(st)) {
 		bud_node *ascii_map = lx_n("nd-map",
 			lx_attr("id", "room-map"),
+			lx_attr("data-bud-key", "room-map"),
 			lx_attr("class", "font-mono whitespace-pre text-[10px] leading-tight bg-black/80 p-2 rounded border border-neutral-700/60 overflow-hidden select-none text-center shadow-inner block mx-auto"));
 		append_fallback_ascii(ascii_map, st, 1);
 		return ascii_map;
@@ -251,12 +252,14 @@ bud_node *render_room_map(const nd_client_state_t *st)
 	/* Container wrapping canvas and progressive SSR/No-JS fallback */
 	bud_node *map = lx_n("nd-map",
 		lx_attr("id", "room-map"),
+		lx_attr("data-bud-key", "room-map"),
 		lx_attr("class", "relative p-0 overflow-hidden select-none block mx-auto"),
 		lx_attr("style", MAP_CANVAS_STYLE));
 
 	/* The canvas rendered by liblamina */
 	bud_node *cv = lx_n("canvas",
 		lx_attr("id", "room-map-canvas"),
+		lx_attr("data-bud-key", "room-map-canvas"),
 		lx_attr("data-bud-canvas", "1"),
 		lx_attr("width", MAP_CANVAS_PX),
 		lx_attr("height", MAP_CANVAS_PX),

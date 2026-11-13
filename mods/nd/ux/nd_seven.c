@@ -1865,6 +1865,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (!near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
+	nd_seven_gl_flush_clouds();
 }
 
 uint32_t nd_seven_last_mid_billboard_count(void)

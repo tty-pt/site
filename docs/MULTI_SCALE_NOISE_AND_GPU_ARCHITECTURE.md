@@ -267,10 +267,15 @@ Switching chunk generation in `chunk_get_or_create()` from 20,480 scalar queries
    * **COMPLETE in `lamina-bridge.js`**: Upgraded `VS_TERRAIN_3D` with `sampleHeightSmooth`, using branchless 4-tap `texelFetch` bilinear height blending and Hermite sub-texel weights.
    * **COMPLETE in `lamina-bridge.js`**: Derived analytical surface normals directly from bilinear patch partial derivatives, eliminating normal spikes and terracing ridges.
 
-5. **Phase 5: Multi-Scale Water & Optical Bathymetry (NEXT)**:
-   * Wire `chaff_glsl` into `FS_WATER_3D` in `lamina-bridge.js` to replace placeholder diagonal sine wave.
-   * Implement Beer-Lambert multi-scale optical depth attenuation ($I = I_0 e^{-\mu d}$) and swash/backwash shoreline foam dynamics ($d \le 2$).
+5. **Phase 5: Multi-Scale Water & Optical Bathymetry (COMPLETE)**:
+   * Replaced placeholder water sine wave with 6-octave orbital-to-capillary wave cascade in `mods/nd/ux/nd_seven_gl.c`.
+   * Implemented Beer-Lambert multi-scale optical depth attenuation, deep in-scatter, and swash/backwash shoreline foam dynamics.
 
-6. **Phase 6: Stratosphere Camera & Horizon Curvature (PLANNED)**:
-   * Implement quadratic horizon curvature in Web HAL 3D projection ($Z_{\text{curved}} = H - \frac{r^2}{2 R_{\text{planet}}}$).
-   * Implement Rayleigh atmospheric scattering and ocean sun glint specular reflection.
+6. **Phase 6: Stratosphere Camera & Torus Horizon Curvature (COMPLETE)**:
+   * Implemented true 3D planetary torus projection with sagitta curvature compensation in NeverDark Seven 3D WebGL2 pipeline.
+   * Seamless continuous LOD transitions from room-scale diorama to continent-scale orbital horizons.
+
+7. **Phase 7: 4D Spatiotemporal Noise & Volumetric Clouds (COMPLETE)**:
+   * Implemented pure-integer 4D sample/gradient algorithms with $16 \to 8 \to 4$ hypercube dimensional reduction in `libchaff` (`external/libchaff`).
+   * Implemented 8-octave observer-gated ("quantum") 4D volumetric cloud deck, Horizon Zero Dawn billow erosion, and single-probe analytical spatial gradient raymarching in NeverDark Seven (`s_fs_cloud`, `nd_seven_gl_flush_clouds`).
+   * See [`docs/VOLUMETRIC_CLOUDS_AND_4D_NOISE.md`](VOLUMETRIC_CLOUDS_AND_4D_NOISE.md) for full specification.

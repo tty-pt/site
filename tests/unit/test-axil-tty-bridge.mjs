@@ -132,6 +132,26 @@ new Uint8Array(memory.buffer, 256, encoded2.length).set(encoded2);
 imports.term_write(256, encoded2.length);
 assert.deepEqual(termsCreated[1].written, [testStr2]);
 
+// Test idempotence: repeated mount() on the same live container does not re-create or dispose
+bridge.mount();
+assert.equal(termsCreated.length, 2, 'Should not create a 3rd terminal when already attached');
+assert.equal(termsCreated[1].disposed, false, 'Terminal 2 should remain active');
+
+// Test resilience against stale __attached flag on a new container
+liveElements.delete(newContainer);
+const staleFlagContainer = {
+	id: 'term-3',
+	__attached: true,
+	addEventListener() {},
+	getAttribute() { return 'false'; }
+};
+liveElements.add(staleFlagContainer);
+activeContainer = staleFlagContainer;
+bridge.mount();
+assert.equal(termsCreated.length, 3, 'Terminal 3 should be created despite stale __attached flag');
+assert.equal(termsCreated[1].disposed, true, 'Terminal 2 should have been disposed');
+assert.equal(termsCreated[2].element, staleFlagContainer, 'Terminal 3 mounted to staleFlagContainer');
+
 bridge.destroy();
 
 // 5. Test TerminalController class

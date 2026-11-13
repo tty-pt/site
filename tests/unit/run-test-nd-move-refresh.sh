@@ -30,6 +30,7 @@ gcc -g -O0 \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
 	mods/nd/ux/nd_seven.c \
+	mods/nd/ux/nd_seven_gl.c \
 	mods/nd/ux/nd_seven_atlas_draw.c \
 	mods/nd/ux/nd_seven_ground.c \
 	mods/nd/ux/nd_seven_motion.c \
