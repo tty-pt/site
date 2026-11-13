@@ -284,7 +284,7 @@ void nd_negotiate_regional_driver(const nd_client_state_t *st)
 	(void)st;
 }
 
-ISO_EXPORT(void, wasm_init, const char *json, int len)
+int nd_stl_init(const char *json, int len)
 {
 	nd_ui_init_defaults();
 	memset(&client_state, 0, sizeof(client_state));
@@ -356,6 +356,7 @@ ISO_EXPORT(void, wasm_init, const char *json, int len)
 	nd_scene_sync(&g_scene, &client_state);
 
 	ws_connect("/nd", 3);
+	return 0;
 }
 
 ISO_EXPORT(void, wasm_term_on_input, const char *buf, size_t len)
