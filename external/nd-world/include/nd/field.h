@@ -173,9 +173,9 @@ nd_field_bimodal_hypsometry(int16_t elev)
 		} else if (elev <= 25) {
 			return (int16_t)(12 + (elev - 8) * 18 / 10); /* Lowlands & uplands: elevated +12..+42 */
 		} else {
-			/* High mountain sharpening: soaring up to 1,854 (Mount Everest) */
+			/* High mountain sharpening: plateaus (43..270), cordilleras (500..1100), alpine summits up to 1,854 (Mount Everest) */
 			int32_t m = elev - 25;
-			int32_t peak = 43 + (m * 18) / 10 + (m * m * 105) / 100;
+			int32_t peak = 43 + (m * 22) / 10 + (m * m * 12) / 100;
 			if (peak > 1854) peak = 1854;
 			return (int16_t)peak;
 		}
@@ -739,7 +739,8 @@ nd_field_eval_mountain_lake(uint16_t world, int32_t wx, int32_t wy,
 	 * In subtropical desert and savannah belts, evaporation exceeds precipitation,
 	 * so perched lakes are suppressed (rare 1-in-32 seasonal watering hole only). */
 	int32_t abs_cry = abs((int32_t)cry);
-	if (abs_cry >= 3200 && abs_cry <= 9200 && abs(abs_cry - 6200) < 2400) {
+	int32_t eq_cry = (abs_cry <= 16384) ? abs_cry : (32768 - abs_cry);
+	if (eq_cry >= 2400 && eq_cry <= 9600 && abs(eq_cry - 5800) < 2800) {
 		if ((h_cell & 31u) != 0)
 			return;
 	}
@@ -889,19 +890,23 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 
 	/* Contrast-stretch rainfall to utilize full dry-to-wet spectrum */
 	int32_t rn_centered = (int32_t)(cl_raw >> 15) - 256;
-	int32_t rn_val = 256 + (rn_centered * 15) / 10;
+	int32_t rn_val = 256 + (rn_centered * 16) / 10;
 
+	/* Toroidal distance from nearest equator (0 at outer equator ry=0 and inner equator ry=+-32768;
+	 * 16384 at North/South poles ry=+-16384). */
 	int32_t abs_ry = abs((int32_t)room_y);
-	/* Intertropical Convergence Zone (ITCZ) equatorial rainfall enhancement (latitudes < 12° == room_y < 2400) creates lush tropical rainforests */
-	if (abs_ry < 2400) {
-		int32_t wet_weight = (2400 - abs_ry) * 85 / 2400;
+	int32_t eq_dist = (abs_ry <= 16384) ? abs_ry : (32768 - abs_ry);
+
+	/* Intertropical Convergence Zone (ITCZ) equatorial rainfall enhancement (latitudes < 13 deg == eq_dist < 2400) */
+	if (eq_dist < 2400) {
+		int32_t wet_weight = (2400 - eq_dist) * 85 / 2400;
 		rn_val += wet_weight;
 	}
-	/* Subtropical Hadley subsidence drying belt (latitudes ~15°..42° == room_y ~2400..10500) creates vast Earth-like desert belts */
-	if (abs_ry >= 2200 && abs_ry <= 11000) {
-		int32_t sub_dist = abs(abs_ry - 6200);
-		if (sub_dist < 4400) {
-			int32_t dry_weight = (4400 - sub_dist) * 150 / 4400;
+	/* Subtropical Hadley subsidence drying belt (latitudes ~13..48 deg == eq_dist ~2200..9200) creates vast desert/savannah belts */
+	if (eq_dist >= 2000 && eq_dist <= 9600) {
+		int32_t sub_dist = abs(eq_dist - 5600);
+		if (sub_dist < 3800) {
+			int32_t dry_weight = (3800 - sub_dist) * 165 / 3800;
 			rn_val -= dry_weight;
 		}
 	}
@@ -909,14 +914,32 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	if (rn_val > (int32_t)ND_FIELD_RAIN_MAX) rn_val = ND_FIELD_RAIN_MAX;
 	s.rain = (uint32_t)rn_val;
 
+	/* 1. Instantaneous diurnal temperature (varies with both longitude pos_x - sun_azimuth and latitude pos_y) */
 	s.temp = nd_field_temp_at_azimuth(world, (uint32_t)s.elevation, tm_raw, room_x, room_y, sun_azimuth);
-	int32_t elev_above_base = (int32_t)s.elevation - 30;
-	if (elev_above_base > 0) {
-		/* Physical environmental lapse rate: high summits cool into subalpine tundra and permanent snowy peaks */
-		int32_t lapse = (elev_above_base * 10) / 100;
-		s.temp -= (int16_t)lapse;
+	int32_t elev_rel = (int32_t)s.elevation - (int32_t)s.water_level;
+	if (elev_rel > 30) {
+		s.temp -= (int16_t)(((elev_rel - 30) * 7) / 100);
 	}
-	nd_field_bio_blend(s.rain, s.temp, &s.bio, &s.bio2, &s.blend);
+
+	/* 2. Mean annual latitudinal & alpine climate temperature for permanent biome classification:
+	 * Biomes (rainforest, desert, savannah, boreal, tundra, polar ice) depend on latitude |cos(phi)|
+	 * and elevation above sea level—never freezing the equator at night! */
+	int32_t lat_insol_q15 = abs(nd_field_cos_q15((uint16_t)room_y));
+	int32_t lat_cool = ((32768 - lat_insol_q15) * 162) >> 15;
+	if (eq_dist > 11000) {
+		/* Polar ice-albedo feedback above 60 deg latitude (eq_dist > 11000) */
+		lat_cool += ((eq_dist - 11000) * 38) / (16384 - 11000);
+	}
+	int32_t tm_var = (int32_t)(tm_raw >> 16) - 128;
+	int32_t bio_temp = (int32_t)ND_FIELD_SOLAR_TEMP_MAX - lat_cool + (tm_var * 36 / 128);
+	if (elev_rel > 220) {
+		/* High mountain environmental lapse rate: summits > 1200..1854 wu cool into alpine tundra and permanent snowcaps */
+		int32_t bio_lapse = ((elev_rel - 220) * 115) / 1000;
+		bio_temp -= bio_lapse;
+	}
+	if (bio_temp < -32000) bio_temp = -32000;
+	if (bio_temp > 32000) bio_temp = 32000;
+	nd_field_bio_blend(s.rain, (int16_t)bio_temp, &s.bio, &s.bio2, &s.blend);
 
 	/* Volcanic Hotspots: Rare localized tectonic rifts/calderas on dry land (~0.2% of terrain),
 	 * rather than covering equatorial climate bands */

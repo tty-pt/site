@@ -106,23 +106,13 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		if (elev_rel < -2000) elev_rel = -2000;
 		if (elev_rel > 1854) elev_rel = 1854;
 
-		/* Natural alpine transition on mountain summits:
-		 *   - 140..260 wu: light granite scree lifts out of lowland vegetation
-		 *   - 240..420+ wu: brilliant alpine snowcaps and glacial ice */
-		if (elev_rel > 140 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
-			uint32_t c_granite = 0xFFA8B0B8u; /* Light granite scree RGB(184, 176, 168) */
-			uint32_t c_snow    = 0xFFFCF8F0u; /* Pure alpine snow RGB(240, 248, 252) */
-			int rock_w = (elev_rel <= 260) ? ((elev_rel - 140) * 255 / 120) : 255;
-			col = macro_blend_rgb(col, c_granite, rock_w);
-			if (elev_rel > 240) {
-				int snow_w = (elev_rel <= 420) ? ((elev_rel - 240) * 255 / 180) : 255;
-				col = macro_blend_rgb(col, c_snow, snow_w);
-			}
-		}
-
-		/* Polar ice caps and high mountain summits stay brilliant white snow */
-		if (fs.bio == BIOME_PERMANENT_ICE || (elev_rel > 360 && !fs.is_water)) {
-			col = 0xFFFCF8F0u;
+		/* Natural alpine transition on high mountain summits (> 950..1400 wu):
+		 * Lowlands, plateaus, and foothills (< 950 wu) preserve their authentic biome
+		 * color in uSubstrateTex so s_fs_terrain never misclassifies warm highlands as polar ice. */
+		if (elev_rel > 950 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
+			uint32_t c_snow = 0xFFFCF8F0u; /* Pure alpine snow RGB(240, 248, 252) */
+			int snow_w = (elev_rel <= 1400) ? ((elev_rel - 950) * 255 / 450) : 255;
+			col = macro_blend_rgb(col, c_snow, snow_w);
 		}
 
 		int hypso_delta;
@@ -138,9 +128,17 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		int r = (int)(col & 0xFF);
 		int g = (int)((col >> 8) & 0xFF);
 		int b = (int)((col >> 16) & 0xFF);
-		r = (r * shade_q8) >> 8;
-		g = (g * (shade_q8 + (fine_rel >> 2))) >> 8;
-		b = (b * (shade_q8 - (hypso_delta >> 2) - (fine_rel >> 2))) >> 8;
+		if (fs.bio == BIOME_PERMANENT_ICE) {
+			/* Keep polar & summit ice cool-white (B >= G >= R) so wPolar in s_fs_terrain is exact */
+			int ice_shade = 248 + (fine_rel >> 1);
+			r = (236 * ice_shade) >> 8;
+			g = (242 * ice_shade) >> 8;
+			b = (252 * ice_shade) >> 8;
+		} else {
+			r = (r * shade_q8) >> 8;
+			g = (g * (shade_q8 + (fine_rel >> 2))) >> 8;
+			b = (b * (shade_q8 - (hypso_delta >> 2) - (fine_rel >> 2))) >> 8;
+		}
 		if (r < 0) r = 0; else if (r > 255) r = 255;
 		if (g < 0) g = 0; else if (g > 255) g = 255;
 		if (b < 0) b = 0; else if (b > 255) b = 255;
