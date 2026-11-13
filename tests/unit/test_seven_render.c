@@ -2101,9 +2101,10 @@ int main(void)
 		assert(fs_w && strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)"));
 		assert(fs_w && !strstr(fs_w, "cSeabed"));
 		assert(vs_b && strstr(vs_b, "a_local_pos"));
-		/* Sprites carry no private water model any more: the water pass refracts and absorbs whatever stands below the surface */
-		assert(fs_b && !strstr(fs_b, "seabedAbsorption"));
-		assert(fs_b && !strstr(fs_b, "snellTexelShift"));
+		/* Sprites evaluate physical water-plane intersection: Snell refraction, caustics, and radiant meniscus highlight */
+		assert(fs_b && strstr(fs_b, "seabedAbsorption"));
+		assert(fs_b && strstr(fs_b, "snellTexelShift"));
+		assert(fs_b && strstr(fs_b, "meniscus"));
 		assert(fs_b && strstr(fs_b, "uPass"));
 		assert(fs_b && strstr(fs_b, "nd_cloud_shadow_map"));
 
@@ -2766,7 +2767,8 @@ int main(void)
 		assert(strstr(fs_b, "sampleAtlasSmooth") != NULL);
 		assert(strstr(fs_b, "fetchBoundedTexel") != NULL);
 		assert(strstr(fs_b, "chaff_grad_noise2d") != NULL);
-		assert(strstr(fs_b, "snellTexelShift") == NULL);   /* refraction lives in the water pass */
+		assert(strstr(fs_b, "snellTexelShift") != NULL);
+		assert(strstr(fs_b, "meniscus") != NULL);
 		assert(strstr(fs_b, "nd_cloud_shadow_map") != NULL);
 		assert(strstr(fs_b, "1.2 / 328.0") == NULL);
 		assert(strstr(fs_b, "contactAO") != NULL);
@@ -3257,7 +3259,8 @@ int main(void)
 		assert(strstr(fs_t, "const float zk = 920.0") != NULL);
 		assert(strstr(fs_t, "zSlices") == NULL);
 		assert(strstr(fs_t, "nd_caustic_web") != NULL);
-		assert(strstr(fs_t, "chaff_sample_3d") == NULL);
+		assert(strstr(fs_t, "chaff_sample_3d") != NULL);
+		assert(strstr(fs_b, "chaff_sample_3d") != NULL);
 		assert(strstr(fs_t, "maxDetailOct") != NULL);
 		assert(strstr(fs_w, "reflCloudDens") != NULL);
 		assert(strstr(fs_w, "reflCloudCol") != NULL);
