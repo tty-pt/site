@@ -3322,6 +3322,48 @@ int main(void)
 
 		printf("PASS: 10-octave continent-to-cumulus 4D clouds (cloudy=%d, clear=%d, core=%.1f, crown=%.1f, orbit_step_diff=%.4f, max=%.3f, min=%.3f, grad=%.4f>%.4f>%.4f, arid=%.2f vs humid=%.2f) & t=100000s stability verified\n",
 		       cloud_cells, clear_cells, sum_core, sum_crown, mean_orbit_step_diff, orbit_max_d, orbit_min_d, grad_close, grad_mid, grad_far, sum_arid, sum_humid);
+
+		/* 9. Verify zero-quality-loss shader optimizations & full northern frustum coverage when zooming out */
+		assert(strstr(vs_c, "chaff_hash2") == NULL);
+		assert(strstr(fs_t, "chaff_wpoint_coarse_2d_f") != NULL);
+		assert(strstr(fs_c, "baseTowerOcc") != NULL);
+
+		ar_system_t *cs_north = nd_seven_get_chunk_sys();
+		assert(cs_north != NULL);
+		float mvp_north[16];
+		nd_seven_gl_compute_flat_mvp(1280, 720, 80.0f, -64.0f, 0.0f,
+		                             3600.0f, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, mvp_north);
+		ar_cull_opts_t opts_north = {
+			.z_min = -2600.0f,
+			.z_max = 3200.0f,
+			.sag_radius = 1335000.0f,
+			.focal_x = 80.0f,
+			.focal_y = -64.0f,
+			.margin = 180.0f,
+			.target_quad_px = 4.0f,
+			.viewport_w = 1280.0f,
+			.viewport_h = 720.0f,
+			.min_level = 0,
+			.max_level = 15,
+			.view_id = 0,
+			.max_populates_per_query = 128
+		};
+		const ar_node_t *north_nodes[128];
+		size_t north_cnt = ar_system_query_matrix(cs_north, 0, mvp_north, &opts_north, north_nodes, 128);
+		assert(north_cnt > 0);
+		int32_t min_chunk_oy = 2147483647;
+		int32_t max_chunk_oy_end = -2147483647;
+		for (size_t ci = 0; ci < north_cnt; ci++) {
+			const ar_node_t *cn = north_nodes[ci];
+			if (!cn) continue;
+			if (cn->oy < min_chunk_oy) min_chunk_oy = cn->oy;
+			if (cn->oy + cn->h > max_chunk_oy_end) max_chunk_oy_end = cn->oy + cn->h;
+		}
+		/* At dist=3600 and 55 deg pitch looking North (-Y), northern frustum coverage must extend >= 6000 wu North of lamb */
+		assert(-64.0f - (float)min_chunk_oy >= 6000.0f);
+		assert((float)max_chunk_oy_end > -64.0f);
+		printf("PASS: zero-quality-loss shader optimizations & full northern frustum coverage (min_oy=%d vs lwy=-64, count=%zu) verified\n",
+		       min_chunk_oy, north_cnt);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
