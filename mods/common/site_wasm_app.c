@@ -158,7 +158,7 @@ ISO_EXPORT_AS(void, wasm_mount, bud_app_mount)
 	bud_host_fetch_fn = (void (*)(const char *, size_t, int))stl_host_fetch;
 	bud_host_log_fn = (void (*)(const char *, size_t))stl_host_log;
 	bud_host_set_location_fn = (void (*)(const char *, size_t))stl_host_set_location;
-	if (&bud_app_render) {
+	if (!s_runtimes[1] && !s_runtimes[0] && &bud_app_render) {
 		bud_slot_mount(1, bud_app_render);
 	}
 }

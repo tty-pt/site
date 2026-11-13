@@ -66,7 +66,8 @@ void nd_ui_restore_persist(const char *key, const char *val);
 /*
  * Client WASM entrypoint rehydrating JSON state from SSR.
  */
-void wasm_init(const char *json, int len);
+int nd_stl_init(const char *json, int len);
+int wasm_init(const char *json, int len);
 
 #ifdef __cplusplus
 }
