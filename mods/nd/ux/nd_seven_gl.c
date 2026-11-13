@@ -314,7 +314,7 @@ static const char *s_vs_terrain =
 	"    if (planetSmooth > 0.001) {\n"
 	"        float seaRef = (uSeaLevel > -900.0) ? uSeaLevel : 0.0;\n"
 	"        float relZ = wz - seaRef;\n"
-	"        float prominence = smoothstep(35.0, 180.0, abs(relZ));\n"
+	"        float prominence = smoothstep(65.0, 520.0, abs(relZ));\n"
 	"        float vertKeep = mix(1.0, prominence, planetSmooth);\n"
 	"        wz = seaRef + relZ * vertKeep;\n"
 	"        grad *= vertKeep;\n"
@@ -765,7 +765,7 @@ static const char *s_fs_terrain =
 	"        return vec4(0.0);\n"
 	"    }\n"
 	"    const float freqs[6] = float[6](0.000005, 0.000022, 0.00010, 0.00048, 0.00220, 0.01000);\n"
-	"    const float amps[6]  = float[6](16.00, 9.50, 5.20, 2.80, 1.50, 0.75);\n"
+	"    const float amps[6]  = float[6](46.00, 27.00, 15.00, 8.00, 4.00, 1.80);\n"
 	"    const uint  seeds[6] = uint[6](0x54454354u, 0x43524154u, 0x504C414Eu, 0x4F524231u, 0x41544D4Fu, 0x4D45534Fu);\n"
 	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
@@ -1094,11 +1094,11 @@ static const char *s_fs_terrain =
 	" * Projects the 3D wind-sheared cloud decks onto the 2D ground/water surface with orbital shadow offset\n" \
 	" * so continental cyclone arms and cumulus towers cast unmistakable 3D ground shadows from ground to orbit! */\n" \
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    const float zBase = 380.0;\n" \
-	"    const float zTop  = 980.0;\n" \
+	"    const float zBase = 420.0;\n" \
+	"    const float zTop  = 2820.0;\n" \
 	"    float orbitOffset = clamp(dist * 0.045, 0.0, 14000.0);\n" \
 	"    if (dist > 14000.0) {\n" \
-	"        float zk = 620.0;\n" \
+	"        float zk = 1150.0;\n" \
 	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
 	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
@@ -1107,18 +1107,20 @@ static const char *s_fs_terrain =
 	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
 	"        return clamp(smoothstep(0.05, 0.65, synCloud.x), 0.0, 0.95);\n" \
 	"    }\n" \
-	"    const float zSlices[2] = float[2](490.0, 740.0);\n" \
+	"    const float zSlices[2] = float[2](720.0, 1620.0);\n" \
 	"    const float weights[2] = float[2](0.58, 0.42);\n" \
 	"    float colDens = 0.0;\n" \
 	"    for (int k = 0; k < 2; k++) {\n" \
 	"        float zk = zSlices[k];\n" \
+	"        if (fragZ >= zk + 120.0) continue;\n" \
+	"        float sliceFade = smoothstep(zk + 120.0, zk - 80.0, fragZ);\n" \
 	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
 	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
 	"        float atmoGust = 0.65, updraft = 0.50;\n" \
 	"        chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
 	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"        colDens += synCloud.x * weights[k];\n" \
+	"        colDens += synCloud.x * weights[k] * sliceFade;\n" \
 	"    }\n" \
 	"    return clamp(smoothstep(0.05, 0.66, colDens), 0.0, 0.95);\n" \
 	"}\n"
@@ -1337,14 +1339,20 @@ static const char *s_fs_terrain =
 	"    }\n"
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
 	"    float submergedBlend = smoothstep(0.35, 5.5, fragWaterDepth);\n"
-	"    /* High-definition orbital/atmospheric procedural albedo modulation on dry land & ocean basins */\n"
+	"    /* High-definition orbital/atmospheric procedural albedo modulation on dry land & ocean basins:\n"
+	"     * Calibrated to true planetary hypsometry (+1,854 wu Mount Everest = 8,849 m):\n"
+	"     *   - Subalpine granite/slate scree emergence: 360..760 wu (~1.7..3.6 km equivalent)\n"
+	"     *   - Climate-modulated permanent alpine snow & glacier caps: 780..1,360 wu (~3.7..6.5 km equivalent) */\n"
 	"    float orbitDetailWeight = smoothstep(1800.0, 6500.0, vDistance);\n"
 	"    if (orbitDetailWeight > 0.001) {\n"
 	"        float contTex = (macroOct.x - 0.5) * 0.16 + (macroOct.y - 0.5) * 0.18 + (macroOct.z - 0.5) * 0.14 + (macroOct.w - 0.5) * 0.10;\n"
 	"        float ridgeCrest = macroDetail.w * orbitDetailWeight;\n"
-	"        vec3 ridgeTint = mix(dryCol * (1.0 + contTex), vec3(0.52, 0.50, 0.48), clamp(ridgeCrest * 0.55, 0.0, 0.45));\n"
-	"        float alpineSnow = smoothstep(48.0, 110.0, elevAboveWater + macroDetail.x * 6.0) * smoothstep(0.28, 0.65, macroOct.y * 0.6 + macroOct.z * 0.4);\n"
-	"        ridgeTint = mix(ridgeTint, vec3(0.90, 0.93, 0.97), alpineSnow * 0.65 * orbitDetailWeight);\n"
+	"        float effElev = elevAboveWater + macroDetail.x * 3.5;\n"
+	"        float subalpineRock = smoothstep(360.0, 760.0, effElev);\n"
+	"        vec3 ridgeTint = mix(dryCol * (1.0 + contTex), vec3(0.50, 0.48, 0.46), clamp(ridgeCrest * 0.48 + subalpineRock * 0.36, 0.0, 0.62));\n"
+	"        float snowBaseZ = 820.0 - 300.0 * wPolar + 240.0 * wTropical;\n"
+	"        float alpineSnow = smoothstep(snowBaseZ, snowBaseZ + 480.0, effElev) * smoothstep(0.24, 0.62, macroOct.y * 0.6 + macroOct.z * 0.4);\n"
+	"        ridgeTint = mix(ridgeTint, vec3(0.92, 0.95, 0.99), alpineSnow * 0.78 * orbitDetailWeight);\n"
 	"        dryCol = mix(dryCol, ridgeTint, orbitDetailWeight * 0.85);\n"
 	"        subCol *= clamp(1.0 + contTex * 0.75 * orbitDetailWeight, 0.78, 1.22);\n"
 	"    }\n"
@@ -1358,9 +1366,9 @@ static const char *s_fs_terrain =
 	"        vec3 warmGlow = vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.24 * atten * nDotL);\n"
 	"        lit += (baseAlbedo * 0.72 + vec3(0.28)) * warmGlow;\n"
 	"    }\n"
-	"    /* 3. Physical Volumetric Water Extinction & Biome-Aware Optics (Crystal-Clear Shallows) */\n"
+	"    /* 3. Physical Volumetric Water Extinction & Biome-Aware Optics (Crystal-Clear Shallows to -2,000 wu Abyssal Trenches) */\n"
 	"    if (fragWaterDepth > 0.0) {\n"
-	"        float d = clamp(fragWaterDepth, 0.0, 64.0);\n"
+	"        float d = clamp(fragWaterDepth, 0.0, 2000.0);\n"
 	"        float wetBlend = smoothstep(0.0, 0.28, fragWaterDepth);\n"
 	"        float distFade = clamp(1.0 - (vDistance - 900.0) / 2500.0, 0.0, 1.0);\n"
 	"        float closeZoom = clamp((420.0 - vDistance) / 300.0, 0.0, 1.0);\n"
@@ -1408,10 +1416,10 @@ static const char *s_fs_terrain =
 	"        /* Gentle Beer-Lambert spectral absorption: red attenuates gradually while shallows remain clear */\n"
 	"        vec3 seabedAbsorption = exp(-vec3(0.058, 0.022, 0.007) * effectiveOpticalDepth);\n"
 	"        vec3 transmittedBed = lit * seabedAbsorption;\n"
-	"        /* Depth-staged in-scattered water body color */\n"
-	"        float tShelf = smoothstep(2.5, 9.5, d);\n"
-	"        float tOuter = smoothstep(9.5, 20.0, d);\n"
-	"        float tAbyss = smoothstep(20.0, 42.0, d);\n"
+	"        /* Depth-staged in-scattered water body color across shallow shelf (2.5..16), outer shelf (16..180), and abyssal trench (180..950) */\n"
+	"        float tShelf = smoothstep(2.5, 16.0, d);\n"
+	"        float tOuter = smoothstep(16.0, 180.0, d);\n"
+	"        float tAbyss = smoothstep(180.0, 950.0, d);\n"
 	"        vec3 inscatterCol = mix(C_SHALLOW, C_SHELF, tShelf);\n"
 	"        inscatterCol = mix(inscatterCol, C_OUTER, tOuter);\n"
 	"        inscatterCol = mix(inscatterCol, C_ABYSS, tAbyss);\n"
@@ -1724,11 +1732,11 @@ static const char *s_fs_water =
 	" * Projects the 3D wind-sheared cloud decks onto the 2D ground/water surface with orbital shadow offset\n" \
 	" * so continental cyclone arms and cumulus towers cast unmistakable 3D ground shadows from ground to orbit! */\n" \
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    const float zBase = 380.0;\n" \
-	"    const float zTop  = 980.0;\n" \
+	"    const float zBase = 420.0;\n" \
+	"    const float zTop  = 2820.0;\n" \
 	"    float orbitOffset = clamp(dist * 0.045, 0.0, 14000.0);\n" \
 	"    if (dist > 14000.0) {\n" \
-	"        float zk = 620.0;\n" \
+	"        float zk = 1150.0;\n" \
 	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
 	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
@@ -1737,18 +1745,20 @@ static const char *s_fs_water =
 	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
 	"        return clamp(smoothstep(0.05, 0.65, synCloud.x), 0.0, 0.95);\n" \
 	"    }\n" \
-	"    const float zSlices[2] = float[2](490.0, 740.0);\n" \
+	"    const float zSlices[2] = float[2](720.0, 1620.0);\n" \
 	"    const float weights[2] = float[2](0.58, 0.42);\n" \
 	"    float colDens = 0.0;\n" \
 	"    for (int k = 0; k < 2; k++) {\n" \
 	"        float zk = zSlices[k];\n" \
+	"        if (fragZ >= zk + 120.0) continue;\n" \
+	"        float sliceFade = smoothstep(zk + 120.0, zk - 80.0, fragZ);\n" \
 	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
 	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
 	"        float atmoGust = 0.65, updraft = 0.50;\n" \
 	"        chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
 	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"        colDens += synCloud.x * weights[k];\n" \
+	"        colDens += synCloud.x * weights[k] * sliceFade;\n" \
 	"    }\n" \
 	"    return clamp(smoothstep(0.05, 0.66, colDens), 0.0, 0.95);\n" \
 	"}\n"
@@ -2309,11 +2319,11 @@ static const char *s_fs_billboard =
 	" * Projects the 3D wind-sheared cloud decks onto the 2D ground/water surface with orbital shadow offset\n" \
 	" * so continental cyclone arms and cumulus towers cast unmistakable 3D ground shadows from ground to orbit! */\n" \
 	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    const float zBase = 380.0;\n" \
-	"    const float zTop  = 980.0;\n" \
+	"    const float zBase = 420.0;\n" \
+	"    const float zTop  = 2820.0;\n" \
 	"    float orbitOffset = clamp(dist * 0.045, 0.0, 14000.0);\n" \
 	"    if (dist > 14000.0) {\n" \
-	"        float zk = 620.0;\n" \
+	"        float zk = 1150.0;\n" \
 	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
 	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
@@ -2322,18 +2332,20 @@ static const char *s_fs_billboard =
 	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
 	"        return clamp(smoothstep(0.05, 0.65, synCloud.x), 0.0, 0.95);\n" \
 	"    }\n" \
-	"    const float zSlices[2] = float[2](490.0, 740.0);\n" \
+	"    const float zSlices[2] = float[2](720.0, 1620.0);\n" \
 	"    const float weights[2] = float[2](0.58, 0.42);\n" \
 	"    float colDens = 0.0;\n" \
 	"    for (int k = 0; k < 2; k++) {\n" \
 	"        float zk = zSlices[k];\n" \
+	"        if (fragZ >= zk + 120.0) continue;\n" \
+	"        float sliceFade = smoothstep(zk + 120.0, zk - 80.0, fragZ);\n" \
 	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
 	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
 	"        float atmoGust = 0.65, updraft = 0.50;\n" \
 	"        chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
 	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"        colDens += synCloud.x * weights[k];\n" \
+	"        colDens += synCloud.x * weights[k] * sliceFade;\n" \
 	"    }\n" \
 	"    return clamp(smoothstep(0.05, 0.66, colDens), 0.0, 0.95);\n" \
 	"}\n"
@@ -2786,8 +2798,8 @@ static const char *s_vs_cloud =
 	"     * uCloudDeck.w holds effShellZ, which is always strictly below the camera's near plane\n"
 	"     * so the proxy shell NEVER intersects the camera plane during ascent/descent, while\n"
 	"     * s_fs_cloud reconstructs the exact 3D camera ray into the physical [zBase, zTop] atmosphere! */\n"
-	"    float deckBase = (uCloudDeck.y > 0.0) ? uCloudDeck.x : 380.0;\n"
-	"    float deckSpan = (uCloudDeck.y > 0.0) ? uCloudDeck.y : 600.0;\n"
+	"    float deckBase = (uCloudDeck.y > 0.0) ? uCloudDeck.x : 420.0;\n"
+	"    float deckSpan = (uCloudDeck.y > 0.0) ? uCloudDeck.y : 2400.0;\n"
 	"    float effWz = (uCloudDeck.w != 0.0) ? uCloudDeck.w : (deckBase + 0.35 * deckSpan);\n"
 	"    vShellZ = effWz;\n"
 	"    float Rv0 = R + r0 * cv0;\n"
@@ -2807,6 +2819,7 @@ static const char *s_fs_cloud =
 	"#version 300 es\n"
 	"precision highp float;\n"
 	"precision highp int;\n"
+	"precision highp isampler2D;\n"
 	"precision highp sampler2D;\n"
 	"in vec2 vUV;\n"
 	"in vec2 vWorldPos;\n"
@@ -2817,6 +2830,7 @@ static const char *s_fs_cloud =
 	"in vec3 vTorusNormal;\n"
 	"in vec3 vTangentU;\n"
 	"in vec3 vTangentV;\n"
+	"uniform isampler2D uHeightTex;\n"
 	"uniform sampler2D uSubstrateTex;\n"
 	"uniform vec2 uChunkSpan;\n"
 	"uniform vec2 uTorusRadii;\n"
@@ -2829,6 +2843,50 @@ static const char *s_fs_cloud =
 	"uniform float uCamDist;\n"
 	"uniform vec4 uCloudDeck;\n"
 	"out vec4 FragColor;\n"
+	"float getH(ivec2 p, ivec2 maxC) {\n"
+	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
+	"}\n"
+	"/* Smooth C1 Catmull-Rom bicubic height evaluator on the 49x49 chunk heightfield texture:\n"
+	" * Provides exact per-pixel analytical mountain-cloud intersection with zero coarse LOD triangle facets! */\n"
+	"float sampleHeightCloud(vec2 uv) {\n"
+	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
+	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
+	"    vec2 uvc = clamp(uv, 0.0, 1.0);\n"
+	"    vec2 pixelCoord = uvc * maxCoordF;\n"
+	"    ivec2 iCoord = ivec2(floor(pixelCoord));\n"
+	"    vec2 f = pixelCoord - vec2(iCoord);\n"
+	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
+	"    vec4 wx = vec4(\n"
+	"        f.x * (-0.5 + f.x * (1.0 - 0.5 * f.x)),\n"
+	"        1.0 + f.x * f.x * (-2.5 + 1.5 * f.x),\n"
+	"        f.x * (0.5 + f.x * (2.0 - 1.5 * f.x)),\n"
+	"        f.x * f.x * (-0.5 + 0.5 * f.x)\n"
+	"    );\n"
+	"    vec4 wy = vec4(\n"
+	"        f.y * (-0.5 + f.y * (1.0 - 0.5 * f.y)),\n"
+	"        1.0 + f.y * f.y * (-2.5 + 1.5 * f.y),\n"
+	"        f.y * (0.5 + f.y * (2.0 - 1.5 * f.y)),\n"
+	"        f.y * f.y * (-0.5 + 0.5 * f.y)\n"
+	"    );\n"
+	"    float hBicubic = 0.0;\n"
+	"    for (int j = 0; j < 4; j++) {\n"
+	"        float rowH = 0.0;\n"
+	"        int py = iCoord.y + j - 1;\n"
+	"        for (int i = 0; i < 4; i++) {\n"
+	"            int px = iCoord.x + i - 1;\n"
+	"            rowH += getH(ivec2(px, py), maxCoord) * wx[i];\n"
+	"        }\n"
+	"        hBicubic += rowH * wy[j];\n"
+	"    }\n"
+	"    float borderDist = min(min(pixelCoord.x, maxCoordF.x - pixelCoord.x), min(pixelCoord.y, maxCoordF.y - pixelCoord.y));\n"
+	"    float borderBlend = clamp(borderDist, 0.0, 1.0);\n"
+	"    float h00 = getH(iCoord, maxCoord);\n"
+	"    float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
+	"    float h01 = getH(iCoord + ivec2(0, 1), maxCoord);\n"
+	"    float h11 = getH(iCoord + ivec2(1, 1), maxCoord);\n"
+	"    float hLinear = mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);\n"
+	"    return mix(hLinear, hBicubic, borderBlend) * 0.0625;\n"
+	"}\n"
 	"vec4 sampleSubstrateSmooth(vec2 uv) {\n"
 	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
 	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
@@ -2855,15 +2913,15 @@ static const char *s_fs_cloud =
 	"}\n"
 	"/* Multi-Deck 3D Tropospheric Cloud Field (4D Noise -> 3D Projection):\n"
 	" * Evaluates three physically distinct, vertically separated atmospheric cloud decks:\n"
-	" *   Deck 1 (Lower Marine Stratocumulus / Cumulus Base): h in [0.00, 0.25] (z = 380..530)\n"
-	" *   Deck 2 (Mid-Troposphere Altocumulus Shelf & Congestus Turrets): h in [0.36, 0.62] (z = 596..752)\n"
-	" *   Deck 3 (Upper-Troposphere Anvil Outflow & Jet-Stream Cirrus): h in [0.72, 1.00] (z = 812..980)\n"
+	" *   Deck 1 (Lower Marine Stratocumulus / Cumulus Base): h in [0.00, 0.27] (z = 420..1068)\n"
+	" *   Deck 2 (Mid-Troposphere Altocumulus Shelf & Congestus Turrets): h in [0.35, 0.64] (z = 1260..1956)\n"
+	" *   Deck 3 (Upper-Troposphere Anvil Outflow & Jet-Stream Cirrus): h in [0.72, 1.00] (z = 2148..2820)\n"
 	" * Returns vec4(density, gradX, gradY, gradZ) where gradXY includes analytical synoptic + regional + 4D gradients\n"
 	" * so orbital/stratospheric views exhibit crisp 3D relief and self-shadowing with a single density evaluation! */\n"
 	"vec4 eval_zoom_cloud_density_grad(vec3 worldPos, float anim_time, float humidity, float dist, float fw) {\n"
 	"    float z = worldPos.z;\n"
-	"    const float zBase = 380.0;\n"
-	"    const float zTop  = 980.0;\n"
+	"    const float zBase = 420.0;\n"
+	"    const float zTop  = 2820.0;\n"
 	"    if (z <= zBase || z >= zTop) return vec4(0.0);\n"
 	"    float hNorm = (z - zBase) / (zTop - zBase);\n"
 	"    /* Evaluate 3D Atmospheric Wind & Ekman Altitude Shear */\n"
@@ -2871,7 +2929,7 @@ static const char *s_fs_cloud =
 	"    vec2 shearDisp   = vec2(0.0);\n"
 	"    float atmoGust   = 0.65;\n"
 	"    float updraft    = 0.50;\n"
-	"    chaff_eval_wind_3d(worldPos, zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
+	"    chaff_eval_wind_3d(vec3(worldPos.xy, 380.0 + hNorm * 600.0), 380.0, 980.0, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
 	"    vec2 shearedXY = worldPos.xy - shearDisp;\n"
 	"    vec2 macroGrad = vec2(0.0);\n"
 	"    float highCirrus = 0.0;\n"
@@ -2926,7 +2984,7 @@ static const char *s_fs_cloud =
 	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
 	"    float wBoil = mod(anim_time * (0.055 * atmoGust * updraft), 512.0);\n"
-	"    float zBaseSlice = (z - zBase) * 0.0085;\n"
+	"    float zBaseSlice = hNorm * 5.10;\n"
 	"    vec2 pRot = shearedXY;\n"
 	"    mat2 cur_rot = mat2(1.0, 0.0, 0.0, 1.0);\n"
 	"    /* Multi-deck vertical normal derivative: positive at each deck's base, negative at each deck's crown */\n"
@@ -2990,25 +3048,26 @@ static const char *s_fs_cloud =
 	"    float camAlt = vShellZ + vnDist + curvSagitta;\n"
 	"    float dz     = dot(rayDir, torusN);\n"
 	"    vec2  dxy    = vec2(dot(rayDir, tangentU), dot(rayDir, tangentV));\n"
-	"    const float zBase = 380.0;\n"
-	"    const float zTop  = 980.0;\n"
+	"    const float zBase = 420.0;\n"
+	"    const float zTop  = 2820.0;\n"
 	"    float deckSpan = zTop - zBase;\n"
 	"    float zoomRamp = smoothstep(480.0, 2200.0, uCamDist);\n"
 	"    float camClearRamp = zoomRamp;\n"
 	"    if (camClearRamp <= 0.001) discard;\n"
 	"    /* Exact 3D curved-torus shell intersection along viewDir from worldPos (vShellZ) through [zBase, zTop]:\n"
 	"     * Solves |(r0 + vShellZ)*torusN + u*viewDir|^2 = (r0 + zProj)^2 without camera-plane clipping!\n"
+	"     * Signed dz0/dz1 handles vShellZ anywhere below, inside, or above [zBase, zTop].\n"
 	"     * Scale-adaptive orbital 3D vertical separation (effOrbitLift) keeps the 3 cloud decks visibly separated\n"
 	"     * in 3D parallax from regional flight all the way to full-planet deep orbit. */\n"
 	"    float effOrbitLift = clamp((uCamDist - 1800.0) * 0.065, 0.0, 16000.0);\n"
 	"    float B_shell = (r0 + vShellZ) * vn;\n"
-	"    float dz0 = max(0.0, zBase - vShellZ);\n"
+	"    float dz0 = zBase - vShellZ;\n"
 	"    float dR0 = dz0 * (2.0 * r0 + zBase + vShellZ);\n"
-	"    float u0  = dR0 / max(1.0, sqrt(B_shell * B_shell + dR0) + B_shell);\n"
+	"    float u0  = dR0 / max(1.0, sqrt(max(1.0, B_shell * B_shell + dR0)) + B_shell);\n"
 	"    float zTopProj = zTop + effOrbitLift;\n"
-	"    float dz1 = max(0.0, zTopProj - vShellZ);\n"
+	"    float dz1 = zTopProj - vShellZ;\n"
 	"    float dR1 = dz1 * (2.0 * r0 + zTopProj + vShellZ);\n"
-	"    float u1  = dR1 / max(1.0, sqrt(B_shell * B_shell + dR1) + B_shell);\n"
+	"    float u1  = dR1 / max(1.0, sqrt(max(1.0, B_shell * B_shell + dR1)) + B_shell);\n"
 	"    float sEnter = -u1;\n"
 	"    float sExit  = -u0;\n"
 	"    if (sExit <= sEnter + 1.0) discard;\n"
@@ -3017,6 +3076,7 @@ static const char *s_fs_cloud =
 	"    vec2 entryWorldPos = vWorldPos + dxy * sMidSlab;\n"
 	"    float rawFw = max(1e-4, max(length(dFdx(entryWorldPos)), length(dFdy(entryWorldPos))));\n"
 	"    float fw = clamp(rawFw, 0.05, 25000.0);\n"
+	"    vec2 invChunkSpan = 1.0 / max(uChunkSpan, vec2(160.0));\n"
 	"    vec3 rawBiome = sampleSubstrateSmooth(vUV).rgb;\n"
 	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
 	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
@@ -3031,10 +3091,13 @@ static const char *s_fs_cloud =
 	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
 	"    /* 12-Step Deck-Stratified 3D Raymarching (4 steps in Deck 3, 4 steps in Deck 2, 4 steps in Deck 1):\n"
-	"     * 100% of samples land inside the 3 active cloud decks with zero wasted samples in inter-deck clefts! */\n"
-	"    float physMarchSpan = deckSpan / max(0.22, vn);\n"
+	"     * 100% of samples land inside the 3 active cloud decks with zero wasted samples in inter-deck clefts!\n"
+	"     * Optical path stepLen is normalized to the 600-unit reference optical thickness so raising the\n"
+	"     * physical envelope to [420, 2820] preserves exact cloud translucency! */\n"
+	"    float physMarchSpan = 600.0 / max(0.22, vn);\n"
 	"    float stepLen = physMarchSpan / 12.0;\n"
 	"    float trans = 1.0;\n"
+	"    float rayGroundVis = 1.0;\n"
 	"    float upperDeckOcc = 0.0;\n"
 	"    vec3 accumLight = vec3(0.0);\n"
 	"    float cosTheta = dot(rayDir, sunDir);\n"
@@ -3047,7 +3110,7 @@ static const char *s_fs_cloud =
 	"     * continental cyclone arms and upper cloud decks cast crisp 3D shadows visible from space! */\n"
 	"    float sunStepDist = clamp(max(90.0, fw * 3.2), 90.0, 24000.0);\n"
 	"    for (int s = 0; s < 12; s++) {\n"
-	"        if (trans < 0.008) break;\n"
+	"        if (trans < 0.008 || rayGroundVis < 0.005) break;\n"
 	"        int deckIdx = s / 4;\n"
 	"        int subStep = s - deckIdx * 4;\n"
 	"        float uSub  = (float(subStep) + jitter) * 0.25;\n"
@@ -3056,13 +3119,21 @@ static const char *s_fs_cloud =
 	"        float hFrac = mix(hTopD, hBotD, uSub);\n"
 	"        float z     = zBase + hFrac * deckSpan;\n"
 	"        float zProj = z + hFrac * effOrbitLift;\n"
-	"        float dzP   = max(0.0, zProj - vShellZ);\n"
+	"        float dzP   = zProj - vShellZ;\n"
 	"        float dRP   = dzP * (2.0 * r0 + zProj + vShellZ);\n"
-	"        float uRay  = dRP / max(1.0, sqrt(B_shell * B_shell + dRP) + B_shell);\n"
+	"        float uRay  = dRP / max(1.0, sqrt(max(1.0, B_shell * B_shell + dRP)) + B_shell);\n"
 	"        float sStep = -uRay;\n"
 	"        vec2 sampleXY = vWorldPos + dxy * sStep;\n"
+	"        /* Smooth per-pixel analytical mountain-cloud intersection using the 49x49 Catmull-Rom heightfield:\n"
+	"         * Eliminates all coarse LOD triangle polygon cutouts while allowing high alpine summits (up to 1,981 wu)\n"
+	"         * to emerge smoothly through Deck 1 & Deck 2 and occlude lower clouds behind the ridge! */\n"
+	"        vec2 stepUV = clamp(vUV + (dxy * sStep) * invChunkSpan, 0.0, 1.0);\n"
+	"        float terrZ = sampleHeightCloud(stepUV);\n"
+	"        float stepClear = smoothstep(terrZ - 24.0, terrZ + 110.0, z);\n"
+	"        rayGroundVis *= smoothstep(terrZ - 36.0, terrZ + 28.0, z);\n"
+	"        if (stepClear * rayGroundVis <= 0.002) continue;\n"
 	"        vec4 cloudSample = eval_zoom_cloud_density_grad(vec3(sampleXY, z), uAnimTime, bioHumidity, uCamDist, fw);\n"
-	"        float dens = cloudSample.x * camClearRamp;\n"
+	"        float dens = cloudSample.x * camClearRamp * stepClear * rayGroundVis;\n"
 	"        if (dens > 0.002) {\n"
 	"            vec3 grad = cloudSample.yzw;\n"
 	"            /* Scale-adaptive 3D sunward shadow probe & analytical directional derivative along sun vector */\n"
@@ -3754,6 +3825,7 @@ typedef struct {
 typedef struct {
 	GLuint prog;
 	GLint uMVP;
+	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
@@ -4090,6 +4162,7 @@ static bool check_pipelines_ready(void)
 		} else {
 			GLuint p = s_gl.cloud_pipe.prog;
 			s_gl.cloud_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.cloud_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
 			s_gl.cloud_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
 			s_gl.cloud_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
 			s_gl.cloud_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
@@ -4593,13 +4666,13 @@ void nd_seven_gl_flush_clouds(void)
 	glUniform1f(s_gl.cloud_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.cloud_pipe.uCamDist, s_gl.cur_dist);
 	{
-		/* Place proxy shell above terrain peaks (up to 280 wu, inside z_max_cull = +360 wu)
-		 * while keeping it strictly below 42% of the camera's altitude so it can never
-		 * approach the camera's near clipping plane AND never get clipped by terrain hills! */
-		float deck_base = 380.0f;
-		float deck_span = 600.0f;
-		float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.34f;
-		float eff_shell_z = fminf(280.0f, fmaxf(24.0f, max_safe_z));
+		/* Place proxy shell above the highest mountain peaks (up to +1,981 wu, eff_shell_z = 2,150 wu)
+		 * while keeping it strictly below 58% of the camera's altitude so it can never approach
+		 * the camera's near clipping plane AND never get Z-clipped by coarse terrain triangles! */
+		float deck_base = 420.0f;
+		float deck_span = 2400.0f;
+		float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
+		float eff_shell_z = fminf(2150.0f, fmaxf(24.0f, max_safe_z));
 		glUniform4f(s_gl.cloud_pipe.uCloudDeck, deck_base, deck_span, s_gl.cur_dist, eff_shell_z);
 	}
 
@@ -4623,6 +4696,10 @@ void nd_seven_gl_flush_clouds(void)
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, chk->substrate_tex);
 		glUniform1i(s_gl.cloud_pipe.uSubstrateTex, 0);
+
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, chk->height_tex);
+		glUniform1i(s_gl.cloud_pipe.uHeightTex, 1);
 
 		glUniform3fv(s_gl.cloud_pipe.uPlanetCenter, 1, chk->rel_center);
 		glUniform2f(s_gl.cloud_pipe.uTorusRadii, chk->major_r, chk->minor_r);
@@ -5575,8 +5652,8 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 	if (out_grad_y) *out_grad_y = 0.0f;
 	if (out_grad_z) *out_grad_z = 0.0f;
 	if (out_grad_t) *out_grad_t = 0.0f;
-	const float zBase = 380.0f;
-	const float zTop  = 980.0f;
+	const float zBase = 420.0f;
+	const float zTop  = 2820.0f;
 	if (wz <= zBase || wz >= zTop)
 		return 0.0f;
 
@@ -5587,7 +5664,7 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 	float atmoDirX = 0.741f, atmoDirY = -0.671f;
 	float shearX = 0.0f, shearY = 0.0f;
 	float atmoGust = 0.65f, updraft = 0.50f;
-	chaff_glsl_ref_eval_wind_3d(wx, wy, wz, zBase, zTop, anim_time, fw,
+	chaff_glsl_ref_eval_wind_3d(wx, wy, 380.0f + hNorm * 600.0f, 380.0f, 980.0f, anim_time, fw,
 	                            &atmoDirX, &atmoDirY, &shearX, &shearY, &atmoGust, &updraft);
 
 	float shearedX = wx - shearX;
@@ -5657,7 +5734,7 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 
 	float raw_wBoil = anim_time * (0.055f * atmoGust * updraft);
 	float wBoil = raw_wBoil - 512.0f * floorf(raw_wBoil / 512.0f);
-	float zBaseSlice = (wz - zBase) * 0.0085f;
+	float zBaseSlice = hNorm * 5.10f;
 
 	float df_dx = mgx;
 	float df_dy = mgy;

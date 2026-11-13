@@ -89,23 +89,31 @@ A single NeverDark room consists of $10 \times 8$ cells of $16 \times 16\text{ w
 
 *(Notice why it is called a "room": at $5.3\text{ m} \times 4.3\text{ m}$ to $6.4\text{ m} \times 5.1\text{ m}$, a NeverDark tile literally has the exact floor dimensions of an architectural room, which the lamb crosses in $\frac{160}{72} = 2.22\text{ seconds}$ E–W or $\frac{128}{72} = 1.78\text{ seconds}$ N–S!)*
 
-### 3.2 Scenery, Elevation & Cloud Altitudes vs. Real World
+### 3.2 Unified Two-Scale Architecture: Local Lamb Scale vs. Planetary Radius Proportions
 
-| Feature | Engine Size (`wu`) | Anchor A ($3.33\text{ cm}$) | Anchor B ($4.0\text{ cm}$) | Anchor C ($6.25\text{ cm}$) | Real-World Comparison |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Grass Tuft** (`NDB_GRASS_TUFT_1`) | $20 \times 18\text{ wu}$ | $0.67 \times 0.60\text{ m}$ | $0.80 \times 0.72\text{ m}$ | $1.25 \times 1.13\text{ m}$ | Lush pasture meadow grass |
-| **Bush** (`NDS_BUSH_DARK`) | $27 \times 27\text{ wu}$ | $0.90 \times 0.90\text{ m}$ | $1.08 \times 1.08\text{ m}$ | $1.69 \times 1.69\text{ m}$ | True-to-scale shrub ($1\text{ m}$) |
-| **Boulder** (`NDS_ROCK_TAN_BIG`) | $53 \times 54\text{ wu}$ | $1.77 \times 1.80\text{ m}$ | $2.12 \times 2.16\text{ m}$ | $3.31 \times 3.38\text{ m}$ | True-to-scale pasture boulder |
-| **Big Tree** (`NDS_TREE_BIG`) | $61 \times 74\text{ wu}$ | $2.03 \times 2.47\text{ m}$ | $2.44 \times 2.96\text{ m}$ | $3.81 \times 4.63\text{ m}$ | Stylized dwarf/orchard tree ($3\times$–$5\times$ vertically compressed vs. $15\text{ m}$ oak) |
-| **Dynamic Big Flora** (`slot_h <= 162`) | up to $160\text{ wu}$ | up to $5.33\text{ m}$ | up to $6.40\text{ m}$ | up to $10.00\text{ m}$ | Small-to-medium forest tree |
-| **Coastal Lowlands** (`nd/field.h:169`) | $0\text{ to }+42\text{ wu}$ | $0\text{ to }1.40\text{ m}$ | $0\text{ to }1.68\text{ m}$ | $0\text{ to }2.63\text{ m}$ | Gentle rolling dunes/terraces |
-| **Cloud Base ($z_{\text{base}}$)** | $+380\text{ wu}$ | $12.67\text{ m}$ | $15.20\text{ m}$ | $23.75\text{ m}$ | Diorama-compressed ($\approx 100\times$ lower than Earth's $1{,}500\text{ m}$ LCL) |
-| **Cloud Anvil Top ($z_{\text{top}}$)** | $+980\text{ wu}$ | $32.67\text{ m}$ | $39.20\text{ m}$ | $61.25\text{ m}$ | Diorama-compressed ($\approx 250\times$ lower than Earth's $10\text{ km}$ tropopause) |
-| **Highest Mountain Peak** (`field.h:176`) | $+1{,}854\text{ wu}$ | $61.80\text{ m}$ | $74.16\text{ m}$ | $115.88\text{ m}$ | $\approx 120\times$ vertically compressed vs. Mt. Everest ($8{,}849\text{ m}$) |
-| **Deepest Ocean Trench** (`field.h:164`) | $-2{,}000\text{ wu}$ | $-66.67\text{ m}$ | $-80.00\text{ m}$ | $-125.00\text{ m}$ | $\approx 137\times$ vertically compressed vs. Mariana Trench ($-10{,}935\text{ m}$) |
+Because the NeverDark planet is a $65{,}536 \times 65{,}536$-room ring torus with minor tube radius $r_0 = 1{,}335{,}000\text{ wu}$, the engine unifies two exact physical scales:
 
-**Key Takeaway on Vertical vs. Horizontal Scale**:
-While local horizontal room geometry, rocks, bushes, grass, and the lamb itself are at **1:1 real-world scale** ($1\text{ wu} \approx 4\text{ cm}$), planetary elevations and cloud altitudes are intentionally compressed by a factor of $\approx 100\times$ so that you can ascend from the lamb's hooves through the cloud decks and into mountain peaks within seconds of smooth scroll-zooming without crossing a $250{,}000\text{-wu}$ empty vertical void.
+1. **Local / Anatomical Scale ($1\text{ wu} = 4.0\text{ cm}$, anchored to the $18\text{-wu}$ lamb $= 0.72\text{ m}$)**:
+   Governs the lamb, walking velocity ($72\text{ wu/s} = 2.88\text{ m/s}$), room floor dimensions ($160 \times 128\text{ wu} = 6.40 \times 5.12\text{ m}$), coastal wading shallows ($-8\text{ to }0\text{ wu} = -32\text{ to }0\text{ cm}$), and ground-level flora/boulders.
+2. **Planetary Geophysical Scale ($\frac{z}{r_0} = \frac{z_\oplus}{R_\oplus}$, anchored to $r_0 = 1{,}335{,}000\text{ wu} \iff R_\oplus = 6{,}371\text{ km}$, so $1\text{ planetary wu} \iff 4.772\text{ m}$)**:
+   Every macroscopic mountain peak, alpine snow line, ocean trench, and tropospheric cloud deck maintains its **exact 1:1 dimensionless proportion to the planet's radius**:
+   $$\frac{H_{\text{Everest}}}{R_\oplus} = \frac{8{,}849\text{ m}}{6{,}371{,}000\text{ m}} = 0.00138895 \implies z_{\text{Everest}} = 1{,}335{,}000\text{ wu} \times 0.00138895 = \mathbf{+1{,}854\text{ wu}}$$
+
+| Feature | Engine Size (`wu`) | Local Lamb Scale ($1\text{ wu} = 4.0\text{ cm}$) | Planetary Radius Scale ($\frac{z}{r_0} = \frac{z_\oplus}{R_\oplus}$) | Real-World Comparison |
+| :--- | :--- | :--- | :--- | :--- |
+| **Grass Tuft** (`NDB_GRASS_TUFT_1`) | $20 \times 18\text{ wu}$ | $0.80 \times 0.72\text{ m}$ | — | Lush pasture meadow grass ($1:1$ with lamb) |
+| **Bush** (`NDS_BUSH_DARK`) | $27 \times 27\text{ wu}$ | $1.08 \times 1.08\text{ m}$ | — | True-to-scale pasture shrub ($1:1$ with lamb) |
+| **Boulder** (`NDS_ROCK_TAN_BIG`) | $53 \times 54\text{ wu}$ | $2.12 \times 2.16\text{ m}$ | — | True-to-scale pasture boulder ($1:1$ with lamb) |
+| **Big Tree** (`NDS_TREE_BIG`) | $61 \times 74\text{ wu}$ | $2.44 \times 2.96\text{ m}$ | — | Stylized orchard/pasture tree |
+| **Dynamic Big Flora** (`slot_h <= 162`) | up to $160\text{ wu}$ | up to $6.40\text{ m}$ | — | Medium forest canopy tree |
+| **Coastal Wading Shallows** (`field.h:157`) | $-8\text{ to }0\text{ wu}$ | $-0.32\text{ to }0.00\text{ m}$ | — | Ankle-to-knee wading shelf ($1:1$ with lamb) |
+| **Coastal Lowlands** (`nd/field.h:169`) | $0\text{ to }+42\text{ wu}$ | $0\text{ to }1.68\text{ m}$ | $0\text{ to }200\text{ m}$ | Coastal plains & gentle rolling terraces |
+| **Subalpine Granite Transition** | $+360\text{ to }+760\text{ wu}$ | $14.4\text{ to }30.4\text{ m}$ | $\mathbf{1{,}718\text{ to }3{,}627\text{ m}}$ | True planetary timberline & bare rock emergence |
+| **Permanent Alpine Snow Line** | $+780\text{ to }+1{,}360\text{ wu}$ | $31.2\text{ to }54.4\text{ m}$ | $\mathbf{3{,}722\text{ to }6{,}490\text{ m}}$ | True planetary snow/glacier line (latitude-modulated) |
+| **Highest Mountain Peak** (`field.h:176`) | $+1{,}854\text{ wu}$ (`+1,981` w/ fine) | $74.16\text{ m}$ ($79.2\text{ m}$) | $\mathbf{+8{,}849\text{ m}}$ ($\mathbf{9{,}454\text{ m}}$) | **Exact $1:1$ $\frac{z}{r_0}$ proportion to Mt. Everest ($8{,}849\text{ m}$)** |
+| **Deepest Ocean Trench** (`field.h:164`) | $-2{,}000\text{ wu}$ | $-80.00\text{ m}$ | $\mathbf{-9{,}545\text{ m}}$ | **Exact planetary proportion to abyssal trenches** |
+| **Cloud Base ($z_{\text{base}}$)** | $+420\text{ wu}$ | $16.80\text{ m}$ | $\mathbf{+2{,}004\text{ m}}$ | True planetary cumulus condensation base (LCL) |
+| **Cloud Anvil Top ($z_{\text{top}}$)** | $+2{,}820\text{ wu}$ | $112.80\text{ m}$ | $\mathbf{+13{,}458\text{ m}}$ | True planetary tropopause (**$> 800\text{ wu}$ above Mt. Everest!**) |
 
 ---
 
@@ -304,40 +312,40 @@ Because the synoptic front field $\text{synFront}$ has an intrinsic spatial mean
 
 ### 7.3 Atmosphere & Tropospheric Scale: Earth vs. NeverDark
 
-| Atmospheric Layer / Property | Earth (Physical Reality) | NeverDark ($1\text{ wu} = 4.0\text{ cm}$) | NeverDark Engine Units (`wu`) | Physical Interpretation |
+Every vertical layer of the NeverDark lithosphere, hydrosphere, and troposphere is calibrated to the **Planetary Radius Scale** ($\frac{z}{r_0} = \frac{z_\oplus}{R_\oplus}$, where $r_0 = 1{,}335{,}000\text{ wu} \iff R_\oplus = 6{,}371\text{ km}$, or $1\text{ wu} \iff 4.772\text{ planetary meters}$):
+
+| Atmospheric / Geophysical Layer | Earth (Physical Reality) | Planetary Equivalent ($\frac{z}{r_0} \cdot R_\oplus$) | NeverDark Engine Units (`wu`) | Physical & Visual Behavior |
 | :--- | :--- | :--- | :--- | :--- |
-| **Max Terrain Elevation** | $8,848\text{ m}$ (Mount Everest) | $8.0\text{ m}$ ($200\text{ wu}$) | $200\text{ wu}$ (high crags/peaks) | Terrain vertical scale optimized for diorama gameplay |
-| **Troposphere Base ($z_{\text{base}}$)** | $600\text{--}1,500\text{ m}$ (LCL condensation base) | $15.2\text{ m}$ | **$z_{\text{base}} = 380\text{ wu}$** | Strictly above highest mountain peaks ($200\text{ wu}$) |
-| **Deck 1: Stratocumulus / Cumulus** | $600\text{--}2,200\text{ m}$ | $15.2\text{--}21.7\text{ m}$ | **$z = 380\text{--}542\text{ wu}$** ($h \in [0.00, 0.27]$) | Boundary-layer marine decks & cumulus streets |
-| **Inter-Deck Clear Cleft 1–2** | $2,200\text{--}3,000\text{ m}$ (Clear air inversion) | $21.7\text{--}23.6\text{ m}$ | **$z = 542\text{--}590\text{ wu}$** ($h \in [0.27, 0.35]$) | Distinct vertical gap separating low and mid decks |
-| **Deck 2: Altocumulus / Congestus** | $3,000\text{--}6,500\text{ m}$ | $23.6\text{--}30.6\text{ m}$ | **$z = 590\text{--}764\text{ wu}$** ($h \in [0.35, 0.64]$) | Mackerel ripple bands & convective tower turrets |
-| **Inter-Deck Clear Cleft 2–3** | $6,500\text{--}7,500\text{ m}$ (Clear air gap) | $30.6\text{--}32.5\text{ m}$ | **$z = 764\text{--}812\text{ wu}$** ($h \in [0.64, 0.72]$) | Clean vertical air gap below high cirrus anvils |
-| **Deck 3: Cirrus / Anvil Outflow** | $7,500\text{--}12,500\text{ m}$ | $32.5\text{--}39.2\text{ m}$ | **$z = 812\text{--}980\text{ wu}$** ($h \in [0.72, 1.00]$) | Jet-stream ice streaks & thunderstorm anvils |
-| **Troposphere Top ($z_{\text{top}}$)** | $11,000\text{--}13,000\text{ m}$ (Tropopause) | $39.2\text{ m}$ | **$z_{\text{top}} = 980\text{ wu}$** | Full vertical cloud envelope span $= 600\text{ wu}$ |
-| **Global Cloud Cover (Optically Thick)** | $\mathbf{42\%\text{--}48\%}$ | $\mathbf{38\%\text{--}42\%}$ | N/A | Calibrated to ensure continents & oceans are visible |
+| **Deepest Ocean Trench** | $-10{,}935\text{ m}$ (Mariana) | $-9{,}545\text{ m}$ | **`-2,000 wu`** (`field.h:164`) | Full Beer-Lambert bathymetric progression (`0..2,000 wu`) |
+| **Subalpine Rock & Timberline** | $1{,}700\text{--}3{,}600\text{ m}$ | $1{,}718\text{--}3{,}627\text{ m}$ | **`+360 .. +760 wu`** | Bare granite/slate emergence above forested uplands |
+| **Permanent Alpine Snow Line** | $3{,}700\text{--}6{,}500\text{ m}$ | $3{,}722\text{--}6{,}490\text{ m}$ | **`+780 .. +1,360 wu`** | Climate-modulated snow caps ($520\text{ wu}$ polar to $1{,}060\text{ wu}$ tropical) |
+| **Max Mountain Peak (Everest)** | $+8{,}849\text{ m}$ (Mt. Everest) | $+8{,}849\text{ m}$ ($+9{,}454\text{ m}$ w/ fine) | **`+1,854 wu`** (`+1,981` w/ fine) | Exact $1:1$ $\frac{H_{\text{Everest}}}{R_\oplus}$ planetary radius ratio |
+| **Troposphere Base ($z_{\text{base}}$)** | $1{,}800\text{--}2{,}200\text{ m}$ | $2{,}004\text{ m}$ | **`z_base = 420 wu`** | Strictly above lowlands, valleys, and coastal hills |
+| **Deck 1: Stratocumulus / Cumulus** | $2{,}000\text{--}5{,}000\text{ m}$ | $2{,}004\text{--}5{,}097\text{ m}$ | **`z = 420 .. 1,068 wu`** ($h \in [0.00, 0.27]$) | Marine decks & cumulus streets; high ranges rise through Deck 1 |
+| **Inter-Deck Clear Cleft 1–2** | $5{,}100\text{--}6{,}000\text{ m}$ | $5{,}097\text{--}6{,}013\text{ m}$ | **`z = 1,068 .. 1,260 wu`** ($h \in [0.27, 0.35]$) | Clean vertical air gap separating low and mid cloud decks |
+| **Deck 2: Altocumulus / Congestus** | $6{,}000\text{--}9{,}300\text{ m}$ | $6{,}013\text{--}9{,}334\text{ m}$ | **`z = 1,260 .. 1,956 wu`** ($h \in [0.35, 0.64]$) | Mackerel ripple bands & convective towers wrapping highest peaks |
+| **Inter-Deck Clear Cleft 2–3** | $9{,}300\text{--}10{,}250\text{ m}$ | $9{,}334\text{--}10{,}251\text{ m}$ | **`z = 1,956 .. 2,148 wu`** ($h \in [0.64, 0.72]$) | Clean air gap above the tallest $+1{,}981\text{ wu}$ summit |
+| **Deck 3: Cirrus / Anvil Outflow** | $10{,}250\text{--}13{,}500\text{ m}$ | $10{,}251\text{--}13{,}458\text{ m}$ | **`z = 2,148 .. 2,820 wu`** ($h \in [0.72, 1.00]$) | Jet-stream ice streaks & anvils **$> 800\text{ wu}$ above all peaks** |
+| **Troposphere Top ($z_{\text{top}}$)** | $13{,}000\text{--}14{,}000\text{ m}$ | $13{,}458\text{ m}$ | **`z_top = 2,820 wu`** | Full vertical cloud envelope span $= 2{,}400\text{ wu}$ |
+| **Global Cloud Cover (Optically Thick)** | $\mathbf{42\%\text{--}48\%}$ | $\mathbf{38\%\text{--}42\%}$ | N/A | Calibrated so continents, snow peaks & oceans remain clear |
 | **Sunny / Clear Sky Surface Fraction** | $\mathbf{52\%\text{--}58\%}$ | $\mathbf{58\%\text{--}62\%}$ | N/A | **Over half the planet is sunny and cloudless** |
 
 ---
 
-### 7.4 Volumetric Projection & Camera Plane Intersection Math
+### 7.4 Volumetric Curved-Torus Projection & Analytical Mountain–Cloud Intersection
 
-#### Root Cause of Mid-Screen Polygon Clipping
-Previously, cloud rendering dispatched individual terrain chunk meshes placed at a dynamic proxy elevation $z = \text{eff\_shell\_z}$. When the camera zoomed between $d = 1250$ and $d = 2400$, $\text{eff\_shell\_z}$ swept from $z = 16$ to $z = 590$. Because the southern chunk vertices were positioned close to the camera eye $(tx, ty + d\cos 55^\circ, z_{\text{eye}})$, these 3D mesh triangles physically crossed the camera's near clipping plane ($z_{\text{near}} = 2.0$), causing OpenGL to clip the polygon edges and produce a visible horizontal seam cutting mid-screen.
+#### Root Cause of Low-LOD Mountain Triangle Cutouts
+Previously, the cloud volume was bounded at `zBase = 380 wu, zTop = 980 wu` and its screen-projection proxy shell (`eff_shell_z`) was clamped at `280 wu` with hardware `GL_DEPTH_TEST` enabled. Because mountains in `nd/field.h` rise to `+1,854 wu` (`+1,981 wu` with fine ridges), every terrain triangle above `280 wu` sat in front of the cloud proxy shell in the hardware Z-buffer. When zooming out caused distant chunks to drop to the $16 \times 16$ macro triangle grid (`GL_GRID_QUADS_MACRO = 16`), the hardware depth test clipped the clouds along the raw polygon edges of those coarse terrain triangles.
 
-#### Closed-Form Quadratic Ray-Torus Atmospheric Intersection
-To guarantee that the camera near plane can never slice through the atmosphere, volumetric raymarching is performed via a full-screen viewport pass. Every screen pixel $(x_{\text{ndc}}, y_{\text{ndc}}) \in [-1, 1]^2$ reconstructs its exact 3D camera ray:
-$$\vec{r}(s) = \vec{E} + s \cdot \vec{V}_{\text{ray}}$$
-Accounting for the torus minor radius curvature $r_0 = 1{,}335{,}000\text{ wu}$, the altitude $z(s)$ along a ray with normal component $dz = \vec{V}_{\text{ray}} \cdot \vec{N}$ is governed by the exact quadratic equation:
-$$z(s) = z_{\text{cam}} + s \cdot dz - \frac{s^2 (1 - dz^2)}{2 r_0}$$
-Setting $z(s) = z_{\text{target}}$ yields the standard quadratic form $A s^2 + B s + C = 0$:
-$$A = \frac{1 - dz^2}{2 r_0} \ge 0, \quad B = -dz, \quad C = z_{\text{target}} - z_{\text{cam}}$$
-$$\Delta = dz^2 - \frac{2 (1 - dz^2)(z_{\text{target}} - z_{\text{cam}})}{r_0}$$
-- **Entry & Exit Bounds**:
-  $$s_{\text{enter}} = \max\left(\frac{dz - \sqrt{\Delta_{\text{top}}}}{2A}, 0.0\right), \quad s_{\text{exit}} = \frac{dz - \sqrt{\Delta_{\text{base}}}}{2A}$$
-- **Zero Camera-Plane Intersection**:
-  Because $s_{\text{enter}} \ge 0$, the raymarch starts strictly at or in front of the camera eye, completely eliminating all near-plane triangle clipping, polygon slicing lines, and chunk boundary seams.
-- **Calibrated Volumetric Extinction**:
-  To prevent instant, opaque blackout of ground features when zooming out, the optical depth step is calibrated to physical cloud extinction:
-  $$\Delta \tau = \text{dens} \cdot (s_{\text{step}} \cdot 0.0018)$$
-  $$\alpha_{\text{step}} = 1 - e^{-\Delta \tau}$$
-  Fair-weather cumulus and thin altocumulus accumulate soft, translucent depth ($\tau \sim 0.3\text{--}1.2$), permitting ground terrain and coastlines to remain clearly visible, while deep convective storm cores smoothly build up full opacity ($\tau > 3.5$).
+#### 1. Signed Curved-Torus Shell Intersection (`eff_shell_z = 2,150 wu`)
+The proxy shell altitude `eff_shell_z = min(2150.0, max(24.0, lamb_z + 0.58 * d))` rises smoothly above all $+1{,}981\text{ wu}$ mountain vertices once zoomed out, while remaining strictly below the camera eye ($z_{\text{eye}} = \text{lamb\_z} + 0.819 \cdot d$). In `s_fs_cloud`, the exact signed quadratic intersection along `viewDir` from the proxy shell radius $r_{\text{shell}} = r_0 + v_{\text{ShellZ}}$ to any target cloud altitude $z_{\text{Proj}} \in [z_{\text{base}}, z_{\text{top}} + \text{effOrbitLift}]$ is solved without clamping $\Delta z_P = z_{\text{Proj}} - v_{\text{ShellZ}}$:
+$$B_{\text{shell}} = (r_0 + v_{\text{ShellZ}}) (\vec{V}_{\text{view}} \cdot \vec{N}), \qquad dR_P = \Delta z_P (2 r_0 + z_{\text{Proj}} + v_{\text{ShellZ}})$$
+$$u_{\text{ray}} = \frac{dR_P}{\sqrt{\max(1.0, B_{\text{shell}}^2 + dR_P)} + B_{\text{shell}}}, \qquad s_{\text{Step}} = -u_{\text{ray}}$$
+This handles cloud layers both above and below `vShellZ` with zero camera near-plane clipping and full hardware depth occlusion of the far side of the torus ring at orbital min-zoom.
+
+#### 2. Per-Pixel Bicubic Mountain–Cloud Intersection
+At each of the 12 top-to-bottom raymarch steps $s \in [0..11]$, `s_fs_cloud` evaluates the chunk's $49 \times 49$ heightfield texture (`uHeightTex`) at the exact ray-projected chunk UV `stepUV = vUV + (dxy * sStep) / uChunkSpan` using the $C^1$ Catmull-Rom bicubic spline (`sampleHeightCloud(stepUV)`):
+$$\text{stepClear} = \text{smoothstep}(z_{\text{terr}} - 24.0,\; z_{\text{terr}} + 110.0,\; z)$$
+$$\text{rayGroundVis} \mathrel{*}= \text{smoothstep}(z_{\text{terr}} - 36.0,\; z_{\text{terr}} + 28.0,\; z)$$
+- **Zero Triangle Facets at Any LOD**: Because `sampleHeightCloud(stepUV)` is a continuous per-pixel $C^1$ bicubic surface on the $49 \times 49$ height texture, high mountain peaks emerging through Deck 1 (`420..1,068 wu`) and Deck 2 (`1,260..1,956 wu`) part the clouds with a smooth, misty contour at every zoom level.
+- **True 3D Ridge Occlusion**: Because the ray marches top-to-bottom from the camera, once a viewing ray strikes a mountain ridge ($z \le z_{\text{terr}}$), `rayGroundVis` drops to `0.0`, preventing lower cloud decks behind the mountain from bleeding through the peak, while Deck 3 cirrus and anvils (`2,148..2,820 wu`) pass cleanly over the summit.

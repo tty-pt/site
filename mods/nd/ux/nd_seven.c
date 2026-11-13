@@ -98,21 +98,29 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		? macro_blend_rgb(c1, c2, (blend * 255) / 128) : c1;
 
 	/* Smooth world-coordinate hypsometric + band-limited meso relief tinting:
-	 * uses only continuous rotated fBm (fs.fine_elev) and elevation (elev_rel) — zero
-	 * uncorrelated per-vertex white-noise hashes that would cause bilinear diamonds. */
+	 * spans the full planetary hypsometry (-2,000 wu abyssal trenches to +1,854 wu Mount Everest)
+	 * without saturating at low hills, using only continuous rotated fBm (fs.fine_elev) and elevation. */
 	{
 		int fine_rel = (int)fs.fine_elev;
 		int elev_rel = ((int)fs.elevation_q12_4 - ((int)fs.water_level << 4)) >> 4;
-		if (elev_rel < -32) elev_rel = -32;
-		if (elev_rel > 64) elev_rel = 64;
-		int shade_q8 = 250 + (elev_rel >> 2) + fine_rel;
+		if (elev_rel < -2000) elev_rel = -2000;
+		if (elev_rel > 1854) elev_rel = 1854;
+		int hypso_delta;
+		if (elev_rel < -64) {
+			hypso_delta = -16 + ((elev_rel + 64) >> 6);
+		} else if (elev_rel <= 120) {
+			hypso_delta = elev_rel >> 2;
+		} else {
+			hypso_delta = 30 + ((elev_rel - 120) >> 5);
+		}
+		int shade_q8 = 250 + hypso_delta + fine_rel;
 
 		int r = (int)(col & 0xFF);
 		int g = (int)((col >> 8) & 0xFF);
 		int b = (int)((col >> 16) & 0xFF);
 		r = (r * shade_q8) >> 8;
 		g = (g * (shade_q8 + (fine_rel >> 2))) >> 8;
-		b = (b * (shade_q8 - (elev_rel >> 4) - (fine_rel >> 2))) >> 8;
+		b = (b * (shade_q8 - (hypso_delta >> 2) - (fine_rel >> 2))) >> 8;
 		if (r < 0) r = 0; else if (r > 255) r = 255;
 		if (g < 0) g = 0; else if (g > 255) g = 255;
 		if (b < 0) b = 0; else if (b > 255) b = 255;
@@ -351,15 +359,15 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_frame_frustum_valid = 1;
 
 	float r_planet = 0.0f;
-	float z_min_cull = lwz_est - 96.0f;
-	float z_max_cull = lwz_est + 360.0f;
+	float z_min_cull = lwz_est - 256.0f;
+	float z_max_cull = lwz_est + 1200.0f;
 	float cull_margin = 64.0f;
 	if (dist >= 1200.0f) {
 		r_planet = dist * 1.25f;
 		if (r_planet < 16000.0f) r_planet = 16000.0f;
 		if (r_planet > 80000.0f) r_planet = 80000.0f;
 		z_min_cull = -2600.0f;
-		z_max_cull = 2600.0f;
+		z_max_cull = 3200.0f;
 		cull_margin = 180.0f;
 	}
 	s_frame_sag_radius = r_planet;
