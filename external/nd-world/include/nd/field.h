@@ -53,13 +53,15 @@
 
 /* Elevation range and climate constants from server worldgen */
 #define ND_FIELD_NOISE_FOURTH    (NOISE_MAX >> 2)
-#define ND_FIELD_TEMP_MAX        ((int16_t)106)
-#define ND_FIELD_TEMP_MIN        ((int16_t)-41)
+#define ND_FIELD_TEMP_MIN        ((int16_t)-36)
 #define ND_FIELD_SOLAR_TEMP_MAX  ((int16_t)115)
 #define ND_FIELD_SOLAR_TEMP_SPAN ((int16_t)150)
 #define ND_FIELD_DAYTICK_BITS    10
 #define ND_FIELD_RAIN_DIV        (NOISE_MAX >> 9)
 #define ND_FIELD_RAIN_MAX        (NOISE_MAX / ND_FIELD_RAIN_DIV)
+
+/* Biome constants mirroring nd/world-types.h enum biome */
+#define ND_FIELD_TEMP_MAX        ((int16_t)102)
 
 /* ============================================================================
  * Planetary Scale (2^16 Room Coordinate Lattice):
@@ -311,8 +313,8 @@ nd_field_bio_blend(uint32_t rn, int16_t tmp, uint8_t *bio_out, uint8_t *bio2_out
 	if (rn_step == 0) rn_step = 1;
 	if (tmp_step == 0) tmp_step = 1;
 
-	/* Smooth transitional boundary into permanent ice below TEMP_MIN */
-	if (tmp < ND_FIELD_TEMP_MIN) {
+	/* 1. Permanent ice sheets and glaciers in polar freezing zones (tmp <= -36) and snowy summits */
+	if (tmp <= ND_FIELD_TEMP_MIN) {
 		uint8_t polar_adj = (rn < rn_step) ? BIOME_COLD_DESERT : BIOME_TUNDRA;
 		int32_t d_ice = ND_FIELD_TEMP_MIN - tmp;
 		if (d_ice < 16) {
@@ -323,22 +325,6 @@ nd_field_bio_blend(uint32_t rn, int16_t tmp, uint8_t *bio_out, uint8_t *bio2_out
 		} else {
 			if (bio_out) *bio_out = BIOME_PERMANENT_ICE;
 			if (bio2_out) *bio2_out = BIOME_PERMANENT_ICE;
-			if (blend_out) *blend_out = 0;
-		}
-		return;
-	}
-	/* Smooth transitional boundary into volcanic heat above TEMP_MAX */
-	if (tmp >= ND_FIELD_TEMP_MAX) {
-		uint8_t heat_adj = (rn < rn_step) ? BIOME_DESERT : BIOME_SAVANNAH;
-		int32_t d_heat = tmp - ND_FIELD_TEMP_MAX;
-		if (d_heat < 16) {
-			if (bio_out) *bio_out = BIOME_VOLCANIC;
-			if (bio2_out) *bio2_out = heat_adj;
-			uint32_t t = (uint32_t)(16 - d_heat);
-			if (blend_out) *blend_out = (uint8_t)((t * t * 128u) / 256u);
-		} else {
-			if (bio_out) *bio_out = BIOME_VOLCANIC;
-			if (bio2_out) *bio2_out = BIOME_VOLCANIC;
 			if (blend_out) *blend_out = 0;
 		}
 		return;
@@ -905,8 +891,13 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	int32_t rn_centered = (int32_t)(cl_raw >> 15) - 256;
 	int32_t rn_val = 256 + (rn_centered * 15) / 10;
 
-	/* Subtropical Hadley subsidence drying belt (latitudes ~15°..42° == room_y ~2400..10500) creates vast Earth-like desert belts */
 	int32_t abs_ry = abs((int32_t)room_y);
+	/* Intertropical Convergence Zone (ITCZ) equatorial rainfall enhancement (latitudes < 12° == room_y < 2400) creates lush tropical rainforests */
+	if (abs_ry < 2400) {
+		int32_t wet_weight = (2400 - abs_ry) * 85 / 2400;
+		rn_val += wet_weight;
+	}
+	/* Subtropical Hadley subsidence drying belt (latitudes ~15°..42° == room_y ~2400..10500) creates vast Earth-like desert belts */
 	if (abs_ry >= 2200 && abs_ry <= 11000) {
 		int32_t sub_dist = abs(abs_ry - 6200);
 		if (sub_dist < 4400) {

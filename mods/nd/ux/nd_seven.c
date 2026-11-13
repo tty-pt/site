@@ -107,17 +107,22 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		if (elev_rel > 1854) elev_rel = 1854;
 
 		/* Natural alpine transition on mountain summits:
-		 *   - 180..320 wu: subalpine granite scree lifts out of lowland vegetation
-		 *   - 320..520+ wu: brilliant alpine snowcaps and glacial ice */
-		if (elev_rel > 180 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
-			uint32_t c_granite = 0xFF6C7073u; /* Slate/granite scree RGB(115, 112, 108) */
-			uint32_t c_snow    = 0xFFFCF4F0u; /* Alpine snow RGB(240, 244, 252) */
-			int rock_w = (elev_rel <= 320) ? ((elev_rel - 180) * 255 / 140) : 255;
+		 *   - 140..260 wu: light granite scree lifts out of lowland vegetation
+		 *   - 240..420+ wu: brilliant alpine snowcaps and glacial ice */
+		if (elev_rel > 140 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
+			uint32_t c_granite = 0xFFA8B0B8u; /* Light granite scree RGB(184, 176, 168) */
+			uint32_t c_snow    = 0xFFFCF8F0u; /* Pure alpine snow RGB(240, 248, 252) */
+			int rock_w = (elev_rel <= 260) ? ((elev_rel - 140) * 255 / 120) : 255;
 			col = macro_blend_rgb(col, c_granite, rock_w);
-			if (elev_rel > 320) {
-				int snow_w = (elev_rel <= 520) ? ((elev_rel - 320) * 255 / 200) : 255;
+			if (elev_rel > 240) {
+				int snow_w = (elev_rel <= 420) ? ((elev_rel - 240) * 255 / 180) : 255;
 				col = macro_blend_rgb(col, c_snow, snow_w);
 			}
+		}
+
+		/* Polar ice caps and high mountain summits stay brilliant white snow */
+		if (fs.bio == BIOME_PERMANENT_ICE || (elev_rel > 360 && !fs.is_water)) {
+			col = 0xFFFCF8F0u;
 		}
 
 		int hypso_delta;
