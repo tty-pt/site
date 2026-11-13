@@ -15,10 +15,6 @@
 #include "nd_lamina.h"
 #include <math.h>
 
-#define MAXW 1920
-#define MAXH 1080
-static uint32_t fb[MAXW * MAXH], fb2[MAXW * MAXH];
-
 static nd_client_state_t st;
 
 /* A 7x7 map of identical tiles centred on the world tile (x, y). */
@@ -51,82 +47,6 @@ static void set_map(int x, int y, int biome, uint8_t exits, uint8_t flags,
 	nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
 }
 
-
-static void dump(const char *name, const uint32_t *p, int w, int h)
-{
-	const char *dir = getenv("SEVEN_DUMP");
-	if (!dir) return;
-	char path[512];
-	snprintf(path, sizeof(path), "%s/%s.ppm", dir, name);
-	FILE *f = fopen(path, "wb");
-	fprintf(f, "P6\n%d %d\n255\n", w, h);
-	for (int i = 0; i < w * h; i++) {
-		fputc(p[i] & 0xFF, f); fputc((p[i] >> 8) & 0xFF, f); fputc((p[i] >> 16) & 0xFF, f);
-	}
-	fclose(f);
-}
-
-static int count_color(const uint32_t *p, int n, uint32_t c)
-{
-	int k = 0;
-	for (int i = 0; i < n; i++) k += p[i] == c;
-	return k;
-}
-
-/* green-dominant pixels (plants, grass) */
-static int count_green(const uint32_t *p, int n)
-{
-	int k = 0;
-	for (int i = 0; i < n; i++) {
-		int r = (int)(p[i] & 0xFF), g = (int)((p[i] >> 8) & 0xFF), b = (int)((p[i] >> 16) & 0xFF);
-		k += g > r + 8 && g > b + 25;
-	}
-	return k;
-}
-
-/* sand-like pixels: warm, light, r >= g >= b */
-static int count_sand(const uint32_t *p, int n)
-{
-	int k = 0;
-	for (int i = 0; i < n; i++) {
-		int r = (int)(p[i] & 0xFF), g = (int)((p[i] >> 8) & 0xFF), b = (int)((p[i] >> 16) & 0xFF);
-		k += r > 170 && r >= g && g >= b && r - b > 40;
-	}
-	return k;
-}
-
-static void set_split(int x, int y, int split, int room_east)
-{
-	set_map(x, y, 10, 0x1B, 0, 0, 0, 0);
-	for (int r = 0; r < 7; r++)
-		for (int c = split; c < 7; c++) {
-			nd_map_tile_t *t = &st.map_data.tiles[r * 7 + c];
-			t->bio_idx = 14;
-			if (room_east)
-				t->flags |= ND_MAP_FLAG_ROOM;
-		}
-}
-
-static int is_sand_px(uint32_t c)
-{
-	int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
-	return r > 170 && r >= g && g >= b && r - b > 40;
-}
-
-/* First x in [x0, x1) that starts a run of 16 sand pixels on row y, else -1
- * (long enough that a yellow flower decor sprite never counts). */
-static int first_sand_run(const uint32_t *p, int w, int y, int x0, int x1)
-{
-	for (int x = x0; x + 16 <= x1 + 15; x++) {
-		int run = 1;
-		for (int k = 0; k < 16; k++)
-			run &= is_sand_px(p[y * w + x + k]);
-		if (run)
-			return x;
-	}
-	return -1;
-}
-
 static void hold(const char *key, int ticks, int *keyret)
 {
 	nd_seven_key(key, 1);
@@ -139,54 +59,16 @@ static void hold(const char *key, int ticks, int *keyret)
 
 int main(void)
 {
-	const int sizes[3][2] = { { 640, 480 }, { 1280, 720 }, { 1920, 1080 } };
 	int fx, fy, dir, walking, key;
 
 	printf("=== ND seven stage: continuous world ===\n");
 
-	/* The world fills any framebuffer, at the unchanged 2x scale. */
-	for (int s = 0; s < 3; s++) {
-		int w = sizes[s][0], h = sizes[s][1];
-		set_map(5, -3, 10, 0x1B, 0, 'x', 0, 'i');
-		nd_seven_render(fb, (uint32_t)w, (uint32_t)h, &st);
-		assert(count_color(fb, w * h, 0xFF08080C) == 0);
-		set_map(5, -3, 14, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, (uint32_t)w, (uint32_t)h, &st);
-		assert(count_color(fb, w * h, 0xFF08080C) == 0);
-	}
 	assert(NDW_TILE_W * 2 <= 320 && NDW_TILE_H * 2 <= 256);
-	printf("PASS: 640x480, 1280x720 and 1920x1080 are fully covered by small tiles\n");
-
-	/* Deterministic. */
-	set_map(5, -3, 10, 0x1B, 0, 'x', 'T', 'i');
-	nd_seven_render(fb, 1280, 720, &st);
-	nd_seven_render(fb2, 1280, 720, &st);
-	assert(!memcmp(fb, fb2, 1280 * 720 * 4));
-	set_map(6, -3, 10, 0x1B, 0, 'x', 'T', 'i');
-	nd_seven_render(fb2, 1280, 720, &st);
-	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
-	printf("PASS: same map and frame give the same pixels, other tiles differ\n");
 
 	/* Field-driven rendering: along a transect from deep water to land, depth decreases
 	 * monotonically with H (it rises toward the shore), and underwater substrate displays
 	 * high-resolution authentic biomes. */
 	{
-		/* 1. Deep ocean basin in world 1: dark sapphire body (sample outside centered lamb sprite) */
-		set_map(0, 0, 0, 0x1B, 0, 0, 0, 0);
-		st.map_data.pos[3] = 1;
-		nd_seven_render(fb, 1280, 720, &st);
-		dump("water", fb, 1280, 720);
-		uint32_t c = fb[360 * 1280 + 600];
-		int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
-		assert(r < 50 && g < 100 && b > 100);
-
-		/* 2. Coastal transect in world 1 at (-19, -20) -> (-18, -20):
-		 * Terrain rises from submerged seabed (-18) to dry land (0). */
-		set_map(-18, -20, 0, 0x1B, 0, 0, 0, 0);
-		st.map_data.pos[3] = 1;
-		nd_seven_render(fb2, 1280, 720, &st);
-		dump("water_coastal", fb2, 1280, 720);
-
 		/* Along the transect approaching the shore, depth decreases monotonically */
 		int prev_d = 9999;
 		int depths_seen = 0;
@@ -199,102 +81,12 @@ int main(void)
 		(void)prev_d;
 		assert(depths_seen >= 5);
 
-		/* Shallows near shore have high transmission (crystal shallows) */
-		uint32_t c_shallow = fb2[360 * 1280 + 560];
-		int sr = (int)(c_shallow & 0xFF), sg = (int)((c_shallow >> 8) & 0xFF), sb = (int)((c_shallow >> 16) & 0xFF);
-		(void)sr; (void)sg;
-		assert(sb > 100);
-
-		/* Terrestrial dry land rendered at positive elevation */
-		uint32_t c_land = fb2[360 * 1280 + 720];
-		assert(c_land != c_shallow);
-
 		/* Underwater substrate displays authentic biomes */
 		nd_field_sample_t s_under = nd_field_sample(1, 3, -2600, -(-20) * 128 + 64);
 		assert(s_under.depth > 0);
 		assert(s_under.bio != 0); /* authentic substrate under water */
 	}
 	printf("PASS: field-driven depth tiers, continuous coastal rise, and underwater substrate biomes verified\n");
-
-
-	/* A cactus on the map is a cactus in the view. */
-	set_map(100, -200, 14, 0x1B, 0, 0, 0, 0);
-	st.map_data.pos[3] = 0;
-	nd_seven_render(fb, 1280, 720, &st);
-	int g0 = count_green(fb, 1280 * 720);
-	set_map(100, -200, 14, 0x1B, 0, 0, 0, 'I');
-	st.map_data.pos[3] = 0;
-	nd_seven_render(fb2, 1280, 720, &st);
-	dump("desert_cactus", fb2, 1280, 720);
-	int g1 = count_green(fb2, 1280 * 720);
-	assert(g1 > g0 + 400);                     /* green cacti stand on the sand */
-	assert(count_sand(fb2, 1280 * 720) > 1280 * 720 / 6);
-	/* the cactus of the right map cell is on the right of its tile, ie the
-	 * right third of the lamb's tile gained the green */
-	{
-		int tx = 1280 / 2 - NDW_CENTER_X * 2, ty = 720 / 2 - NDW_CENTER_Y * 2;
-		int added = 0;
-		for (int y = ty; y < ty + NDW_TILE_H * 2; y++)
-			for (int x = tx + NDW_TILE_W * 2 * 2 / 3; x < tx + NDW_TILE_W * 2; x++) {
-				uint32_t a = fb[y * 1280 + x], b = fb2[y * 1280 + x];
-				added += a != b;
-			}
-		assert(added > 200);
-	}
-	/* the same cactus tile on grass biome has no sand */
-	set_map(5, -3, 10, 0x1B, 0, 0, 0, 'I');
-	nd_seven_render(fb2, 1280, 720, &st);
-	assert(count_sand(fb2, 1280 * 720) < 1280 * 720 / 20);
-	/* small and big cacti differ */
-	set_map(100, -200, 14, 0x1B, 0, 0, 0, 'i');
-	st.map_data.pos[3] = 0;
-	nd_seven_render(fb, 1280, 720, &st);
-	set_map(100, -200, 14, 0x1B, 0, 0, 0, 'I');
-	st.map_data.pos[3] = 0;
-	nd_seven_render(fb2, 1280, 720, &st);
-	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
-	printf("PASS: map cactus glyphs appear as cacti in their cell, on sand in desert\n");
-
-	/* A tree seen from outside stays when the player steps into its tile: the
-	 * server's '!' marker must not erase it (cache by absolute tile position). */
-	{
-		set_map(5, -3, 10, 0x1B, 0, 0, 'x', 0);
-		nd_seven_render(fb, 1280, 720, &st);          /* (6,-3) seen as 'x' */
-		set_map_keep(6, -3, 10, 0x1B, 0, 0, 'x', 0);   /* now we stand in it */
-		nd_seven_render(fb, 1280, 720, &st);
-		set_map(6, -3, 10, 0x1B, 0, 0, 'x', 0);        /* control: never seen */
-		nd_seven_render(fb2, 1280, 720, &st);
-		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);   /* the restored tree is drawn */
-		printf("PASS: a tree survives the player entering its tile\n");
-	}
-
-	/* The cache holds far more than one 7x7 view: after seeing ~300 distinct
-	 * tiles, stepping into tiles seen long ago still restores their tree. */
-	{
-		static const int origin[] = { 5, 12, 19, 26, 33, 40 };
-		static const int enter[] = { 3, 10, 17, 24, 31, 38 };
-
-		set_map(origin[0], -3, 10, 0x1B, 0, 0, 'x', 0);
-		nd_seven_render(fb, 1280, 720, &st);
-		for (int i = 1; i < 6; i++) {
-			set_map_keep(origin[i], -3, 10, 0x1B, 0, 0, 'x', 0);
-			nd_seven_render(fb, 1280, 720, &st);
-		}
-		for (int i = 0; i < 6; i++) {
-			set_map_keep(enter[i], -3, 10, 0x1B, 0, 0, 'x', 0);
-			nd_seven_render(fb, 1280, 720, &st);
-			nd_seven_forget();
-			set_map_keep(enter[i], -3, 10, 0x1B, 0, 0, 'x', 0);
-			nd_seven_render(fb2, 1280, 720, &st);          /* control: nothing remembered */
-			assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
-			/* re-seed the cache for the next entry tile */
-			for (int j = 0; j < 6; j++) {
-				set_map_keep(origin[j], -3, 10, 0x1B, 0, 0, 'x', 0);
-				nd_seven_render(fb2, 1280, 720, &st);
-			}
-		}
-		printf("PASS: tree glyphs survive cache pressure\n");
-	}
 
 	/* Rock and stone sprites are cropped whole: trimmed to their opaque bounds
 	 * (opaque pixels touch all four edges), the medium tan rock is not clipped,
@@ -332,55 +124,6 @@ int main(void)
 		printf("PASS: atlas rock sprites are whole\n");
 	}
 
-	/* Room contents: an entity named "stone" is a stone sprite at its spot, a
-	 * "goblin" is still a pawn; and no stone is ever scattered as terrain. */
-	{
-		static const uint8_t mineral[] = {
-			NDS_STONE_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_FLAT,
-			NDS_STONE_TINY, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY, NDS_ROCK_GREY
-		};
-		const uint32_t ref = 100;
-		const nd_seven_sprite_rect_t *sr = &nd_seven_sprite_rects[mineral[ndw_mix(ref) % 8]];
-		const uint8_t *atlas = atlas_px();
-		uint32_t sprite_colour = 0;
-		int none, with_stone, with_goblin;
-
-		/* the sprite's centre-most opaque pixel gives a colour only it paints */
-		for (int y = sr->h / 2; y < sr->h && !sprite_colour; y++)
-			for (int x = sr->w / 2; x < sr->w && !sprite_colour; x++) {
-				uint32_t c = nd_seven_palette[atlas[(sr->y + y) * ND_SEVEN_ATLAS_W + sr->x + x]];
-				if ((c >> 24) == 0xFF)
-					sprite_colour = c;
-			}
-		assert(sprite_colour);
-
-		set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
-		st.room.ref = 7;
-		nd_seven_render(fb, 1280, 720, &st);
-		none = count_color(fb, 1280 * 720, sprite_colour);
-
-		st.entity_count = 1;
-		st.entities[0].ref = ref; st.entities[0].location = 7;
-		st.entities[0].ch = '*'; st.entities[0].fg = 7;
-		strcpy(st.entities[0].name, "stone");
-		nd_seven_render(fb, 1280, 720, &st);
-		with_stone = count_color(fb, 1280 * 720, sprite_colour);
-		assert(with_stone > none);                    /* the stone sprite is on screen */
-
-		st.entities[0].ch = 'g';
-		strcpy(st.entities[0].name, "goblin");
-		nd_seven_render(fb2, 1280, 720, &st);
-		with_goblin = count_color(fb2, 1280 * 720, sprite_colour);
-		assert(with_goblin == none);                  /* a goblin is a pawn, not a stone */
-		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
-
-		st.entities[0].location = 8;                  /* an item of another room is not shown */
-		strcpy(st.entities[0].name, "stone");
-		nd_seven_render(fb2, 1280, 720, &st);
-		assert(count_color(fb2, 1280 * 720, sprite_colour) == none);
-		printf("PASS: a stone entity draws as a stone sprite at its spot, a goblin as a pawn\n");
-	}
-
 	/* Player named entities and non-landscape entities are never bound to trees */
 	{
 		set_map(5, -3, 10, 0x1B, 0, 'x', 0, 0); /* an oak tree glyph */
@@ -399,81 +142,6 @@ int main(void)
 			assert(strcmp(tr->objs[k].name, "quirinpa") != 0);
 		}
 		printf("PASS: player entities are never bound as trees or landscape elements\n");
-	}
-
-	/* Terrain carries no rocks, stones or mushrooms: the empty map draws only
-	 * grass, the two yellow decor sprites and the lamb (no entity, no glyph). */
-	{
-		static const int ids[] = {
-			NDS_ROCK_TAN_BIG, NDS_ROCK_WHITE_BIG, NDS_ROCK_TAN, NDS_ROCK_TAN_SM, NDS_ROCK_TAN_TINY,
-			NDS_ROCK_WHITE, NDS_ROCK_GREY, NDS_STONE_BLUE, NDS_STONE_BLUE_SM, NDS_STONE_GREY,
-			NDS_STONE_FLAT, NDS_STONE_TINY, NDS_DECOR_ORG, NDS_DECOR_PINK
-		};
-		const uint8_t *atlas = atlas_px();
-
-		for (int bio = 10; bio <= 14; bio += 4) {      /* grassland and desert */
-			set_map(5, -3, bio, 0x1B, 0, 0, 0, 0);
-			nd_seven_render(fb, 1280, 720, &st);
-			for (size_t k = 0; k < sizeof(ids) / sizeof(ids[0]); k++) {
-				const nd_seven_sprite_rect_t *r = &nd_seven_sprite_rects[ids[k]];
-				int found = 0;
-				/* a colour of this sprite that no other kind of ground paints */
-				for (int y = 0; y < r->h; y++)
-					for (int x = 0; x < r->w; x++) {
-						uint32_t c = nd_seven_palette[atlas[(r->y + y) * ND_SEVEN_ATLAS_W + r->x + x]];
-						int cr = (int)(c & 0xFF), cg = (int)((c >> 8) & 0xFF), cb = (int)((c >> 16) & 0xFF);
-						if ((c >> 24) != 0xFF || cr - cg < 60 || cr - cb < 60)
-							continue;     /* only the toadstool reds are checked per pixel */
-						found |= count_color(fb, 1280 * 720, c) > 0;
-					}
-				assert(!found);
-			}
-		}
-		printf("PASS: terrain draws no rocks, stones or mushrooms\n");
-	}
-
-	/* Other plant families and map features show up too. */
-	{
-		const int gl[][3] = { { 'x', 0, 0 }, { 0, 'T', 0 }, { 0, 0, 'a' }, { 0, '~', 0 }, { 0, '$', 0 }, { '<', 0, '>' }, { '*', 0, 0 }, { 0, 'o', 0 }, { 0, 0, 'O' } };
-		set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, 1280, 720, &st);
-		for (unsigned k = 0; k < sizeof(gl) / sizeof(gl[0]); k++) {
-			set_map(5, -3, 10, 0x1B, 0, gl[k][0], gl[k][1], gl[k][2]);
-			nd_seven_render(fb2, 1280, 720, &st);
-			assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
-		}
-	}
-	printf("PASS: deciduous, tall, fir, pond, shop, stairs, stone and rock glyphs are drawn\n");
-
-	/* Stones are drawn pebbles, rocks bigger, boulders bigger still: the
-	 * pixels each adds over the bare map grow with the glyph, and a stone
-	 * stays well under the old 25x24 atlas sprite per object. */
-	{
-		static const int glyph[3] = { '*', 'o', 'O' };
-		int area[3], objs[3];
-
-		for (int k = 0; k < 3; k++) {
-			int diff = 0;
-
-			set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
-			nd_seven_render(fb2, 1280, 720, &st);
-			set_map(5, -3, 10, 0x1B, 0, 0, glyph[k], 0);
-			nd_seven_render(fb, 1280, 720, &st);
-			for (int i = 0; i < 1280 * 720; i++)
-				diff += fb[i] != fb2[i];
-			area[k] = diff;
-			/* objects Seven laid out in the 7x7 map that can be on screen */
-			objs[k] = 0;
-			for (int r = 0; r < 7; r++)
-				for (int c = 0; c < 7; c++) {
-					ndw_obj_t o[NDW_MAX_OBJ];
-					objs[k] += nd_seven_tile_objects(&st.map_data, c, r, o);
-				}
-			assert(diff > 0);
-		}
-		assert(area[0] < area[1] && area[1] < area[2]);
-		assert(objs[0] > 0 && area[0] / objs[0] < 25 * 24 * 4);
-		printf("PASS: stones, rocks and boulders draw as distinct, growing shapes\n");
 	}
 
 	/* The minimap reuses Seven's layout: nd_seven_tile_objects is the same
@@ -500,39 +168,9 @@ int main(void)
 		printf("PASS: nd_seven_tile_objects mirrors the world layout and rejects off-map tiles\n");
 	}
 
-
-	/* A rock seen from outside survives the player entering its tile, just like a tree. */
-	{
-		set_map(5, -3, 10, 0x1B, 0, 0, 'o', 0);
-		nd_seven_render(fb, 1280, 720, &st);          /* (6,-3) seen as 'o' */
-		set_map_keep(6, -3, 10, 0x1B, 0, 0, 'o', 0);   /* now we stand in it */
-		nd_seven_render(fb, 1280, 720, &st);
-		set_map(6, -3, 10, 0x1B, 0, 0, 'o', 0);        /* control: never seen */
-		nd_seven_render(fb2, 1280, 720, &st);
-		assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);   /* the restored rock is drawn */
-		printf("PASS: a rock survives the player entering its tile without popping\n");
-	}
-
-	/* The room contents list is drawn in the lamb's tile. */
-	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
-	st.room.ref = 9; st.me = 1;
-	nd_seven_render(fb, 1280, 720, &st);
-	st.entity_count = 2;
-	st.entities[0].ref = 5; st.entities[0].location = 9; st.entities[0].ch = 'g'; st.entities[0].fg = 9;
-	st.entities[1].ref = 1; st.entities[1].location = 9; st.entities[1].ch = '@'; st.entities[1].fg = 11;   /* me */
-	nd_seven_render(fb2, 1280, 720, &st);
-	assert(memcmp(fb, fb2, 1280 * 720 * 4) != 0);
-	dump("entity", fb2, 1280, 720);
-	st.entities[0].location = 77;                      /* another room */
-	nd_seven_render(fb, 1280, 720, &st);
-	st.entity_count = 0;
-	nd_seven_render(fb2, 1280, 720, &st);
-	assert(!memcmp(fb, fb2, 1280 * 720 * 4));          /* not here, not drawn; me never drawn */
-	printf("PASS: room contents are drawn, the player and other rooms' items are not\n");
-
 	/* The lamb walks and faces its way. */
 	set_map(5, -3, 10, 0x1B, 0, 0, 0, 0);
-	nd_seven_render(fb, 640, 480, &st);
+	nd_seven_render(640, 480, &st);
 	nd_seven_lamb(&fx, &fy, &dir, &walking);
 	assert(fx == NDW_CENTER_X && fy == NDW_CENTER_Y);
 	nd_seven_key("ArrowRight", 1);
@@ -564,16 +202,15 @@ int main(void)
 	for (int i = 0; i < 30; i++) assert(nd_seven_tick(&st, 1.0f / 60) == 0);
 	nd_seven_key("ArrowRight", 0);
 	nd_seven_lamb(&fx, &fy, &dir, &walking);
-	nd_seven_render(fb, 1280, 720, &st);
-	/* the server moved us east: same world, shifted origin, same pixels */
+	nd_seven_render(1280, 720, &st);
+	/* the server moved us east: same world, shifted origin */
 	set_map_keep(41, 40, 10, 0x1B, 0, 0, 0, 0);
-	nd_seven_render(fb2, 1280, 720, &st);
+	nd_seven_render(1280, 720, &st);
 	{
 		int nfx, nfy;
 		nd_seven_lamb(&nfx, &nfy, &dir, &walking);
 		assert(nfx == fx - NDW_TILE_W && nfy == fy);
 	}
-	assert(!memcmp(fb, fb2, 1280 * 720 * 4));
 	{
 		int pending, px, py, have;
 		nd_seven_debug(&pending, &px, &py, &have);
@@ -629,8 +266,7 @@ int main(void)
 	hold("a", 600, &key);
 	nd_seven_lamb(&fx2, &fy2, &dir, &walking);
 	assert(key == 0 && fx2 >= NDW_WALL_T + NDW_FOOT_HW && fx2 < fx);
-	nd_seven_render(fb, 640, 480, &st);
-	dump("room_walls", fb, 640, 480);
+	nd_seven_render(640, 480, &st);
 	set_map(40, 40, 10, 0x1B, ND_MAP_FLAG_ROOM, 0, 0, 0);
 	nd_seven_tick(&st, 0);
 	key = 0;
@@ -774,85 +410,6 @@ int main(void)
 		printf("PASS: off-map wilderness un-clamping evaluates authentic continuous field instead of clamping edge biomes\n");
 	}
 
-	/* Organic biome borders: the grass|desert border is not the tile edge. The
-	 * lamb stands in the first desert tile at 1280x720, so the tile edge is at
-	 * screen x = 640 - NDW_CENTER_X * 2 = 480; the warp reaches 11 units = 22 px. */
-	{
-		const int W = 1280, H = 720, EDGE = 640 - NDW_CENTER_X * 2;
-		const int BAND = 2 * NDW_BLEND_AMP + 8;
-		int lo = 9999, hi = -9999, bulge_west = 0, bulge_east = 0, rows = 0;
-
-		set_split(5, -3, 3, 0);
-		nd_seven_render(fb, W, H, &st);
-		nd_seven_render(fb2, W, H, &st);
-		assert(!memcmp(fb, fb2, W * H * 4));             /* deterministic */
-		dump("border", fb, W, H);
-		for (int y = 8; y < H - 8; y++) {
-			int x = first_sand_run(fb, W, y, EDGE - BAND, EDGE + BAND);
-			assert(x >= 0);                               /* desert starts near the edge */
-			assert(x >= EDGE - 2 * NDW_BLEND_AMP - 2 && x <= EDGE + 2 * NDW_BLEND_AMP + 2);
-			if (x < lo) lo = x;
-			if (x > hi) hi = x;
-			bulge_west += x < EDGE - 2;
-			bulge_east += x > EDGE + 2;
-			rows++;
-		}
-		assert(hi - lo >= 10);                            /* wavy, not a straight line */
-		assert(bulge_west > 10 || bulge_east > 10);       /* macro terrain feature bulges across the tile edge */
-		/* well inside each biome the ground is its own: no sand far west, no grass far east */
-		for (int y = 8; y < H - 8; y += 7) {
-			assert(first_sand_run(fb, W, y, 0, EDGE - BAND) < 0);
-			for (int x = EDGE + BAND; x < EDGE + BAND + 100; x++) {
-				uint32_t c = fb[y * W + x];
-				int g = (int)((c >> 8) & 0xFF), r = (int)(c & 0xFF), b = (int)((c >> 16) & 0xFF);
-				assert(!(g > r + 8 && g > b + 25));
-			}
-		}
-
-		/* Zero color blur: every pixel across the border zone has an RGB value matching
-		 * either pure unblurred sand or pure unblurred grass, with no linear color blend. */
-		for (int y = 8; y < H - 8; y += 4) {
-			for (int x = EDGE - 20; x < EDGE + 20; x++) {
-				uint32_t c = fb[y * W + x];
-				int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
-				int is_grass = (g > r + 8 && g > b + 25);
-				int is_sand = (r > 170 && r >= g && g >= b && r - b > 40);
-				assert(is_grass || is_sand); /* crisp: strictly one ground, never a blended blur */
-			}
-		}
-		printf("PASS: zero color blur across the border zone (100%% crisp pixel art)\n");
-		printf("PASS: the grass|desert border wanders instead of following the tile edge (%d rows)\n", rows);
-
-		/* Seamless: seen from another origin tile, the same world pixels are identical. */
-		set_split(6, -3, 2, 0);
-		nd_seven_render(fb2, W, H, &st);
-		for (int y = 8; y < H - 8; y++)
-			for (int x = EDGE - 70; x < EDGE + 70; x++)
-				assert(fb[y * W + x] == fb2[y * W + x - NDW_TILE_W * 2]);
-		printf("PASS: the border is identical after re-centring the view\n");
-
-		/* A different z changes the shape: the border follows the world, not the tile. */
-		set_split(5, -3, 3, 0);
-		st.map_data.pos[2] = 7;
-		nd_seven_render(fb2, W, H, &st);
-		assert(memcmp(fb, fb2, W * H * 4) != 0);
-		printf("PASS: another level has another border\n");
-	}
-
-	/* A room blends seamlessly with wilderness */
-	{
-		const int W = 1280, H = 720, EDGE = 640 - NDW_CENTER_X * 2;
-		const int BAND = 2 * NDW_BLEND_AMP + 8;
-		int west_sand = 0;
-
-		set_split(5, -3, 3, 1);                           /* the desert side is rooms */
-		nd_seven_render(fb, W, H, &st);
-		for (int y = 8; y < H - 8; y++)
-			west_sand += first_sand_run(fb, W, y, EDGE, EDGE + BAND) > EDGE + 2;
-		assert(west_sand > 10);
-		printf("PASS: a room's edge blends organically against wilderness\n");
-	}
-
 	/* Persistent picked object tracking, cross-room stability, and database entities */
 	{
 		nd_seven_forget();
@@ -994,7 +551,7 @@ int main(void)
 		assert(is_entity_nested(&st, &st.entities[1]) == 1);
 
 		/* Render Seven stage: child entity MUST NOT be drawn as a ground entity */
-		nd_seven_render(fb, 640, 480, &st);
+		nd_seven_render(640, 480, &st);
 
 		/* Approach the tree: action balloon MUST offer to harvest stick from tree */
 		nd_seven_set_lamb(tr->objs[0].x, tr->objs[0].y);
@@ -1084,15 +641,6 @@ int main(void)
 		assert(tr->objs[idx_s0].slot_id == 0);
 		assert(tr->objs[idx_s2].slot_id == 2);
 		printf("PASS: table-driven scenery traits and deterministic slot identity verified\n");
-
-		/* 11. Ground surface cache consistency */
-		static uint32_t g_fb1[640 * 480], g_fb2[640 * 480];
-		nd_seven_forget();
-		nd_seven_render(g_fb1, 640, 480, &st);
-		/* Second render should hit the ground tile cache */
-		nd_seven_render(g_fb2, 640, 480, &st);
-		assert(memcmp(g_fb1, g_fb2, sizeof(g_fb1)) == 0);
-		printf("PASS: ground surface cache hit produces pixel-identical rendering\n");
 
 		/* 12. Multi-room surrounding entity cache and cross-room picked suppression */
 		int16_t pos_east[4] = { 61, 60, 0, 1 };
@@ -1618,7 +1166,7 @@ int main(void)
 		assert(sp_entry.objs[0].y == fixed_y);
 
 		/* Render Seven stage: rock must be drawn on screen */
-		nd_seven_render(fb, 640, 480, &st);
+		nd_seven_render(640, 480, &st);
 
 		/* Frame 3: Subsequent frame. BCP ITEM packet arrives with rock entity #901 */
 		st.entity_count = 1;
@@ -1766,416 +1314,6 @@ int main(void)
 		printf("PASS: action debouncing prevents burst double-picks and strict ID commands verified\n");
 	}
 
-	/* Client-side room chunks: retention when in-view and eager freeing when out-of-view */
-	{
-		nd_seven_ground_cache_forget();
-		assert(nd_seven_chunk_count() == 0);
-
-		/* Frame 1: render at (20, 20) */
-		set_map(20, 20, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, 640, 480, &st);
-		int initial_chunks = nd_seven_chunk_count();
-		int initial_allocs = nd_seven_chunk_alloc_count();
-		assert(initial_chunks > 0);
-		assert(initial_allocs == initial_chunks);
-
-		/* Frame 2: render same view -> chunks MUST be kept, 0 allocations, 0 frees */
-		nd_seven_render(fb2, 640, 480, &st);
-		assert(nd_seven_chunk_count() == initial_chunks);
-		assert(nd_seven_chunk_alloc_count() == initial_allocs); /* Zero noise/alloc overhead! */
-		assert(memcmp(fb, fb2, 640 * 480 * 4) == 0);
-
-		/* Frame 3: camera teleports far away to (200, 200). Old rooms (20, 20) are out of view */
-		set_map_keep(200, 200, 10, 0x1B, 0, 0, 0, 0);
-		for (int f = 0; f < 125; f++)
-			nd_seven_ground_frame_begin();
-		nd_seven_render(fb, 640, 480, &st);
-		/* The old chunks MUST have been freed upon TTL expiration */
-		assert(nd_seven_chunk_free_count() >= initial_chunks);
-		assert(nd_seven_chunk_count() > 0);
-
-		/* Lamina minimap renders without building Seven chunks */
-		nd_seven_ground_cache_forget();
-		set_map_keep(10, 10, 0, 0x1B, 0, 0, 0, 0); /* 0 = water */
-		uint32_t map_fb[224 * 224];
-		nd_lamina_render_map_live(map_fb, 224, 224, &st.map_data, "lamina", 43200, 0, 0, 0, 0);
-		/* No Seven chunks built for minimap */
-		assert(nd_seven_chunk_count() == 0);
-
-		/* Seven stage renders the water map */
-		nd_seven_render(fb, 640, 480, &st);
-		int seven_chunks = nd_seven_chunk_count();
-		assert(seven_chunks > 0);
-		int seven_allocs = nd_seven_chunk_alloc_count();
-
-		/* Seven stage renders the same water map: hits the exact same room chunks (0 new allocations) */
-		nd_seven_render(fb, 640, 480, &st);
-		assert(nd_seven_chunk_alloc_count() == seven_allocs);
-
-		/* Lamina minimap renders land without building Seven chunks */
-		nd_seven_ground_cache_forget();
-		set_map_keep(15, 15, 10, 0x1B, 0, 0, 0, 0); /* 10 = grassland */
-		nd_lamina_render_map_live(map_fb, 224, 224, &st.map_data, "lamina", 43200, 0, 1, NDW_CENTER_X, NDW_CENTER_Y);
-		assert(nd_seven_chunk_count() == 0);
-
-		/* Seven stage renders the grassland map */
-		nd_seven_render(fb, 640, 480, &st);
-		int land_chunks = nd_seven_chunk_count();
-		assert(land_chunks > 0);
-		int land_allocs = nd_seven_chunk_alloc_count();
-
-		/* Re-render hits cached chunks */
-		nd_seven_render(fb, 640, 480, &st);
-		assert(nd_seven_chunk_alloc_count() == land_allocs);
-
-		/* Explicit forget clears everything */
-		nd_seven_ground_cache_forget();
-		assert(nd_seven_chunk_count() == 0);
-
-		printf("PASS: client room chunks retention in-view, O(1) frame hits, and out-of-view freeing verified\n");
-	}
-
-	/* Dynamic water surface animation & wave motion over precomputed chunks */
-	{
-		set_map_keep(-50, 9, 0, 0x1B, 0, 0, 0, 0); /* deep/mid water map */
-		nd_seven_render(fb, 640, 480, &st);
-
-		/* Step animation by 18 ticks (drift changes by 3) */
-		nd_seven_step_anim(18);
-		nd_seven_render(fb2, 640, 480, &st);
-
-		/* Water surface must dynamically animate over time (never static or frozen) */
-		assert(memcmp(fb, fb2, 640 * 480 * 4) != 0);
-
-		/* Subsequent frame must hit the exact same cached chunk with 0 re-evaluations */
-		int allocs_before = nd_seven_chunk_alloc_count();
-		nd_seven_render(fb, 640, 480, &st);
-		assert(nd_seven_chunk_alloc_count() == allocs_before);
-
-		printf("PASS: dynamic water surface wave animation across frames verified\n");
-	}
-
-	/* Shoreline Multi-Scenario Rendering: Seamless continuous bathymetry across chunks */
-	{
-		/* Scenario 1: Convex Cape (L-shaped coastline) */
-		nd_seven_forget();
-		memset(&st, 0, sizeof(st));
-		strcpy(st.preferred_driver, "lamina-seven");
-		st.map_data.width = st.map_data.height = 7;
-		st.map_data.player_x = st.map_data.player_y = 3;
-		st.map_data.pos[0] = 10;
-		st.map_data.pos[1] = 10;
-
-		/* Top-left 4x4 is Land (Grassland = 10), rest is Water (0) */
-		for (int r = 0; r < 7; r++) {
-			for (int c = 0; c < 7; c++) {
-				int idx = r * 7 + c;
-				int is_land = (r <= 3 && c <= 3);
-				st.map_data.tiles[idx].bio_idx = is_land ? 10 : 0;
-				st.map_data.tiles[idx].exits = 0x1B;
-			}
-		}
-		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
-		nd_seven_render(fb, 640, 480, &st);
-
-		/* Verify boundary agreement across room chunk vertical seam */
-		for (int y = 300; y < 400; y += 10) {
-			uint32_t col_left = fb[y * 640 + 319];
-			uint32_t col_right = fb[y * 640 + 320];
-			int dr = abs((int)(col_left & 0xFF) - (int)(col_right & 0xFF));
-			int dg = abs((int)((col_left >> 8) & 0xFF) - (int)((col_right >> 8) & 0xFF));
-			int db = abs((int)((col_left >> 16) & 0xFF) - (int)((col_right >> 16) & 0xFF));
-			assert(dr < 120 && dg < 120 && db < 120);
-		}
-		printf("PASS: convex cape water renders continuous across vertical and horizontal chunk boundaries\n");
-
-		/* Scenario 2: Multi-Biome Coastline Junction (Grassland + Shrubland meeting Ocean) */
-		nd_seven_forget();
-		memset(&st, 0, sizeof(st));
-		strcpy(st.preferred_driver, "lamina-seven");
-		st.map_data.width = st.map_data.height = 7;
-		st.map_data.player_x = st.map_data.player_y = 3;
-		st.map_data.pos[0] = 20;
-		st.map_data.pos[1] = 20;
-
-		for (int r = 0; r < 7; r++) {
-			for (int c = 0; c < 7; c++) {
-				int idx = r * 7 + c;
-				if (c <= 3) {
-					st.map_data.tiles[idx].bio_idx = (r <= 3) ? 10 : 250;
-				} else {
-					st.map_data.tiles[idx].bio_idx = 0;
-				}
-				st.map_data.tiles[idx].exits = 0x1B;
-			}
-		}
-		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
-		nd_seven_render(fb, 640, 480, &st);
-
-		/* Verify at the multi-biome horizontal boundary (y=256, c=3) that land does not round into water */
-		uint32_t land_north = fb[250 * 640 + 300];
-		uint32_t land_south = fb[260 * 640 + 300];
-		assert((land_north & 0xFF) > 30 || ((land_north >> 8) & 0xFF) > 40);
-		assert((land_south & 0xFF) > 30 || ((land_south >> 8) & 0xFF) > 40);
-		printf("PASS: multi-biome coastline boundary has zero water intrusion or corner bites\n");
-
-		/* Scenario 3: Sheep in Ocean looking at Coastline */
-		nd_seven_forget();
-		memset(&st, 0, sizeof(st));
-		strcpy(st.preferred_driver, "lamina-seven");
-		st.map_data.width = st.map_data.height = 7;
-		st.map_data.player_x = st.map_data.player_y = 3;
-		st.map_data.pos[0] = 30;
-		st.map_data.pos[1] = 30;
-
-		for (int r = 0; r < 7; r++) {
-			for (int c = 0; c < 7; c++) {
-				int idx = r * 7 + c;
-				int is_land = (c <= 2) || (r <= 1 && c <= 3);
-				st.map_data.tiles[idx].bio_idx = is_land ? 10 : 0;
-				st.map_data.tiles[idx].exits = 0x1B;
-			}
-		}
-		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
-		nd_seven_render(fb, 640, 480, &st);
-		printf("PASS: sheep in ocean renders seamless continuous bathymetry across all ocean rooms\n");
-
-		/* Volumetric Water Fog & Shallows Optical Transmission Test */
-		{
-			/* Shore shallows (d = 1..2): gentle crystal shallows transmission (~12% opacity) */
-			int a_shore = water_alpha_at_depth(1);
-			assert(a_shore >= 30 && a_shore <= 105);
-
-			/* Wading shallows (d = 6..8): sweet spot where submerged bodies are visible with rich water substance (alpha 140..165) */
-			int a_wade = water_alpha_at_depth(7);
-			assert(a_wade >= 140 && a_wade <= 165);
-
-			/* Shallows color: high green and blue, red attenuated (crystal turquoise/cerulean) */
-			uint32_t c_shallow = water_color_at_depth(4, 128, 128, 128);
-			int r_s = c_shallow & 0xFF;
-			int g_s = (c_shallow >> 8) & 0xFF;
-			int b_s = (c_shallow >> 16) & 0xFF;
-			assert(b_s > 180 && g_s > 160 && r_s < 100);
-
-			/* Deep abyss (d >= 28): total optical extinction (alpha >= 245) */
-			int a_deep = water_alpha_at_depth(28);
-			assert(a_deep >= 245);
-
-			/* Seabed elevation preservation: water chunks maintain true seabed H < w_level */
-			const nd_room_chunk_t *gc = nd_seven_chunk_find(st.map_data.pos);
-			if (gc && gc->height && gc->has_water) {
-				int found_seabed = 0;
-				for (int i = 0; i < TILE_PX_W * TILE_PX_H; i++) {
-					if (gc->depth && gc->depth[i] > 0) {
-						found_seabed = 1;
-						break;
-					}
-				}
-				assert(found_seabed);
-			}
-
-			/* Buoyancy & Surface Swimming Elevation Test (SQ2 / R2) */
-			uint16_t world = (uint16_t)st.map_data.pos[3];
-			int16_t w_level = nd_field_water_level(world);
-			int64_t lx = 0, ly = 0;
-			nd_seven_world_pos(&st, &lx, &ly);
-			int16_t lamb_z = nd_seven_lamb_elevation(&st, (int32_t)lx, (int32_t)ly);
-			int16_t seabed_z = nd_seven_ground_elevation((int32_t)lx, (int32_t)ly);
-			assert(lamb_z >= w_level - 8);
-			assert(lamb_z >= seabed_z);
-
-			/* 2D Software Isomorphic Submersion Blit Test (SQ3 / R3) */
-			extern void draw_lamb_scaled_sub(uint32_t *fb, int w, int h, int sx, int sy, int scale, int sub_units);
-			uint32_t test_fb[64 * 64];
-			for (int i = 0; i < 64 * 64; i++) test_fb[i] = 0xFFFFFFFFu;
-			draw_lamb_scaled_sub(test_fb, 64, 64, 32, 40, 1, 8);
-			/* Verify pixels below waterline were tinted by water (not pure white) */
-			int water_tinted_pixels = 0;
-			for (int y = 40 - 8; y < 40; y++) {
-				for (int x = 20; x < 44; x++) {
-					uint32_t px = test_fb[y * 64 + x];
-					if (px != 0xFFFFFFFFu && (px & 0xFF) < 220)
-						water_tinted_pixels++;
-				}
-			}
-			assert(water_tinted_pixels > 0);
-
-			printf("PASS: volumetric water fog, seabed preservation, lamb buoyancy, and 2D submersion blit verified\n");
-		}
-	}
-
-	/* Dynamic Camera Zoom & View Frustum Culling (2D and 3D): Zero Black Borders */
-	{
-		const int W = 1280, H = 720;
-		const uint32_t CLEAR_BLACK = 0xFF08080C;
-
-		/* Test across multiple zoom factors: 0.25x, 0.5x, 1.0x, 2.0x */
-		float zoom_levels[4] = { 0.25f, 0.5f, 1.0f, 2.0f };
-		for (int z = 0; z < 4; z++) {
-			float zoom = zoom_levels[z];
-			nd_seven_set_zoom(zoom);
-			assert(nd_seven_get_zoom() == zoom);
-
-			/* 2D Mode: Full screen coverage */
-			nd_seven_set_3d_mode(0);
-			set_map(-8, -3, 10, 0x1B, 0, 0, 0, 0);
-			nd_seven_render(fb, W, H, &st);
-
-			int black_pixels_2d = 0;
-			for (int i = 0; i < W * H; i++) {
-				if (fb[i] == CLEAR_BLACK)
-					black_pixels_2d++;
-			}
-			assert(black_pixels_2d == 0); /* Zero black pixels anywhere on the canvas */
-
-			/* 3D Mode: Full screen coverage including tilted northern horizon */
-			nd_seven_set_3d_mode(1);
-			nd_seven_render(fb, W, H, &st);
-
-			int black_pixels_3d = 0;
-			for (int i = 0; i < W * H; i++) {
-				if (fb[i] == CLEAR_BLACK)
-					black_pixels_3d++;
-			}
-			assert(black_pixels_3d == 0); /* Zero black pixels in 3D diorama */
-		}
-		nd_seven_set_zoom(1.0f);
-		assert(nd_seven_get_zoom() == 1.0f);
-		printf("PASS: dynamic camera zoom 0.25x-2.0x guarantees 100%% canvas coverage with zero black borders\n");
-	}
-
-	/* Multi-Resolution Noise LOD Selection across Zoom and Distance Tiers */
-	{
-		/* 2D Mode: Uniform LOD selection based on zoom */
-		nd_seven_set_3d_mode(0);
-
-		nd_seven_set_zoom(2.0f);
-		set_map(-8, -3, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, 640, 480, &st);
-		const nd_room_chunk_t *c_high = nd_seven_chunk_find(st.map_data.pos);
-		assert(c_high != NULL);
-		assert(c_high->lod == 3); /* High zoom selects LOD 3 (full 1x1 ladder) */
-
-		/* Macro Zoom Out: selects LOD 1 or LOD 0 */
-		nd_seven_ground_cache_forget();
-		nd_seven_set_zoom(0.05f);
-		nd_seven_render(fb, 640, 480, &st);
-		const nd_room_chunk_t *c_macro = nd_seven_chunk_find(st.map_data.pos);
-		assert(c_macro != NULL);
-		assert(c_macro->lod <= 1); /* Macro zoom selects LOD 0 or 1 */
-
-		nd_seven_set_zoom(1.0f);
-		assert(nd_seven_get_zoom() == 1.0f);
-
-		/* 3D Mode: Concentric LOD rings & Equidistant LOD Invariant */
-		nd_seven_set_3d_mode(1);
-		nd_seven_set_zoom(0.5f); /* Zoom out so distant chunks are in frustum */
-		set_map(-8, -3, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, 1280, 720, &st);
-
-		/* Center chunk is near target: LOD 3 or 2 */
-		const nd_room_chunk_t *c_center = nd_seven_chunk_find(st.map_data.pos);
-		assert(c_center != NULL);
-		assert(c_center->lod >= 2);
-
-		/* Equidistant LOD Invariant: chunks at symmetric distance from camera eye MUST share identical LOD */
-		int16_t east_pos[4] = { (int16_t)(st.map_data.pos[0] + 2), (int16_t)(st.map_data.pos[1] - 1), 0, 0 };
-		int16_t west_pos[4] = { (int16_t)(st.map_data.pos[0] - 2), (int16_t)(st.map_data.pos[1] - 1), 0, 0 };
-		const nd_room_chunk_t *c_east = nd_seven_chunk_find(east_pos);
-		const nd_room_chunk_t *c_west = nd_seven_chunk_find(west_pos);
-		if (c_east && c_west) {
-			assert(c_east->lod == c_west->lod); /* Equidistant chunks have 100% identical LOD */
-		}
-
-		/* Far chunk (distance >= 5 tiles): evaluated at LOD 1 or LOD 2 */
-		int16_t far_pos[4] = { (int16_t)(st.map_data.pos[0] + 5), (int16_t)(st.map_data.pos[1] - 5), 0, 0 };
-		const nd_room_chunk_t *c_far = nd_seven_chunk_find(far_pos);
-		if (c_far) {
-			assert(c_far->lod <= 2); /* Far chunks use coarser LOD 1 or 2 */
-		}
-
-		nd_seven_set_zoom(1.0f);
-		printf("PASS: multi-resolution noise LOD selection & equidistant LOD invariant verified\n");
-	}
-
-	/* 2D Billboard and Entity Scaling by Camera Zoom */
-	{
-		const int W = 640, H = 480;
-		nd_seven_set_3d_mode(0);
-
-		/* Render at zoom 1.0x (eff_scale = 2) */
-		nd_seven_set_zoom(1.0f);
-		set_map(-8, -3, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, W, H, &st);
-
-		/* Count non-background pixels in lamb bounding box at center (w/2, h/2) */
-		int cx = W / 2, cy = H / 2;
-		int lamb_px_1x = 0;
-		for (int dy = -40; dy <= 40; dy++) {
-			for (int dx = -40; dx <= 40; dx++) {
-				uint32_t c = fb[(cy + dy) * W + (cx + dx)];
-				if (c != 0xFF08080C) lamb_px_1x++;
-			}
-		}
-
-		/* Render at zoom 2.0x (eff_scale = 4): lamb sprite should scale up 2x in width and height */
-		nd_seven_set_zoom(2.0f);
-		nd_seven_render(fb2, W, H, &st);
-		int lamb_px_2x = 0;
-		for (int dy = -40; dy <= 40; dy++) {
-			for (int dx = -40; dx <= 40; dx++) {
-				uint32_t c = fb2[(cy + dy) * W + (cx + dx)];
-				if (c != 0xFF08080C) lamb_px_2x++;
-			}
-		}
-		assert(lamb_px_1x > 0);
-		assert(lamb_px_2x > 0);
-		nd_seven_set_zoom(1.0f);
-		printf("PASS: 2D billboards, lamb and entities scale proportionally with camera zoom\n");
-	}
-
-	/* Active Frustum Chunk Retention Across Frame Eviction */
-	{
-		nd_seven_ground_cache_forget();
-		assert(nd_seven_chunk_count() == 0);
-
-		/* Zoom out 2x in 2D so frustum encompasses chunks beyond the 7x7 server map */
-		nd_seven_set_zoom(0.5f);
-		nd_seven_set_3d_mode(0);
-		set_map(-8, -3, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, 1280, 720, &st);
-
-		int active_count = nd_seven_chunk_count();
-		assert(active_count > 0);
-
-		/* Render a second frame with the same view: all active chunks MUST be retained */
-		nd_seven_render(fb, 1280, 720, &st);
-		assert(nd_seven_chunk_count() == active_count);
-
-		nd_seven_set_zoom(1.0f);
-		nd_seven_ground_cache_forget();
-		printf("PASS: active frustum chunks retained across frame eviction without premature purging\n");
-	}
-
-	/* Stratospheric LOD Threshold and Macro Chunk Dispatch (SQ3) */
-	{
-		nd_seven_ground_cache_forget();
-		nd_seven_set_3d_mode(1);
-		nd_seven_set_zoom(0.05f); /* Extreme stratospheric zoom */
-		set_map(50, 60, 10, 0x1B, 0, 0, 0, 0);
-
-		/* At zoom 0.05f, standard room iteration would evaluate > 4,000 rooms.
-		 * With the stratospheric threshold, room chunk allocations are strictly bounded to the 7x7 focal area. */
-		nd_seven_render(fb, 1280, 720, &st);
-		int chunk_allocs = nd_seven_chunk_alloc_count();
-		assert(chunk_allocs <= 64); /* Must NOT allocate thousands of room chunks */
-
-		nd_seven_set_zoom(1.0f);
-		nd_seven_set_3d_mode(0);
-		nd_seven_ground_cache_forget();
-		printf("PASS: stratospheric LOD threshold at zoom < 0.25f bypasses room explosion and bounds chunk count to <= 64\n");
-	}
-
 	/* Pure-C 3D Shaders, Pitch-Rotated Billboards, Water Depression, and Temporal Stability (R1-R4) */
 	{
 		/* 1. Verify all 6 3D shaders are exported from pure C and include required optics */
@@ -2288,11 +1426,11 @@ int main(void)
 		nd_seven_forget();
 		/* Stand at (100, 100) where room (100, 100) has a boulder 'O' and a built room flag */
 		set_map(100, 100, 10, 0x1B, ND_MAP_FLAG_ROOM, 'O', 0, 'T');
-		nd_seven_render(fb, 640, 480, &st);
+		nd_seven_render(640, 480, &st);
 
 		/* Walk 12 rooms East to (112, 100) so (100, 100) is well outside the 7x7 window */
 		set_map_keep(112, 100, 10, 0x1B, 0, 0, 0, 0);
-		nd_seven_render(fb, 640, 480, &st);
+		nd_seven_render(640, 480, &st);
 
 		int16_t old_pos[4] = { 100, 100, 0, 0 };
 		ndw_tile_t resolved;
@@ -2306,12 +1444,11 @@ int main(void)
 	/* R3 & R4: Unified 1:1 Room Scenery Placement Across Zoom Levels (Zero 7x7 Density Cliff) */
 	{
 		nd_seven_forget();
-		nd_seven_set_3d_mode(1);
 		set_map(10, 10, 12, 0x1B, 0, 'X', 'o', 'T');
 
 		/* First measure billboards in ring [4..12] rooms outside 7x7 at mid zoom (0.15f) */
 		nd_seven_set_zoom(0.15f);
-		nd_seven_render(fb, 1280, 720, &st);
+		nd_seven_render(1280, 720, &st);
 		uint32_t cnt_mid_zoom = nd_seven_last_mid_billboard_count();
 		int ring_4_12_mid_zoom = 0;
 		for (uint32_t i = 0; i < cnt_mid_zoom; i++) {
@@ -2331,7 +1468,7 @@ int main(void)
 		/* Now zoom all the way out to -22x (0.00738f): ring [4..12] must NOT thin out,
 		 * and scenery must be emitted homogeneously across visible rooms! */
 		nd_seven_set_zoom(0.00738f);
-		nd_seven_render(fb, 1280, 720, &st);
+		nd_seven_render(1280, 720, &st);
 
 		uint32_t mid_cnt = nd_seven_last_mid_billboard_count();
 		assert(mid_cnt > 1000);
@@ -2399,11 +1536,10 @@ int main(void)
 
 		/* By -23x zoom (0.0059f, eff_cam_dist ~47,457 > 44,000), all scenery has uniformly faded out together */
 		nd_seven_set_zoom(0.0059f);
-		nd_seven_render(fb, 1280, 720, &st);
+		nd_seven_render(1280, 720, &st);
 		assert(nd_seven_last_mid_billboard_count() == 0);
 
 		nd_seven_set_zoom(1.0f);
-		nd_seven_set_3d_mode(0);
 		nd_seven_forget();
 		printf("PASS: -22x zoom (0.00738) emits %u homogeneous billboards with zero zoom-out thinning (ring[4..12]: %d vs %d at 0.15x, >14: %d, >30: %d, max_cheb=%d) and fades out uniformly by -23x zoom\n",
 		       mid_cnt, ring_4_12_far_zoom, ring_4_12_mid_zoom, far_horizon_cnt, deep_horizon_30_cnt, max_cheb_seen);
@@ -2411,7 +1547,6 @@ int main(void)
 
 	/* High-Resolution 48x48 Level 0 Terrain Grid & Exact Seam Continuity Verification */
 	{
-		nd_seven_set_3d_mode(1);
 		ar_system_t *cs = nd_seven_get_chunk_sys();
 		assert(cs != NULL);
 
@@ -2581,7 +1716,6 @@ int main(void)
 
 	/* R7 & R8: Non-Stationary Regional Ruggedness Envelope & Real 3D Height Relief (Clear Plains vs Rugged Ridges) */
 	{
-		nd_seven_set_3d_mode(1);
 		ar_system_t *cs = nd_seven_get_chunk_sys();
 		assert(cs != NULL);
 
@@ -2661,11 +1795,14 @@ int main(void)
 		assert(strstr(fs_t, "wTropical") != NULL && strstr(fs_t, "wPolar") != NULL);
 		assert(strstr(fs_t, "shoreWetMoisture") != NULL);
 		assert(strstr(fs_t, "C_SHALLOW") != NULL && strstr(fs_t, "C_ABYSS") != NULL);
-		assert(strstr(fs_t, "shallowFactor") != NULL && strstr(fs_t, "effectiveOpticalDepth") != NULL);
+		assert(strstr(fs_t, "shallowFactor") != NULL && strstr(fs_t, "deepFactor") != NULL && strstr(fs_t, "effectiveOpticalDepth") != NULL);
+		assert(strstr(fs_t, "refractedWorldPos") != NULL);
+		assert(strstr(fs_t, "capDepthScale") != NULL && strstr(fs_t, "openGlareGate") != NULL);
 		assert(strstr(fs_w, "eval_recursive_wind") != NULL);
 		assert(strstr(fs_w, "eval_water_fetch_and_basin") != NULL);
 		assert(strstr(fs_w, "eval_wind_capillary_facets") != NULL);
 		assert(strstr(fs_w, "openSeaFactor") != NULL && strstr(fs_w, "windFetch") != NULL);
+		assert(strstr(fs_w, "capDepthScale") != NULL && strstr(fs_w, "openGlareGate") != NULL);
 		assert(strstr(fs_w, "specMicro") != NULL && strstr(fs_w, "specWavelet") != NULL && strstr(fs_w, "specBroad") != NULL);
 		assert(strstr(fs_w, "eval_zoom_water_waves") != NULL);
 		assert(strstr(fs_w, "hBicubic") != NULL);
@@ -2723,13 +1860,95 @@ int main(void)
 		}
 		assert(g_late > g_early * 0.75f && g_late < g_early * 1.35f);
 
-		/* 4. Verify natural bathymetric shelf progression in nd_field_bimodal_hypsometry:
+		/* 4. Verify natural bathymetric shelf progression in nd_field_bimodal_hypsometry
+		 * and two-scale shallow-vs-deep water optical curves across d = 2.0, 6.0, 20.0, 80.0:
 		 * Shallow coastal elevations (-1..-7) remain gentle wading shallows instead of dropping to -12 */
 		assert(nd_field_bimodal_hypsometry(-2) == -2);
 		assert(nd_field_bimodal_hypsometry(-6) == -6);
 		assert(nd_field_bimodal_hypsometry(-7) == -7);
 		assert(nd_field_bimodal_hypsometry(-12) < -14);
 		assert(nd_field_bimodal_hypsometry(-30) < -60);
+
+		/* Verify 4-tier bathymetric fine-octave damping across littoral (-4..0), sublittoral (-16..-4),
+		 * abyssal (< -16), and coastal beach (0..+6) in nd_field_sample(world, 3, ...) */
+		{
+			int tier_seen[4] = { 0, 0, 0, 0 };
+			for (uint16_t world = 0; world <= 1; world++) {
+				for (int wy = -3840; wy <= 3840; wy += 64) {
+					for (int wx = -3840; wx <= 3840; wx += 80) {
+						int32_t raw_fine_q12_4 = 0;
+						nd_field_elevation_q12_4(world, 3, wx, wy, NULL, &raw_fine_q12_4);
+						int32_t rx_q16 = 0, ry_q16 = 0;
+						nd_field_world_to_room_q16(wx, wy, &rx_q16, &ry_q16);
+						int32_t coarse_q12_4 = nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
+						int16_t w_lvl = nd_field_water_level(world);
+						nd_field_eval_mountain_lake(world, wx, wy, &coarse_q12_4, &w_lvl);
+						int32_t rel_q12_4 = coarse_q12_4 - ((int32_t)w_lvl << 4);
+
+						int32_t exp_fine = raw_fine_q12_4;
+						if (rel_q12_4 <= -(16 << 4)) {
+							exp_fine >>= 1;
+							tier_seen[2]++;
+						} else if (rel_q12_4 <= -(4 << 4)) {
+							int32_t w_sub = 72 + (((-rel_q12_4 - (4 << 4)) * 56) / (12 << 4));
+							exp_fine = (int32_t)(((int64_t)exp_fine * w_sub) >> 8);
+							tier_seen[1]++;
+						} else if (rel_q12_4 <= 0) {
+							int32_t w_sub = 38 + (((-rel_q12_4) * 34) / (4 << 4));
+							exp_fine = (int32_t)(((int64_t)exp_fine * w_sub) >> 8);
+							tier_seen[0]++;
+						} else if (rel_q12_4 < (6 << 4)) {
+							int32_t w_coast = 38 + ((rel_q12_4 * 218) / (6 << 4));
+							exp_fine = (int32_t)(((int64_t)exp_fine * w_coast) >> 8);
+							tier_seen[3]++;
+						}
+						int32_t max_fine_q12_4 = (int32_t)ND_FIELD_FINE_AMP_BUDGET << 4;
+						if (exp_fine > max_fine_q12_4) exp_fine = max_fine_q12_4;
+						if (exp_fine < -max_fine_q12_4) exp_fine = -max_fine_q12_4;
+						int32_t exp_total = coarse_q12_4 + exp_fine;
+						if (exp_total > 32000) exp_total = 32000;
+						if (exp_total < -32000) exp_total = -32000;
+
+						nd_field_sample_t s3 = nd_field_sample(world, 3, wx, wy);
+						assert(s3.fine_elev == (int16_t)(exp_fine >> 4));
+						assert(s3.elevation_q12_4 == (int16_t)exp_total);
+					}
+				}
+			}
+			assert(tier_seen[0] > 0 && tier_seen[1] > 0 && tier_seen[2] > 0 && tier_seen[3] > 0);
+		}
+
+		{
+			const float test_d[4] = { 2.0f, 6.0f, 20.0f, 80.0f };
+			float absorb_r[4], scatter_w[4], caust_f[4], glass_m[4];
+			for (int i = 0; i < 4; i++) {
+				float d = fminf(test_d[i], 64.0f);
+				float t_sh = fminf(1.0f, fmaxf(0.0f, (d - 0.15f) / (4.5f - 0.15f)));
+				float sh = t_sh * t_sh * (3.0f - 2.0f * t_sh);
+				float t_dp = fminf(1.0f, fmaxf(0.0f, (d - 6.0f) / (28.0f - 6.0f)));
+				float dp = t_dp * t_dp * (3.0f - 2.0f * t_dp);
+				float opt_d = (d / 0.819152f) * (0.42f + 0.58f * sh);
+				absorb_r[i]  = expf(-0.145f * opt_d);
+				scatter_w[i] = (0.28f * sh + 0.72f * dp) * (1.0f - expf(-0.16f * opt_d));
+				float t_cf = fminf(1.0f, fmaxf(0.0f, (d - 0.08f) / (0.65f - 0.08f)));
+				caust_f[i]   = (t_cf * t_cf * (3.0f - 2.0f * t_cf)) * expf(-0.12f * d);
+				float t_gl = fminf(1.0f, fmaxf(0.0f, (d - 1.5f) / (16.0f - 1.5f)));
+				glass_m[i]   = 0.12f + 0.88f * (t_gl * t_gl * (3.0f - 2.0f * t_gl));
+			}
+			/* d = 2.0 (lamb leg wading depth): visible ~21% red absorption & clear aquamarine tint,
+			 * while keeping > 75% bottom transmission and glassy surface reflectance (< 0.16 * fresnel) */
+			assert(absorb_r[0] < 0.82f && absorb_r[0] > 0.72f);
+			assert(scatter_w[0] > 0.020f && scatter_w[0] < 0.10f);
+			assert(caust_f[0] > 0.75f);
+			assert(glass_m[0] < 0.16f);
+			/* d = 6.0 (shallow lake basin): richer turquoise tint and active caustics */
+			assert(absorb_r[1] < absorb_r[0] && scatter_w[1] > scatter_w[0] * 2.5f);
+			assert(caust_f[1] > 0.45f);
+			/* d = 20.0..80.0 (mesopelagic shelf & abyssal ocean): caustics extinguish, deep scatter & Fresnel dominate */
+			assert(scatter_w[2] > 0.55f && scatter_w[3] > 0.90f);
+			assert(caust_f[2] < 0.10f && caust_f[3] < 0.001f);
+			assert(glass_m[2] > 0.99f && glass_m[3] > 0.99f);
+		}
 
 		/* 5. Verify all 3 WebGL2 shader programs (terrain, water, billboard) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */

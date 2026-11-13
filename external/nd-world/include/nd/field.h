@@ -800,17 +800,23 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	if (lod > 0) {
 		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
 
-		/* Smooth C1 coastal/bathymetric transition: keep immediate beach & surf zone
-		 * (-8..+6 world units relative to water_level) gently sloped without hard shelf clamps. */
+		/* Four-tier continuous coastal/bathymetric transition anchored to 1 world unit = 1 sprite pixel
+		 * (lamb height = 32 units, leg height = 4 units):
+		 * 1. Littoral wading shelf (-4..0 units): 15% (38/256) at shoreline to 28% (72/256) at -4 units
+		 * 2. Sublittoral / shallow lake basin (-16..-4 units): 28% (72/256) to 50% (128/256) at -16 units
+		 * 3. Mesopelagic shelf break & abyssal ocean (< -16 units): 50% (128/256)
+		 * 4. Coastal beach above water (0..+6 units): 15% (38/256) to 100% (256/256) */
 		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
-		if (rel_water_q12_4 <= -(8 << 4)) {
+		if (rel_water_q12_4 <= -(16 << 4)) {
 			fine_q12_4 >>= 1;
+		} else if (rel_water_q12_4 <= -(4 << 4)) {
+			int32_t w_sub = 72 + (((-rel_water_q12_4 - (4 << 4)) * 56) / (12 << 4));
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
 		} else if (rel_water_q12_4 <= 0) {
-			/* -8..0 world units: ramp from 50% (128/256) at depth 8 down to 25% (64/256) at shoreline */
-			int32_t w_sub = 64 + ((-rel_water_q12_4) >> 1);
+			int32_t w_sub = 38 + (((-rel_water_q12_4) * 34) / (4 << 4));
 			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
 		} else if (rel_water_q12_4 < (6 << 4)) {
-			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) / (6 << 4));
+			int32_t w_coast = 38 + ((rel_water_q12_4 * 218) / (6 << 4));
 			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);
 		}
 
