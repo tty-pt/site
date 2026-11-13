@@ -1873,7 +1873,9 @@ int main(void)
 		 * abyssal (< -16), and coastal beach (0..+6) in nd_field_sample(world, 3, ...) */
 		{
 			int tier_seen[4] = { 0, 0, 0, 0 };
-			for (uint16_t world = 0; world <= 1; world++) {
+			const uint16_t test_worlds[3] = { 0, 1, 90 };
+			for (int wi = 0; wi < 3; wi++) {
+				uint16_t world = test_worlds[wi];
 				for (int wy = -3840; wy <= 3840; wy += 64) {
 					for (int wx = -3840; wx <= 3840; wx += 80) {
 						int32_t raw_fine_q12_4 = 0;
