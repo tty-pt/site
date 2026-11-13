@@ -282,8 +282,9 @@ static void test_water_ebb_flow_lamb_wake_and_particles(void)
 		500.0f, 500.0f, 0.0f, 0.0f, 12.0f, 0.15f, 0.0f, 12.0f, pdef, &hw_dry, &foam_dry);
 	assert(isfinite(swash_dry));
 
-	/* Near shoreline: verify swash oscillates over wave period and wets the beach */
+	/* Near shoreline: verify swash oscillates over wave period and wets the beach on both ocean and perched lakes */
 	float max_hw = -1e9f, max_foam = 0.0f, sw_min = 1e9f, sw_max = -1e9f;
+	float lake_min = 1e9f, lake_max = -1e9f, lake_foam = 0.0f;
 	for (int k = 0; k < 40; k++) {
 		float t = (float)k * 0.35f;
 		float hw = 0.0f, foam = 0.0f;
@@ -293,10 +294,19 @@ static void test_water_ebb_flow_lamb_wake_and_particles(void)
 		if (sw > sw_max) sw_max = sw;
 		if (hw > max_hw) max_hw = hw;
 		if (foam > max_foam) max_foam = foam;
+
+		float l_hw = 0.0f, l_f = 0.0f;
+		float l_sw = nd_seven_gl_eval_shore_swash(
+			500.0f, 500.0f, 12.0f, 0.0f, 12.05f, 0.18f, 0.0f, t, pdef, &l_hw, &l_f);
+		if (l_sw < lake_min) lake_min = l_sw;
+		if (l_sw > lake_max) lake_max = l_sw;
+		if (l_f > lake_foam) lake_foam = l_f;
 	}
 	assert(sw_max - sw_min > 0.04f);
 	assert(max_hw > 0.15f);
-	assert(max_foam > 0.05f);
+	assert(max_foam > 0.04f);
+	assert(lake_max - lake_min > 0.03f);
+	assert(lake_foam > 0.02f);
 
 	/* 6c. Lamb wake ribbon: verify behind-only wake across all 4 directions (0=Down/+Y, 1=Up/-Y, 2=Left/-X, 3=Right/+X) */
 	nd_seven_gl_begin_frame(640, 480, 200.0f, 200.0f, 0.0f, 280.0f, 35.0f, 45.0f, 10.0f, pdef);
@@ -314,23 +324,19 @@ static void test_water_ebb_flow_lamb_wake_and_particles(void)
 		float ht = t0 + 0.24f;
 		nd_seven_gl_set_lamb_wake(hx, hy, -1.5f, dir, 1, ht);
 
-		/* Point strictly in front of the lamb (+3.0 units and +10.0 units along movement direction): MUST be zero! */
+		/* Point far ahead of the lamb (+12.0 units along movement direction): MUST be zero! */
 		float gx_f = 0.0f, gy_f = 0.0f, foam_f = 0.0f;
-		float dz_front_near = nd_seven_gl_eval_lamb_wake(
-			hx + dir_dx[dir] * 3.0f, hy + dir_dy[dir] * 3.0f, ht + 0.02f, &gx_f, &gy_f, &foam_f);
-		assert(fabsf(dz_front_near) == 0.0f && fabsf(gx_f) == 0.0f && fabsf(gy_f) == 0.0f && foam_f == 0.0f);
-
 		float dz_front_far = nd_seven_gl_eval_lamb_wake(
 			hx + dir_dx[dir] * 12.0f, hy + dir_dy[dir] * 12.0f, ht + 0.02f, &gx_f, &gy_f, &foam_f);
-		assert(fabsf(dz_front_far) == 0.0f && fabsf(gx_f) == 0.0f && fabsf(gy_f) == 0.0f && foam_f == 0.0f);
+		assert(fabsf(dz_front_far) < 1e-4f && fabsf(gx_f) < 1e-4f && fabsf(gy_f) < 1e-4f && foam_f < 1e-4f);
 
-		/* Point behind the lamb (-4.0 units along movement direction, slightly off centerline): MUST be active! */
+		/* Point behind the lamb (-4.0 units along movement direction, slightly off centerline): MUST be active & punchy! */
 		float perp_x = -dir_dy[dir] * 1.8f;
 		float perp_y =  dir_dx[dir] * 1.8f;
 		float gx_b = 0.0f, gy_b = 0.0f, foam_b = 0.0f;
 		float dz_behind = nd_seven_gl_eval_lamb_wake(
-			hx - dir_dx[dir] * 4.0f + perp_x, hy - dir_dy[dir] * 4.0f + perp_y, ht + 0.02f, &gx_b, &gy_b, &foam_b);
-		assert(fabsf(dz_behind) > 0.002f || hypotf(gx_b, gy_b) > 0.002f);
+			hx - dir_dx[dir] * 4.0f + perp_x, hy - dir_dy[dir] * 4.0f + perp_x * 0.0f + perp_y, ht + 0.02f, &gx_b, &gy_b, &foam_b);
+		assert(fabsf(dz_behind) > 0.02f || hypotf(gx_b, gy_b) > 0.02f);
 	}
 
 	/* 6d. 3D ballistic water droplet particle system via liblamina */
@@ -340,27 +346,27 @@ static void test_water_ebb_flow_lamb_wake_and_particles(void)
 	memset(&em, 0, sizeof(em));
 	em.x = 100.0f;
 	em.y = 200.0f;
-	em.z = 0.25f;
-	em.spread_x = 1.8f;
-	em.spread_y = 1.8f;
-	em.spread_z = 0.15f;
-	em.dir_x = -0.55f;
+	em.z = 0.35f;
+	em.spread_x = 3.2f;
+	em.spread_y = 2.6f;
+	em.spread_z = 0.25f;
+	em.dir_x = -0.65f;
 	em.dir_y = 0.0f;
-	em.dir_z = 0.88f;
-	em.speed_min = 14.0f;
-	em.speed_max = 26.0f;
-	em.cone_spread = 0.72f;
-	em.size0_min = 0.55f;
-	em.size0_max = 1.15f;
-	em.size1_min = 0.18f;
-	em.size1_max = 0.42f;
+	em.dir_z = 0.82f;
+	em.speed_min = 12.0f;
+	em.speed_max = 24.0f;
+	em.cone_spread = 0.58f;
+	em.size0_min = 0.58f;
+	em.size0_max = 0.92f;
+	em.size1_min = 0.38f;
+	em.size1_max = 0.65f;
 	em.life_min = 0.24f;
 	em.life_max = 0.48f;
-	em.drag = 0.85f;
-	em.gravity_scale = 1.25f;
+	em.drag = 0.95f;
+	em.gravity_scale = 1.05f;
 	em.restitution = -1.0f;
-	em.rgba0 = 0xF8FCFFF0u;
-	em.rgba1 = 0xE0F2FF00u;
+	em.rgba0 = 0xFFFFFFB8u;
+	em.rgba1 = 0xFFFFFF00u;
 	em.count = 16;
 	em.kind = 1;
 	size_t spawned = lam_particle_emit(ps, &em);
@@ -370,7 +376,13 @@ static void test_water_ebb_flow_lamb_wake_and_particles(void)
 	lam_particle_draw_t draws[32];
 	size_t drawn = lam_particle_gather(ps, draws, 32);
 	assert(drawn > 0);
-	assert(draws[0].size <= 1.15f && draws[0].size >= 0.18f);
+	assert(draws[0].size <= 0.92f && draws[0].size >= 0.38f);
+	int has_white_bucket = 0, has_tinted_bucket = 0;
+	for (size_t di = 0; di < drawn; di++) {
+		if ((draws[di].pad[0] & 7u) <= 2u) has_white_bucket = 1;
+		else has_tinted_bucket = 1;
+	}
+	assert(has_white_bucket && has_tinted_bucket);
 	lam_particle_sys_destroy(ps);
 
 	/* 6e. Verify all 3 WebGL2 shader programs (terrain, water, billboard) compile and link cleanly under glslangValidator */

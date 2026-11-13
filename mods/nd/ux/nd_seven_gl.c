@@ -921,43 +921,88 @@ static const char *s_fs_terrain =
 	"    float p2Sun   = 0.5 * (3.0 * cosSun  * cosSun  - 1.0);\n"
 	"    return isOcean * (0.68 * p2Moon + 0.31 * p2Sun);\n"
 	"}\n"
+	"/* Low-frequency shoreline wave run-up sampler (octaves 0..2 only, wavelengths 4.5..42 units):\n"
+	" * Matches the visible travelling water wave pattern on both lakes and oceans while omitting\n"
+	" * high-frequency octaves 3..5 (wavelengths 0.14..1.47 units) that would jitter the shoreline edge. */\n"
+	"vec2 eval_shore_wave_swell(vec2 pos, float anim_time, float dist, float fw) {\n"
+	"    vec4 wind = eval_recursive_wind(pos, anim_time, fw, dist);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const float freqs[3] = float[3](0.024, 0.072, 0.220);\n"
+	"    const float amps[3]  = float[3](1.450, 0.680, 0.280);\n"
+	"    const float spds[3]  = float[3](0.180, 0.340, 0.620);\n"
+	"    const float dFar[3]  = float[3](65000.0, 18000.0, 4800.0);\n"
+	"    const float dNear[3] = float[3](14000.0,  3600.0, 1100.0);\n"
+	"    const uint  seeds[3] = uint[3](0x4F434530u, 0x5357454Cu, 0x57415645u);\n"
+	"    const vec2  dirs[3]  = vec2[3](\n"
+	"        vec2( 0.8575, -0.5145),\n"
+	"        vec2( 0.6402, -0.7682),\n"
+	"        vec2( 0.9285, -0.3714)\n"
+	"    );\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    float h = 0.0;\n"
+	"    float crest = 0.0;\n"
+	"    vec2 pRot = pos;\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
+	"        float wNyq  = smoothstep(0.55, 0.16, freqs[i] * fw);\n"
+	"        float w = wDist * wNyq * (0.85 + 0.20 * gust);\n"
+	"        if (w > 0.001) {\n"
+	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
+	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
+	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
+	"            float signedVal = g.x - 0.5;\n"
+	"            float ridge = 0.5 - abs(signedVal);\n"
+	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
+	"            h += shaped * amps[i] * w;\n"
+	"            crest += max(0.0, ridge - 0.22) * (w * 1.4);\n"
+	"            pRot += g.yz * (0.11 * w);\n"
+	"        }\n"
+	"        pRot = rot * pRot;\n"
+	"    }\n"
+	"    return vec2(h, clamp(crest, 0.0, 1.0));\n"
+	"}\n"
 	"/* Asymmetric Shoreline Wave Run-Up & Backwash (Swash) + Intertidal Wet-Sand Hysteresis:\n"
-	" * Driven directly by the travelling water wavelets (eval_zoom_water_waves) + smooth coastal surge\n"
-	" * with zero high-frequency cellular/lace noise static.\n"
+	" * Driven by the smooth travelling wave octaves (eval_shore_wave_swell) + gentle shoreward phase\n"
+	" * on both lakes and oceans, with zero high-frequency shoreline static.\n"
 	" * Returns vec4(swashSurfZ, highWaterZ, swashFoam, swashFilmMask). */\n"
 	"vec4 eval_shore_swash(vec2 pos, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw) {\n"
 	"    float isOcean = 1.0 - smoothstep(0.25, 0.75, abs(uSeaLevel - uBaseSeaLevel));\n"
 	"    float slopeMag = length(slopeGrad);\n"
-	"    float nearShore = smoothstep(6.0, 0.0, abs(terrainZ - baseTideZ));\n"
+	"    float relZ = terrainZ - baseTideZ;\n"
+	"    float nearShore = smoothstep(7.5, 0.0, abs(relZ));\n"
 	"    if (nearShore <= 0.001 || dist > 3800.0) {\n"
-	"        float tideHigh = uSeaLevel + isOcean * 0.99;\n"
+	"        float tideHigh = uSeaLevel + (0.42 + 0.78 * isOcean);\n"
 	"        return vec4(baseTideZ, max(baseTideZ, tideHigh), 0.0, 0.0);\n"
 	"    }\n"
 	"    float distFade = smoothstep(3800.0, 450.0, dist);\n"
-	"    vec2 shoreDir = (slopeMag > 1e-4) ? (slopeGrad / slopeMag) : vec2(0.7071, -0.7071);\n"
-	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.025 + vec2(13.7, -9.2), 0x53574153u);\n"
-	"    float groupEnv = 0.65 + 0.35 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.4);\n"
-	"    float crossCoord = dot(pos, shoreDir) * 0.08 + (nAlong.x - 0.5) * 1.15;\n"
-	"    float waveArg = mod(anim_time * 0.95, 628.3185) - crossCoord;\n"
-	"    float swellWave = sin(waveArg) + 0.25 * sin(2.0 * waveArg - 0.45);\n"
-	"    /* Couple shoreline water level directly to the actual travelling water wavelets (eval_zoom_water_waves) */\n"
-	"    vec4 shoreWaves = eval_zoom_water_waves(pos, anim_time, dist, fw);\n"
-	"    float slopeResponse = smoothstep(0.008, 0.14, slopeMag) * distFade;\n"
-	"    float waveletRunup = shoreWaves.x * (0.55 + 0.45 * isOcean) * (0.45 + 0.55 * slopeResponse);\n"
-	"    float swellRunup = swellWave * (0.08 + 0.38 * isOcean) * groupEnv * slopeResponse;\n"
-	"    float swashDisp = waveletRunup + swellRunup;\n"
+	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.014 + vec2(13.7, -9.2), 0x53574153u);\n"
+	"    float groupEnv = 0.76 + 0.24 * sin(mod(anim_time * 0.24, 628.3185) + (nAlong.x - 0.5) * 2.2);\n"
+	"    /* Shoreward phase parameterized by local elevation above/below tide (relZ) + low-freq along-shore phase:\n"
+	"     * 100% invariant to world coordinate magnitude |pos|, eliminating all pos*shoreDir Moire contour rings! */\n"
+	"    float waveArg = mod(anim_time * 0.92, 628.3185) - relZ * 0.32 + (nAlong.x - 0.5) * 1.8;\n"
+	"    float swellWave = sin(waveArg) + 0.22 * sin(2.0 * waveArg - 0.35);\n"
+	"    vec2 shoreWaves = eval_shore_wave_swell(pos, anim_time, dist, fw);\n"
+	"    float slopeResponse = (0.52 + 0.48 * smoothstep(0.005, 0.12, slopeMag)) * distFade;\n"
+	"    /* Coupled travelling water-wave + gentle tidal surge on both lakes and oceans */\n"
+	"    float waveletRunup = shoreWaves.x * (0.58 + 0.28 * isOcean) * slopeResponse;\n"
+	"    float swellRunup = swellWave * (0.30 + 0.28 * isOcean) * groupEnv * slopeResponse;\n"
+	"    float swashDisp = (waveletRunup + swellRunup) * nearShore;\n"
 	"    float swashSurfZ = baseTideZ + swashDisp;\n"
-	"    float recentSwashTop = baseTideZ + (0.28 + 0.72 * isOcean) * (0.75 + 0.25 * groupEnv) * slopeResponse;\n"
-	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.25);\n"
-	"    /* Smooth, low-frequency wavelet-crest lip at the water's edge (zero high-frequency laceNoise static) */\n"
-	"    float edgeLip = smoothstep(0.32, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.35, shoreWaves.x + swellWave * 0.25);\n"
-	"    float swashFoam = clamp(edgeLip * (0.16 + 0.34 * shoreWaves.w) * isOcean * distFade, 0.0, 0.36);\n"
-	"    float swashFilm = smoothstep(highWaterZ + 0.15, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
+	"    float recentSwashTop = baseTideZ + (0.58 + 0.58 * isOcean) * (0.80 + 0.20 * groupEnv) * slopeResponse;\n"
+	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.20);\n"
+	"    float edgeLip = smoothstep(0.45, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.40, shoreWaves.x + swellWave * 0.25);\n"
+	"    float rockImpact = smoothstep(0.12, 0.28, slopeMag) * smoothstep(0.05, 0.55, shoreWaves.x + swellWave * 0.30);\n"
+	"    float bodyFoamScale = 0.35 + 0.65 * isOcean;\n"
+	"    float swashFoam = clamp((edgeLip * (0.08 + 0.14 * shoreWaves.y) + rockImpact * 0.14) * bodyFoamScale * distFade, 0.0, 0.24);\n"
+	"    float swashFilm = smoothstep(highWaterZ + 0.18, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
 	"}\n"
-	"/* Real-Life Path-Ribbon Lamb Wake in Water (Continuous Behind-Only V-Shear & Turbulent Slick):\n"
-	" * Evaluates piecewise-linear trail segments connecting ordered path nodes (uLambWakeXYT[0..7])\n"
-	" * strictly behind the lamb (zero forward projection, zero sinusoidal bullseye rings). */\n"
+	"/* Natural Path-Ribbon Lamb Wake in Water:\n"
+	" * Evaluates true capsule distance to each path segment (uLambWakeXYT[0..7]) with smooth\n"
+	" * radial falloff around the lamb's waterline and zero artificial planar clipping lines. */\n"
 	"vec4 eval_lamb_wake_ribbon(vec2 pos, float anim_time, float dist, float fw) {\n"
 	"    float headEnergy = uLambWakeHead.w;\n"
 	"    if (headEnergy <= 0.001 || dist > 2600.0) return vec4(0.0);\n"
@@ -968,15 +1013,12 @@ static const char *s_fs_terrain =
 	"    vec4 headVel0 = uLambWakeVel0[0];\n"
 	"    float headSpd = length(headVel0.xy);\n"
 	"    vec2 headFwd = (headSpd > 0.5) ? (headVel0.xy / headSpd) : vec2(0.0, 1.0);\n"
-	"    float sHead = dot(dHead, headFwd);\n"
-	"    /* Strict forward cutoff: never draw any wake stripe in front of the lamb */\n"
-	"    if (sHead > 0.0) return vec4(0.0);\n"
-	"    float frontGate = smoothstep(0.0, -0.35, sHead);\n"
 	"    float totalH = 0.0;\n"
 	"    vec2 totalGrad = vec2(0.0);\n"
 	"    float totalFoam = 0.0;\n"
-	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.85, 256.0), -mod(anim_time * 0.65, 256.0)), 0x57414B45u);\n"
-	"    vec2 warpOffset = wakeTurb.yz * 1.05;\n"
+	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.38 + vec2(mod(anim_time * 0.75, 256.0), -mod(anim_time * 0.55, 256.0)), 0x57414B45u);\n"
+	"    vec2 warpOffset = wakeTurb.yz * 0.85;\n"
+	"    float pathArc = 0.0;\n"
 	"    for (int i = 0; i < 7; i++) {\n"
 	"        vec4 nodeA = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
 	"        vec4 velA  = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
@@ -987,57 +1029,68 @@ static const char *s_fs_terrain =
 	"        float spdA = length(velA.xy);\n"
 	"        vec2 fwdA = (spdA > 0.5) ? (velA.xy / spdA) : headFwd;\n"
 	"        vec2 pA = nodeA.xy;\n"
-	"        vec2 pB = (velB.z > 0.002) ? nodeB.xy : (pA - fwdA * 6.0);\n"
-	"        float tB = (velB.z > 0.002) ? nodeB.z : (nodeA.z - 0.25);\n"
+	"        vec2 pB = (velB.z > 0.002) ? nodeB.xy : (pA - fwdA * 3.5);\n"
+	"        float tB = (velB.z > 0.002) ? nodeB.z : (nodeA.z - 0.18);\n"
 	"        vec2 seg = pA - pB;\n"
 	"        float segLen = length(seg);\n"
-	"        vec2 tDir = (segLen > 0.25) ? (seg / segLen) : fwdA;\n"
+	"        vec2 tDir = (segLen > 0.15) ? (seg / segLen) : fwdA;\n"
 	"        vec2 nDir = vec2(-tDir.y, tDir.x);\n"
-	"        float effLen = max(segLen, 3.5);\n"
+	"        float span = max(segLen, 0.25);\n"
 	"        vec2 relB = pos - pB;\n"
 	"        float proj = dot(relB, tDir);\n"
-	"        float sAhead = proj - effLen;\n"
-	"        if (i == 0 && sAhead >= 0.0) continue;\n"
-	"        float sBehind = -proj;\n"
-	"        float tSeg = clamp(proj / effLen, 0.0, 1.0);\n"
+	"        float tSeg = clamp(proj / span, 0.0, 1.0);\n"
+	"        vec2 closest = pB + tDir * (tSeg * segLen);\n"
 	"        float segTime = mix(tB, nodeA.z, tSeg);\n"
 	"        float age = clamp(anim_time - segTime, 0.0, 4.2);\n"
-	"        if (age >= 4.15) continue;\n"
+	"        if (age >= 4.15) {\n"
+	"            pathArc += segLen;\n"
+	"            continue;\n"
+	"        }\n"
 	"        float segEnergy = mix((velB.z > 0.002) ? velB.z : velA.z * 0.5, velA.z, tSeg);\n"
-	"        float ageDecay = exp(-0.85 * age) * smoothstep(4.0, 0.15, age) * segEnergy;\n"
-	"        float longWin = (sAhead > 0.0) ? exp(-(sAhead * sAhead) * 0.65) : 1.0;\n"
-	"        if (sBehind > 0.0) longWin *= exp(-(sBehind * sBehind) / (12.0 + age * 14.0));\n"
-	"        float envBase = ageDecay * longWin * frontGate;\n"
+	"        float ageDecay = exp(-0.80 * age) * smoothstep(4.0, 0.15, age) * segEnergy;\n"
+	"        /* Smooth natural longitudinal window around segment [pB, pA] with rounded capsule ends (no planar clip) */\n"
+	"        float sOverA = max(0.0, proj - segLen);\n"
+	"        float sOverB = max(0.0, -proj);\n"
+	"        float headCapSigma = (i == 0) ? 1.85 : 2.60;\n"
+	"        float tailCapSigma = 3.20 + age * 2.80;\n"
+	"        float longWin = exp(-(sOverA * sOverA) / (headCapSigma * headCapSigma))\n"
+	"                      * exp(-(sOverB * sOverB) / (tailCapSigma * tailCapSigma));\n"
+	"        /* Neighboring segments share interior nodes: weight smoothly so interior joints don't double-count */\n"
+	"        float jointWeight = (i == 0) ? smoothstep(-tailCapSigma, 0.0, proj)\n"
+	"                                     : (smoothstep(-tailCapSigma, 0.0, proj) * smoothstep(segLen + headCapSigma, segLen, proj + 0.5 * headCapSigma));\n"
+	"        float envBase = ageDecay * longWin * (0.45 + 0.55 * jointWeight);\n"
+	"        float curArc = pathArc + (1.0 - tSeg) * segLen + sOverA;\n"
+	"        pathArc += segLen;\n"
 	"        if (envBase <= 0.002) continue;\n"
-	"        vec2 closest = pB + tDir * clamp(proj, 0.0, effLen);\n"
-	"        float backDist = length(uLambWakeHead.xy - closest);\n"
-	"        float rawU = dot((pos + warpOffset * (0.20 + 0.14 * age)) - closest, nDir);\n"
+	"        vec2 delta = (pos + warpOffset * (0.16 + 0.14 * age)) - closest;\n"
+	"        float rawU = dot(delta, nDir);\n"
 	"        float u = abs(rawU);\n"
 	"        float signU = (rawU >= 0.0) ? 1.0 : -1.0;\n"
-	"        float wakeHalfW = 1.6 + backDist * 0.18 + age * 2.2;\n"
+	"        float wakeHalfW = 1.35 + curArc * 0.16 + age * 2.10;\n"
 	"        float edgeSigma = 1.15 + age * 0.85;\n"
 	"        float dEdge = (u - wakeHalfW) / edgeSigma;\n"
-	"        /* Punchy non-oscillatory Kelvin V-shear rim along the wake arms */\n"
-	"        float rimEnv = exp(-(dEdge * dEdge)) * exp(-backDist * 0.032) * envBase;\n"
-	"        float spdScale = clamp(spdA / 36.0, 0.35, 1.15);\n"
+	"        /* Smooth Kelvin V-shear rim along the wake arms */\n"
+	"        float rimEnv = exp(-(dEdge * dEdge)) * exp(-curArc * 0.028) * envBase;\n"
+	"        float spdScale = clamp(spdA / 36.0, 0.30, 1.15);\n"
 	"        if (rimEnv > 0.002) {\n"
-	"            float hRim = 0.22 * rimEnv * spdScale;\n"
+	"            float hRim = 0.20 * rimEnv * spdScale;\n"
 	"            totalH += hRim;\n"
-	"            float dRimDu = (-2.4 * dEdge / edgeSigma) * hRim;\n"
-	"            totalGrad += (nDir * signU - tDir * 0.22) * dRimDu;\n"
-	"            totalFoam += rimEnv * spdScale * exp(-age * 1.15) * (0.20 + 0.26 * wakeTurb.x);\n"
+	"            float dRimDu = (-2.2 * dEdge / edgeSigma) * hRim;\n"
+	"            totalGrad += (nDir * signU - tDir * 0.20) * dRimDu;\n"
+	"            totalFoam += rimEnv * spdScale * exp(-age * 1.15) * (0.14 + 0.20 * wakeTurb.x);\n"
 	"        }\n"
-	"        /* Turbulent wake trough & aerated whitewater trail strictly inside the stern V-cone */\n"
-	"        float coreEnv = smoothstep(wakeHalfW + edgeSigma * 0.85, wakeHalfW * 0.15, u) * exp(-backDist * 0.038) * envBase;\n"
+	"        /* Turbulent wake trough & subtle aerated trail inside the V-cone (softened near body so it doesn't white-out the lamb) */\n"
+	"        float coreEnv = smoothstep(wakeHalfW + edgeSigma * 0.80, wakeHalfW * 0.15, u) * exp(-curArc * 0.035) * envBase;\n"
 	"        if (coreEnv > 0.003) {\n"
 	"            float eddy = coreEnv * spdScale;\n"
-	"            totalH -= 0.12 * eddy;\n"
-	"            totalGrad += wakeTurb.yz * (0.48 * eddy) + nDir * (signU * 0.22 * eddy);\n"
-	"            float bubbleMask = smoothstep(0.32, 0.72, wakeTurb.x) * exp(-age * 1.25);\n"
-	"            totalFoam += eddy * (0.18 + bubbleMask * 0.48);\n"
+	"            float bodyFoamRamp = smoothstep(0.5, 4.5, curArc);\n"
+	"            totalH -= 0.11 * eddy;\n"
+	"            totalGrad += wakeTurb.yz * (0.42 * eddy) + nDir * (signU * 0.20 * eddy);\n"
+	"            float bubbleMask = smoothstep(0.36, 0.74, wakeTurb.x) * exp(-age * 1.25);\n"
+	"            totalFoam += eddy * (0.10 + bubbleMask * 0.34) * (0.35 + 0.65 * bodyFoamRamp);\n"
 	"        }\n"
 	"    }\n"
-	"    return vec4(clamp(totalH, -0.45, 0.45) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.72));\n"
+	"    return vec4(clamp(totalH, -0.42, 0.42) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.55));\n"
 	"}\n"
 	"vec4 sampleSubstrateSmooth(vec2 uv) {\n"
 	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
@@ -1279,7 +1332,7 @@ static const char *s_fs_terrain =
 	"    /* 3. Physical Volumetric Water Extinction & Biome-Aware Optics (Crystal-Clear Shallows) */\n"
 	"    if (fragWaterDepth > 0.0) {\n"
 	"        float d = clamp(fragWaterDepth, 0.0, 64.0);\n"
-	"        float wetBlend = smoothstep(0.0, 0.45, fragWaterDepth);\n"
+	"        float wetBlend = smoothstep(0.0, 0.28, fragWaterDepth);\n"
 	"        float distFade = clamp(1.0 - (vDistance - 900.0) / 2500.0, 0.0, 1.0);\n"
 	"        float closeZoom = clamp((420.0 - vDistance) / 300.0, 0.0, 1.0);\n"
 	"        /* Subsurface wave-refracted caustic light web projected onto seabed before Beer-Lambert absorption */\n"
@@ -1378,10 +1431,10 @@ static const char *s_fs_terrain =
 	"        float openSeaSurfEnergy = openSeaFactor * windFetch * smoothstep(0.55, 1.15, wind.z);\n"
 	"        float crestLap = smoothstep(1.6, 0.20, shoreDist) * smoothstep(0.48, 0.82, waves.w) * openSeaSurfEnergy * 0.22;\n"
 	"        float whitecap = smoothstep(0.68, 0.94, waves.w) * smoothstep(6.0, 16.0, fragWaterDepth) * openSeaSurfEnergy * 0.24;\n"
-	"        float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.65);\n"
+	"        float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.55);\n"
 	"        vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
-	"        float shallowGlassMask = smoothstep(0.0, 4.5, fragWaterDepth);\n"
-	"        float skyReflWeight = fresnel * (0.18 + 0.82 * shallowGlassMask);\n"
+	"        float shallowGlassMask = smoothstep(0.0, 3.8, fragWaterDepth);\n"
+	"        float skyReflWeight = fresnel * (0.28 + 0.72 * shallowGlassMask);\n"
 	"        float sssWeight     = crestGlow * 0.16;\n"
 	"        float specWeight    = clamp(specSun, 0.0, 0.92);\n"
 	"        float foamWeight    = foam;\n"
@@ -1395,7 +1448,7 @@ static const char *s_fs_terrain =
 	"            float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
 	"            surfaceRgb += vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.16 * atten);\n"
 	"        }\n"
-	"        float surfEdgeFade = smoothstep(0.0, 0.14, fragWaterDepth);\n"
+	"        float surfEdgeFade = smoothstep(0.0, 0.18, fragWaterDepth);\n"
 	"        float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight), 0.0, 0.94) * surfEdgeFade;\n"
 	"        vec3 finalWater = mix(waterBody, surfaceRgb, surfAlpha);\n"
 	"        lit = mix(lit, finalWater, wetBlend);\n"
@@ -1810,32 +1863,73 @@ static const char *s_fs_water =
 	"    float p2Sun   = 0.5 * (3.0 * cosSun  * cosSun  - 1.0);\n"
 	"    return isOcean * (0.68 * p2Moon + 0.31 * p2Sun);\n"
 	"}\n"
+	"vec2 eval_shore_wave_swell(vec2 pos, float anim_time, float dist, float fw) {\n"
+	"    vec4 wind = eval_recursive_wind(pos, anim_time);\n"
+	"    vec2 wDir = wind.xy;\n"
+	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"    float gust = wind.z;\n"
+	"    const float freqs[3] = float[3](0.024, 0.072, 0.220);\n"
+	"    const float amps[3]  = float[3](1.450, 0.680, 0.280);\n"
+	"    const float spds[3]  = float[3](0.180, 0.340, 0.620);\n"
+	"    const float dFar[3]  = float[3](65000.0, 18000.0, 4800.0);\n"
+	"    const float dNear[3] = float[3](14000.0,  3600.0, 1100.0);\n"
+	"    const uint  seeds[3] = uint[3](0x4F434530u, 0x5357454Cu, 0x57415645u);\n"
+	"    const vec2  dirs[3]  = vec2[3](\n"
+	"        vec2( 0.8575, -0.5145),\n"
+	"        vec2( 0.6402, -0.7682),\n"
+	"        vec2( 0.9285, -0.3714)\n"
+	"    );\n"
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    float h = 0.0;\n"
+	"    float crest = 0.0;\n"
+	"    vec2 pRot = pos;\n"
+	"    for (int i = 0; i < 3; i++) {\n"
+	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), (i == 0) ? 0.35 : 0.0, 1.0);\n"
+	"        float wNyq  = smoothstep(0.55, 0.16, freqs[i] * fw);\n"
+	"        float w = wDist * wNyq * (0.85 + 0.20 * gust);\n"
+	"        if (w > 0.001) {\n"
+	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
+	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
+	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
+	"            float signedVal = g.x - 0.5;\n"
+	"            float ridge = 0.5 - abs(signedVal);\n"
+	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
+	"            h += shaped * amps[i] * w;\n"
+	"            crest += max(0.0, ridge - 0.22) * (w * 1.4);\n"
+	"            pRot += g.yz * (0.11 * w);\n"
+	"        }\n"
+	"        pRot = rot * pRot;\n"
+	"    }\n"
+	"    return vec2(h, clamp(crest, 0.0, 1.0));\n"
+	"}\n"
 	"vec4 eval_shore_swash(vec2 pos, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw) {\n"
 	"    float isOcean = 1.0 - smoothstep(0.25, 0.75, abs(uSeaLevel - uBaseSeaLevel));\n"
 	"    float slopeMag = length(slopeGrad);\n"
-	"    float nearShore = smoothstep(6.0, 0.0, abs(terrainZ - baseTideZ));\n"
+	"    float relZ = terrainZ - baseTideZ;\n"
+	"    float nearShore = smoothstep(7.5, 0.0, abs(relZ));\n"
 	"    if (nearShore <= 0.001 || dist > 3800.0) {\n"
-	"        float tideHigh = uSeaLevel + isOcean * 0.99;\n"
+	"        float tideHigh = uSeaLevel + (0.42 + 0.78 * isOcean);\n"
 	"        return vec4(baseTideZ, max(baseTideZ, tideHigh), 0.0, 0.0);\n"
 	"    }\n"
 	"    float distFade = smoothstep(3800.0, 450.0, dist);\n"
-	"    vec2 shoreDir = (slopeMag > 1e-4) ? (slopeGrad / slopeMag) : vec2(0.7071, -0.7071);\n"
-	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.025 + vec2(13.7, -9.2), 0x53574153u);\n"
-	"    float groupEnv = 0.65 + 0.35 * sin(mod(anim_time * 0.23, 628.3185) + (nAlong.x - 0.5) * 2.4);\n"
-	"    float crossCoord = dot(pos, shoreDir) * 0.08 + (nAlong.x - 0.5) * 1.15;\n"
-	"    float waveArg = mod(anim_time * 0.95, 628.3185) - crossCoord;\n"
-	"    float swellWave = sin(waveArg) + 0.25 * sin(2.0 * waveArg - 0.45);\n"
-	"    vec4 shoreWaves = eval_zoom_water_waves(pos, anim_time, dist, fw);\n"
-	"    float slopeResponse = smoothstep(0.008, 0.14, slopeMag) * distFade;\n"
-	"    float waveletRunup = shoreWaves.x * (0.55 + 0.45 * isOcean) * (0.45 + 0.55 * slopeResponse);\n"
-	"    float swellRunup = swellWave * (0.08 + 0.38 * isOcean) * groupEnv * slopeResponse;\n"
-	"    float swashDisp = waveletRunup + swellRunup;\n"
+	"    vec3 nAlong = chaff_grad_noise2d(pos * 0.014 + vec2(13.7, -9.2), 0x53574153u);\n"
+	"    float groupEnv = 0.76 + 0.24 * sin(mod(anim_time * 0.24, 628.3185) + (nAlong.x - 0.5) * 2.2);\n"
+	"    float waveArg = mod(anim_time * 0.92, 628.3185) - relZ * 0.32 + (nAlong.x - 0.5) * 1.8;\n"
+	"    float swellWave = sin(waveArg) + 0.22 * sin(2.0 * waveArg - 0.35);\n"
+	"    vec2 shoreWaves = eval_shore_wave_swell(pos, anim_time, dist, fw);\n"
+	"    float slopeResponse = (0.52 + 0.48 * smoothstep(0.005, 0.12, slopeMag)) * distFade;\n"
+	"    float waveletRunup = shoreWaves.x * (0.58 + 0.28 * isOcean) * slopeResponse;\n"
+	"    float swellRunup = swellWave * (0.30 + 0.28 * isOcean) * groupEnv * slopeResponse;\n"
+	"    float swashDisp = (waveletRunup + swellRunup) * nearShore;\n"
 	"    float swashSurfZ = baseTideZ + swashDisp;\n"
-	"    float recentSwashTop = baseTideZ + (0.28 + 0.72 * isOcean) * (0.75 + 0.25 * groupEnv) * slopeResponse;\n"
-	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.25);\n"
-	"    float edgeLip = smoothstep(0.32, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.35, shoreWaves.x + swellWave * 0.25);\n"
-	"    float swashFoam = clamp(edgeLip * (0.16 + 0.34 * shoreWaves.w) * isOcean * distFade, 0.0, 0.36);\n"
-	"    float swashFilm = smoothstep(highWaterZ + 0.15, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
+	"    float recentSwashTop = baseTideZ + (0.58 + 0.58 * isOcean) * (0.80 + 0.20 * groupEnv) * slopeResponse;\n"
+	"    float highWaterZ = max(swashSurfZ, recentSwashTop + isOcean * 0.20);\n"
+	"    float edgeLip = smoothstep(0.45, 0.0, abs(terrainZ - swashSurfZ)) * smoothstep(-0.05, 0.40, shoreWaves.x + swellWave * 0.25);\n"
+	"    float rockImpact = smoothstep(0.12, 0.28, slopeMag) * smoothstep(0.05, 0.55, shoreWaves.x + swellWave * 0.30);\n"
+	"    float bodyFoamScale = 0.35 + 0.65 * isOcean;\n"
+	"    float swashFoam = clamp((edgeLip * (0.08 + 0.14 * shoreWaves.y) + rockImpact * 0.14) * bodyFoamScale * distFade, 0.0, 0.24);\n"
+	"    float swashFilm = smoothstep(highWaterZ + 0.18, swashSurfZ - 0.05, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
 	"}\n"
 	"vec4 eval_lamb_wake_ribbon(vec2 pos, float anim_time, float dist, float fw) {\n"
@@ -1848,15 +1942,12 @@ static const char *s_fs_water =
 	"    vec4 headVel0 = uLambWakeVel0[0];\n"
 	"    float headSpd = length(headVel0.xy);\n"
 	"    vec2 headFwd = (headSpd > 0.5) ? (headVel0.xy / headSpd) : vec2(0.0, 1.0);\n"
-	"    float sHead = dot(dHead, headFwd);\n"
-	"    /* Strict forward cutoff: never draw any wake stripe in front of the lamb */\n"
-	"    if (sHead > 0.0) return vec4(0.0);\n"
-	"    float frontGate = smoothstep(0.0, -0.35, sHead);\n"
 	"    float totalH = 0.0;\n"
 	"    vec2 totalGrad = vec2(0.0);\n"
 	"    float totalFoam = 0.0;\n"
-	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.42 + vec2(mod(anim_time * 0.85, 256.0), -mod(anim_time * 0.65, 256.0)), 0x57414B45u);\n"
-	"    vec2 warpOffset = wakeTurb.yz * 1.05;\n"
+	"    vec3 wakeTurb = chaff_grad_noise2d(pos * 0.38 + vec2(mod(anim_time * 0.75, 256.0), -mod(anim_time * 0.55, 256.0)), 0x57414B45u);\n"
+	"    vec2 warpOffset = wakeTurb.yz * 0.85;\n"
+	"    float pathArc = 0.0;\n"
 	"    for (int i = 0; i < 7; i++) {\n"
 	"        vec4 nodeA = (i < 4) ? uLambWakeXYT0[i] : uLambWakeXYT1[i - 4];\n"
 	"        vec4 velA  = (i < 4) ? uLambWakeVel0[i] : uLambWakeVel1[i - 4];\n"
@@ -1867,57 +1958,64 @@ static const char *s_fs_water =
 	"        float spdA = length(velA.xy);\n"
 	"        vec2 fwdA = (spdA > 0.5) ? (velA.xy / spdA) : headFwd;\n"
 	"        vec2 pA = nodeA.xy;\n"
-	"        vec2 pB = (velB.z > 0.002) ? nodeB.xy : (pA - fwdA * 6.0);\n"
-	"        float tB = (velB.z > 0.002) ? nodeB.z : (nodeA.z - 0.25);\n"
+	"        vec2 pB = (velB.z > 0.002) ? nodeB.xy : (pA - fwdA * 3.5);\n"
+	"        float tB = (velB.z > 0.002) ? nodeB.z : (nodeA.z - 0.18);\n"
 	"        vec2 seg = pA - pB;\n"
 	"        float segLen = length(seg);\n"
-	"        vec2 tDir = (segLen > 0.25) ? (seg / segLen) : fwdA;\n"
+	"        vec2 tDir = (segLen > 0.15) ? (seg / segLen) : fwdA;\n"
 	"        vec2 nDir = vec2(-tDir.y, tDir.x);\n"
-	"        float effLen = max(segLen, 3.5);\n"
+	"        float span = max(segLen, 0.25);\n"
 	"        vec2 relB = pos - pB;\n"
 	"        float proj = dot(relB, tDir);\n"
-	"        float sAhead = proj - effLen;\n"
-	"        if (i == 0 && sAhead >= 0.0) continue;\n"
-	"        float sBehind = -proj;\n"
-	"        float tSeg = clamp(proj / effLen, 0.0, 1.0);\n"
+	"        float tSeg = clamp(proj / span, 0.0, 1.0);\n"
+	"        vec2 closest = pB + tDir * (tSeg * segLen);\n"
 	"        float segTime = mix(tB, nodeA.z, tSeg);\n"
 	"        float age = clamp(anim_time - segTime, 0.0, 4.2);\n"
-	"        if (age >= 4.15) continue;\n"
+	"        if (age >= 4.15) {\n"
+	"            pathArc += segLen;\n"
+	"            continue;\n"
+	"        }\n"
 	"        float segEnergy = mix((velB.z > 0.002) ? velB.z : velA.z * 0.5, velA.z, tSeg);\n"
-	"        float ageDecay = exp(-0.85 * age) * smoothstep(4.0, 0.15, age) * segEnergy;\n"
-	"        float longWin = (sAhead > 0.0) ? exp(-(sAhead * sAhead) * 0.65) : 1.0;\n"
-	"        if (sBehind > 0.0) longWin *= exp(-(sBehind * sBehind) / (12.0 + age * 14.0));\n"
-	"        float envBase = ageDecay * longWin * frontGate;\n"
+	"        float ageDecay = exp(-0.80 * age) * smoothstep(4.0, 0.15, age) * segEnergy;\n"
+	"        float sOverA = max(0.0, proj - segLen);\n"
+	"        float sOverB = max(0.0, -proj);\n"
+	"        float headCapSigma = (i == 0) ? 1.85 : 2.60;\n"
+	"        float tailCapSigma = 3.20 + age * 2.80;\n"
+	"        float longWin = exp(-(sOverA * sOverA) / (headCapSigma * headCapSigma))\n"
+	"                      * exp(-(sOverB * sOverB) / (tailCapSigma * tailCapSigma));\n"
+	"        float jointWeight = (i == 0) ? smoothstep(-tailCapSigma, 0.0, proj)\n"
+	"                                     : (smoothstep(-tailCapSigma, 0.0, proj) * smoothstep(segLen + headCapSigma, segLen, proj + 0.5 * headCapSigma));\n"
+	"        float envBase = ageDecay * longWin * (0.45 + 0.55 * jointWeight);\n"
+	"        float curArc = pathArc + (1.0 - tSeg) * segLen + sOverA;\n"
+	"        pathArc += segLen;\n"
 	"        if (envBase <= 0.002) continue;\n"
-	"        vec2 closest = pB + tDir * clamp(proj, 0.0, effLen);\n"
-	"        float backDist = length(uLambWakeHead.xy - closest);\n"
-	"        float rawU = dot((pos + warpOffset * (0.20 + 0.14 * age)) - closest, nDir);\n"
+	"        vec2 delta = (pos + warpOffset * (0.16 + 0.14 * age)) - closest;\n"
+	"        float rawU = dot(delta, nDir);\n"
 	"        float u = abs(rawU);\n"
 	"        float signU = (rawU >= 0.0) ? 1.0 : -1.0;\n"
-	"        float wakeHalfW = 1.6 + backDist * 0.18 + age * 2.2;\n"
+	"        float wakeHalfW = 1.35 + curArc * 0.16 + age * 2.10;\n"
 	"        float edgeSigma = 1.15 + age * 0.85;\n"
 	"        float dEdge = (u - wakeHalfW) / edgeSigma;\n"
-	"        /* Punchy non-oscillatory Kelvin V-shear rim along the wake arms */\n"
-	"        float rimEnv = exp(-(dEdge * dEdge)) * exp(-backDist * 0.032) * envBase;\n"
-	"        float spdScale = clamp(spdA / 36.0, 0.35, 1.15);\n"
+	"        float rimEnv = exp(-(dEdge * dEdge)) * exp(-curArc * 0.028) * envBase;\n"
+	"        float spdScale = clamp(spdA / 36.0, 0.30, 1.15);\n"
 	"        if (rimEnv > 0.002) {\n"
-	"            float hRim = 0.22 * rimEnv * spdScale;\n"
+	"            float hRim = 0.20 * rimEnv * spdScale;\n"
 	"            totalH += hRim;\n"
-	"            float dRimDu = (-2.4 * dEdge / edgeSigma) * hRim;\n"
-	"            totalGrad += (nDir * signU - tDir * 0.22) * dRimDu;\n"
-	"            totalFoam += rimEnv * spdScale * exp(-age * 1.15) * (0.20 + 0.26 * wakeTurb.x);\n"
+	"            float dRimDu = (-2.2 * dEdge / edgeSigma) * hRim;\n"
+	"            totalGrad += (nDir * signU - tDir * 0.20) * dRimDu;\n"
+	"            totalFoam += rimEnv * spdScale * exp(-age * 1.15) * (0.14 + 0.20 * wakeTurb.x);\n"
 	"        }\n"
-	"        /* Turbulent wake trough & aerated whitewater trail strictly inside the stern V-cone */\n"
-	"        float coreEnv = smoothstep(wakeHalfW + edgeSigma * 0.85, wakeHalfW * 0.15, u) * exp(-backDist * 0.038) * envBase;\n"
+	"        float coreEnv = smoothstep(wakeHalfW + edgeSigma * 0.80, wakeHalfW * 0.15, u) * exp(-curArc * 0.035) * envBase;\n"
 	"        if (coreEnv > 0.003) {\n"
 	"            float eddy = coreEnv * spdScale;\n"
-	"            totalH -= 0.12 * eddy;\n"
-	"            totalGrad += wakeTurb.yz * (0.48 * eddy) + nDir * (signU * 0.22 * eddy);\n"
-	"            float bubbleMask = smoothstep(0.32, 0.72, wakeTurb.x) * exp(-age * 1.25);\n"
-	"            totalFoam += eddy * (0.18 + bubbleMask * 0.48);\n"
+	"            float bodyFoamRamp = smoothstep(0.5, 4.5, curArc);\n"
+	"            totalH -= 0.11 * eddy;\n"
+	"            totalGrad += wakeTurb.yz * (0.42 * eddy) + nDir * (signU * 0.20 * eddy);\n"
+	"            float bubbleMask = smoothstep(0.36, 0.74, wakeTurb.x) * exp(-age * 1.25);\n"
+	"            totalFoam += eddy * (0.10 + bubbleMask * 0.34) * (0.35 + 0.65 * bodyFoamRamp);\n"
 	"        }\n"
 	"    }\n"
-	"    return vec4(clamp(totalH, -0.45, 0.45) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.72));\n"
+	"    return vec4(clamp(totalH, -0.42, 0.42) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.55));\n"
 	"}\n"
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
@@ -2018,11 +2116,11 @@ static const char *s_fs_water =
 	"    float openSeaSurfEnergy = openSeaFactor * windFetch * smoothstep(0.55, 1.15, wind.z);\n"
 	"    float crestLap = smoothstep(1.6, 0.20, shoreDist) * smoothstep(0.48, 0.82, waves.w) * openSeaSurfEnergy * 0.22;\n"
 	"    float whitecap = smoothstep(0.68, 0.94, waves.w) * smoothstep(6.0, 16.0, fragWaterDepth) * openSeaSurfEnergy * 0.24;\n"
-	"    float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.65);\n"
+	"    float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.55);\n"
 	"    vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
 	"    /* Pure air-water surface compositing: shallow water stays glass-clear except for wavelet specularity & Fresnel */\n"
-	"    float shallowGlassMask = smoothstep(0.0, 4.5, fragWaterDepth);\n"
-	"    float skyReflWeight = fresnel * (0.18 + 0.82 * shallowGlassMask);\n"
+	"    float shallowGlassMask = smoothstep(0.0, 3.8, fragWaterDepth);\n"
+	"    float skyReflWeight = fresnel * (0.28 + 0.72 * shallowGlassMask);\n"
 	"    float sssWeight     = crestGlow * 0.16;\n"
 	"    float specWeight    = clamp(specSun, 0.0, 0.92);\n"
 	"    float foamWeight    = foam;\n"
@@ -2038,7 +2136,7 @@ static const char *s_fs_water =
 	"    }\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    surfaceRgb = mix(surfaceRgb, vec3(0.35, 0.70, 1.0), limb * 0.55 * uAtmoIntensity);\n"
-	"    float edgeFade = smoothstep(0.0, 0.14, fragWaterDepth);\n"
+	"    float edgeFade = smoothstep(0.0, 0.18, fragWaterDepth);\n"
 	"    float alpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight) + limb * 0.35 * uAtmoIntensity, 0.0, 0.94) * edgeFade;\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    FragColor = vec4(mix(surfaceRgb, sky, fogFactor * uAtmoIntensity), alpha);\n"
@@ -2376,21 +2474,21 @@ static const char *s_fs_billboard =
 	"    /* 2. Sub-Texel Anti-Aliased, Snell-Refracted & Outline-Softened Sprite Sampling */\n"
 	"    float style = vQuadUV.w;\n"
 	"    if (style > 5.5) {\n"
-	"        /* ND_BB_STYLE_PARTICLE (6.0): Crisp sunlit ballistic water droplet bead with per-droplet color variation */\n"
-	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0);\n"
-	"        qc.x *= (1.0 + 0.15 * max(0.0, qc.y));\n"
+	"        /* ND_BB_STYLE_PARTICLE (6.0): Subtle, fine sunlit water droplet / mist bead with per-droplet color variation */\n"
+	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0) * 1.18;\n"
+	"        qc.x *= (1.0 + 0.14 * max(0.0, qc.y));\n"
 	"        float r2 = dot(qc, qc);\n"
 	"        if (r2 >= 1.0) discard;\n"
 	"        float radial = clamp(1.0 - r2, 0.0, 1.0);\n"
 	"        float nz = sqrt(radial);\n"
-	"        vec3 dropN = normalize(vec3(qc.x * 0.75, qc.y * 0.75, nz));\n"
+	"        vec3 dropN = normalize(vec3(qc.x * 0.72, qc.y * 0.72, nz));\n"
 	"        vec3 sunDir = normalize(vec3(-0.55, 0.62, 0.56));\n"
-	"        float specGlint = pow(max(0.0, dot(dropN, sunDir)), 4.0);\n"
+	"        float specGlint = pow(max(0.0, dot(dropN, sunDir)), 5.0);\n"
 	"        float fresnelRim = pow(1.0 - nz, 2.0) * radial;\n"
-	"        float coreMask = smoothstep(0.0, 0.72, radial);\n"
-	"        float pAlpha = clamp(coreMask * vTint.a * 1.35 * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.98);\n"
-	"        if (pAlpha <= 0.02) discard;\n"
-	"        vec3 dropCol = clamp(mix(vTint.rgb, vec3(1.0, 1.0, 1.0), specGlint * 0.65 + fresnelRim * 0.25), 0.0, 1.0);\n"
+	"        float coreMask = radial * radial * (0.65 + 0.35 * radial);\n"
+	"        float pAlpha = clamp(coreMask * vTint.a * 0.78 * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.78);\n"
+	"        if (pAlpha <= 0.015) discard;\n"
+	"        vec3 dropCol = clamp(mix(vTint.rgb, vec3(1.0, 1.0, 1.0), specGlint * 0.58 + fresnelRim * 0.22), 0.0, 1.0);\n"
 	"        FragColor = vec4(dropCol, pAlpha);\n"
 	"        return;\n"
 	"    }\n"
@@ -2612,20 +2710,20 @@ static const char *s_fs_billboard =
 	"        vec3 sunColor   = vec3(1.0, 0.98, 0.92);\n"
 	"        vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun;\n"
 	"        vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
-	"        if (uLambLight.w > 0.001) {\n"
+	"        if (uLambLight.w > 0.001 && !isLambGlow) {\n"
 	"            vec2 dXY = uLambLight.xy - waterSurfPos;\n"
 	"            float d2 = dot(dXY, dXY);\n"
 	"            float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
 	"            surfaceRgb += vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.16 * atten);\n"
 	"        }\n"
-	"        float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight), 0.0, 0.94) * smoothstep(0.0, 0.14, dClamped);\n"
+	"        float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight), 0.0, 0.94) * smoothstep(0.0, 0.14, dClamped) * (isLambGlow ? 0.45 : 1.0);\n"
 	"        vec3 submergedComposite = mix(waterColumn, surfaceRgb, surfAlpha);\n"
 	"        lit = mix(lit, submergedComposite, wetBlend);\n"
 	"        if (isLambGlow && edgeAlpha < 0.99) {\n"
 	"            outAlpha = clamp(edgeAlpha + auraAlpha * clamp(1.0 - dClamped * 0.35, 0.0, 1.0), 0.0, 1.0) * vTint.a;\n"
 	"        }\n"
 	"        /* Subtle air-water meniscus highlight right along the live wave intersection */\n"
-	"        float meniscus = smoothstep(0.0, 0.14, dClamped) * smoothstep(0.75, 0.14, dClamped) * clamp(1.0 - (vDist - 600.0) / 1800.0, 0.0, 1.0) * baseSubFade * (isLambGlow ? edgeAlpha : 1.0);\n"
+	"        float meniscus = smoothstep(0.0, 0.14, dClamped) * smoothstep(0.75, 0.14, dClamped) * clamp(1.0 - (vDist - 600.0) / 1800.0, 0.0, 1.0) * baseSubFade * (isLambGlow ? edgeAlpha * 0.45 : 1.0);\n"
 	"        vec3 meniscusColor = mix(reflSkyCol, vec3(0.96, 0.99, 1.0), 0.70);\n"
 	"        lit = mix(lit, meniscusColor, meniscus * 0.38);\n"
 	"    }\n"
@@ -3673,7 +3771,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	if (terrain_sea_lvl > -900.0f) {
 		bool contains_focal = (s_gl.cur_tx >= (float)ox && s_gl.cur_tx <= (float)(ox + span_w) &&
 		                       s_gl.cur_ty >= (float)oy && s_gl.cur_ty <= (float)(oy + span_h));
-		if (s_gl.cur_sea_level <= -900.0f || contains_focal) {
+		if (contains_focal && (level == 0 || terrain_sea_lvl > s_gl.cur_sea_level)) {
+			s_gl.cur_sea_level = terrain_sea_lvl;
+		} else if (s_gl.cur_sea_level <= -900.0f) {
 			s_gl.cur_sea_level = terrain_sea_lvl;
 		}
 	}
@@ -4588,39 +4688,41 @@ float nd_seven_gl_eval_shore_swash(float wx, float wy,
 	float base_tide_z = sea_level + astro_tide;
 	float is_ocean = 1.0f - gl_smoothstep(0.25f, 0.75f, fabsf(sea_level - base_sea_level));
 	float slope_mag = sqrtf(slope_gx * slope_gx + slope_gy * slope_gy);
-	float near_shore = gl_smoothstep(5.5f, 0.0f, fabsf(terrain_z - base_tide_z));
+	float near_shore = gl_smoothstep(8.0f, 0.0f, fabsf(terrain_z - base_tide_z));
 
 	if (near_shore <= 0.001f) {
-		float tide_high = sea_level + is_ocean * 0.99f;
+		float tide_high = sea_level + (0.45f + 0.85f * is_ocean);
 		if (out_high_water_z) *out_high_water_z = fmaxf(base_tide_z, tide_high);
 		if (out_splash_foam) *out_splash_foam = 0.0f;
 		return base_tide_z;
 	}
 
-	float sdx = (slope_mag > 1e-4f) ? (slope_gx / slope_mag) : 0.7071f;
-	float sdy = (slope_mag > 1e-4f) ? (slope_gy / slope_mag) : -0.7071f;
 	float na_v = 0.5f, na_x = 0.0f, na_y = 0.0f;
-	float nm_v = 0.5f, nm_x = 0.0f, nm_y = 0.0f;
-	gl_chaff_grad_noise2d(wx * 0.045f + 13.7f, wy * 0.045f - 9.2f, 0x53574153u, &na_v, &na_x, &na_y);
-	gl_chaff_grad_noise2d(wx * 0.190f + na_x * 0.45f, wy * 0.190f + na_y * 0.45f, 0x53574132u, &nm_v, &nm_x, &nm_y);
+	gl_chaff_grad_noise2d(wx * 0.015f + 13.7f, wy * 0.015f - 9.2f, 0x53574153u, &na_v, &na_x, &na_y);
 
-	float group_env = 0.58f + 0.42f * sinf(fmodf(t_sec * 0.23f, 628.3185f) + (na_v - 0.5f) * 3.2f);
-	float cross_coord = (wx * sdx + wy * sdy) * 0.14f + (na_v - 0.5f) * 1.65f + (nm_v - 0.5f) * 0.55f;
-	float wave_arg = fmodf(t_sec * 1.18f, 628.3185f) - cross_coord;
-	float raw_wave = sinf(wave_arg) + 0.32f * sinf(2.0f * wave_arg - 0.45f) + 0.10f * cosf(3.0f * wave_arg);
-	float swash_amp = (0.06f + 0.52f * is_ocean) * group_env * gl_smoothstep(0.015f, 0.18f, slope_mag);
-	float swash_surf_z = base_tide_z + raw_wave * swash_amp;
-	float recent_top = base_tide_z + (0.08f + 0.68f * is_ocean) * (0.75f + 0.25f * group_env) * gl_smoothstep(0.015f, 0.18f, slope_mag);
-	float high_water_z = fmaxf(swash_surf_z, recent_top + is_ocean * 0.35f);
+	float group_env = 0.78f + 0.22f * sinf(fmodf(t_sec * 0.24f, 628.3185f) + (na_v - 0.5f) * 2.2f);
+	float rel_z = fmaxf(-6.0f, fminf(6.0f, terrain_z - base_tide_z));
+	float wave_arg = fmodf(t_sec * 0.92f, 628.3185f) - rel_z * 0.32f + (na_v - 0.5f) * 1.8f;
+	float swell_wave = sinf(wave_arg) + 0.22f * sinf(2.0f * wave_arg - 0.35f);
 
-	float bore_front = gl_smoothstep(-0.20f, 0.55f, cosf(wave_arg - 0.35f));
-	float edge_prox = gl_smoothstep(0.55f, 0.0f, fabsf(terrain_z - swash_surf_z));
-	float rock_impact = gl_smoothstep(0.10f, 0.28f, slope_mag) * gl_smoothstep(-0.1f, 0.7f, raw_wave);
-	float ln_v = 0.5f, ln_x = 0.0f, ln_y = 0.0f;
-	gl_chaff_grad_noise2d(wx * 0.85f + sdx * (raw_wave * 0.6f), wy * 0.85f + sdy * (raw_wave * 0.6f), 0x464F414Du, &ln_v, &ln_x, &ln_y);
-	float cell_lace = gl_smoothstep(0.42f, 0.74f, ln_v * 0.65f + nm_v * 0.35f);
-	float foam = (edge_prox * (0.35f + 0.65f * bore_front) + rock_impact * 0.55f) * cell_lace * is_ocean;
-	if (foam > 0.68f) foam = 0.68f;
+	float wave_crest = 0.0f;
+	/* Pass pixel_footprint = 2.5f so only smooth low-frequency wave octaves 0..2 (wavelengths 4.5..42 units) contribute */
+	float wave_h = nd_seven_gl_eval_water_waves(wx, wy, t_sec, 280.0f, 2.5f, NULL, NULL, &wave_crest);
+	float slope_resp = 0.62f + 0.38f * gl_smoothstep(0.004f, 0.10f, slope_mag);
+	float wavelet_runup = wave_h * (0.48f + 0.24f * is_ocean) * slope_resp;
+	float swell_runup = swell_wave * (0.34f + 0.28f * is_ocean) * group_env * slope_resp;
+	float swash_surf_z = base_tide_z + (wavelet_runup + swell_runup) * near_shore;
+	float recent_top = base_tide_z + (0.62f + 0.58f * is_ocean) * (0.82f + 0.18f * group_env) * slope_resp;
+	float high_water_z = fmaxf(swash_surf_z, recent_top + is_ocean * 0.20f);
+
+	float wave_phase_lift = gl_smoothstep(-0.20f, 0.45f, wave_h * 1.2f + swell_wave * 0.50f);
+	float edge_lip = gl_smoothstep(0.55f, 0.0f, fabsf(terrain_z - swash_surf_z)) *
+	                 (0.30f + 0.70f * wave_phase_lift);
+	float rock_impact = gl_smoothstep(0.12f, 0.26f, slope_mag) *
+	                    gl_smoothstep(0.05f, 0.52f, wave_h + swell_wave * 0.35f);
+	float body_foam_scale = 0.65f + 0.35f * is_ocean;
+	float foam = (edge_lip * (0.14f + 0.20f * wave_crest) + rock_impact * 0.14f) * body_foam_scale;
+	if (foam > 0.32f) foam = 0.32f;
 	if (foam < 0.0f) foam = 0.0f;
 
 	if (out_high_water_z) *out_high_water_z = high_water_z;
@@ -4665,8 +4767,8 @@ void nd_seven_gl_set_lamb_wake(float wx, float wy, float ground_z,
 			s_gl.cur_wake_vel[0][3] = (float)dir;
 
 			/* Seed slot 1 slightly behind slot 0 along -dir so segment 0->1 is immediately valid */
-			s_gl.cur_wake_xyt[1][0] = wx - dir_vx * 4.0f;
-			s_gl.cur_wake_xyt[1][1] = wy - dir_vy * 4.0f;
+			s_gl.cur_wake_xyt[1][0] = wx - dir_vx * 3.5f;
+			s_gl.cur_wake_xyt[1][1] = wy - dir_vy * 3.5f;
 			s_gl.cur_wake_xyt[1][2] = anim_time - 0.12f;
 			s_gl.cur_wake_xyt[1][3] = water_depth;
 			s_gl.cur_wake_vel[1][0] = dir_vx * init_spd;
@@ -4773,25 +4875,18 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 	float hspd = sqrtf(hvx * hvx + hvy * hvy);
 	float hfwd_x = (hspd > 0.5f) ? (hvx / hspd) : 0.0f;
 	float hfwd_y = (hspd > 0.5f) ? (hvy / hspd) : 1.0f;
-	float s_head = dhx * hfwd_x + dhy * hfwd_y;
-
-	/* Strict forward cutoff: never draw any wake stripe in front of the lamb */
-	if (s_head > 0.0f)
-		return 0.0f;
-	float front_gate = gl_smoothstep(0.0f, -1.2f, s_head) * head_energy;
-	if (front_gate <= 0.001f)
-		return 0.0f;
 
 	float wt_v = 0.5f, wt_x = 0.0f, wt_y = 0.0f;
-	gl_chaff_grad_noise2d(frag_wx * 0.45f + fmodf(anim_time * 0.85f, 256.0f),
-	                      frag_wy * 0.45f - fmodf(anim_time * 0.65f, 256.0f),
+	gl_chaff_grad_noise2d(frag_wx * 0.38f + fmodf(anim_time * 0.75f, 256.0f),
+	                      frag_wy * 0.38f - fmodf(anim_time * 0.55f, 256.0f),
 	                      0x57414B45u, &wt_v, &wt_x, &wt_y);
-	float warp_x = wt_x * 0.95f;
-	float warp_y = wt_y * 0.95f;
+	float warp_x = wt_x * 0.85f;
+	float warp_y = wt_y * 0.85f;
 
 	float total_h = 0.0f;
 	float total_gx = 0.0f, total_gy = 0.0f;
 	float total_foam = 0.0f;
+	float path_arc = 0.0f;
 
 	for (int i = 0; i < ND_LAMB_WAKE_NODES - 1; i++) {
 		float energy_a = s_gl.cur_wake_vel[i][2];
@@ -4810,84 +4905,90 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 		float pa_y = s_gl.cur_wake_xyt[i][1];
 		float ta   = s_gl.cur_wake_xyt[i][2];
 
-		float pb_x = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][0] : (pa_x - fwd_ax * 6.0f);
-		float pb_y = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][1] : (pa_y - fwd_ay * 6.0f);
-		float tb   = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][2] : (ta - 0.25f);
+		float pb_x = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][0] : (pa_x - fwd_ax * 3.5f);
+		float pb_y = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][1] : (pa_y - fwd_ay * 3.5f);
+		float tb   = (energy_b > 0.002f) ? s_gl.cur_wake_xyt[j][2] : (ta - 0.18f);
 
 		float seg_x = pa_x - pb_x;
 		float seg_y = pa_y - pb_y;
 		float seg_len = sqrtf(seg_x * seg_x + seg_y * seg_y);
-		float tdir_x = (seg_len > 0.25f) ? (seg_x / seg_len) : fwd_ax;
-		float tdir_y = (seg_len > 0.25f) ? (seg_y / seg_len) : fwd_ay;
+		float tdir_x = (seg_len > 0.15f) ? (seg_x / seg_len) : fwd_ax;
+		float tdir_y = (seg_len > 0.15f) ? (seg_y / seg_len) : fwd_ay;
 		float ndir_x = -tdir_y;
 		float ndir_y =  tdir_x;
-		float eff_len = fmaxf(seg_len, 3.5f);
+		float span = fmaxf(seg_len, 0.25f);
 
 		float rel_bx = frag_wx - pb_x;
 		float rel_by = frag_wy - pb_y;
 		float proj = rel_bx * tdir_x + rel_by * tdir_y;
-		float s_ahead = proj - eff_len;
-		if (i == 0 && s_ahead >= 0.0f)
-			continue;
-		float s_behind = -proj;
-		float t_seg = fminf(1.0f, fmaxf(0.0f, proj / eff_len));
+		float t_seg = fminf(1.0f, fmaxf(0.0f, proj / span));
+		float closest_x = pb_x + tdir_x * (t_seg * seg_len);
+		float closest_y = pb_y + tdir_y * (t_seg * seg_len);
 		float seg_time = tb + (ta - tb) * t_seg;
 		float age = anim_time - seg_time;
 		if (age < 0.0f) age = 0.0f;
-		if (age >= 4.15f) continue;
+		if (age >= 4.15f) {
+			path_arc += seg_len;
+			continue;
+		}
 
 		float eb_eff = (energy_b > 0.002f) ? energy_b : (energy_a * 0.5f);
 		float seg_energy = eb_eff + (energy_a - eb_eff) * t_seg;
-		float age_decay = expf(-0.95f * age) * gl_smoothstep(4.0f, 0.15f, age) * seg_energy;
-		float long_win = (s_ahead > 0.0f) ? expf(-(s_ahead * s_ahead) * 0.65f) : 1.0f;
-		if (s_behind > 0.0f)
-			long_win *= expf(-(s_behind * s_behind) / (10.0f + age * 12.0f));
-		float env_base = age_decay * long_win * front_gate;
+		float age_decay = expf(-0.80f * age) * gl_smoothstep(4.0f, 0.15f, age) * seg_energy * head_energy;
+
+		float s_over_a = fmaxf(0.0f, proj - seg_len);
+		float s_over_b = fmaxf(0.0f, -proj);
+		float head_cap_sigma = (i == 0) ? 1.85f : 2.60f;
+		float tail_cap_sigma = 3.20f + age * 2.80f;
+		float long_win = expf(-(s_over_a * s_over_a) / (head_cap_sigma * head_cap_sigma)) *
+		                 expf(-(s_over_b * s_over_b) / (tail_cap_sigma * tail_cap_sigma));
+		float joint_w = (i == 0)
+		                ? gl_smoothstep(-tail_cap_sigma, 0.0f, proj)
+		                : (gl_smoothstep(-tail_cap_sigma, 0.0f, proj) *
+		                   gl_smoothstep(seg_len + head_cap_sigma, seg_len, proj + 0.5f * head_cap_sigma));
+		float env_base = age_decay * long_win * (0.45f + 0.55f * joint_w);
+		float cur_arc = path_arc + (1.0f - t_seg) * seg_len + s_over_a;
+		path_arc += seg_len;
 		if (env_base <= 0.002f)
 			continue;
 
-		float clamped_proj = fminf(eff_len, fmaxf(0.0f, proj));
-		float closest_x = pb_x + tdir_x * clamped_proj;
-		float closest_y = pb_y + tdir_y * clamped_proj;
-		float bdx = s_gl.cur_wake_head[0] - closest_x;
-		float bdy = s_gl.cur_wake_head[1] - closest_y;
-		float back_dist = sqrtf(bdx * bdx + bdy * bdy);
-
-		float wx_w = (frag_wx + warp_x * (0.18f + 0.12f * age)) - closest_x;
-		float wy_w = (frag_wy + warp_y * (0.18f + 0.12f * age)) - closest_y;
+		float wx_w = (frag_wx + warp_x * (0.16f + 0.14f * age)) - closest_x;
+		float wy_w = (frag_wy + warp_y * (0.16f + 0.14f * age)) - closest_y;
 		float raw_u = wx_w * ndir_x + wy_w * ndir_y;
 		float u = fabsf(raw_u);
 		float sign_u = (raw_u >= 0.0f) ? 1.0f : -1.0f;
 
-		float wake_hw = 1.4f + back_dist * 0.16f + age * 2.0f;
+		float wake_hw = 1.35f + cur_arc * 0.16f + age * 2.10f;
 		float edge_sigma = 1.15f + age * 0.85f;
 		float d_edge = (u - wake_hw) / edge_sigma;
 
-		float rim_env = expf(-(d_edge * d_edge)) * expf(-back_dist * 0.04f) * env_base;
-		float spd_scale = fminf(1.0f, fmaxf(0.25f, spd_a / 42.0f));
+		float rim_env = expf(-(d_edge * d_edge)) * expf(-cur_arc * 0.028f) * env_base;
+		float spd_scale = fminf(1.15f, fmaxf(0.30f, spd_a / 36.0f));
 		if (rim_env > 0.002f) {
-			float h_rim = 0.065f * rim_env * spd_scale;
+			float h_rim = 0.20f * rim_env * spd_scale;
 			total_h += h_rim;
-			float d_rim_du = (-2.0f * d_edge / edge_sigma) * h_rim;
-			total_gx += (ndir_x * sign_u - tdir_x * 0.16f) * d_rim_du;
-			total_gy += (ndir_y * sign_u - tdir_y * 0.16f) * d_rim_du;
+			float d_rim_du = (-2.2f * d_edge / edge_sigma) * h_rim;
+			total_gx += (ndir_x * sign_u - tdir_x * 0.20f) * d_rim_du;
+			total_gy += (ndir_y * sign_u - tdir_y * 0.20f) * d_rim_du;
+			total_foam += rim_env * spd_scale * expf(-age * 1.15f) * (0.14f + 0.20f * wt_v);
 		}
 
-		float core_env = gl_smoothstep(wake_hw + edge_sigma * 0.8f, wake_hw * 0.2f, u) *
-		                 expf(-back_dist * 0.045f) * env_base;
+		float core_env = gl_smoothstep(wake_hw + edge_sigma * 0.80f, wake_hw * 0.15f, u) *
+		                 expf(-cur_arc * 0.035f) * env_base;
 		if (core_env > 0.003f) {
 			float eddy = core_env * spd_scale;
-			total_h -= 0.035f * eddy;
-			total_gx += wt_x * (0.14f * eddy);
-			total_gy += wt_y * (0.14f * eddy);
-			float bubble = gl_smoothstep(0.48f, 0.78f, wt_v) * expf(-age * 1.45f);
-			total_foam += eddy * bubble * 0.28f;
+			float body_foam_ramp = gl_smoothstep(0.5f, 4.5f, cur_arc);
+			total_h -= 0.11f * eddy;
+			total_gx += wt_x * (0.42f * eddy) + ndir_x * (sign_u * 0.20f * eddy);
+			total_gy += wt_y * (0.42f * eddy) + ndir_y * (sign_u * 0.20f * eddy);
+			float bubble = gl_smoothstep(0.36f, 0.74f, wt_v) * expf(-age * 1.25f);
+			total_foam += eddy * (0.10f + bubble * 0.34f) * (0.35f + 0.65f * body_foam_ramp);
 		}
 	}
 
-	if (total_h < -0.18f) total_h = -0.18f;
-	if (total_h >  0.18f) total_h =  0.18f;
-	if (total_foam > 0.38f) total_foam = 0.38f;
+	if (total_h < -0.42f) total_h = -0.42f;
+	if (total_h >  0.42f) total_h =  0.42f;
+	if (total_foam > 0.55f) total_foam = 0.55f;
 
 	if (out_grad_x) *out_grad_x = total_gx;
 	if (out_grad_y) *out_grad_y = total_gy;
