@@ -53,7 +53,7 @@
 
 /* Elevation range and climate constants from server worldgen */
 #define ND_FIELD_NOISE_FOURTH    (NOISE_MAX >> 2)
-#define ND_FIELD_TEMP_MAX        ((int16_t)170)
+#define ND_FIELD_TEMP_MAX        ((int16_t)106)
 #define ND_FIELD_TEMP_MIN        ((int16_t)-41)
 #define ND_FIELD_SOLAR_TEMP_MAX  ((int16_t)115)
 #define ND_FIELD_SOLAR_TEMP_SPAN ((int16_t)150)
@@ -306,23 +306,43 @@ nd_field_bio_idx(uint32_t rn, int16_t tmp)
 static inline void
 nd_field_bio_blend(uint32_t rn, int16_t tmp, uint8_t *bio_out, uint8_t *bio2_out, uint8_t *blend_out)
 {
-	if (tmp < ND_FIELD_TEMP_MIN) {
-		if (bio_out) *bio_out = BIOME_PERMANENT_ICE;
-		if (bio2_out) *bio2_out = BIOME_PERMANENT_ICE;
-		if (blend_out) *blend_out = 0;
-		return;
-	}
-	if (tmp >= ND_FIELD_TEMP_MAX) {
-		if (bio_out) *bio_out = BIOME_VOLCANIC;
-		if (bio2_out) *bio2_out = BIOME_VOLCANIC;
-		if (blend_out) *blend_out = 0;
-		return;
-	}
-
 	uint32_t rn_step = ND_FIELD_RAIN_MAX / 4;
 	int32_t tmp_step = (ND_FIELD_TEMP_MAX - ND_FIELD_TEMP_MIN) / 4;
 	if (rn_step == 0) rn_step = 1;
 	if (tmp_step == 0) tmp_step = 1;
+
+	/* Smooth transitional boundary into permanent ice below TEMP_MIN */
+	if (tmp < ND_FIELD_TEMP_MIN) {
+		uint8_t polar_adj = (rn < rn_step) ? BIOME_COLD_DESERT : BIOME_TUNDRA;
+		int32_t d_ice = ND_FIELD_TEMP_MIN - tmp;
+		if (d_ice < 16) {
+			if (bio_out) *bio_out = BIOME_PERMANENT_ICE;
+			if (bio2_out) *bio2_out = polar_adj;
+			uint32_t t = (uint32_t)(16 - d_ice);
+			if (blend_out) *blend_out = (uint8_t)((t * t * 128u) / 256u);
+		} else {
+			if (bio_out) *bio_out = BIOME_PERMANENT_ICE;
+			if (bio2_out) *bio2_out = BIOME_PERMANENT_ICE;
+			if (blend_out) *blend_out = 0;
+		}
+		return;
+	}
+	/* Smooth transitional boundary into volcanic heat above TEMP_MAX */
+	if (tmp >= ND_FIELD_TEMP_MAX) {
+		uint8_t heat_adj = (rn < rn_step) ? BIOME_DESERT : BIOME_SAVANNAH;
+		int32_t d_heat = tmp - ND_FIELD_TEMP_MAX;
+		if (d_heat < 16) {
+			if (bio_out) *bio_out = BIOME_VOLCANIC;
+			if (bio2_out) *bio2_out = heat_adj;
+			uint32_t t = (uint32_t)(16 - d_heat);
+			if (blend_out) *blend_out = (uint8_t)((t * t * 128u) / 256u);
+		} else {
+			if (bio_out) *bio_out = BIOME_VOLCANIC;
+			if (bio2_out) *bio2_out = BIOME_VOLCANIC;
+			if (blend_out) *blend_out = 0;
+		}
+		return;
+	}
 
 	uint32_t rn_bit = (rn / rn_step);
 	if (rn_bit > 3) rn_bit = 3;
@@ -344,7 +364,14 @@ nd_field_bio_blend(uint32_t rn, int16_t tmp, uint8_t *bio_out, uint8_t *bio2_out
 	uint8_t secondary = primary;
 	int32_t min_d = 128;
 
-	if (d_rn < d_tmp) {
+	/* Smooth transitional blend to PERMANENT_ICE near cold threshold */
+	if (tmp_bit == 0 && tmp_frac < 48) {
+		secondary = BIOME_PERMANENT_ICE;
+		min_d = (int32_t)tmp_frac;
+	} else if (tmp_bit == 3 && tmp_frac > 208) {
+		secondary = BIOME_VOLCANIC;
+		min_d = (int32_t)(256 - tmp_frac);
+	} else if (d_rn < d_tmp) {
 		min_d = d_rn;
 		if (rn_frac < 128 && rn_bit > 0)
 			secondary = (uint8_t)(2 + (rn_bit - 1) + (tmp_bit << 2));
@@ -360,7 +387,9 @@ nd_field_bio_blend(uint32_t rn, int16_t tmp, uint8_t *bio_out, uint8_t *bio2_out
 
 	uint8_t blend = 0;
 	if (min_d < 48 && secondary != primary) {
-		blend = (uint8_t)(((48 - min_d) * 128) / 48);
+		uint32_t t = (uint32_t)(48 - min_d);
+		/* Smooth C1 quadratic ease-in reaching exactly 128 (50% blend) at the boundary */
+		blend = (uint8_t)((t * t * 128u) / (48u * 48u));
 	}
 
 	if (bio_out) *bio_out = primary;
@@ -719,6 +748,16 @@ nd_field_eval_mountain_lake(uint16_t world, int32_t wx, int32_t wy,
 
 	int16_t crx = (int16_t)noise_fdiv(cx - (ND_FIELD_ROOM_W / 2), ND_FIELD_ROOM_W);
 	int16_t cry = (int16_t)noise_fdiv((ND_FIELD_ROOM_H / 2) - cy, ND_FIELD_ROOM_H);
+
+	/* Aridity gating: Highland lakes require positive moisture balance.
+	 * In subtropical desert and savannah belts, evaporation exceeds precipitation,
+	 * so perched lakes are suppressed (rare 1-in-32 seasonal watering hole only). */
+	int32_t abs_cry = abs((int32_t)cry);
+	if (abs_cry >= 3200 && abs_cry <= 9200 && abs(abs_cry - 6200) < 2400) {
+		if ((h_cell & 31u) != 0)
+			return;
+	}
+
 	int16_t center_hyp = nd_field_room_hyp_coarse(world, crx, cry);
 	if (center_hyp < sea_lvl + 36 || center_hyp > sea_lvl + 480)
 		return;
@@ -845,20 +884,58 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	}
 	uint32_t cl_macro = rm->cl_macro;
 	uint32_t tm_macro = rm->tm_macro;
-	uint32_t cl_reg = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 5, 8, 1 + world);
-	uint32_t tm_reg = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 6, 8, 53 + world);
-	uint32_t cl_raw = (cl_macro >> 1) + (cl_reg >> 1);
-	uint32_t tm_raw = (tm_macro >> 1) + (tm_reg >> 1);
+	uint32_t cl_prov  = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 10, 8, 101 + world);
+	uint32_t tm_prov  = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 10, 8, 153 + world);
+	uint32_t cl_reg   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 7, 8, 1 + world);
+	uint32_t tm_reg   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 7, 8, 53 + world);
+	uint32_t cl_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 201 + world);
+	uint32_t tm_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 253 + world);
 
-	s.rain = (cl_raw >> 15);
-	if (s.rain > ND_FIELD_RAIN_MAX) s.rain = ND_FIELD_RAIN_MAX;
+	/* 4-octave continuous climate hierarchy across scales:
+	 *   40% continental macro (shift 14: 16k rooms = 2.6M world units)
+	 *   30% continental provinces (shift 10: 1k rooms = 164k world units)
+	 *   20% regional corridors (shift 7: 128 rooms = 20.5k world units)
+	 *   10% local eco-regions (shift 4: 16 rooms = 2.5k world units)
+	 * Biomes form broad, natural geographical realms (like Earth's Sahara, Savannah, Taiga)
+	 * that maintain continuous multi-octave level of detail when zooming out! */
+	uint32_t cl_raw = (cl_macro * 4u + cl_prov * 3u + cl_reg * 2u + cl_loc * 1u) / 10u;
+	uint32_t tm_raw = (tm_macro * 4u + tm_prov * 3u + tm_reg * 2u + tm_loc * 1u) / 10u;
+
+	/* Contrast-stretch rainfall to utilize full dry-to-wet spectrum */
+	int32_t rn_centered = (int32_t)(cl_raw >> 15) - 256;
+	int32_t rn_val = 256 + (rn_centered * 15) / 10;
+
+	/* Subtropical Hadley subsidence drying belt (latitudes ~15°..42° == room_y ~2400..10500) creates vast Earth-like desert belts */
+	int32_t abs_ry = abs((int32_t)room_y);
+	if (abs_ry >= 2200 && abs_ry <= 11000) {
+		int32_t sub_dist = abs(abs_ry - 6200);
+		if (sub_dist < 4400) {
+			int32_t dry_weight = (4400 - sub_dist) * 150 / 4400;
+			rn_val -= dry_weight;
+		}
+	}
+	if (rn_val < 0) rn_val = 0;
+	if (rn_val > (int32_t)ND_FIELD_RAIN_MAX) rn_val = ND_FIELD_RAIN_MAX;
+	s.rain = (uint32_t)rn_val;
 
 	s.temp = nd_field_temp_at_azimuth(world, (uint32_t)s.elevation, tm_raw, room_x, room_y, sun_azimuth);
 	int32_t elev_above_base = (int32_t)s.elevation - 30;
 	if (elev_above_base > 0) {
-		s.temp -= (int16_t)((elev_above_base * 7) / 100);
+		/* Physical environmental lapse rate: high summits cool into subalpine tundra and permanent snowy peaks */
+		int32_t lapse = (elev_above_base * 10) / 100;
+		s.temp -= (int16_t)lapse;
 	}
 	nd_field_bio_blend(s.rain, s.temp, &s.bio, &s.bio2, &s.blend);
+
+	/* Volcanic Hotspots: Rare localized tectonic rifts/calderas on dry land (~0.2% of terrain),
+	 * rather than covering equatorial climate bands */
+	if (!s.is_water && s.elevation > s.water_level + 20) {
+		uint32_t v_caldera = chaff_sample_torus_macro((int32_t)room_x, (int32_t)room_y, 6, 0x564F4C43u);
+		if ((v_caldera & 0x1FFu) <= 1u) {
+			s.bio = BIOME_VOLCANIC;
+			s.blend = 0;
+		}
+	}
 
 	return s;
 }

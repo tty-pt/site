@@ -95,7 +95,7 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	uint32_t c2 = ndw_biome_base_rgb(fs.bio2);
 	uint8_t blend = fs.blend;
 	uint32_t col = (blend > 0 && fs.bio != fs.bio2)
-		? macro_blend_rgb(c1, c2, (blend * 255) / 128) : c1;
+		? macro_blend_rgb(c1, c2, (int)blend) : c1;
 
 	/* Smooth world-coordinate hypsometric + band-limited meso relief tinting:
 	 * spans the full planetary hypsometry (-2,000 wu abyssal trenches to +1,854 wu Mount Everest)
@@ -105,6 +105,21 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		int elev_rel = ((int)fs.elevation_q12_4 - ((int)fs.water_level << 4)) >> 4;
 		if (elev_rel < -2000) elev_rel = -2000;
 		if (elev_rel > 1854) elev_rel = 1854;
+
+		/* Natural alpine transition on mountain summits:
+		 *   - 180..320 wu: subalpine granite scree lifts out of lowland vegetation
+		 *   - 320..520+ wu: brilliant alpine snowcaps and glacial ice */
+		if (elev_rel > 180 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
+			uint32_t c_granite = 0xFF6C7073u; /* Slate/granite scree RGB(115, 112, 108) */
+			uint32_t c_snow    = 0xFFFCF4F0u; /* Alpine snow RGB(240, 244, 252) */
+			int rock_w = (elev_rel <= 320) ? ((elev_rel - 180) * 255 / 140) : 255;
+			col = macro_blend_rgb(col, c_granite, rock_w);
+			if (elev_rel > 320) {
+				int snow_w = (elev_rel <= 520) ? ((elev_rel - 320) * 255 / 200) : 255;
+				col = macro_blend_rgb(col, c_snow, snow_w);
+			}
+		}
+
 		int hypso_delta;
 		if (elev_rel < -64) {
 			hypso_delta = -16 + ((elev_rel + 64) >> 6);
@@ -378,13 +393,14 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	uint8_t min_lvl = 0;
 
 	/* Continuous logarithmic LOD stepping function from atmosphere through orbital space:
-	 * replaces discrete switch-cases with a single smooth log2(dist / 2000) scale law. */
+	 * Preserves higher chunk and biome resolution during zoom-out so biomes remain crisp
+	 * multi-octave provinces rather than collapsing prematurely into coarse LODs. */
 	if (dist >= 2500.0f) {
 		float atmo_t = fminf(1.0f, fmaxf(0.0f, (dist - 2500.0f) / 42000.0f));
-		target_quad_px = 1.80f + 10.20f * atmo_t;
-		int lvl_step = (int)floorf(log2f(dist * (1.0f / 2000.0f)));
+		target_quad_px = 1.33f + 3.80f * atmo_t;
+		int lvl_step = (int)floorf(log2f(dist * (1.0f / 5000.0f)));
 		if (lvl_step < 1) lvl_step = 1;
-		if (lvl_step > 6) lvl_step = 6;
+		if (lvl_step > 4) lvl_step = 4;
 		min_lvl = (uint8_t)lvl_step;
 	}
 
@@ -823,6 +839,12 @@ static int seven_emit_room_billboards(const nd_client_state_t *st, const ar_node
 		int16_t elev_q = 0, local_wl = w_level;
 		seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 		int16_t wz = nd_field_elevation_to_block(elev_q);
+
+		if (wz <= local_wl && node->level >= 2) {
+			int16_t canon_elev = nd_field_sample((uint16_t)pos[3], 0, wx, wy).elevation;
+			if (canon_elev > local_wl)
+				wz = canon_elev;
+		}
 
 		if (wz <= local_wl &&
 		    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS)
@@ -1869,10 +1891,10 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				for (int32_t bx0 = cx0; bx0 < cx1; bx0 += 8) {
 					int32_t bx1 = (bx0 + 8 < cx1) ? (bx0 + 8) : cx1;
 					if (s_frame_frustum_valid) {
-						float bmin_x = (float)(bx0 * NDW_TILE_W) - 384.0f;
-						float bmax_x = (float)(bx1 * NDW_TILE_W) + 384.0f;
-						float bmin_y = (float)(by0 * NDW_TILE_H) - 384.0f;
-						float bmax_y = (float)(by1 * NDW_TILE_H) + 384.0f;
+						float bmin_x = (float)(bx0 * NDW_TILE_W) - 512.0f;
+						float bmax_x = (float)(bx1 * NDW_TILE_W) + 512.0f;
+						float bmin_y = (float)(by0 * NDW_TILE_H) - 512.0f;
+						float bmax_y = (float)(by1 * NDW_TILE_H) + 512.0f;
 						if (!seven_test_frustum_xy(bmin_x, bmin_y, bmax_x, bmax_y, (float)lwx, (float)lwy, nz_min, nz_max))
 							continue;
 					}

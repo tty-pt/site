@@ -135,7 +135,7 @@
 	"    /* Exact analytical upper bound of regional squalls (0.116*wReg2 + 0.070*wReg3) and cirrus (+0.164):\n" \
 	"     * bails out immediately in anticyclonic clear-sky basins before evaluating 7 cirrus/squall/meso noises! */\n" \
 	"    float maxFront = synFront + 0.116 * wReg2 + 0.070 * wReg3;\n" \
-	"    if (maxFront <= (0.505 - 0.125 * humidity) && (!wantCirrus || (synFront + 0.164) <= (0.48 - 0.08 * humidity))) {\n" \
+	"    if (maxFront <= (0.510 - 0.125 * humidity) && (!wantCirrus || (synFront + 0.164) <= (0.48 - 0.08 * humidity))) {\n" \
 	"        outGrad = vec2(0.0);\n" \
 	"        outHighCirrus = 0.0;\n" \
 	"        return vec4(0.0, synFront, synWarp);\n" \
@@ -171,7 +171,7 @@
 	"            macroGrad += (irot * oct3.yz) * (0.42 * wReg3);\n" \
 	"        }\n" \
 	"    }\n" \
-	"    float synRegime = smoothstep(0.505 - 0.125 * humidity, 0.685 - 0.075 * humidity, synFront);\n" \
+	"    float synRegime = smoothstep(0.510 - 0.125 * humidity, 0.685 - 0.075 * humidity, synFront);\n" \
 	"    float macroCoverage = synRegime;\n" \
 	"    /* Multi-regime weather hierarchy: Continental Overcast Shields vs Frontal Broken Decks vs Fair Cumulus */\n" \
 	"    float overcastShield = smoothstep(0.62, 0.86, synRegime);\n" \
@@ -201,6 +201,9 @@
 	"         * while carving billowing top relief, rather than punching empty holes to the ground! */\n" \
 	"        float structuredCov = mix(cumulusCells, max(cumulusCells, synRegime * 0.88 + 0.12 * cellField), overcastShield);\n" \
 	"        macroCoverage = mix(synRegime, structuredCov, wMeso0);\n" \
+	"    } else {\n" \
+	"        float orbitArm = smoothstep(0.32, 0.70, r0);\n" \
+	"        macroCoverage = synRegime * mix(0.72 + 0.28 * orbitArm, 1.0, overcastShield);\n" \
 	"    }\n" \
 	"    outGrad = macroGrad;\n" \
 	"    return vec4(macroCoverage, synFront, synWarp);\n" \
@@ -1253,9 +1256,10 @@ static const char *s_fs_terrain =
 	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
 	"    float wVolcanic = smoothstep(0.32, 0.14, maxBio);\n"
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
-	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
-	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
-	"    float texBioHumidity = clamp(0.55 * wTemperate + 0.82 * wTropical + 0.48 * wPolar + 0.20 * wVolcanic + 0.25 * smoothstep(-4.0, 8.0, fragWaterDepth), 0.15, 0.95);\n"
+	"    float wDesert = smoothstep(0.65, 0.85, rawBiome.r) * smoothstep(0.50, 0.70, rawBiome.g) * smoothstep(0.65, 0.45, rawBiome.b) * (1.0 - wPolar);\n"
+	"    float wTropical = smoothstep(0.40, 0.65, rawBiome.g) * smoothstep(0.04, 0.35, rawBiome.g - rawBiome.r) * (1.0 - wPolar) * (1.0 - wDesert);\n"
+	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical + wDesert), 0.0, 1.0);\n"
+	"    float texBioHumidity = clamp(0.52 * wTemperate + 0.80 * wTropical + 0.45 * wPolar + 0.15 * wVolcanic + 0.10 * wDesert + 0.25 * smoothstep(-4.0, 8.0, fragWaterDepth), 0.08, 0.95);\n"
 	"    vec3 worldClimate = chaff_grad_noise2d(vWorldPos * 0.000045, 0x434C494Du);\n"
 	"    float worldBioHumidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.22, 0.90);\n"
 	"    float bioHumidity = mix(texBioHumidity, worldBioHumidity, gpuFieldBlend);\n"
@@ -1317,7 +1321,7 @@ static const char *s_fs_terrain =
 	"                loamCol *= (1.0 - soilMoisture * 0.35);\n"
 	"                dryCol = mix(dryCol, loamCol, soilFactor * distFade);\n"
 	"            }\n"
-	"            bool isSandBiome = (dryCol.r > 0.55 && dryCol.g > 0.45 && dryCol.b < 0.45);\n"
+	"            bool isSandBiome = (dryCol.r > 0.60 && dryCol.g > 0.48 && dryCol.r > dryCol.b * 1.20 && dryCol.b < 0.75);\n"
 	"            float shoreFactor = smoothstep(6.0, 0.4, min(elevAboveWater, elevAboveHighTide)) * (1.0 - rockFactor);\n"
 	"            float sandSparkle = 0.0;\n"
 	"            float wetSand = 0.0;\n"
@@ -1397,21 +1401,45 @@ static const char *s_fs_terrain =
 	"    }\n"
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
 	"    float submergedBlend = smoothstep(0.35, 5.5, fragWaterDepth);\n"
+	"    /* Alpine progression on mountain summits: subalpine granite scree and permanent snowcaps across all zooms */\n"
+	"    float effElev = elevAboveWater + macroDetail.x * 2.5;\n"
+	"    float snowBaseZ = 340.0 - 180.0 * wPolar + 180.0 * wTropical + 120.0 * wDesert;\n"
+	"    float snowShed = smoothstep(0.42, 0.18, slope);\n"
+	"    float alpineSnow = smoothstep(snowBaseZ, snowBaseZ + 180.0, effElev) * snowShed;\n"
+	"    float alpineRock = smoothstep(snowBaseZ - 140.0, snowBaseZ + 40.0, effElev);\n"
+	"    if (alpineRock > 0.001) {\n"
+	"        vec3 slateRock = vec3(0.45, 0.44, 0.43);\n"
+	"        dryCol = mix(dryCol, slateRock, alpineRock * 0.75);\n"
+	"        if (alpineSnow > 0.001) {\n"
+	"            float snowNoise = (nStd - 0.5) * 0.12 * distFade + (nClose - 0.5) * 0.10 * closeZoom;\n"
+	"            vec3 snowCol = vec3(0.94, 0.96, 0.99) * (0.95 + snowNoise);\n"
+	"            dryCol = mix(dryCol, snowCol, alpineSnow * 0.92);\n"
+	"        }\n"
+	"    }\n"
 	"    /* High-definition orbital/atmospheric procedural albedo modulation on dry land & ocean basins:\n"
 	"     * Calibrated to true planetary hypsometry (+1,854 wu Mount Everest = 8,849 m):\n"
-	"     *   - Subalpine granite/slate scree emergence: 360..760 wu (~1.7..3.6 km equivalent)\n"
-	"     *   - Climate-modulated permanent alpine snow & glacier caps: 780..1,360 wu (~3.7..6.5 km equivalent) */\n"
+	"     *   - Polar ice caps: brilliant white snow & ice from sea level up!\n"
+	"     *   - Subalpine granite/slate scree emergence: 180..320 wu\n"
+	"     *   - Climate-modulated permanent alpine snow & glacier caps on mountain summits: 180..380 wu\n"
+	"     *   - Golden desert erg sand modulation visible across space */\n"
 	"    float orbitDetailWeight = smoothstep(1800.0, 6500.0, vDistance);\n"
 	"    if (orbitDetailWeight > 0.001) {\n"
 	"        float contTex = (macroOct.x - 0.5) * 0.16 + (macroOct.y - 0.5) * 0.18 + (macroOct.z - 0.5) * 0.14 + (macroOct.w - 0.5) * 0.10;\n"
 	"        float ridgeCrest = macroDetail.w * orbitDetailWeight;\n"
-	"        float effElev = elevAboveWater + macroDetail.x * 3.5;\n"
-	"        float subalpineRock = smoothstep(360.0, 760.0, effElev);\n"
+	"        float subalpineRock = smoothstep(160.0, 320.0, effElev);\n"
 	"        vec3 ridgeTint = mix(dryCol * (1.0 + contTex), vec3(0.50, 0.48, 0.46), clamp(ridgeCrest * 0.48 + subalpineRock * 0.36, 0.0, 0.62));\n"
-	"        float snowBaseZ = 820.0 - 300.0 * wPolar + 240.0 * wTropical;\n"
-	"        float alpineSnow = smoothstep(snowBaseZ, snowBaseZ + 480.0, effElev) * smoothstep(0.24, 0.62, macroOct.y * 0.6 + macroOct.z * 0.4);\n"
-	"        ridgeTint = mix(ridgeTint, vec3(0.92, 0.95, 0.99), alpineSnow * 0.78 * orbitDetailWeight);\n"
-	"        dryCol = mix(dryCol, ridgeTint, orbitDetailWeight * 0.85);\n"
+	"        /* 1. Polar ice caps visible from orbit: brilliant white from sea level up */\n"
+	"        float polarIce = wPolar * smoothstep(-1.0, 3.5, elevAboveWater);\n"
+	"        /* 2. Alpine mountain snowcaps visible from orbit: summits and ridges above 180..380 wu */\n"
+	"        float alpineSnowline = 180.0 - 120.0 * wPolar + 100.0 * wTropical + 60.0 * wDesert;\n"
+	"        float mountainSnow = smoothstep(alpineSnowline, alpineSnowline + 180.0, effElev) * smoothstep(0.44, 0.15, slope);\n"
+	"        float spaceSnow = max(polarIce, mountainSnow);\n"
+	"        vec3 snowOrbitCol = vec3(0.95, 0.97, 1.00);\n"
+	"        ridgeTint = mix(ridgeTint, snowOrbitCol, spaceSnow * 0.95);\n"
+	"        /* 3. Golden desert erg sand visible from orbit */\n"
+	"        vec3 desertOrbitCol = vec3(0.86, 0.74, 0.52);\n"
+	"        ridgeTint = mix(ridgeTint, desertOrbitCol, wDesert * 0.75);\n"
+	"        dryCol = mix(dryCol, ridgeTint, orbitDetailWeight * 0.88);\n"
 	"        subCol *= clamp(1.0 + contTex * 0.75 * orbitDetailWeight, 0.78, 1.22);\n"
 	"    }\n"
 	"    vec3 baseAlbedo = mix(dryCol, subCol, submergedBlend);\n"
@@ -2795,7 +2823,7 @@ static const char *s_fs_csm =
 	"    vec2 projXY = uCsm.xy + (vUv - 0.5) * (2.0 * uCsm.z);\n"
 	"    float fw = (2.0 * uCsm.z) / " ND_SL_STR(ND_CSM_RES) ".0;\n"
 	"    vec3 worldClimate = chaff_grad_noise2d(projXY * 0.000045, 0x434C494Du);\n"
-	"    float humidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + 0.10 * uSeaWet, 0.22, 0.90);\n"
+	"    float humidity = clamp(0.50 + 0.28 * (worldClimate.x - 0.5) + 0.08 * uSeaWet, 0.15, 0.88);\n"
 	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n"
 	"    float atmoGust = 0.65, updraft = 0.50;\n"
 	"    chaff_eval_wind_3d(vec3(projXY, 920.0), 420.0, 2820.0, uAnimTime, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
@@ -2986,8 +3014,8 @@ static const char *s_fs_cloud =
 	"    bool upperDeck = (hNorm >= 0.68);\n"
 	"    vec2 shearedXY = worldPos.xy - shearDisp - atmoWindDir * (hNorm * 1400.0);\n"
 	"    vec2 synQueryXY = upperDeck\n"
-	"        ? (shearedXY - atmoWindDir * 38000.0 + windPerp * 22000.0)\n"
-	"        : ((deckIdx > 0.5) ? (shearedXY + windPerp * 4800.0 + atmoWindDir * 3200.0) : shearedXY);\n"
+	"        ? (shearedXY - atmoWindDir * 14000.0 + windPerp * 8000.0)\n"
+	"        : ((deckIdx > 0.5) ? (shearedXY + windPerp * 3200.0 + atmoWindDir * 2000.0) : shearedXY);\n"
 	"    float synFw = upperDeck ? max(fw, 4000.0) : fw;\n"
 	"    vec2 macroGrad = vec2(0.0);\n"
 	"    float highCirrus = 0.0;\n"
@@ -3146,11 +3174,12 @@ static const char *s_fs_cloud =
 	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
 	"    float wVolcanic = smoothstep(0.32, 0.14, maxBio);\n"
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
-	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
-	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
-	"    float texBioHumidity = clamp(0.58 * wTemperate + 0.85 * wTropical + 0.50 * wPolar + 0.22 * wVolcanic + ((uSeaLevel > -900.0) ? 0.12 : 0.0), 0.18, 0.95);\n"
+	"    float wDesert = smoothstep(0.65, 0.85, rawBiome.r) * smoothstep(0.50, 0.70, rawBiome.g) * smoothstep(0.65, 0.45, rawBiome.b) * (1.0 - wPolar);\n"
+	"    float wTropical = smoothstep(0.40, 0.65, rawBiome.g) * smoothstep(0.04, 0.35, rawBiome.g - rawBiome.r) * (1.0 - wPolar) * (1.0 - wDesert);\n"
+	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical + wDesert), 0.0, 1.0);\n"
+	"    float texBioHumidity = clamp(0.52 * wTemperate + 0.80 * wTropical + 0.45 * wPolar + 0.15 * wVolcanic + 0.10 * wDesert + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.08, 0.95);\n"
 	"    vec3 worldClimate = chaff_grad_noise2d(entryWorldPos * 0.000045, 0x434C494Du);\n"
-	"    float worldBioHumidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.22, 0.90);\n"
+	"    float worldBioHumidity = clamp(0.50 + 0.28 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.08 : 0.0), 0.15, 0.88);\n"
 	"    float bioHumidity = mix(texBioHumidity, worldBioHumidity, clamp(uCamDist * 0.00002, 0.0, 1.0));\n"
 	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
@@ -5970,7 +5999,7 @@ static inline void gl_eval_synoptic_macro_cloud_fw(float wx, float wy, float ani
 	float wReg2 = gl_smoothstep(0.26f, 0.07f, 0.00001150f * fw);
 	float wReg3 = gl_smoothstep(0.24f, 0.06f, 0.00005500f * fw);
 	float maxFront = synFront + 0.116f * wReg2 + 0.070f * wReg3;
-	if (maxFront <= (0.505f - 0.125f * humidity) && (!out_high_cirrus || (synFront + 0.176f) <= (0.42f - 0.10f * humidity))) {
+	if (maxFront <= (0.510f - 0.125f * humidity) && (!out_high_cirrus || (synFront + 0.176f) <= (0.42f - 0.10f * humidity))) {
 		if (out_coverage) *out_coverage = 0.0f;
 		if (out_front) *out_front = synFront;
 		if (out_warp_x) *out_warp_x = synWarpX;
@@ -6027,7 +6056,7 @@ static inline void gl_eval_synoptic_macro_cloud_fw(float wx, float wy, float ani
 		}
 	}
 
-	float synRegime = gl_smoothstep(0.505f - 0.125f * humidity, 0.685f - 0.075f * humidity, synFront);
+	float synRegime = gl_smoothstep(0.510f - 0.125f * humidity, 0.685f - 0.075f * humidity, synFront);
 	float macroCoverage = synRegime;
 
 	/* Multi-regime weather hierarchy: Continental Overcast Shields vs Frontal Broken Decks vs Fair Cumulus */
@@ -6083,6 +6112,9 @@ static inline void gl_eval_synoptic_macro_cloud_fw(float wx, float wy, float ani
 		float cumulusCells = gl_smoothstep(threshLo, threshHi, cellField) * gl_smoothstep(0.02f, 0.18f, synRegime);
 		float structuredCov = (1.0f - overcastShield) * cumulusCells + overcastShield * (cumulusCells > (synRegime * 0.88f + 0.12f * cellField) ? cumulusCells : (synRegime * 0.88f + 0.12f * cellField));
 		macroCoverage = (1.0f - wMeso0) * synRegime + wMeso0 * structuredCov;
+	} else {
+		float orbitArm = gl_smoothstep(0.32f, 0.70f, r0);
+		macroCoverage = synRegime * ((1.0f - overcastShield) * (0.72f + 0.28f * orbitArm) + overcastShield);
 	}
 
 	if (out_coverage) *out_coverage = macroCoverage;
@@ -6139,11 +6171,11 @@ float nd_seven_gl_eval_zoom_cloud_density(float wx, float wy, float wz,
 	float shearedX = wx - shearX - atmoDirX * (hNorm * 1400.0f);
 	float shearedY = wy - shearY - atmoDirY * (hNorm * 1400.0f);
 	float synQueryX = upperDeck
-	                ? (shearedX - atmoDirX * 38000.0f + windPerpX * 22000.0f)
-	                : ((deckIdx > 0.5f) ? (shearedX + windPerpX * 4800.0f + atmoDirX * 3200.0f) : shearedX);
+	                ? (shearedX - atmoDirX * 14000.0f + windPerpX * 8000.0f)
+	                : ((deckIdx > 0.5f) ? (shearedX + windPerpX * 3200.0f + atmoDirX * 2000.0f) : shearedX);
 	float synQueryY = upperDeck
-	                ? (shearedY - atmoDirY * 38000.0f + windPerpY * 22000.0f)
-	                : ((deckIdx > 0.5f) ? (shearedY + windPerpY * 4800.0f + atmoDirY * 3200.0f) : shearedY);
+	                ? (shearedY - atmoDirY * 14000.0f + windPerpY * 8000.0f)
+	                : ((deckIdx > 0.5f) ? (shearedY + windPerpY * 3200.0f + atmoDirY * 2000.0f) : shearedY);
 	float synFw = upperDeck ? fmaxf(fw, 4000.0f) : fw;
 
 	float macroCoverage = 0.0f, contFront = 0.0f, synWarp0X = 0.0f, synWarp0Y = 0.0f;
