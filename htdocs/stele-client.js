@@ -815,6 +815,14 @@ export class SteleWasmClient {
 				(fit ? (rect?.height || c.clientHeight) : (parseInt(c.getAttribute('height') || '0', 10) || rect?.height || c.clientHeight)) ||
 				window.innerHeight || 600
 			);
+			let offscreen = null;
+			if (!c.__stele_transferred && typeof c.transferControlToOffscreen === 'function') {
+				try {
+					offscreen = c.transferControlToOffscreen();
+					c.__stele_transferred = true;
+				} catch (_) {}
+			}
+			const transferList = offscreen ? [offscreen] : [];
 			this.worker.postMessage({
 				type: 'stele:canvas_attach',
 				slot,
@@ -823,8 +831,9 @@ export class SteleWasmClient {
 				fit,
 				webgl,
 				width,
-				height
-			});
+				height,
+				canvas: offscreen
+			}, transferList);
 		}
 	}
 

@@ -1600,7 +1600,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
 
 		bud_node *root = bud_tpl(
-			"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+			"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina webgl bud xylem' "
 			"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 			layout);
 
@@ -1672,7 +1672,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 	bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
 
 	bud_node *root = bud_tpl(
-		"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina bud xylem' "
+		"<div id='bud-root' data-slot='1' data-capabilities='axil-ws axil-tty lamina webgl bud xylem' "
 		"class='w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]'>%node</div>",
 		layout);
 
