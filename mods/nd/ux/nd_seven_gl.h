@@ -160,6 +160,7 @@ float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
 /* Resolve the scene and present it to the canvas. Must follow the last draw of a begin_frame()d frame. */
 void nd_seven_gl_end_frame(void);
 
+void nd_seven_gl_set_focal_water(float water_level);
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
                              float tx, float ty, float tz,
                              float dist, float pitch_deg, float fov_deg,

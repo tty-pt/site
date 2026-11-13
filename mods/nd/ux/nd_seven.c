@@ -208,6 +208,10 @@ static int seven_has_water_at(uint16_t world, int32_t wx, int32_t wy, int16_t *o
 		has_w = fs.is_water || (wl > base_wl);
 	}
 
+	int16_t gz = nd_seven_ground_elevation(wx, wy);
+	if (gz < base_wl)
+		has_w = 1;
+
 	int ti = ndw_fdiv(wx, NDW_TILE_W);
 	int pos_y = -ndw_fdiv(wy, NDW_TILE_H);
 	if (ti == -3 && pos_y == 0)
@@ -427,6 +431,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                : (float)lamb_wl;
 		float eff_wl = fmaxf((float)lamb_wl, live_wl);
 		bool lamb_in_water = has_loc_water && (lwz < eff_wl + 0.65f);
+		if (has_loc_water) {
+			nd_seven_gl_set_focal_water(eff_wl);
+		}
 		float wake_ground_z = lamb_in_water ? (lwz - ((float)lamb_wl - (float)base_wl)) : (float)base_wl + 10.0f;
 
 		/* Compute the exact 3D waterline intersection on the 55-deg tilted lamb billboard:
