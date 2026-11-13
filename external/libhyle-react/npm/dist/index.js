@@ -17,7 +17,7 @@ function formatFieldTitle(name) {
 /**
  * Unopinionated, pluggable semantic table component mirroring hyle-bud.
  * Supports explicit columns OR schema-driven auto columns with columnOverrides.
- * Host applications (like Duna) command styling, class names, and custom cell projections.
+ * Host applications command styling, class names, and custom cell projections.
  */
 export function HyleTable({
   columns = [],

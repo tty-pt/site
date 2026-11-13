@@ -31,5 +31,14 @@
     "useSyncExternalStore"
   ],
   "author": "Paulo Quirino",
-  "license": "BSD-2-Clause"
+  "license": "BSD-2-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tty-pt/libhyle-react.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/tty-pt/libhyle-react/tree/main/npm#readme",
+  "bugs": {
+    "url": "https://github.com/tty-pt/libhyle-react/issues"
+  }
 }

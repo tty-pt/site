@@ -286,21 +286,13 @@ export class SteleWasmClient {
 			declaredCaps = [...new Set(capAttr.trim().split(/\s+/).filter(Boolean))];
 		}
 		for (const cap of declaredCaps) {
-			if (this.worker && !this.isWorkerHost && cap !== 'axil-tty' && cap !== 'bud') {
-				// Worker-side capabilities are loaded inside the Worker; still load axil on main thread if needed for __axil_ws bus
-				if (cap === 'axil-ws' || cap === 'axil') {
-					await this.resolveCapability(cap);
-				}
-				continue;
-			}
 			await this.resolveCapability(cap);
 		}
 
 		if (!this.isWorkerHost && !s_bridgeFactory && typeof globalScope.__wasm_slot_bridge_factory !== 'function' && typeof document !== 'undefined') {
 			const bridgeSrc = document.body?.getAttribute?.('data-bridge') ||
 			                  document.querySelector?.('[data-bridge]')?.getAttribute?.('data-bridge') ||
-			                  document.querySelector?.('meta[name="slot-bridge"]')?.getAttribute?.('content') ||
-			                  '/bud-cap.js';
+			                  document.querySelector?.('meta[name="slot-bridge"]')?.getAttribute?.('content');
 			if (bridgeSrc) {
 				try {
 					const mod = await import(resolveFullUrl(bridgeSrc) || bridgeSrc);
@@ -720,11 +712,12 @@ export class SteleWasmClient {
 					if (msg.id && typeof document !== 'undefined') {
 						el = document.getElementById(msg.id);
 					}
-					if (!el && msg.budId && typeof root.querySelector === 'function') {
-						el = root.querySelector(`canvas[data-bud-id="${msg.budId}"]`);
+					const canvasId = msg.canvasId || msg.id || msg.budId;
+					if (!el && canvasId && typeof root.querySelector === 'function') {
+						el = root.querySelector(`canvas[data-canvas-id="${canvasId}"], canvas[data-bud-id="${canvasId}"]`);
 					}
 					if (!el && typeof root.querySelector === 'function') {
-						el = root.querySelector(msg.fit ? 'canvas[data-bud-canvas-fit]' : 'canvas[data-bud-canvas]');
+						el = root.querySelector(msg.fit ? 'canvas[data-canvas-fit], canvas[data-bud-canvas-fit]' : 'canvas[data-canvas], canvas[data-bud-canvas]');
 					}
 					if (el) {
 						if (el.width !== msg.width) el.width = msg.width;
@@ -798,14 +791,14 @@ export class SteleWasmClient {
 		const root = bridge?.root || document.body;
 		if (!root || typeof root.querySelectorAll !== 'function') return;
 
-		const canvases = root.querySelectorAll('canvas[data-bud-canvas], canvas');
+		const canvases = root.querySelectorAll('canvas[data-canvas], canvas[data-bud-canvas], canvas');
 		for (const c of canvases) {
 			if (c.__stele_registered) continue;
 			c.__stele_registered = true;
 			const id = c.getAttribute('id') || '';
-			const budId = c.getAttribute('data-bud-id') || '';
-			const fit = c.hasAttribute('data-bud-canvas-fit') || id === 'seven-stage-canvas';
-			const webgl = c.hasAttribute('data-bud-webgl') || fit;
+			const canvasId = c.getAttribute('data-canvas-id') || c.getAttribute('data-bud-id') || '';
+			const fit = c.hasAttribute('data-canvas-fit') || c.hasAttribute('data-bud-canvas-fit');
+			const webgl = c.hasAttribute('data-canvas-webgl') || c.hasAttribute('data-bud-webgl') || fit;
 			const rect = typeof c.getBoundingClientRect === 'function' ? c.getBoundingClientRect() : null;
 			const width = Math.round(
 				(fit ? (rect?.width || c.clientWidth) : (parseInt(c.getAttribute('width') || '0', 10) || rect?.width || c.clientWidth)) ||
@@ -819,7 +812,8 @@ export class SteleWasmClient {
 				type: 'stele:canvas_attach',
 				slot,
 				id,
-				budId,
+				canvasId,
+				budId: canvasId,
 				fit,
 				webgl,
 				width,
@@ -1061,11 +1055,18 @@ export class SteleWasmClient {
 			].join(' ');
 			const declaredCaps = [...new Set(capStr.trim().split(/\s+/).filter(Boolean))];
 
-			if (declaredCaps.includes('axil-tty') && typeof globalScope.__wasm_capability_registry['axil-tty'] === 'function') {
-				const ttyBridge = globalScope.__wasm_capability_registry['axil-tty'](slotRoot || document.body, () => null);
-				if (ttyBridge && !this.activeBridges.includes(ttyBridge)) {
-					this.activeBridges.push(ttyBridge);
-					window.__active_bridges = this.activeBridges;
+			for (const cap of declaredCaps) {
+				const factory = globalScope.__wasm_capability_registry[cap];
+				if (typeof factory === 'function') {
+					try {
+						const capBridge = factory(slotRoot || (hasDoc ? document.body : null), () => null);
+						if (capBridge && !this.activeBridges.includes(capBridge)) {
+							this.activeBridges.push(capBridge);
+							if (typeof window !== 'undefined') window.__active_bridges = this.activeBridges;
+						}
+					} catch (e) {
+						console.error(`Failed to initialize main-thread capability bridge for ${cap}:`, e);
+					}
 				}
 			}
 

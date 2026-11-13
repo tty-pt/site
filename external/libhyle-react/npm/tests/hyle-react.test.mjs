@@ -51,7 +51,7 @@ test("HyleTable renders table structure with custom cell projections and Tailwin
     sort: "name",
     sortOrder: "asc",
     tableClassName: "w-full text-left text-xs",
-    headerRowClassName: "border-b border-duna-border uppercase",
+    headerRowClassName: "border-b border-neutral-200 uppercase",
     rowClassName: (item) => (item.status === "PROSPECT" ? "bg-amber-50" : "bg-white"),
     onRowClick: (item) => {
       clickedRow = item;
@@ -76,7 +76,7 @@ test("HyleTable renders table structure with custom cell projections and Tailwin
 
   // Verify thead header row and sort button
   const headerTr = thead.props.children;
-  assert.equal(headerTr.props.className, "border-b border-duna-border uppercase");
+  assert.equal(headerTr.props.className, "border-b border-neutral-200 uppercase");
   assert.equal(headerTr.props.children.length, 3);
 
   const firstTh = headerTr.props.children[0];
@@ -137,14 +137,14 @@ test("HyleTable updates and reorders rows dynamically when sort changes", () => 
 test("HyleTable auto-derives columns from Hyle schema with columnOverrides", () => {
   const schema = {
     fields: [
-      { name: "title", label: "Track Title" },
-      { name: "artist_name", type: "text" },
+      { name: "title", label: "Item Title" },
+      { name: "category", type: "text" },
       { name: "rating", type: "int" }
     ]
   };
 
   const items = [
-    { id: "1", title: "Song One", artist_name: "Band A", rating: 5 }
+    { id: "1", title: "Item One", category: "General", rating: 5 }
   ];
 
   const vnode = HyleTable({
@@ -163,7 +163,7 @@ test("HyleTable auto-derives columns from Hyle schema with columnOverrides", () 
   const headerCells = thead.props.children.props.children;
   assert.equal(headerCells.length, 3);
   assert.equal(headerCells[0].props["data-field"], "title");
-  assert.equal(headerCells[1].props["data-field"], "artist_name");
+  assert.equal(headerCells[1].props["data-field"], "category");
   assert.equal(headerCells[2].props["data-field"], "rating");
 
   // Rating label overridden to Score
