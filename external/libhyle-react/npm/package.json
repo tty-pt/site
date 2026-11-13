@@ -21,7 +21,7 @@
     "@tty-pt/hyle-source": ">=1.4.0"
   },
   "devDependencies": {
-    "@tty-pt/hyle": "^1.7.2",
+    "@tty-pt/hyle": "^1.7.3",
     "@tty-pt/hyle-source": "^1.4.0"
   },
   "keywords": [
