@@ -3181,7 +3181,9 @@ int main(void)
 		assert(strstr(fs_c, "nd_cloud_wind_column") != NULL);
 		assert(strstr(fs_c, "nd_cloud_wind_at_height") != NULL);
 		assert(strstr(fs_c, "towerReady") != NULL);
-		assert(strstr(fs_c, "hWarp") != NULL);
+		assert(strstr(fs_c, "turretShift") != NULL);
+		assert(strstr(fs_c, "synQueryXY") != NULL);
+		assert(strstr(fs_c, "maxFront") != NULL);
 		assert(strstr(fs_c, "eval_synoptic_macro_cloud_core") != NULL);
 		assert(strstr(fs_c, "hgPhase") != NULL);
 		assert(strstr(fs_c, "sEnter") != NULL);
@@ -3261,9 +3263,9 @@ int main(void)
 			grad_mid   += hypotf(gxm, gym);
 			grad_far   += hypotf(gxf, gyf);
 		}
-		/* Fixed 2-octave 4D cascade: close-range gradient energy no longer grows past mid zoom (only mesoscale cells add detail) */
-		assert(grad_close > grad_mid * 0.85f);
-		assert(grad_mid > grad_far * 1.10f);
+		/* Sliding 2-octave band-pass cascade preserves full close > mid > far detail progression */
+		assert(grad_close > grad_mid * 1.25f);
+		assert(grad_mid > grad_far * 1.25f);
 		assert(grad_far > 1e-6f);
 
 		/* 5. Verify 4D temporal derivative stability at t = 100,000s vs t = 10s across a continent-spanning planetary grid */
@@ -3311,8 +3313,8 @@ int main(void)
 			sum_nyq_fine   += hypotf(g_fine_x, g_fine_y);
 			sum_nyq_coarse += hypotf(g_coarse_x, g_coarse_y);
 		}
-		/* With the fixed 2-octave cascade the band-limited difference comes from the mesoscale cells (1.1-4.2 km) */
-		assert(sum_nyq_fine > sum_nyq_coarse * 1.15f);
+		/* Sliding 2-octave band-pass cascade suppresses high-frequency octaves cleanly at coarse fw */
+		assert(sum_nyq_fine > sum_nyq_coarse * 1.35f);
 		assert(sum_nyq_coarse > 0.0f);
 
 		/* 8. Verify continent-scale spatial coherence at orbital zoom (cam_dist=500000, fw=4000):
