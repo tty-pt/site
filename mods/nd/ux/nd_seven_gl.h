@@ -202,7 +202,7 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
                                          float *out_shear_x, float *out_shear_y,
                                          float *out_depress_z, float *out_rustle);
 
-/* Pure-C reference mirror of the 8-octave observer-gated ("quantum") 4D wind-coupled
+/* Pure-C reference mirror of the 10-octave observer-gated ("quantum") 4D wind-coupled
  * fractal cloud cascade in s_fs_cloud / s_fs_terrain / s_fs_water / s_fs_billboard:
  * Gates fine fractal octaves by camera distance (cam_dist) and screen-space Nyquist
  * footprint (pixel_footprint), early-outing in clear-sky synoptic regions while

@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary & Architectural Goals
 
-This document specifies the mathematical and systems architecture for **4D analytical spatiotemporal noise** in `libchaff` (`<ttypt/noise.h>`, `<ttypt/chaff.h>`, `<ttypt/chaff_glsl.h>`) and its integration into NeverDark Seven's **wind-coupled 4D volumetric cloud, ground/water cloud shadow, and water cloud reflection pipeline** (`mods/nd/ux/nd_seven_gl.c`).
+This document specifies the mathematical and systems architecture for **4D analytical spatiotemporal noise** in `libchaff` (`<ttypt/noise.h>`, `<ttypt/chaff.h>`, `<ttypt/chaff_glsl.h>`) and its integration into NeverDark Seven's **wind-coupled $\text{4D} \to \text{3D} \to \text{2D}$ volumetric cloud, ground/water/lamb cloud shadow, and water cloud reflection pipeline** (`mods/nd/ux/nd_seven_gl.c`).
 
 ### Core Architectural Invariants
 1. **Pure-Integer C99 Determinism in `libchaff`**:
@@ -18,8 +18,18 @@ This document specifies the mathematical and systems architecture for **4D analy
    Evaluating a 4D hypercube $(X, Y, Z, W)$ naively at every pixel requires 16 corner hashes and 15 linear interpolations (7 across $W$, 4 across $Z$, 2 across $Y$, 1 across $X$). In `chaff_fill_slice_4d`, when stepping across a 2D horizontal $(X, Y)$ slice at fixed altitude $z$ and time $w$, the $W$ axis ($16 \to 8$) and $Z$ axis ($8 \to 4$) are pre-collapsed **once per 4D cell boundary**, reducing the inner pixel loop to a 4-corner 2D bilinear evaluation that is **100% bit-exact** with point-by-point `chaff_sample_grad_4d`.
 3. **Bit-Exact 8-Byte `XXH32` 4D Lattice Hashing Across CPU & WebGL2**:
    A 4D coordinate vector `int16_t p[4] = { x, y, z, w }` occupies exactly 8 bytes, executing two 32-bit `XXH32_round` lanes (`v1 = (y & 0xFFFF) | (x << 16)` and `v2 = (z & 0xFFFF) | (w << 16)`) before the final `XXH32` avalanche. Both `<ttypt/chaff_glsl.h>` (`chaff_hash4`) and `mods/nd/ux/nd_seven_gl.c` replicate this exact 8-byte `XXH32` pipeline in GLSL ES 3.0.
-4. **Unified Wind-Coupled Atmospheric Dynamics**:
-   Planetary clouds in `nd_seven_gl.c` are driven by the exact same multi-octave moving recursive wind field (`eval_recursive_wind`) that drives ocean gravity waves and capillary cat's-paws, extended with **geostrophic altitude wind-shear** and **4D internal convective boiling** along the $W$ axis.
+4. **Evolved 5-Band Recursive Wind Field & 3D Ekman Shear Coupling**:
+   The atmosphere is driven by a 5-band planetary-to-micro circulation model (`chaff_eval_synoptic_flow_2d`, `chaff_eval_wind_3d`):
+   - Planetary Rossby waves & cyclonic streamfunction $\Psi_0$ ($\lambda \approx 2{,}400\text{ km}$);
+   - Regional frontal squalls & convergence ridges $\Psi_1$ ($\lambda \approx 180\text{ km}$);
+   - Mesoscale convective gust rolls ($\lambda = 180\text{ units}$);
+   - Micro-turbulence & capillary cat's-paw breeze ($\lambda = 35, 8.3\text{ units}$);
+   - Altitude-dependent **3D Ekman spiral rotation** (veering clockwise up to $22^\circ$) and vertical wind-shear displacement $\mathbf{S}_{\text{shear}}(z)$ tilting convective cloud turrets and anvils downwind;
+   - Baroclinic convergence and updraft velocity $w_{\text{updraft}}$ driving convective turret growth and 4D boiling rate $\frac{dw}{dt}$.
+5. **Strict $\text{4D} \to \text{3D} \to \text{2D}$ Projective Hierarchy**:
+   - **4D Spatiotemporal Density Potential $\Phi(x, y, z, w)$**: 10 octaves of continuous detail from Continental ($2{,}400\text{ km}$) to micro-wisps ($6.25\text{ units}$).
+   - **3D Volumetric Cloud Field $\rho(x, y, z; t)$**: Evaluated via stratified raymarching through a physically calibrated tropospheric slab $z \in [380.0, 980.0]$ on an un-warped concentric torus shell at $z_{\text{ref}} = 590.0$, eliminating all inter-chunk LOD seams and triangle fold-over artifacts.
+   - **2D Surface Shadow Field $\tau_{\text{shadow}}(x_s, y_s, z_s)$**: True 3-slice Gaussian-quadrature Beer-Lambert column integral along the sun ray $\mathbf{L}_{\text{sun}}$ through the 3D cloud volume, matching 3D cloud positions and shapes 1-to-1 on ground, water, and lamb.
 
 ---
 
@@ -81,78 +91,67 @@ flowchart LR
 | `<ttypt/chaff.h>` | `chaff_fill_slice_4d(...)` | Bulk 2D horizontal slice stepper at fixed `(z, w)` with $16 \to 8 \to 4$ pre-collapse |
 | `<ttypt/chaff_glsl.h>` | `chaff_hash4(ivec4 p, uint seed)` | Bit-exact 8-byte `XXH32` 4D lattice corner hash in GLSL ES 3.0 |
 | `<ttypt/chaff_glsl.h>` | `chaff_sample_4d` / `chaff_sample_grad_4d` | GLSL ES 3.0 4D noise and `vec4` analytical spatial+temporal gradient |
+| `<ttypt/chaff_glsl.h>` | `chaff_eval_synoptic_flow_2d` | Divergence-free planetary Rossby & regional frontal wind curl + convergence |
+| `<ttypt/chaff_glsl.h>` | `chaff_eval_wind_3d` | 3D Ekman spiral veering, altitude wind-shear displacement, and updraft velocity |
 
 ---
 
-### 3. Observer-Gated ("Quantum") 8-Octave 4D Volumetric Cloud Architecture in NeverDark Seven
+## 3. $\text{4D} \to \text{3D} \to \text{2D}$ Atmospheric Architecture in NeverDark Seven
 
-### 3.1 True 4D Isotropic Unit-Gradient Dot-Product Noise (`chaff_grad4`)
+### 3.1 Un-Warped Watertight Concentric Torus Proxy Shell
 
-Scalar value noise in 4D exhibits axis-aligned hypercubic grid artifacts when domain-warped or thresholded at high contrast. To guarantee 100% smooth, isotropic cloud contours with zero lattice boxiness or pixelation at any zoom level, `nd_seven_gl.c` (`s_fs_terrain`, `s_fs_water`, `s_fs_billboard`, `s_vs_cloud`, `s_fs_cloud`, and CPU reference `gl_chaff_grad_noise4d`) unpacks 4D unit gradient vectors from the 32-bit `chaff_hash4` avalanche at all 16 hypercube corners:
+Adjacent quadtree chunks evaluate different LOD levels. Displacing vertices vertically on a $55^\circ$ tilted camera causes adjacent chunk seams to tear and triangles to fold and overlap in screen space, resulting in double-blended raymarching artifacts.
 
-$$\mathbf{g}(\mathbf{c}) = \text{normalize}\!\left(\text{float}\bigl((h \gg \{0,8,16,24\}) \ \& \ \text{0xFF}\bigr) - 128.0\right)$$
+To eliminate these geometric artifacts completely:
+- In `s_vs_cloud`, all vertices are placed on a **smooth concentric torus shell at fixed reference altitude $z_{\text{ref}} = 590.0\text{ units}$**:
+  $$z_{\text{ref}} = z_{\text{base}} + 0.35 \times (z_{\text{top}} - z_{\text{base}}) = 380.0 + 210.0 = 590.0$$
+- Across all LOD levels (`LOD 0` to `LOD 3`), adjacent chunk edges match with $100\%$ watertight $C^\infty$ continuity.
+- All 3D relief, towering cumulonimbus domes, and anvil overhangs are evaluated **per-pixel inside the fragment shader** by analytically intersecting the camera ray with the curved atmospheric slab $z \in [380.0, 980.0]$.
 
-and interpolates the 16 directional dot products $v_k = \mathbf{g}_k \cdot (\mathbf{f}_p - \mathbf{o}_k)$ using quintic $C^2$ Hermite fade polynomials $u(t) = t^3(6t^2 - 15t + 10)$. Furthermore, both `s_fs_water` and `s_fs_cloud` sample `uSubstrateTex` through a shared quintic $C^2$ sub-texel filter (`sampleSubstrateSmooth(vUV)`), and `nd_seven_gl_flush_clouds` selects adaptive mesh subdivision (`select_grid_buffers(chk->level, ...)`) per chunk so neither substrate humidity nor cloud geometry ever exhibits bilinear texel or polygon faceting.
+### 3.2 Calibrated Tropospheric Slab & Smooth Camera Clearance Ramp
 
-### 3.2 Continent-to-Cumulus 8-Octave Cascade & Smooth $C^\infty$ *Nubis* Billow Erosion
+- **Physically Calibrated Cloud Layer ($z \in [380.0, 980.0]$)**:
+  - Lifting Condensation Level (LCL) base sits at $z_{\text{base}} = 380.0\text{ units}$.
+  - Convective turret and anvil tops extend up to $z_{\text{top}} = 980.0\text{ units}$ ($\Delta z = 600\text{ units}$).
+  - Ordinary terrain ($z = 40\dots 120$) and the lamb billboard ($32\text{ units}$ tall) sit safely below cloud base. Only tall alpine ranges pierce through the cloud deck.
+- **Smooth Camera Clearance Ramp (`camClearRamp`)**:
+  - Near the camera lens, density is scaled by $\text{smoothstep}(180.0, 520.0, s)$ where $s$ is the distance along the camera ray.
+  - At close zoom ($cam\_dist = 200\dots 520$), the distance from the camera to the ground/lamb is $< 520\text{ units}$, so cloud density between camera and player is zero—**completely eliminating abrupt lamb occlusion**.
+  - As the player zooms out past $520\text{ units}$, wisps of cloud fade in progressively and continuously over hundreds of units.
 
-`eval_zoom_cloud_density(vec3 worldPos, float anim_time, float humidity, float dist, float fw)` (and its pure-C counterpart `nd_seven_gl_eval_zoom_cloud_density`) evaluates a **continuous $4.8\times$ geometric 8-octave 4D cascade** across the vertical altitude slab $z \in [92.0, 232.0]$:
+### 3.3 10-Octave Spatiotemporal Cascade ($\lambda = 2{,}400\text{ km} \to 6.25\text{ units}$)
 
-| Octave | Frequency (`freqs[i]`) | Wavelength ($\lambda_i = 1 / f_i$) | Rooms ($\lambda_i / 160$) | $d_{\text{near}} \to d_{\text{far}}$ | Physical Meteorological Scale |
-| :---: | :---: | :---: | :---: | :---: | :--- |
-| **0** | `0.00000050` | $2{,}000{,}000$ units | $12{,}500$ rooms | $8\text{M} \to 24\text{M}$ | Planetary ITCZ / extratropical cyclone belts |
-| **1** | `0.00000240` | $416{,}667$ units | $2{,}604$ rooms | $1.8\text{M} \to 6\text{M}$ | Continent-scale baroclinic frontal waves & comma heads |
-| **2** | `0.00001150` | $86{,}957$ units | $543$ rooms | $220\text{k} \to 950\text{k}$ | Sub-continental synoptic cloud shields & dry slots |
-| **3** | `0.00005500` | $18{,}182$ units | $114$ rooms | $45\text{k} \to 220\text{k}$ | Regional mesoscale cloud streets & squall bands |
-| **4** | `0.00026000` | $3{,}846$ units | $24$ rooms | $9.6\text{k} \to 48\text{k}$ | Multi-room cumulus congestus complexes |
-| **5** | `0.00125000` | $800$ units | $5.0$ rooms | $2.2\text{k} \to 10\text{k}$ | Individual cumulus towers ($5$-room scale) |
-| **6** | `0.00600000` | $166.7$ units | $1.04$ rooms | $520 \to 2.4\text{k}$ | Single-room cumulus domes |
-| **7** | `0.02800000` | $35.7$ units | $0.22$ rooms | $180 \to 750$ | Soft local cloud-edge puffs (Nyquist-clamped at $\ge 35.7$ units) |
+The atmospheric noise spectrum spans 10 continuous octaves combining 4 macro/synoptic/mesoscale bands with 6 high-definition 4D turbulence octaves:
 
-- **Stage 1 — Divergence-Free Planetary Geostrophic Cyclone Streamfunction & Synoptic Coverage (Octaves 0–3)**:
-  - A 2-octave planetary geostrophic streamfunction $\Psi_0(\mathbf{x}, t), \Psi_1(\mathbf{x}, t)$ ($\lambda_{\Psi_0} \approx 2.38 \times 10^6$, $\lambda_{\Psi_1} \approx 5.56 \times 10^5$) warps the macro coordinates via the divergence-free skew gradient $\mathbf{v}_{\text{syn}} = (-\partial_y \Psi, \partial_x \Psi)$ (`synWarp0` up to $260{,}000$ units, `mesoWarp` up to $14{,}000$ units). This curls planetary cloud bands into long, sweeping comma-cloud fronts and cyclonic spirals without introducing high-frequency cell-space phase scrambling.
-  - Every macro octave $i \in \{0\dots 3\}$ is weighted by both observer distance and screen-space Nyquist footprint (`wMacro[i] = wDist * wNyq`, with floor $0.25$ on Octaves 0–1 at extreme orbital distances) and combined into a single smooth, non-multiplicative synoptic field:
-    $$\text{contFront} = 0.50 + 0.58\,w_0(\text{oct}_0 - 0.50) + 0.46\,w_1(\text{oct}_1 - 0.50)$$
-    $$\text{regBand} = 0.50 + 0.52\,w_2(\text{oct}_2 - 0.50) + 0.42\,w_3(\text{oct}_3 - 0.50)$$
-    $$\text{synFront} = \text{mix}(\text{contFront}, \text{regBand}, 0.48\,w_2) + 0.28\,\text{orbitBoost}\,(\text{contFront} - 0.50)$$
-    $$\text{macroCoverage} = \text{smoothstep}(0.515 - 0.115 H, \; 0.695 - 0.065 H, \; \text{synFront})$$
-    Because `oct[2]` and `oct[3]` modulate `contFront` additively rather than chopping it via a multiplicative gate, continent-scale weather fronts remain unbroken over millions of world units while preserving ~60–65% crystal-clear sky corridors (`macroCoverage <= 0.015`).
-  - **3D Vertical Cumulus & Anvil Envelope ($z \in [92, 232]$)**:
-    Strong cloud cores tower up to $z_{\text{top}} = \text{mix}(132.0, 232.0, \text{coreStrength})$ while thin perimeter fringes stay low ($z \approx 132$), shaped by rounded base/crown vertical profiles $v_{\text{prof}}(h_{\text{local}}) = \text{smoothstep}(0.0, 0.15, h_{\text{local}}) \cdot \text{smoothstep}(1.0, 0.42, h_{\text{local}})$ and mapped into the base cloud envelope via `cloud_remap`:
-    $$\text{baseCloud} = \text{clamp}\!\left(\text{cloud\_remap}\bigl(\text{macroCoverage} \cdot v_{\text{prof}}, \; 0.12(1 - 0.45\,\text{coreStrength}), \; 0.86, \; 0.0, \; 1.0\bigr), \; 0.0, \; 1.0\right)$$
+| Octave | Scale / Wavelength | Physical Feature | Model & Mathematical Formulation |
+| :---: | :---: | :--- | :--- |
+| **-2** | $2{,}400\text{ km}$ | Planetary Rossby Waves & Extratropical Cyclones | Synoptic streamfunction $\Psi_0$, curl flow $\mathbf{v}_{\text{syn}}$, baroclinic convergence |
+| **-1** | $180\text{ km}$ | Regional Frontal Squalls & Convergence Ridges | Advected streamfunction $\Psi_1$, squall envelope `convEnv` |
+| **0** | $18\text{ km}$ | Mesoscale Cloud Streets & Roll Vortices | Wind-aligned shear coordinates `pStreet` |
+| **1** | $3{,}846\text{ units}$ | Convective Congestus Clusters | 4D octave 0 ($f = 0.00026$), 3D altitude shear $\mathbf{S}_{\text{shear}}(z)$ |
+| **2** | $1{,}052\text{ units}$ | Individual Towering Cumulus Domes | 4D octave 1 ($f = 0.00095$), downwind anvil flare |
+| **3** | $294\text{ units}$ | Room-Scale Convective Turrets | 4D octave 2 ($f = 0.00340$), internal convective boiling $w(t)$ |
+| **4** | $83\text{ units}$ | Cauliflower Lobes & Clefts | 4D octave 3 ($f = 0.01200$), zero-mean billows $1 - 2|n_4 - 0.5|$ |
+| **5** | $23.8\text{ units}$ | Crisp Cumulus Knuckles & Shear Rolls | 4D octave 4 ($f = 0.04200$), un-normalized additive fractal detail |
+| **6** | $6.25\text{ units}$ | Sub-Lamb Micro-Wisps & Scud Filaments | 4D octave 5 ($f = 0.16000$), screen-space Nyquist derivative $fw$ |
 
-- **Stage 2 — Smooth $C^\infty$ Cumulus Lobe Erosion (Octaves 4–7)**:
-  - Evaluated **only inside a macro cloud** ($\text{baseCloud} > 0.002$) and **only when the observer is within $d_{\text{far},4} = 240{,}000$**, coupled to `eval_recursive_wind(worldPos.xy, anim_time)` with world-space displacement `windDisp` and 4D convective boiling (`wBoil = mod(anim_time * 0.072, 512.0)`).
-  - Instead of the non-differentiable $C^0$ crease `1.0 - abs(2.0 * n - 1.0)` (whose derivative jumps from $+2$ to $-2$ at $n = 0.5$, doubling spatial frequencies), each active fine octave evaluates a **hyperbolically smoothed $C^\infty$ cumulus lobe**:
-    $$d = n - 0.5, \qquad \text{cauliflower}(n) = \text{clamp}\!\left(0.52 + 0.45\,d + 0.75\bigl(0.22 - \sqrt{d^2 + 0.018}\bigr), \; 0.0, \; 1.0\right)$$
-    with continuous analytical derivative $\frac{\partial\,\text{cauliflower}}{\partial n} = 0.45 - \frac{0.75\,d}{\sqrt{d^2 + 0.018}}$.
-  - The normalized billow FBM gently carves the outer shell of `baseCloud` (`erodeAmt = normErode * 0.34 * (1.0 - 0.62 * coreStrength) * (0.30 + 0.70 * hLocal)`), producing soft, rounded cumulus domes with zero high-frequency grain.
+- **Un-Normalized Additive Multi-Fractal Detail**:
+  Coarse octaves sculpt the fundamental 3D cloud body across cores, undersides, and tops. Fine octaves additively carve crisp knuckles and wisps at close LODs without flattening coarse contrast.
+- **Pure Screen-Space Nyquist Derivative ($fw$)**:
+  In `s_fs_cloud`, $fw = \text{clamp}(\max(\|\text{dFdx}(\mathbf{x})\|, \|\text{dFdy}(\mathbf{x})\|), 0.05, 25000.0)$ is computed strictly from screen-space partial derivatives, ensuring every pixel at a given zoom evaluates the identical frequency bandwidth regardless of quadtree chunk level.
 
-### 3.3 Scale-Adaptive 3D Torus Shell Relief & Curvature-Invariant Shell-Centered Raymarching
+### 3.4 3D Volumetric Lighting & 2D Column-Integral Shadows
 
-1. **Scale-Adaptive 3D Torus Vertex Shell (`s_vs_cloud` & `uCloudDeck`)**:
-   - In `nd_seven_gl_flush_clouds`, the cloud shell base and vertical span scale smoothly with camera altitude via `alt_scale = smoothstep(1800.0, 280000.0, cur_dist)`:
-     $$\text{deck\_base} = 92.0 + 1350.0 \cdot \text{alt\_scale}, \qquad \text{deck\_span} = 160.0 + 24000.0 \cdot \text{alt\_scale}$$
-     passed to `uCloudDeck = vec4(deck_base, deck_span, cur_dist, alt_scale)`.
-   - `s_vs_cloud` evaluates the continent-to-mesoscale macro dome (`eval_vertex_cloud_dome(worldXY, uAnimTime, uCamDist)`) per vertex, displaces the curved torus cloud mesh along the outward surface normal by `effWz = deck_base + deck_span * (0.08 + 0.78 * macroDome)`, and passes the normalized canonical shell height `vShellZ = 92.0 + 140.0 * (0.08 + 0.78 * macroDome)` to `s_fs_cloud`. At orbital zoom, continent-scale weather systems therefore exhibit up to $\sim 20{,}000$ world units of true 3D geometric relief over the curved planet torus.
-2. **Torus Curvature Sagitta Compensation & Shell-Centered Raymarching (`s_fs_cloud`)**:
-   - On a curved planet torus of minor radius $r_0 \approx 6.11 \times 10^6$, the chord vector `vViewDir = uCameraPos - worldPos` drops below the local tangent plane by the torus sagitta $\Delta z_{\text{curv}} \approx D_{\text{horiz}}^2 / (2 r_0)$. Without compensation, `vShellZ + dot(vViewDir, torusN)` becomes negative for any fragment further than $\sim 28{,}700$ units from the sub-camera point, falsely triggering below-cloud `discard` outside a flat central disk.
-   - `s_fs_cloud` restores the curvature sagitta:
-     $$\text{curvSagitta} = \frac{\max(0.0, \; d_{\text{frag}}^2 - v_n^2)}{2 r_0}, \qquad \text{camAlt} = \max\bigl(\text{vShellZ} + v_n + \text{curvSagitta}, \; u_{\text{CamDist}} \cdot 0.85\bigr)$$
-     and restricts the below-cloud breakout discard strictly to low-altitude local views (`uCamDist < 360.0 && camAlt < zBase && dz <= 0.0`).
-   - Rather than tracing from `t = 0` at the camera and truncating grazing rays inside empty upper air (`[175, 232]`), the raymarch interval `[tEnter, tExit]` is parameterized **symmetrically around the curved shell intersection `s = 0` (`vShellH`)** using a grazing-clamped effective vertical slope `effDz = (abs(dz) > 0.35) ? dz : ((dz >= 0.0) ? 0.35 : -0.35)`:
-     $$t_{\text{enter}} = \max(-d_{\text{frag}} \cdot 0.95, \; \min(s_{\text{base}}, s_{\text{top}})), \qquad t_{\text{exit}} = \max(s_{\text{base}}, s_{\text{top}})$$
-     Every ray across the entire visible torus — from nadir to the curved planetary limb — therefore sweeps full-depth through $h_{\text{frac}} \in [0.02, 0.98]$ of the cloud deck `[92.0, 232.0]`.
-3. **Deterministic 6-to-8 Step 3D Raymarch with Single-Probe Analytical Gradient Lighting**:
-   - Marches `numSteps` (`6` when `vDistance > 24000`, `7` when `vDistance > 4500`, `8` when close) deterministic midpoint samples (`t = tEnter + (float(s) + 0.5) * dt`, with zero screen-space `gl_FragCoord` white-noise jitter) along `[tEnter, tExit]`.
-   - **Single-Probe Analytical Spatial Gradient Sampling**: Rather than executing a second expensive 8-octave evaluation (`dSun`) per ray step, `eval_zoom_cloud_density_grad` directly accumulates the exact analytical 3D spatial gradient vector $\nabla \rho = (\partial_x \rho, \partial_y \rho, \partial_z \rho)$ via the `.yzw` derivative channels of `chaff_grad_noise4d`. In `s_fs_cloud`, the directional derivative toward the sun probe is computed in $\mathcal{O}(1)$ via $d_{\text{dens}} = -\nabla\rho \cdot \mathbf{L}_{\text{sun}} \cdot \text{sunProbeXY} \cdot 0.005$, completely eliminating the secondary 8-octave probe loop, halving raymarching ALU cost, and eliminating shader compilation pressure.
-   - At each active sample, solar optical depth $\tau_{\odot}$ and forward Henyey-Greenstein scattering $\Phi_{\text{HG}}(\cos\theta)$ combine with Beer-Lambert absorption and powder sugar backscatter:
-     $$E_{\text{light}}(\tau_{\odot}) = \Bigl(e^{-\tau_{\odot}}\bigl(0.44 + 0.96(1 - e^{-2.45\tau_{\odot}})\bigr) + 0.22\,e^{-0.35\tau_{\odot}}\Bigr) \cdot \Phi_{\text{HG}}(\cos\theta) \cdot \text{domeLambert}$$
-   - **Lightweight Projected Surface Shadows (`eval_planetary_cloud_shadow`)**: To avoid GPU shader compiler timeouts and frame hangs on surface shaders (`s_fs_terrain`, `s_fs_water`, `s_fs_billboard`), ground, water, and billboard passes evaluate a dedicated 2D projected cloud shadow slice (`eval_planetary_cloud_shadow`) rather than unrolling the full 8-octave 4D volumetric cascade.
-4. **Seamless Cross-LOD Fading (`gpuFieldBlend`) Across Quadtree Boundaries**:
-   - Both `s_fs_cloud` and `s_fs_terrain` compute the dual-criteria cross-LOD blend weight:
-     $$\text{spanBlend} = \text{smoothstep}(3.3, 13.5, u_{\text{ChunkSpan},x} / 48.0), \qquad \text{distBlend} = \text{smoothstep}(1400.0, 4800.0, d_{\text{cam}}), \qquad \text{gpuFieldBlend} = \text{clamp}(\max(\text{spanBlend}, \text{distBlend}), 0, 1)$$
-   - As chunks transition from near-field server/quadtree tiles to coarser LOD rings, `gpuFieldBlend` smoothly cross-fades the per-chunk `uSubstrateTex` biome humidity (`texBioHumidity`) into a continuous chunk-independent world-space climate humidity field (`worldBioHumidity`), and cross-fades the screen-space derivative filter width `rawFw` into a continuous distance-proportional filter width `contFw`. Adjacent quadtree chunks of different LOD levels therefore evaluate identical cloud density, Nyquist octave weights, terrain cloud shadows, and single-pass water cloud reflections at their shared border with **zero LOD boundary seams or popping**.
+1. **Stratified 6–8 Step 3D Raymarching with 2-Point Sun Occlusion**:
+   - Marches through the $[380, 980]$ slab with early-out transmittance termination ($trans < 0.03$).
+   - Samples 3D sunward occlusion at $+85\text{ units}$ along $\mathbf{L}_{\text{sun}}$ plus analytical gradient $\nabla\rho$ normal estimation.
+   - Dual-lobe Henyey-Greenstein phase function ($g_1 = 0.58$, $g_2 = -0.22$) with Beer-Powder multi-scattering silver linings.
+   - High dynamic range: deep cool slate-indigo undersides (`vec3(0.24, 0.31, 0.44)`) vs warm crisp sunlit crowns (`vec3(1.12, 1.08, 1.02)`).
+2. **True 2D Beer-Lambert Line Integral Cloud Shadows**:
+   - `eval_planetary_cloud_shadow` evaluates the **3-slice Gaussian quadrature column integral** along $\mathbf{L}_{\text{sun}} = (-0.577, -0.577, 0.816)$ through the 3D cloud slab at $z_k \in \{470.0, 640.0, 830.0\}$:
+     $$\mathbf{x}_k = \mathbf{x}_s + (-0.7071, -0.7071) \cdot (z_k - z_s)$$
+   - Samples the wind-sheared 3D/4D cloud density $\rho(\mathbf{x}_k - \mathbf{S}_{\text{shear}}(z_k), z_k, w(t))$ at each slice.
+   - Ground, water, reflection, and billboard shadows match the overhead 3D clouds 1-to-1 at every zoom level.
 
 ---
 
@@ -162,7 +161,14 @@ and interpolates the 16 directional dot products $v_k = \mathbf{g}_k \cdot (\mat
   - Test 14: Verifies `chaff_sample_grad_4d` value parity with `noise_sample_4d` and analytical gradient sign/bounds across all 4 axes (`dx`, `dy`, `dz`, `dw`) under both `NOISE_FADE3` and `NOISE_FADE5`.
   - Test 15: Verifies 100% bit-exact parity between `chaff_fill_slice_4d` and point-by-point `chaff_sample_grad_4d` across multi-cell boundaries and `int16_t` modular wrap limits (`32760 -> -32768`), plus `dim == 4` `chaff_fill` / `chaff_fill_lod` parity.
   - Test 16: Verifies 100% bit-exact parity between `chaff_glsl_ref_hash4` and `noise_r(va, seed, 0, 4)`, plus `chaff_glsl_ref_sample_grad_4d` analytical derivative accuracy against central finite differences.
+  - Test 17: Verifies synoptic 2D curl flow continuity, 3D Ekman spiral altitude veering, zero shear at cloud base ($h = 0$), downwind shear displacement ($> 100\text{ units}$) at cloud top ($h = 1$), and temporal stability at $t = 100{,}000\text{ s}$.
 - **`tests/unit/test_seven_render.c`**:
   - Validates all 4 WebGL2 shader programs (`terrain`, `water`, `billboard`, `cloud`) with `glslangValidator -l` (GLSL ES 3.00).
-  - Verifies `chaff_grad4`, `cloud_remap`, `eval_vertex_cloud_dome`, `vShellZ`, `camAlt`, `curvSagitta`, `uCloudDeck`, and `sampleSubstrateSmooth` shader contracts, `nd_seven_gl_eval_zoom_cloud_density` determinism, continent-scale spatial coherence ($\lambda_0 = 2{,}000{,}000$) at orbital zoom, planetary clear-sky vs. cloudy synoptic distribution, towering cloud core vs. crown vertical profiles (`[92..232]`), observer-distance progressive octave gradient activation (`close > mid > far`), climate humidity sensitivity (`humid > arid * 1.25`), and 4D temporal derivative stability at $t = 100{,}000\text{ s}$ vs $t = 10\text{ s}$.
-
+  - Verifies `vShellZ`, `uCloudDeck`, `chaff_hash4`, `chaff_grad4`, `cloud_remap`, `eval_recursive_wind`, `eval_zoom_cloud_density`, `eval_zoom_cloud_density_grad`, `synWarp`, `synFront`, `macroCoverage`, `camAlt`, `curvSagitta`, `sunTowerCloud`, `sampleSubstrateSmooth`, `worldBioHumidity`, `texBioHumidity`, `beer`, `powder`, `hgPhase`, `sEnter`, `sExit`, and `camClearRamp` shader contracts.
+  - Verifies planetary & regional weather distribution across 256 sample regions (cloudy in $\ge 25$ cells, crystal-clear in $\ge 100$ cells, humid coverage $> 1.25\times$ arid).
+  - Verifies calibrated tropospheric cloud layer $z \in [380.0, 980.0]$ and zero cloud density at surface/lamb altitudes ($z = 92.0$ and $z < 380.0$).
+  - Verifies observer-distance progressive octave gradient activation (`grad_close > grad_mid * 1.25 > grad_far * 1.25 > 0`).
+  - Verifies 4D temporal derivative stability across continent grid at $t = 100{,}000\text{ s}$ vs $t = 10\text{ s}$.
+  - Verifies 3D vertical profile and derivative continuity across cloud base ($380$), core ($480$), and top ($980$).
+  - Verifies Nyquist filter width band-limiting suppresses high frequencies cleanly (`sum_nyq_fine > sum_nyq_coarse * 1.35`).
+  - Verifies continent-scale spatial coherence at orbital zoom ($\lambda_0 = 2{,}400{,}000\text{ units}$, step diff $< 0.030$).
