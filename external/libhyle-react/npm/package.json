@@ -19,7 +19,7 @@
     "react": ">=18.0.0"
   },
   "dependencies": {
-    "@tty-pt/hyle": ">=1.7.0",
+    "@tty-pt/hyle": ">=1.7.2",
     "@tty-pt/hyle-source": ">=1.4.0"
   },
   "keywords": [

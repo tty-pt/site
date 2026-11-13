@@ -172,3 +172,20 @@ The atmospheric noise spectrum spans 10 continuous octaves combining 4 macro/syn
   - Verifies 3D vertical profile and derivative continuity across cloud base ($380$), core ($480$), and top ($980$).
   - Verifies Nyquist filter width band-limiting suppresses high frequencies cleanly (`sum_nyq_fine > sum_nyq_coarse * 1.35`).
   - Verifies continent-scale spatial coherence at orbital zoom ($\lambda_0 = 2{,}400{,}000\text{ units}$, step diff $< 0.030$).
+
+## Vertical 4D decorrelation, crown erosion & solar lighting
+
+- **No more "identical slices" from above.** `zBaseSlice = hNorm * 28` and an extra `w` offset `hNorm * 11.5 * zScale[j]` make consecutive raymarch slices of a deck sample independent 3D cross-sections of the 4D noise (CPU mirror `nd_seven_gl_eval_zoom_cloud_density` is kept in sync; verified by the slice-correlation test).
+- **Crown erosion.** `hLocal` (0 at a deck's condensation base, 1 at its crown) erodes `baseCloud` by `crownErode` and weights `billowFbm` by `0.62 + 0.55 * hLocal`, so decks are broad at the base and only buoyant turrets reach the top.
+- **Octave range.** `dFar/dNear` were widened (650 km … 420 wu) so the coarse 4D octaves stay active at stratospheric altitude.
+- **Lighting.** `sunSlopeOcc` (density derivative toward the sun) + self/tower/inter-deck occlusion form `tauSun`; colour is a three-zone blend of Rayleigh shadow, multiply-scattered interior (`multiScatter`) and direct sun (`directSun`) plus a thin-edge Mie `silverLining`.
+- **Clear-sky early-out.** Four coarse synoptic probes (slab entry/mid/exit + upwind anvil offset) discard pixels that are deep in the clear regime before any raymarch step (`anyCloud`).
+- **Graphics quality tiers** (`nd_seven_set_quality`, dock button, `Q` key): Low / Balanced (default) / High.
+
+| Parameter | Low | Balanced | High |
+|---|---|---|---|
+| Cloud raymarch steps | 3 | 6 | 12 |
+| Cloud 4D octaves | 2 | 4 | 6 |
+| Billboard cloud-shadow range | off | < 4000 wu | < 6000 wu |
+| Close-zoom terrain subdivision | 48x48 | 96x96 | 144x144 |
+| Living Meadow radius / lattice | 156 wu / 9 | 216 wu / 7 | 252 wu / 6 |

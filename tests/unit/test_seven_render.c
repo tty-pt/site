@@ -2334,6 +2334,21 @@ int main(void)
 		 * normal/close zoom (<= 340, including 1.0x at 280) scales to 96x96 (18,432 tris),
 		 * close/ultra-close zoom (<= 220) scales to 144x144 (41,472 tris),
 		 * and low zoom (14 < x < 25, cam_dist >= 5000) scales down to 16x16 (512 tris) */
+		/* Hardware quality tiers: default is Balanced (96x96 cap); High unlocks 144x144; Low caps at 48x48 */
+		assert(nd_seven_get_quality() == ND_SEVEN_QUALITY_BALANCED);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 200.0f)   == 96);
+		nd_seven_set_quality(ND_SEVEN_QUALITY_LOW);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 200.0f)   == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f)   == 48);
+		nd_seven_set_quality(ND_SEVEN_QUALITY_HIGH);
+		assert(nd_seven_cycle_quality() == ND_SEVEN_QUALITY_LOW);
+		assert(nd_seven_cycle_quality() == ND_SEVEN_QUALITY_BALANCED);
+		assert(nd_seven_cycle_quality() == ND_SEVEN_QUALITY_HIGH);
+		nd_seven_set_quality(99);
+		assert(nd_seven_get_quality() == ND_SEVEN_QUALITY_HIGH);
+		nd_seven_set_quality(-5);
+		assert(nd_seven_get_quality() == ND_SEVEN_QUALITY_LOW);
+		nd_seven_set_quality(ND_SEVEN_QUALITY_HIGH);
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 380.0f)   == 48);
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f)   == 96);
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 240.0f)   == 96);
@@ -2343,6 +2358,7 @@ int main(void)
 		assert(nd_seven_gl_grid_quads_for_zoom(1, 6500.0f)  == 16);
 		assert(nd_seven_gl_grid_quads_for_zoom(2, 20000.0f) == 16);
 		assert(nd_seven_gl_grid_quads_for_zoom(4, 280.0f)   == 16);
+		nd_seven_set_quality(ND_SEVEN_QUALITY_BALANCED);
 
 		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values,
 		 * including across large world coordinates where 16-bit signed rotation would wrap */
@@ -3170,8 +3186,14 @@ int main(void)
 		assert(strstr(fs_c, "sampleSubstrateSmooth") != NULL);
 		assert(strstr(fs_c, "worldBioHumidity") != NULL);
 		assert(strstr(fs_c, "texBioHumidity") != NULL);
-		assert(strstr(fs_c, "beer") != NULL);
-		assert(strstr(fs_c, "powder") != NULL);
+		assert(strstr(fs_c, "directSun") != NULL);
+		assert(strstr(fs_c, "multiScatter") != NULL);
+		assert(strstr(fs_c, "thinEdge") != NULL);
+		assert(strstr(fs_c, "sunSlopeOcc") != NULL);
+		assert(strstr(fs_c, "crownErode") != NULL);
+		assert(strstr(fs_c, "wSlice") != NULL);
+		assert(strstr(fs_c, "uQualityTier") != NULL);
+		assert(strstr(fs_c, "anyCloud") != NULL);
 		assert(strstr(fs_c, "hgPhase") != NULL);
 		assert(strstr(fs_c, "sEnter") != NULL);
 		assert(strstr(fs_c, "sExit") != NULL);
@@ -3322,6 +3344,62 @@ int main(void)
 
 		printf("PASS: 10-octave continent-to-cumulus 4D clouds (cloudy=%d, clear=%d, core=%.1f, crown=%.1f, orbit_step_diff=%.4f, max=%.3f, min=%.3f, grad=%.4f>%.4f>%.4f, arid=%.2f vs humid=%.2f) & t=100000s stability verified\n",
 		       cloud_cells, clear_cells, sum_core, sum_crown, mean_orbit_step_diff, orbit_max_d, orbit_min_d, grad_close, grad_mid, grad_far, sum_arid, sum_humid);
+
+		/* 10. Verify true 3D/4D volume: vertical slices within one deck sample independent 4D cross-sections
+		 * (no "4 identical 2D slices" when viewed from above), and the crown erodes inward relative to the base */
+		{
+			nd_seven_set_quality(ND_SEVEN_QUALITY_HIGH);
+			int cloudy_pts = 0, regions = 0;
+			float sum_slice_diff = 0.0f, sum_base = 0.0f, sum_crown2 = 0.0f, sum_corr = 0.0f;
+			for (int k = 0; k < 600 && regions < 24; k++) {
+				float wx0 = (float)k * 6300.0f - 1900000.0f;
+				float wy0 = (float)((k * 37) % 600) * 5100.0f - 1500000.0f;
+				/* Pearson correlation of two vertical slices of the same deck over a 16x16 horizontal patch (12 wu spacing) */
+				double sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sab = 0.0;
+				int n = 0;
+				float hz_a = 420.0f + 0.07f * 2400.0f, hz_b = 420.0f + 0.15f * 2400.0f;
+				for (int iy = 0; iy < 16; iy++) {
+					for (int ix = 0; ix < 16; ix++) {
+						float wx = wx0 + (float)ix * 12.0f, wy = wy0 + (float)iy * 12.0f;
+						float da = nd_seven_gl_eval_zoom_cloud_density(wx, wy, hz_a, 24.0f, 0.90f, 300.0f, 0.4f, NULL, NULL, NULL, NULL);
+						float db = nd_seven_gl_eval_zoom_cloud_density(wx, wy, hz_b, 24.0f, 0.90f, 300.0f, 0.4f, NULL, NULL, NULL, NULL);
+						sa += da; sb += db; saa += (double)da * da; sbb += (double)db * db; sab += (double)da * db; n++;
+						sum_slice_diff += fabsf(da - db);
+						sum_base += da;
+						sum_crown2 += nd_seven_gl_eval_zoom_cloud_density(wx, wy, 420.0f + 0.22f * 2400.0f, 24.0f, 0.90f, 300.0f, 0.4f, NULL, NULL, NULL, NULL);
+					}
+				}
+				double va = saa / n - (sa / n) * (sa / n), vb = sbb / n - (sb / n) * (sb / n);
+				if (va < 1e-4 || vb < 1e-4) continue; /* uniform / clear patch */
+				regions++;
+				cloudy_pts += n;
+				sum_corr += (float)((sab / n - (sa / n) * (sb / n)) / sqrt(va * vb));
+			}
+			assert(regions >= 6);
+			float mean_corr = sum_corr / (float)regions;
+			float mean_slice_diff_v = sum_slice_diff / (float)cloudy_pts;
+			assert(mean_corr < 0.65f);
+			assert(sum_crown2 < sum_base);
+
+			/* Quality tiers: Low keeps <= 2 octaves, Balanced <= 4, High all 6 -> close-range gradient energy grows with tier */
+			float g_tier[3] = { 0.0f, 0.0f, 0.0f };
+			for (int q = ND_SEVEN_QUALITY_LOW; q <= ND_SEVEN_QUALITY_HIGH; q++) {
+				nd_seven_set_quality(q);
+				for (int k = 0; k < 96; k++) {
+					float wx = (float)k * 31000.0f - 1500000.0f;
+					float wy = (float)k * 22000.0f - 1100000.0f;
+					float gx = 0.0f, gy = 0.0f;
+					nd_seven_gl_eval_zoom_cloud_density(wx, wy, 820.0f, 24.0f, 0.90f, 280.0f, 0.15f, &gx, &gy, NULL, NULL);
+					g_tier[q] += hypotf(gx, gy);
+				}
+			}
+			assert(g_tier[ND_SEVEN_QUALITY_HIGH] > g_tier[ND_SEVEN_QUALITY_BALANCED]);
+			assert(g_tier[ND_SEVEN_QUALITY_BALANCED] > g_tier[ND_SEVEN_QUALITY_LOW]);
+			nd_seven_set_quality(ND_SEVEN_QUALITY_BALANCED);
+			printf("PASS: 3D/4D cloud slice decorrelation (regions=%d, corr=%.3f, mean_slice_diff=%.3f, base=%.1f>crown=%.1f) & quality tier octave scaling (low=%.4f<bal=%.4f<high=%.4f) verified\n",
+			       regions, mean_corr, mean_slice_diff_v, sum_base, sum_crown2,
+			       g_tier[0], g_tier[1], g_tier[2]);
+		}
 
 		/* 9. Verify zero-quality-loss shader optimizations & full northern frustum coverage when zooming out */
 		assert(strstr(vs_c, "chaff_hash2") == NULL);

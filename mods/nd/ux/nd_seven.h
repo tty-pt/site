@@ -71,6 +71,17 @@ float nd_seven_get_zoom(void);
 void nd_seven_zoom_in(void);
 void nd_seven_zoom_out(void);
 
+/* Hardware graphics quality tiers (cycled from the dock / 'q' key) */
+enum {
+	ND_SEVEN_QUALITY_LOW      = 0, /* Fast / integrated GPU */
+	ND_SEVEN_QUALITY_BALANCED = 1, /* Default */
+	ND_SEVEN_QUALITY_HIGH     = 2, /* Ultra / dedicated GPU */
+	ND_SEVEN_QUALITY_COUNT    = 3
+};
+void nd_seven_set_quality(int quality);
+int  nd_seven_get_quality(void);
+int  nd_seven_cycle_quality(void);
+
 /* Diorama 2.5D & camera rendering constants (zero magic numbers) */
 #define ND_SEVEN_SCALE              2
 #ifndef ND_SEVEN_ZOOM_MIN

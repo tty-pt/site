@@ -1498,8 +1498,10 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 		/* Sample a high-frequency 6-unit world-locked lattice within [-252..+252] using ndw_fdiv
 		 * so grid coordinates are 100% invariant across negative/positive world axes and room transitions */
-		const int32_t step = 6;
-		const int32_t rad = 252;
+		/* Quality tier: Low 156 wu / 9-unit lattice, Balanced 216 wu / 7-unit lattice, High 252 wu / 6-unit lattice */
+		int q_tier = nd_seven_get_quality();
+		const int32_t step = (q_tier <= ND_SEVEN_QUALITY_LOW) ? 9 : ((q_tier == ND_SEVEN_QUALITY_BALANCED) ? 7 : 6);
+		const int32_t rad  = (q_tier <= ND_SEVEN_QUALITY_LOW) ? 156 : ((q_tier == ND_SEVEN_QUALITY_BALANCED) ? 216 : 252);
 		int32_t cx0 = ndw_fdiv(lwx - rad, step) * step;
 		int32_t cy0 = ndw_fdiv(lwy - rad, step) * step;
 		const ar_node_t *m_node = NULL;
