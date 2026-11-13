@@ -358,12 +358,11 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	ar_frustum_from_matrix(&s_frame_frustum, mvp);
 	s_frame_frustum_valid = 1;
 
-	float r_planet = 0.0f;
+	float r_planet = pdef ? pdef->minor_r : 1335000.0f;
 	float z_min_cull = lwz_est - 256.0f;
-	float z_max_cull = lwz_est + 1200.0f;
-	float cull_margin = 64.0f;
+	float z_max_cull = lwz_est + 320.0f;
+	float cull_margin = 96.0f;
 	if (dist >= 1200.0f) {
-		r_planet = pdef ? pdef->minor_r : 1335000.0f;
 		z_min_cull = -2600.0f;
 		z_max_cull = 3200.0f;
 		cull_margin = 180.0f;
@@ -1503,8 +1502,16 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		const int32_t rad = 252;
 		int32_t cx0 = ndw_fdiv(lwx - rad, step) * step;
 		int32_t cy0 = ndw_fdiv(lwy - rad, step) * step;
+		const ar_node_t *m_node = NULL;
+		int cached_ti = 0x7FFFFFFF, cached_tj = 0x7FFFFFFF;
+		unsigned cached_bio = 10u;
 
 		for (int32_t gy = cy0; gy <= lwy + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gy += step) {
+			if (s_frame_frustum_valid &&
+			    !seven_test_frustum_xy((float)(lwx - rad) - 32.0f, (float)gy - 32.0f,
+			                           (float)(lwx + rad) + 32.0f, (float)gy + 32.0f,
+			                           lwx_f, lwy_f, -256.0f, 320.0f))
+				continue;
 			for (int32_t gx = cx0; gx <= lwx + rad && all_gpu_count + 8 < ALL_GPU_MAX_DRAW; gx += step) {
 				uint32_t jh = meadow_hash32(gx, gy, 0x4A495454u);
 				int32_t wx = gx + (int32_t)(jh % 5u) - 2;
@@ -1515,26 +1522,62 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				float r2 = ddx * ddx + ddy * ddy;
 				if (r2 > (float)(rad * rad))
 					continue;
+				if (s_frame_frustum_valid &&
+				    !seven_test_frustum_xy((float)wx - 24.0f, (float)wy - 24.0f,
+				                           (float)wx + 24.0f, (float)wy + 24.0f,
+				                           lwx_f, lwy_f, -256.0f, 320.0f))
+					continue;
 
-				int16_t elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-				int16_t eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-				int16_t eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
+				/* Resolve biome at (wx, wy) with room-level caching */
+				int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
+				int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
+				if (ti != cached_ti || tj != cached_tj) {
+					cached_ti = ti;
+					cached_tj = tj;
+					cached_bio = 10u;
+					ndw_tile_t mt;
+					int16_t mpos[4];
+					if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
+						cached_bio = mt.biome;
+				}
+				unsigned bio = cached_bio;
+
+				/* Fast O(1) active leaf node lookup for elevation, slope, and water level */
+				if (!m_node || wx < m_node->ox || wx >= m_node->ox + m_node->w ||
+				    wy < m_node->oy || wy >= m_node->oy + m_node->h) {
+					m_node = NULL;
+					for (size_t li = 0; li < s_visible_leaf_count; li++) {
+						const ar_node_t *cand = s_visible_leaves[li];
+						if (cand && cand->values &&
+						    wx >= cand->ox && wx < cand->ox + cand->w &&
+						    wy >= cand->oy && wy < cand->oy + cand->h) {
+							if (!m_node || cand->level < m_node->level)
+								m_node = cand;
+						}
+					}
+				}
+
+				int16_t elev_q = 0, eq_x = 0, eq_y = 0;
+				int16_t local_wl = base_wl;
+				if (m_node && wx + 8 < m_node->ox + m_node->w && wy + 8 < m_node->oy + m_node->h) {
+					int16_t dummy_wl = base_wl;
+					seven_sample_node_smooth(m_node, wx,     wy,     base_wl, &elev_q, &local_wl);
+					seven_sample_node_smooth(m_node, wx + 8, wy,     base_wl, &eq_x,   &dummy_wl);
+					seven_sample_node_smooth(m_node, wx,     wy + 8, base_wl, &eq_y,   &dummy_wl);
+					int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
+					if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && local_wl < base_wl)
+						local_wl = base_wl;
+				} else {
+					elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
+					eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
+					eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
+					seven_has_water_at(m_world, wx, wy, &local_wl);
+				}
+
 				float z_f = (float)elev_q / 16.0f;
 				float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
 				float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
 				float slope_mag = sqrtf(dz_dx * dz_dx + dz_dy * dz_dy);
-
-				int16_t local_wl = base_wl;
-				seven_has_water_at(m_world, wx, wy, &local_wl);
-
-				/* Resolve biome at (wx, wy) */
-				int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-				int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-				unsigned bio = 10u;
-				ndw_tile_t mt;
-				int16_t mpos[4];
-				if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-					bio = mt.biome;
 
 				int zone = ND_MEADOW_NONE;
 				float scale_m = 1.0f;

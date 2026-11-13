@@ -3362,8 +3362,38 @@ int main(void)
 		/* At dist=3600 and 55 deg pitch looking North (-Y), northern frustum coverage must extend >= 6000 wu North of lamb */
 		assert(-64.0f - (float)min_chunk_oy >= 6000.0f);
 		assert((float)max_chunk_oy_end > -64.0f);
-		printf("PASS: zero-quality-loss shader optimizations & full northern frustum coverage (min_oy=%d vs lwy=-64, count=%zu) verified\n",
-		       min_chunk_oy, north_cnt);
+
+		/* Also verify close/mid zoom (dist=560, 0.5x zoom as in screenshot) covers >= 512 wu (4 rooms) North of lamb */
+		float mvp_mid[16];
+		nd_seven_gl_compute_flat_mvp(1280, 720, 80.0f, -64.0f, 0.0f,
+		                             560.0f, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, mvp_mid);
+		ar_cull_opts_t opts_mid = {
+			.z_min = -256.0f,
+			.z_max = 320.0f,
+			.sag_radius = 1335000.0f,
+			.focal_x = 80.0f,
+			.focal_y = -64.0f,
+			.margin = 96.0f,
+			.target_quad_px = 1.333f,
+			.viewport_w = 1280.0f,
+			.viewport_h = 720.0f,
+			.min_level = 0,
+			.max_level = 14,
+			.view_id = 0,
+			.max_populates_per_query = 48
+		};
+		const ar_node_t *mid_nodes[160];
+		size_t mid_cnt = ar_system_query_matrix(cs_north, 0, mvp_mid, &opts_mid, mid_nodes, 160);
+		assert(mid_cnt > 0);
+		int32_t min_mid_oy = 2147483647;
+		for (size_t ci = 0; ci < mid_cnt; ci++) {
+			if (mid_nodes[ci] && mid_nodes[ci]->oy < min_mid_oy)
+				min_mid_oy = mid_nodes[ci]->oy;
+		}
+		assert(-64.0f - (float)min_mid_oy >= 512.0f);
+
+		printf("PASS: zero-quality-loss shader optimizations & full northern frustum coverage (mid_min_oy=%d, far_min_oy=%d vs lwy=-64, count=%zu) verified\n",
+		       min_mid_oy, min_chunk_oy, north_cnt);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
