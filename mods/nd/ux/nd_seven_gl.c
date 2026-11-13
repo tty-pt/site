@@ -20,6 +20,76 @@
 #define PI_F 3.14159265358979323846f
 #define TWO_PI_F 6.28318530717958647692f
 
+/* Shared scene-lighting model (terrain, water, sprites): cloud shadow strength s in [0, 0.95] attenuates direct sun by
+ * ND_CLOUD_SHADOW_DIRECT_LOSS and the neutral (untinted) ambient fill by ND_CLOUD_SHADOW_AMBIENT_LOSS. Clouds reduce
+ * opacity of the shadow instead of switching the terrain to night. */
+#define ND_SL_STR_(x) #x
+#define ND_SL_STR(x) ND_SL_STR_(x)
+#define ND_GLSL_SCENE_LIGHT \
+	"float nd_sun_trans(float s) { return 1.0 - " ND_SL_STR(ND_CLOUD_SHADOW_DIRECT_LOSS) " * s; }\n" \
+	"float nd_amb_trans(float s) { return 1.0 - " ND_SL_STR(ND_CLOUD_SHADOW_AMBIENT_LOSS) " * s; }\n"
+
+/* Analytic planetary cloud shadow (per-pixel evaluation): used above 14 km and as fallback when the cloud-shadow map is unavailable. */
+#define ND_GLSL_CLOUD_SHADOW_FN \
+	"/* Scale-Adaptive 2D Projection of the 3D Cloud Volume along the Sun Vector L_sun = (-0.577, -0.577, 0.816):\n" \
+	" * Projects the 3D wind-sheared cloud decks onto the 2D ground/water surface with orbital shadow offset\n" \
+	" * so continental cyclone arms and cumulus towers cast unmistakable 3D ground shadows from ground to orbit! */\n" \
+	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
+	"    const float zBase = 420.0;\n" \
+	"    const float zTop  = 2820.0;\n" \
+	"    float orbitOffset = clamp(dist * 0.045, 0.0, 14000.0);\n" \
+	"    if (dist > 14000.0) {\n" \
+	"        float zk = 1150.0;\n" \
+	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
+	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
+	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
+	"        float atmoGust = 0.65, updraft = 0.50;\n" \
+	"        chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
+	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
+	"        return clamp(smoothstep(0.05, 0.65, synCloud.x), 0.0, 0.95);\n" \
+	"    }\n" \
+	"    /* Single representative projection slice at zk = 920 (the 2D synoptic field is identical at every height; the\n" \
+	" * two former slices differed only by a ~640 unit sun-ward shift, far below the 1.1..4.2 km cell size) */\n" \
+	"    const float zk = 920.0;\n" \
+	"    if (fragZ >= zk + 240.0) return 0.0;\n" \
+	"    float sliceFade = smoothstep(zk + 240.0, zk - 120.0, fragZ);\n" \
+	"    float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
+	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
+	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
+	"    float atmoGust = 0.65, updraft = 0.50;\n" \
+	"    chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
+	"    vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
+	"    return clamp(smoothstep(0.05, 0.66, synCloud.x * sliceFade), 0.0, 0.95);\n" \
+	"}\n"
+
+/* Cloud-shadow map (R8, one frame-wide evaluation of the synoptic density on the cloud slice z = 920):
+ * the map is indexed by projected slice position, so terrain, water and sprites each do ONE texture fetch.
+ * uCsm = (window centre x, window centre y, window half-extent); half <= 0 means "no map bound". */
+#define ND_GLSL_CSM_LOOKUP_FN \
+	"uniform sampler2D uCloudShadowMap;\n" \
+	"uniform vec3 uCsm;\n" \
+	"float nd_csm_density(vec2 sliceXY) {\n" \
+	"    vec2 uv = (sliceXY - uCsm.xy) / (2.0 * uCsm.z) + 0.5;\n" \
+	"    vec2 e = min(uv, 1.0 - uv);\n" \
+	"    float edge = smoothstep(0.0, 0.04, min(e.x, e.y));\n" \
+	"    return texture(uCloudShadowMap, uv).r * edge;\n" \
+	"}\n" \
+	"float nd_cloud_shadow_map(vec2 fragXY, float fragZ, float dist) {\n" \
+	"    const float zk = 920.0;\n" \
+	"    if (uCsm.z <= 0.0 || fragZ >= zk + 240.0) return 0.0;\n" \
+	"    float sliceFade = smoothstep(zk + 240.0, zk - 120.0, fragZ);\n" \
+	"    float dz = max(0.0, zk - fragZ) + clamp(dist * 0.045, 0.0, 14000.0);\n" \
+	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
+	"    return clamp(smoothstep(0.05, 0.66, nd_csm_density(projXY) * sliceFade), 0.0, 0.95);\n" \
+	"}\n"
+
+/* Terrain / water entry point: one map fetch up to 14 km, analytic evaluation in orbit or without a map. */
+#define ND_GLSL_CLOUD_SHADOW_ENTRY_FN \
+	"float nd_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
+	"    if (dist > 14000.0 || uCsm.z <= 0.0) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
+	"    return nd_cloud_shadow_map(fragXY, fragZ, dist);\n" \
+	"}\n"
+
 /* Canonical 2D Synoptic & Mesoscale Cellular Weather Envelope Function:
  * Pure function of (worldXY, anim_time, humidity, fw). Zero camera-distance morphing.
  * Driven by the evolved synoptic wind streamfunction and divergence-free curl flow:
@@ -168,6 +238,7 @@
 #define MAX_CHUNK_TEXTURES 192
 #define MAX_WATER_QUEUE 192
 #define MAX_BB_VERTS 65536
+#define MAX_BB_OTHER_VERTS 16384
 
 /* --- GLSL 300 es Shaders --- */
 
@@ -682,15 +753,21 @@ static const char *s_fs_terrain =
 	"    out_fine_elev = fineH;\n"
 	"    return vec3(coarseH + fineH, coarseGrad.x + fineGrad.x, coarseGrad.y + fineGrad.y);\n"
 	"}\n"
-	"/* Caustic light web from 2D gradient-noise iso-contours: 1 octave (4 lattice hashes) + 1 close-up octave, replacing four\n"
-	" * 8-corner 3D hash noises (32 hashes). Line width is normalised by the noise gradient so the web stays thin and crisp. */\n"
+	"/* Caustic light web from 2D gradient-noise iso-contours. Two interlocking meso layers (opposing drift, different scale)\n"
+	" * reproduce the crossing web of the former 3D-noise-pair caustics at a fraction of the cost (8 lattice hashes instead of\n"
+	" * 32); a close-up octave adds fine detail. Line width is normalised by the noise gradient so the web stays thin and crisp. */\n"
+	"float nd_caustic_iso(vec3 n) {\n"
+	"    return pow(clamp(1.0 - abs(n.x - 0.5) / (0.05 + 0.09 * length(n.yz)), 0.0, 1.0), 3.0);\n"
+	"}\n"
 	"float nd_caustic_web(vec2 cUV, float tC, float closeZoom) {\n"
 	"    vec3 n1 = chaff_grad_noise2d(cUV * 1.85 + vec2(tC * 2.1, -tC * 1.6), 0x1337u);\n"
+	"    vec3 n2 = chaff_grad_noise2d(cUV * 2.35 + vec2(37.0 - tC * 1.7, -23.0 + tC * 2.2), 0xBEEFu);\n"
 	"    float shimmer = 0.85 + 0.15 * sin(tC * 3.1 + n1.x * 9.0);\n"
-	"    float web = pow(clamp(1.0 - abs(n1.x - 0.5) / (0.05 + 0.09 * length(n1.yz)), 0.0, 1.0), 2.0) * shimmer;\n"
+	"    float web = (nd_caustic_iso(n1) + 0.85 * nd_caustic_iso(n2)) * 0.62 * shimmer;\n"
 	"    if (closeZoom > 0.01) {\n"
-	"        vec3 n2 = chaff_grad_noise2d(cUV * 4.8 + vec2(-tC * 3.3, tC * 2.7), 0xCA57u);\n"
-	"        web += 0.65 * closeZoom * pow(clamp(1.0 - abs(n2.x - 0.5) / (0.05 + 0.09 * length(n2.yz)), 0.0, 1.0), 2.0);\n"
+	"        vec3 n3 = chaff_grad_noise2d(cUV * 4.8 + vec2(-tC * 3.3, tC * 2.7), 0xCA57u);\n"
+	"        vec3 n4 = chaff_grad_noise2d(cUV * 5.6 + vec2(-19.0 + tC * 3.0, 41.0 - tC * 2.4), 0xCA58u);\n"
+	"        web += 0.65 * closeZoom * 0.62 * (nd_caustic_iso(n3) + 0.85 * nd_caustic_iso(n4));\n"
 	"    }\n"
 	"    return web;\n"
 	"}\n"
@@ -1079,36 +1156,10 @@ static const char *s_fs_terrain =
 	"    vec2 u = fp * fp * fp * (fp * (fp * 6.0 - 15.0) + 10.0);\n"
 	"    return texture(uSubstrateTex, (ip + u + 0.5) / texSize);\n"
 	"}\n"
-	"/* Scale-Adaptive 2D Projection of the 3D Cloud Volume along the Sun Vector L_sun = (-0.577, -0.577, 0.816):\n" \
-	" * Projects the 3D wind-sheared cloud decks onto the 2D ground/water surface with orbital shadow offset\n" \
-	" * so continental cyclone arms and cumulus towers cast unmistakable 3D ground shadows from ground to orbit! */\n" \
-	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    const float zBase = 420.0;\n" \
-	"    const float zTop  = 2820.0;\n" \
-	"    float orbitOffset = clamp(dist * 0.045, 0.0, 14000.0);\n" \
-	"    if (dist > 14000.0) {\n" \
-	"        float zk = 1150.0;\n" \
-	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
-	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
-	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
-	"        float atmoGust = 0.65, updraft = 0.50;\n" \
-	"        chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
-	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"        return clamp(smoothstep(0.05, 0.65, synCloud.x), 0.0, 0.95);\n" \
-	"    }\n" \
-	"    /* Single representative projection slice at zk = 920 (the 2D synoptic field is identical at every height; the\n" \
-	" * two former slices differed only by a ~640 unit sun-ward shift, far below the 1.1..4.2 km cell size) */\n" \
-	"    const float zk = 920.0;\n" \
-	"    if (fragZ >= zk + 240.0) return 0.0;\n" \
-	"    float sliceFade = smoothstep(zk + 240.0, zk - 120.0, fragZ);\n" \
-	"    float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
-	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
-	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
-	"    float atmoGust = 0.65, updraft = 0.50;\n" \
-	"    chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
-	"    vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"    return clamp(smoothstep(0.05, 0.66, synCloud.x * sliceFade), 0.0, 0.95);\n" \
-	"}\n"
+	ND_GLSL_SCENE_LIGHT
+	ND_GLSL_CLOUD_SHADOW_FN
+	ND_GLSL_CSM_LOOKUP_FN
+	ND_GLSL_CLOUD_SHADOW_ENTRY_FN
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
 	"    float effectiveScale = scale * 0.0625;\n"
@@ -1187,12 +1238,12 @@ static const char *s_fs_terrain =
 	"    float worldBioHumidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.22, 0.90);\n"
 	"    float bioHumidity = mix(texBioHumidity, worldBioHumidity, gpuFieldBlend);\n"
 	"    float cloudFw = mix(fw, max(0.18, vDistance * 0.00055), gpuFieldBlend);\n"
-	"    float rawCloudShadow = eval_planetary_cloud_shadow(vWorldPos, fragZ, uAnimTime, bioHumidity, vDistance, cloudFw);\n"
+	"    float rawCloudShadow = nd_cloud_shadow(vWorldPos, fragZ, uAnimTime, bioHumidity, vDistance, cloudFw);\n"
 	"    float cloudShadow = rawCloudShadow;\n"
-	"    float sunTrans = 1.0 - cloudShadow * 0.92;\n"
+	"    float sunTrans = nd_sun_trans(cloudShadow);\n"
 	"    vec3 L_frag = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans;\n"
-	"    float effLighting = (0.45 * (1.0 - cloudShadow * 0.48)) + 0.55 * baseDiff;\n"
+	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow)) + 0.55 * baseDiff;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
 	"    float dryLighting = effLighting;\n"
 	"    float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
@@ -1280,7 +1331,7 @@ static const char *s_fs_terrain =
 	"            vec3 H_half = normalize(L_frag + viewDir);\n"
 	"            float perFragDiff = max(0.0, dot(N_frag, L_frag));\n"
 	"            float cavityAO = clamp(1.0 - slope * 0.26 + h0 * 0.26 - microCavity * 0.42 - rockCrevice * 0.34, 0.54, 1.05);\n"
-	"            float fragLit = ((0.40 * (1.0 - 0.48 * cloudShadow)) + 0.60 * perFragDiff * sunTrans) * cavityAO;\n"
+	"            float fragLit = ((0.40 * nd_amb_trans(cloudShadow)) + 0.60 * perFragDiff * sunTrans) * cavityAO;\n"
 	"            dryLighting = mix(dryLighting, fragLit, macroFade);\n"
 	"            float microShade = clamp(1.0 + h0 * (0.30 + 0.16 * closeZoom) * macroFade, 0.72, 1.28);\n"
 	"            dryCol *= microShade;\n"
@@ -1319,7 +1370,7 @@ static const char *s_fs_terrain =
 	"            vec3 N_sub = normalize(fragNormal - detail.y * (0.30 * distFade) * tangentU - detail.z * (0.30 * distFade) * tangentV);\n"
 	"            float subDiff = max(0.0, dot(N_sub, L_frag));\n"
 	"            float subCavity = clamp(1.0 + detail.x * 0.28 - detail.w * 0.38, 0.62, 1.18);\n"
-	"            subLighting = mix(subLighting, ((0.45 * (1.0 - 0.48 * cloudShadow)) + 0.55 * subDiff * sunTrans) * subCavity, distFade);\n"
+	"            subLighting = mix(subLighting, ((0.45 * nd_amb_trans(cloudShadow)) + 0.55 * subDiff * sunTrans) * subCavity, distFade);\n"
 	"        }\n"
 	"    }\n"
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
@@ -1370,8 +1421,8 @@ static const char *s_fs_terrain =
 	"        float cosView = max(0.35, dot(torusN, viewDir));\n"
 	"        float opticalDepth = d / cosView;\n"
 	"        /* Non-linear shallow optical path: crystal-clear wading shallows (d < 4), smooth shelf ramp (4..16) */\n"
-	"        float shallowFactor = smoothstep(0.40, 15.0, d);\n"
-	"        float effectiveOpticalDepth = opticalDepth * (0.14 + 0.86 * shallowFactor);\n"
+	"        float shallowFactor = smoothstep(1.5, 18.0, d);\n"
+	"        float effectiveOpticalDepth = opticalDepth * (0.04 + 0.96 * shallowFactor);\n"
 	"        /* Natural lacustrine & oceanic water body palette (no neon cyan wash in shallows) */\n"
 	"        vec3 C_SHALLOW = vec3(0.16, 0.56, 0.62) * wTropical\n"
 	"                       + vec3(0.11, 0.42, 0.46) * wTemperate\n"
@@ -1393,13 +1444,16 @@ static const char *s_fs_terrain =
 	"        vec3 seabedAbsorption = exp(-vec3(0.058, 0.022, 0.007) * effectiveOpticalDepth);\n"
 	"        vec3 transmittedBed = lit * seabedAbsorption;\n"
 	"        /* Depth-staged in-scattered water body color across shallow shelf (2.5..16), outer shelf (16..180), and abyssal trench (180..950) */\n"
-	"        float tShelf = smoothstep(2.5, 16.0, d);\n"
-	"        float tOuter = smoothstep(16.0, 180.0, d);\n"
-	"        float tAbyss = smoothstep(180.0, 950.0, d);\n"
+	"        /* Shallow ramps as in the crystal-clear shelf look (2.5..9.5..20..42); trenches keep extra gradation below 42 */\n"
+	"        float tShelf = smoothstep(2.5, 9.5, d);\n"
+	"        float tOuter = smoothstep(9.5, 20.0, d);\n"
+	"        float tAbyss = smoothstep(20.0, 42.0, d);\n"
+	"        float tTrench = smoothstep(180.0, 950.0, d);\n"
 	"        vec3 inscatterCol = mix(C_SHALLOW, C_SHELF, tShelf);\n"
 	"        inscatterCol = mix(inscatterCol, C_OUTER, tOuter);\n"
 	"        inscatterCol = mix(inscatterCol, C_ABYSS, tAbyss);\n"
-	"        float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.072 * effectiveOpticalDepth));\n"
+	"        inscatterCol = mix(inscatterCol, C_ABYSS * 0.55, tTrench);\n"
+	"        float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.052 * effectiveOpticalDepth));\n"
 	"        vec3 waterBody = mix(transmittedBed, inscatterCol, bodyScatterWeight);\n"
 	"        /* Single-pass unified air-water surface reflection, 3-tier sun glitter, Fresnel & surf foam\n"
 	"         * (eliminates the duplicate overlapping water mesh and all water/earth Z-fighting flicker) */\n"
@@ -1410,7 +1464,7 @@ static const char *s_fs_terrain =
 	"        float shoreWaveDamp = smoothstep(0.0, 1.8, fragWaterDepth);\n"
 	"        float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
 	"        vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw);\n"
-	"        vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.0, 0.35, fragWaterDepth);\n"
+	"        vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.4, 2.8, fragWaterDepth);\n"
 	"        vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85;\n"
 	"        vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85;\n"
 	"        vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
@@ -1425,7 +1479,8 @@ static const char *s_fs_terrain =
 	"        float specMicro   = pow(smoothstep(0.9942, 0.9997, NdotH_cap), 2.5) * (0.42 + 0.52 * wind.w) * (0.50 + 0.50 * closeWeight);\n"
 	"        float specWavelet = pow(smoothstep(0.9840, 0.9982, NdotH_wave), 2.0) * (0.22 + 0.18 * wind.z);\n"
 	"        float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
-	"        float specSun     = (specMicro + specWavelet + specBroad) * smoothstep(0.0, 0.25, fragWaterDepth) * sunTrans;\n"
+	"        float shoreSpecDamp = smoothstep(0.3, 3.2, fragWaterDepth);\n"
+	"        float specSun     = (specMicro * 0.70 + specWavelet * 0.85 + specBroad * 0.55) * shoreSpecDamp * sunTrans;\n"
 	"        float flatNdotV = max(0.0, dot(torusN, viewDir));\n"
 	"        float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
 	"        float fresnel = clamp(0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0) + max(0.0, facetTilt) * 0.22, 0.015, 0.65);\n"
@@ -1434,7 +1489,7 @@ static const char *s_fs_terrain =
 	"        float waveSlopeDiff = dot(specNormal, L_frag) - dot(torusN, L_frag);\n"
 	"        float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans;\n"
 	"        float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
-	"        vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40) * (1.0 - cloudShadow * 0.40);\n"
+	"        vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40) * nd_amb_trans(cloudShadow);\n"
 	"        float deepSssMask = smoothstep(2.5, 10.0, fragWaterDepth);\n"
 	"        float crestGlow = clamp(waves.w * 0.60 + hillshadeLit * 1.40, 0.0, 1.0) * deepSssMask;\n"
 	"        vec3 sssTint = mix(C_SHALLOW, waveShade, 0.55) * (crestGlow * 0.22);\n"
@@ -1446,17 +1501,24 @@ static const char *s_fs_terrain =
 	"        float whitecap = smoothstep(0.68, 0.94, waves.w) * smoothstep(6.0, 16.0, fragWaterDepth) * openSeaSurfEnergy * 0.24;\n"
 	"        float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.55);\n"
 	"        vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
-	"        float shallowGlassMask = smoothstep(0.0, 3.8, fragWaterDepth);\n"
-	"        float skyReflWeight = fresnel * (0.28 + 0.72 * shallowGlassMask);\n"
+	"        float shallowGlassMask = smoothstep(0.5, 4.0, fragWaterDepth);\n"
+	"        float skyReflWeight = fresnel * (0.15 + 0.85 * shallowGlassMask);\n"
 	"        float sssWeight     = crestGlow * 0.16;\n"
 	"        float specWeight    = clamp(specSun, 0.0, 0.92);\n"
 	"        float foamWeight    = foam;\n"
 	"        float totalWeight   = skyReflWeight + sssWeight + specWeight + foamWeight;\n"
 	"        vec3 reflSkyCol = mix(skySurf * 0.92, skySurf * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
-	"        /* Reflected cloud cover reuses the already-evaluated column cloud density (rawCloudShadow) instead of a second 2-noise-field evaluation */\n"
+	"        /* Reflected clouds: intersect the wave-perturbed reflection ray with the cloud slice and read the shared cloud-shadow map there\n"
+	"         * (one fetch); without a map (orbit) fall back to the column density above the pixel */\n"
 	"        float reflCloudDens = rawCloudShadow;\n"
+	"        if (uCsm.z > 0.0 && vDistance <= 14000.0) {\n"
+	"            vec3 waveRefl = reflect(-viewDir, waveNormal);\n"
+	"            float reflUp = max(0.30, dot(waveRefl, torusN));\n"
+	"            vec2 reflHoriz = vec2(dot(waveRefl, tangentU), dot(waveRefl, tangentV));\n"
+	"            reflCloudDens = smoothstep(0.05, 0.66, nd_csm_density(vWorldPos + reflHoriz * ((920.0 - liveSeaLevel) / reflUp)));\n"
+	"        }\n"
 	"        vec3 reflCloudCol = mix(vec3(0.76, 0.82, 0.90), vec3(0.98, 0.97, 0.95), clamp(0.55 + facetTilt * 1.4, 0.0, 1.0));\n"
-	"        reflSkyCol = mix(reflSkyCol * (1.0 - cloudShadow * 0.35), reflCloudCol, clamp(reflCloudDens * 0.85, 0.0, 0.88));\n"
+	"        reflSkyCol = mix(reflSkyCol * nd_amb_trans(cloudShadow), reflCloudCol, clamp(reflCloudDens * 0.85, 0.0, 0.88));\n"
 	"        vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
 	"        vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
 	"        if (uLambLight.w > 0.001) {\n"
@@ -1579,8 +1641,8 @@ static const char *s_vs_water =
 	"    float cu = cu0 + dcu, su = su0 + dsu;\n"
 	"    float cv = cv0 + dcv, sv = sv0 + dsv;\n"
 	"    /* Raise effWz above max tidal/swash water level near shore to prevent linearly interpolated terrain triangles from depth-clipping per-fragment water */\n"
-	"    bool nearWater = (depth > -4.5) || (minNeighborWz < uSeaLevel + 4.5);\n"
-	"    float effWz = nearWater ? (max(uSeaLevel + 1.85, wz) + 0.16) : (min(wz, uSeaLevel) - 2.0);\n"
+	"    /* Exact sea-level plane: the water pass depth-tests the true surface against sprite depth */\n"
+	"    float effWz = uSeaLevel;\n"
 	"    float Rv0 = R + r0 * cv0;\n"
 	"    float dRv = r0 * dcv + effWz * cv;\n"
 	"    vec3 worldPos = uPlanetCenter + vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + effWz * sv);\n"
@@ -1626,6 +1688,11 @@ static const char *s_fs_water =
 	"uniform mat4 uLambWakeXYT1;\n"
 	"uniform mat4 uLambWakeVel0;\n"
 	"uniform mat4 uLambWakeVel1;\n"
+	"uniform sampler2D uSceneColor;\n"
+	"uniform sampler2D uSceneDepth;\n"
+	"uniform vec2 uViewport;\n"
+	"uniform vec2 uNearFar;\n"
+	"uniform vec2 uProjScale;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -1700,36 +1767,10 @@ static const char *s_fs_water =
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    return chaff_eval_flow_2d(worldPos, anim_time);\n"
 	"}\n"
-	"/* Scale-Adaptive 2D Projection of the 3D Cloud Volume along the Sun Vector L_sun = (-0.577, -0.577, 0.816):\n" \
-	" * Projects the 3D wind-sheared cloud decks onto the 2D ground/water surface with orbital shadow offset\n" \
-	" * so continental cyclone arms and cumulus towers cast unmistakable 3D ground shadows from ground to orbit! */\n" \
-	"float eval_planetary_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    const float zBase = 420.0;\n" \
-	"    const float zTop  = 2820.0;\n" \
-	"    float orbitOffset = clamp(dist * 0.045, 0.0, 14000.0);\n" \
-	"    if (dist > 14000.0) {\n" \
-	"        float zk = 1150.0;\n" \
-	"        float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
-	"        vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
-	"        vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
-	"        float atmoGust = 0.65, updraft = 0.50;\n" \
-	"        chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
-	"        vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"        return clamp(smoothstep(0.05, 0.65, synCloud.x), 0.0, 0.95);\n" \
-	"    }\n" \
-	"    /* Single representative projection slice at zk = 920 (the 2D synoptic field is identical at every height; the\n" \
-	" * two former slices differed only by a ~640 unit sun-ward shift, far below the 1.1..4.2 km cell size) */\n" \
-	"    const float zk = 920.0;\n" \
-	"    if (fragZ >= zk + 240.0) return 0.0;\n" \
-	"    float sliceFade = smoothstep(zk + 240.0, zk - 120.0, fragZ);\n" \
-	"    float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
-	"    vec2 projXY = fragXY + vec2(-0.7071, -0.7071) * dz;\n" \
-	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n" \
-	"    float atmoGust = 0.65, updraft = 0.50;\n" \
-	"    chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
-	"    vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
-	"    return clamp(smoothstep(0.05, 0.66, synCloud.x * sliceFade), 0.0, 0.95);\n" \
-	"}\n"
+	ND_GLSL_SCENE_LIGHT
+	ND_GLSL_CLOUD_SHADOW_FN
+	ND_GLSL_CSM_LOOKUP_FN
+	ND_GLSL_CLOUD_SHADOW_ENTRY_FN
 	"vec3 eval_shore_micro_relief(vec2 worldPos, float depth, float fw) {\n"
 	"    float env = smoothstep(3.2, 0.25, abs(depth));\n"
 	"    if (env <= 0.001) return vec3(0.0);\n"
@@ -2003,7 +2044,23 @@ static const char *s_fs_water =
 	"    }\n"
 	"    return vec4(clamp(totalH, -0.42, 0.42) * distFade, totalGrad.x * distFade, totalGrad.y * distFade, clamp(totalFoam * distFade, 0.0, 0.55));\n"
 	"}\n"
+	"/* Linear eye depth of a window-space depth value, written to stay accurate for a 8e7 far plane */\n"
+	"float nd_eye_depth(float d) {\n"
+	"    return (uNearFar.x * uNearFar.y) / (uNearFar.y * (1.0 - d) + d * uNearFar.x);\n"
+	"}\n"
+	"/* True camera distance of the nearest opaque scene point under a screen UV. Sprite quads are pushed toward the camera by\n"
+	" * min(24, 0.08 * dist) in s_vs_billboard to avoid terrain clipping: undo it so thickness through the water is exact. */\n"
+	"float nd_object_dist(vec2 uv) {\n"
+	"    float e = nd_eye_depth(texture(uSceneDepth, uv).r);\n"
+	"    vec2 n = uv * 2.0 - 1.0;\n"
+	"    float dist = e * length(vec3(n * uProjScale, 1.0));\n"
+	"    return (dist < 276.0) ? dist / 0.92 : dist + 24.0;\n"
+	"}\n"
 	"void main() {\n"
+	"    /* Only sprite pixels (stencil-marked) that lie BELOW the water surface reach this point */\n"
+	"    vec2 sUV = gl_FragCoord.xy / uViewport;\n"
+	"    float objPath1 = nd_object_dist(sUV) - vDistance;\n"
+	"    if (objPath1 <= 0.02) discard;\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
 	"    float effectiveScale = scale * 0.0625;\n"
 	"    vec2 shoreGrad = vec2(0.0);\n"
@@ -2038,8 +2095,8 @@ static const char *s_fs_water =
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
 	"    float bioHumidity = clamp(0.65 * wTemperate + 0.88 * wTropical + 0.52 * wPolar + 0.25 * wVolcanic + 0.15 * smoothstep(0.0, 16.0, fragWaterDepth), 0.25, 0.95);\n"
-	"    float cloudShadow = eval_planetary_cloud_shadow(vWorldPos, uSeaLevel, uAnimTime, bioHumidity, vDistance, fw);\n"
-	"    float sunTrans = 1.0 - cloudShadow * 0.92;\n"
+	"    float cloudShadow = nd_cloud_shadow(vWorldPos, uSeaLevel, uAnimTime, bioHumidity, vDistance, fw);\n"
+	"    float sunTrans = nd_sun_trans(cloudShadow);\n"
 	"    vec3 C_SHALLOW = vec3(0.16, 0.56, 0.62) * wTropical\n"
 	"                   + vec3(0.11, 0.42, 0.46) * wTemperate\n"
 	"                   + vec3(0.17, 0.50, 0.62) * wPolar\n"
@@ -2052,6 +2109,10 @@ static const char *s_fs_water =
 	"                   + vec3(0.05, 0.21, 0.36) * wTemperate\n"
 	"                   + vec3(0.06, 0.21, 0.40) * wPolar\n"
 	"                   + vec3(0.04, 0.16, 0.27) * wVolcanic;\n"
+	"    vec3 C_ABYSS   = vec3(0.030, 0.120, 0.30) * wTropical\n"
+	"                   + vec3(0.024, 0.100, 0.24) * wTemperate\n"
+	"                   + vec3(0.022, 0.090, 0.24) * wPolar\n"
+	"                   + vec3(0.018, 0.072, 0.18) * wVolcanic;\n"
 	"    /* Evaluate recursive moving wind field & height-model basin/fetch profile */\n"
 	"    vec4 wind = eval_recursive_wind(vWorldPos, uAnimTime);\n"
 	"    vec2 basin = eval_water_fetch_and_basin(vUV, wind.xy, shoreGrad, fragWaterDepth, effectiveScale);\n"
@@ -2061,7 +2122,7 @@ static const char *s_fs_water =
 	"    float shoreWaveDamp = smoothstep(0.0, 1.8, fragWaterDepth);\n"
 	"    float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
 	"    vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw);\n"
-	"    vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.0, 0.35, fragWaterDepth);\n"
+	"    vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.4, 2.8, fragWaterDepth);\n"
 	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85;\n"
 	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85;\n"
 	"    vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
@@ -2082,7 +2143,8 @@ static const char *s_fs_water =
 	"    float specMicro   = pow(smoothstep(0.9942, 0.9997, NdotH_cap), 2.5) * (0.42 + 0.52 * wind.w) * (0.50 + 0.50 * closeWeight);\n"
 	"    float specWavelet = pow(smoothstep(0.9840, 0.9982, NdotH_wave), 2.0) * (0.22 + 0.18 * wind.z);\n"
 	"    float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
-	"    float specSun     = (specMicro + specWavelet + specBroad) * smoothstep(0.0, 0.25, fragWaterDepth) * sunTrans;\n"
+	"    float shoreSpecDamp = smoothstep(0.3, 3.2, fragWaterDepth);\n"
+	"    float specSun     = (specMicro * 0.70 + specWavelet * 0.85 + specBroad * 0.55) * shoreSpecDamp * sunTrans;\n"
 	"    /* Schlick Fresnel for air-water interface (R0 = 0.02) + per-wavelet facet tilt contrast */\n"
 	"    float flatNdotV = max(0.0, dot(torusN, viewDir));\n"
 	"    float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
@@ -2093,7 +2155,7 @@ static const char *s_fs_water =
 	"    float waveSlopeDiff = dot(specNormal, sunDir) - dot(torusN, sunDir);\n"
 	"    float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans;\n"
 	"    float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
-	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40) * (1.0 - cloudShadow * 0.40);\n"
+	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40) * nd_amb_trans(cloudShadow);\n"
 	"    /* Subsurface wave-crest back-scattering only in deeper water (suppressed in crystal shallows) */\n"
 	"    float deepSssMask = smoothstep(2.5, 10.0, fragWaterDepth);\n"
 	"    float crestGlow = clamp(waves.w * 0.60 + hillshadeLit * 1.40, 0.0, 1.0) * deepSssMask;\n"
@@ -2108,17 +2170,23 @@ static const char *s_fs_water =
 	"    float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.55);\n"
 	"    vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
 	"    /* Pure air-water surface compositing: shallow water stays glass-clear except for wavelet specularity & Fresnel */\n"
-	"    float shallowGlassMask = smoothstep(0.0, 3.8, fragWaterDepth);\n"
-	"    float skyReflWeight = fresnel * (0.28 + 0.72 * shallowGlassMask);\n"
+	"    float shallowGlassMask = smoothstep(0.5, 4.0, fragWaterDepth);\n"
+	"    float skyReflWeight = fresnel * (0.15 + 0.85 * shallowGlassMask);\n"
 	"    float sssWeight     = crestGlow * 0.16;\n"
 	"    float specWeight    = clamp(specSun, 0.0, 0.92);\n"
 	"    float foamWeight    = foam;\n"
 	"    float totalWeight   = skyReflWeight + sssWeight + specWeight + foamWeight;\n"
 	"    vec3 reflSkyCol = mix(sky * 0.92, sky * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
-	"    /* Reflected cloud cover reuses the already-evaluated column cloud density (cloudShadow) */\n"
+	"    /* Reflected clouds: wave-perturbed reflection ray intersected with the cloud slice, read from the shared cloud-shadow map */\n"
 	"    float reflCloudDens = cloudShadow;\n"
+	"    if (uCsm.z > 0.0 && vDistance <= 14000.0) {\n"
+	"        vec3 waveRefl = reflect(-viewDir, waveNormal);\n"
+	"        float reflUp = max(0.30, dot(waveRefl, torusN));\n"
+	"        vec2 reflHoriz = vec2(dot(waveRefl, tangentU), dot(waveRefl, tangentV));\n"
+	"        reflCloudDens = smoothstep(0.05, 0.66, nd_csm_density(vWorldPos + reflHoriz * ((920.0 - uSeaLevel) / reflUp)));\n"
+	"    }\n"
 	"    vec3 reflCloudCol = mix(vec3(0.76, 0.82, 0.90), vec3(0.98, 0.97, 0.95), clamp(0.55 + facetTilt * 1.4, 0.0, 1.0));\n"
-	"    reflSkyCol = mix(reflSkyCol * (1.0 - cloudShadow * 0.35), reflCloudCol, clamp(reflCloudDens * 0.85, 0.0, 0.88));\n"
+	"    reflSkyCol = mix(reflSkyCol * nd_amb_trans(cloudShadow), reflCloudCol, clamp(reflCloudDens * 0.85, 0.0, 0.88));\n"
 	"    vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun + foamColor * foamWeight;\n"
 	"    vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
 	"    if (uLambLight.w > 0.001) {\n"
@@ -2129,10 +2197,48 @@ static const char *s_fs_water =
 	"    }\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    surfaceRgb = mix(surfaceRgb, vec3(0.35, 0.70, 1.0), limb * 0.55 * uAtmoIntensity);\n"
-	"    float edgeFade = smoothstep(0.0, 0.18, fragWaterDepth);\n"
-	"    float alpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight) + limb * 0.35 * uAtmoIntensity, 0.0, 0.94) * edgeFade;\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
-	"    FragColor = vec4(mix(surfaceRgb, sky, fogFactor * uAtmoIntensity), alpha);\n"
+	"    float fogW = fogFactor * uAtmoIntensity;\n"
+	"    /* --- Submerged sprite: refracted lookup of the resolved scene + true view-ray absorption --- */\n"
+	"    float cosV = max(0.35, dot(torusN, viewDir));\n"
+	"    float subDepthV = objPath1 * cosV;\n"
+	"    float refrFade = smoothstep(2000.0, 500.0, vDistance);\n"
+	"    float refrDepth = min(subDepthV, 8.0) * refrFade;\n"
+	"    /* Snell-style lateral shift from the local wave slope (world units -> screen UV) plus the apparent lift of submerged things */\n"
+	"    vec2 refrWorld = waveGrad * (0.30 * refrDepth);\n"
+	"    vec2 refrUV = 0.5 * vec2(-refrWorld.x / (vDistance * uProjScale.x),\n"
+	"                              (refrWorld.y * 0.82 + 0.25 * refrDepth * cosV) / (vDistance * uProjScale.y));\n"
+	"    vec2 sUVr = clamp(sUV + refrUV, vec2(0.002), vec2(0.998));\n"
+	"    float objPath2 = nd_object_dist(sUVr) - vDistance;\n"
+	"    bool refrOk = objPath2 > 0.02;\n"
+	"    vec2 sUVf = refrOk ? sUVr : sUV;\n"
+	"    float pathF = refrOk ? objPath2 : objPath1;\n"
+	"    vec4 sceneS = texture(uSceneColor, sUVf);\n"
+	"    float objW = 1.0 - sceneS.a; /* sprites wrote alpha 0, the terrain (water already shaded over the seabed) alpha 1 */\n"
+	"    float dObj = clamp(pathF * cosV, 0.0, 2000.0);\n"
+	"    float shallowFactor = smoothstep(1.5, 18.0, dObj);\n"
+	"    float effOptical = pathF * (0.04 + 0.96 * shallowFactor);\n"
+	"    vec3 absorbed = sceneS.rgb * exp(-vec3(0.058, 0.022, 0.007) * effOptical);\n"
+	"    float dBed = clamp(fragWaterDepth, 0.0, 2000.0);\n"
+	"    float tShelf = smoothstep(2.5, 9.5, dBed);\n"
+	"    float tOuter = smoothstep(9.5, 20.0, dBed);\n"
+	"    float tAbyss = smoothstep(20.0, 42.0, dBed);\n"
+	"    float tTrench = smoothstep(180.0, 950.0, dBed);\n"
+	"    vec3 inscatterCol = mix(C_SHALLOW, C_SHELF, tShelf);\n"
+	"    inscatterCol = mix(inscatterCol, C_OUTER, tOuter);\n"
+	"    inscatterCol = mix(inscatterCol, C_ABYSS, tAbyss);\n"
+	"    inscatterCol = mix(inscatterCol, C_ABYSS * 0.55, tTrench);\n"
+	"    float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.052 * effOptical));\n"
+	"    vec3 objCol = mix(absorbed, mix(inscatterCol, sky, fogW), bodyScatterWeight);\n"
+	"    vec3 sceneOut = mix(sceneS.rgb, objCol, objW);\n"
+	"    /* Air-water surface layer over the submerged sprite, identical terms to the terrain pass */\n"
+	"    float surfEdgeFade = smoothstep(0.0, 0.18, fragWaterDepth);\n"
+	"    float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight), 0.0, 0.94) * surfEdgeFade;\n"
+	"    vec3 comp = mix(sceneOut, mix(surfaceRgb, sky, fogW), surfAlpha);\n"
+	"    /* The waterline fades in over the first quarter unit below the surface */\n"
+	"    float wetBlend = smoothstep(0.0, 0.25, subDepthV);\n"
+	"    vec3 dryRgb = texture(uSceneColor, sUV).rgb;\n"
+	"    FragColor = vec4(mix(dryRgb, comp, wetBlend), 1.0);\n"
 	"}\n";
 
 static const char *s_vs_billboard =
@@ -2186,22 +2292,13 @@ static const char *s_fs_billboard =
 	"uniform vec3 uSkyColor;\n"
 	"uniform float uAtmoIntensity;\n"
 	"uniform vec4 uLambLight;\n"
+	"uniform int uPass;\n"
 	"out vec4 FragColor;\n"
+	ND_GLSL_SCENE_LIGHT
+	ND_GLSL_CSM_LOOKUP_FN
 	CHAFF_GLSL_HASH_FN
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
-	"/* Caustic light web from 2D gradient-noise iso-contours: 1 octave (4 lattice hashes) + 1 close-up octave, replacing four\n"
-	" * 8-corner 3D hash noises (32 hashes). Line width is normalised by the noise gradient so the web stays thin and crisp. */\n"
-	"float nd_caustic_web(vec2 cUV, float tC, float closeZoom) {\n"
-	"    vec3 n1 = chaff_grad_noise2d(cUV * 1.85 + vec2(tC * 2.1, -tC * 1.6), 0x1337u);\n"
-	"    float shimmer = 0.85 + 0.15 * sin(tC * 3.1 + n1.x * 9.0);\n"
-	"    float web = pow(clamp(1.0 - abs(n1.x - 0.5) / (0.05 + 0.09 * length(n1.yz)), 0.0, 1.0), 2.0) * shimmer;\n"
-	"    if (closeZoom > 0.01) {\n"
-	"        vec3 n2 = chaff_grad_noise2d(cUV * 4.8 + vec2(-tC * 3.3, tC * 2.7), 0xCA57u);\n"
-	"        web += 0.65 * closeZoom * pow(clamp(1.0 - abs(n2.x - 0.5) / (0.05 + 0.09 * length(n2.yz)), 0.0, 1.0), 2.0);\n"
-	"    }\n"
-	"    return web;\n"
-	"}\n"
 	"vec4 fetchBoundedTexel(ivec2 tc, ivec4 iBounds, ivec2 maxTex) {\n"
 	"    if (tc.x < iBounds.x || tc.x > iBounds.z || tc.y < iBounds.y || tc.y > iBounds.w) {\n"
 	"        return vec4(0.0);\n"
@@ -2264,116 +2361,14 @@ static const char *s_fs_billboard =
 	"    }\n"
 	"    return vec4(rgb, a);\n"
 	"}\n"
-	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
-	"    return chaff_eval_flow_2d(worldPos, anim_time);\n"
-	"}\n"
-	"vec4 eval_zoom_water_waves(vec2 pos, vec4 wind, float anim_time, float dist, float fw) {\n"
-	"    vec2 wDir = wind.xy;\n"
-	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
-	"    float gust = wind.z;\n"
-	"    const float freqs[6] = float[6](0.024, 0.072, 0.220, 0.680, 2.150, 6.800);\n"
-	"    const float amps[6]  = float[6](1.450, 0.680, 0.280, 0.115, 0.045, 0.018);\n"
-	"    const float spds[6]  = float[6](0.180, 0.340, 0.620, 1.050, 1.750, 2.800);\n"
-	"    const float dFar[6]  = float[6](65000.0, 18000.0, 4800.0, 1600.0, 520.0, 200.0);\n"
-	"    const float dNear[6] = float[6](14000.0,  3600.0, 1100.0,  360.0, 130.0,  42.0);\n"
-	"    const uint  seeds[6] = uint[6](0x4F434530u, 0x5357454Cu, 0x57415645u, 0x52495050u, 0x46494E45u, 0x53505241u);\n"
-	"    const vec2  dirs[6]  = vec2[6](\n"
-	"        vec2( 0.8575, -0.5145),\n"
-	"        vec2( 0.6402, -0.7682),\n"
-	"        vec2( 0.9285, -0.3714),\n"
-	"        vec2( 0.5145, -0.8575),\n"
-	"        vec2( 0.7809, -0.6247),\n"
-	"        vec2( 0.3714, -0.9285)\n"
-	"    );\n"
-	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
-	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
-	"    float h = 0.0;\n"
-	"    vec2 grad = vec2(0.0);\n"
-	"    float crest = 0.0;\n"
-	"    vec2 pRot = pos;\n"
-	"    mat2 curInvRot = mat2(1.0, 0.0, 0.0, 1.0);\n"
-	"    for (int i = 0; i < 6; i++) {\n"
-	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), (i == 0) ? 0.35 : 0.0, 1.0);\n"
-	"        float wNyq  = smoothstep(0.55, 0.16, freqs[i] * fw);\n"
-	"        float gustScale = (i >= 3) ? (0.75 + 0.45 * gust) : (0.85 + 0.20 * gust);\n"
-	"        float w = wDist * wNyq * gustScale;\n"
-	"        if (w > 0.001) {\n"
-	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
-	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
-	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
-	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
-	"            float signedVal = g.x - 0.5;\n"
-	"            float ridge = 0.5 - abs(signedVal);\n"
-	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
-	"            float dShape = 0.85 + 0.45 * ridge;\n"
-	"            vec2 worldG = curInvRot * g.yz;\n"
-	"            h += shaped * amps[i] * w;\n"
-	"            grad += worldG * (dShape * freqs[i] * amps[i] * w);\n"
-	"            crest += max(0.0, ridge - 0.22) * (w * ((i <= 2) ? 1.4 : 0.8));\n"
-	"            pRot += g.yz * (0.11 * w);\n"
-	"        }\n"
-	"        pRot = rot * pRot;\n"
-	"        curInvRot = curInvRot * irot;\n"
-	"    }\n"
-	"    return vec4(h, grad.x, grad.y, clamp(crest, 0.0, 1.0));\n"
-	"}\n"
-	"vec2 eval_wind_capillary_facets(vec2 pos, float anim_time, vec4 wind, float dist, float fw) {\n"
-	"    float distVis = clamp(1.0 - (dist - 550.0) / 2200.0, 0.0, 1.0);\n"
-	"    if (distVis <= 0.001) return vec2(0.0);\n"
-	"    vec2 wDir = wind.xy;\n"
-	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
-	"    const vec2 prevW = vec2(0.741, -0.671);\n"
-	"    const vec2 prevP = vec2(0.671,  0.741);\n"
-	"    float rippleEnv = (0.55 + 0.65 * wind.w) * distVis;\n"
-	"    float f1 = 1.35;\n"
-	"    float f2 = 3.40;\n"
-	"    float nyq1 = smoothstep(0.60, 0.15, f1 * fw);\n"
-	"    float nyq2 = smoothstep(0.60, 0.15, f2 * fw);\n"
-	"    float t1 = mod(anim_time * 1.15, 512.0);\n"
-	"    float t2 = mod(anim_time * 1.65, 512.0);\n"
-	"    vec2 gustShift = wDir * (wind.z * 0.55) + wPerp * (wind.w * 0.35);\n"
-	"    vec2 wCoord1 = vec2(dot(pos, prevW) * 1.45, dot(pos, prevP) * 0.78) * f1 + gustShift - vec2(t1, 0.18 * t1);\n"
-	"    vec2 wCoord2 = vec2(dot(pos, prevW) * 1.35 + dot(pos, prevP) * 0.35, dot(pos, prevP) * 0.85 - dot(pos, prevW) * 0.25) * f2 + gustShift * 1.4 - vec2(t2, -0.22 * t2);\n"
-	"    vec3 c1 = (nyq1 > 0.001) ? chaff_grad_noise2d(wCoord1, 0xCA9111A1u) : vec3(0.5, 0.0, 0.0);\n"
-	"    vec3 c2 = (nyq2 > 0.001) ? chaff_grad_noise2d(wCoord2 + c1.yz * 0.25, 0xCA9111A2u) : vec3(0.5, 0.0, 0.0);\n"
-	"    vec2 localG = c1.yz * (0.14 * nyq1) + c2.yz * (0.11 * nyq2);\n"
-	"    vec2 worldCapGrad = (wDir * localG.x * 1.40 + wPerp * localG.y * 0.80) * rippleEnv;\n"
-	"    return worldCapGrad;\n"
-	"}\n"
 	"void main() {\n"
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
 	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
-	"    /* Exact horizontal water-plane (Z = uSeaLevel) intersection of the camera ray through this billboard pixel:\n"
-	"     * matches vWorldPos of s_vs_water / s_fs_water at the exact same screen pixel!\n"
-	"     * In eval_billboard_quad_with_origin, vLocalPos.y is b->y - c[k].dy / sin(pitch), which is the exact\n"
-	"     * ray intersection with Z = b->z (vQuadUV.z). Advancing along the ray (-cos(pitch), -sin(pitch)) from\n"
-	"     * Z = vQuadUV.z to Z = uSeaLevel shifts Y by (vQuadUV.z - uSeaLevel) * cot(pitch)! */\n"
-	"    vec2 waterSurfPos = vec2(vLocalPos.x, vLocalPos.y - (uSeaLevel - vQuadUV.z) * 0.7002075);\n"
-	"    float waterFw = max(1e-4, max(length(dFdx(waterSurfPos)), length(dFdy(waterSurfPos))));\n"
-	"    float d = 0.0;\n"
-	"    bool isSubmerged = false;\n"
-	"    vec4 wind = vec4(0.7071, -0.7071, 1.0, 0.5);\n"
-	"    vec4 waves = vec4(0.0);\n"
-	"    vec2 capGrad = vec2(0.0);\n"
-	"    vec2 waveRefGrad = vec2(0.0);\n"
-	"    float waveSurfZ = uSeaLevel;\n"
-	"    /* Flora (style 1..2) has anti-submersion; non-flora submerges when its ground base (vQuadUV.z) is in water */\n"
-	"    bool canSubmerge = (vQuadUV.w < 0.5 || vQuadUV.w > 2.5);\n"
-	"    if (uSeaLevel > -900.0 && canSubmerge && vQuadUV.z < uSeaLevel + 0.85) {\n"
-	"        wind = eval_recursive_wind(waterSurfPos, uAnimTime);\n"
-	"        waves = eval_zoom_water_waves(waterSurfPos, wind, uAnimTime, vDist, waterFw);\n"
-	"        waveSurfZ = uSeaLevel + waves.x * 0.35 * smoothstep(2600.0, 400.0, vDist);\n"
-	"        if (vQuadUV.z < waveSurfZ + 0.35 && vLocalPos.z < waveSurfZ) {\n"
-	"            d = waveSurfZ - vLocalPos.z;\n"
-	"            isSubmerged = true;\n"
-	"            capGrad = eval_wind_capillary_facets(waterSurfPos, uAnimTime, wind, vDist, waterFw);\n"
-	"            waveRefGrad = waves.yz + capGrad * 0.65;\n"
-	"        }\n"
-	"    }\n"
+	"    /* Same cloud shadow as terrain and water: one fetch from the shared cloud-shadow map at the sprite's ground position */\n"
+	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vQuadUV.z, vDist);\n"
 	"    /* 1. 3D Ground-Contact Drop Shadow Pass (vQuadUV.w < -0.5) */\n"
 	"    if (vQuadUV.w < -0.5) {\n"
-	"        if (isSubmerged && d > 4.0) discard;\n"
 	"        float r2 = dot(vQuadUV.xy, vQuadUV.xy);\n"
 	"        if (r2 >= 1.0) discard;\n"
 	"        vec3 shNoise = chaff_grad_noise2d(vLocalPos.xy * 0.28, 0x53484457u);\n"
@@ -2381,9 +2376,8 @@ static const char *s_fs_billboard =
 	"        float dapple = 0.86 + 0.28 * shNoise.x;\n"
 	"        vec2 umbraDelta = vQuadUV.xy + vec2(0.20, 0.16);\n"
 	"        float umbra = exp(-dot(umbraDelta, umbraDelta) * 3.2) * 0.16;\n"
-	"        float waterAtten = isSubmerged ? clamp(1.0 - d * 0.25, 0.0, 1.0) : 1.0;\n"
 	"        float distAtten = clamp((16000.0 - vDist) / 12000.0, 0.0, 1.0);\n"
-	"        float shadowAlpha = clamp((penumbra * 0.36 * dapple + umbra) * vTint.a * waterAtten * distAtten * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.48);\n"
+	"        float shadowAlpha = clamp((penumbra * 0.36 * dapple + umbra) * nd_sun_trans(cloudSh) * vTint.a * distAtten * (1.0 - fogFactor * uAtmoIntensity), 0.0, 0.48);\n"
 	"        if (shadowAlpha <= 0.005) discard;\n"
 	"        vec3 shadowRgb = mix(vec3(0.05, 0.07, 0.10), sky * 0.16, 0.45);\n"
 	"        FragColor = vec4(shadowRgb, shadowAlpha);\n"
@@ -2414,24 +2408,8 @@ static const char *s_fs_billboard =
 	"    bool isGrass = (style > 4.5 && style < 5.5);\n"
 	"    bool isFloraObj = (style > 0.5 && style < 2.5);\n"
 	"    vec4 baseCol = sampleAtlasSmooth(vUV, vSpriteBounds, style);\n"
-	"    vec2 sampleUV = vUV;\n"
-	"    if (isSubmerged) {\n"
-	"        vec2 atlasSize = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
-	"        float depthRamp = smoothstep(0.0, 1.4, d) * (0.48 + 0.52 * smoothstep(1.0, 7.0, d));\n"
-	"        float refractDistFade = clamp(1.0 - (vDist - 800.0) / 2400.0, 0.0, 1.0);\n"
-	"        /* Physical Snell's law air->water (n1/n2 = 1/1.333) wave-slope ray deflection + vertical foreshortening */\n"
-	"        vec2 snellTexelShift = vec2(\n"
-	"            -waveRefGrad.x * (3.20 * depthRamp),\n"
-	"            -waveRefGrad.y * (2.20 * depthRamp) - clamp(d * 0.10, 0.0, 0.75) * smoothstep(0.0, 1.0, d)\n"
-	"        ) * refractDistFade;\n"
-	"        sampleUV = vUV + snellTexelShift / atlasSize;\n"
-	"        if (vSpriteBounds.z > vSpriteBounds.x && vSpriteBounds.w > vSpriteBounds.y) {\n"
-	"            vec2 halfTexel = 0.5 / atlasSize;\n"
-	"            sampleUV = clamp(sampleUV, vSpriteBounds.xy + halfTexel, vSpriteBounds.zw - halfTexel);\n"
-	"        }\n"
-	"    }\n"
-	"    vec4 subSample = isSubmerged ? sampleAtlasSmooth(sampleUV, vSpriteBounds, style) : baseCol;\n"
-	"    float effSampleAlpha = isSubmerged ? mix(baseCol.a, subSample.a, smoothstep(0.0, 0.65, d)) : baseCol.a;\n"
+	"    vec4 subSample = baseCol;\n"
+	"    float effSampleAlpha = baseCol.a;\n"
 	"    float edgeAlpha = isGrass\n"
 	"        ? (smoothstep(0.08, 0.48, effSampleAlpha) * smoothstep(0.0, 0.22, clamp(vQuadUV.y, 0.0, 1.0) + 0.06))\n"
 	"        : smoothstep(0.12, 0.46, effSampleAlpha);\n"
@@ -2455,6 +2433,9 @@ static const char *s_fs_billboard =
 	"    }\n"
 	"    float outAlpha = clamp(edgeAlpha + auraAlpha, 0.0, 1.0) * vTint.a;\n"
 	"    if (outAlpha <= 0.001) discard;\n"
+	"    /* Pass 0 draws only the opaque core (depth + stencil), pass 1 only the anti-aliased fringe, pass 2 everything else */\n"
+	"    if (uPass == 0 && outAlpha < 0.5) discard;\n"
+	"    if (uPass == 1 && outAlpha >= 0.5) discard;\n"
 	"    /* Soften dark 1px retro ink outlines toward natural surface chroma */\n"
 	"    float rawLuma = dot(albedo, vec3(0.299, 0.587, 0.114));\n"
 	"    if (rawLuma < 0.22 && style > 0.5 && !isLambGlow) {\n"
@@ -2511,14 +2492,8 @@ static const char *s_fs_billboard =
 	"    float hemiSky = 0.5 + 0.5 * N_bb.z;\n"
 	"    vec3 ambCol = mix(vec3(0.50, 0.55, 0.62), vec3(0.68, 0.74, 0.82), hemiSky);\n"
 	"    vec3 sunCol = vec3(1.06, 1.02, 0.95);\n"
-	"    vec3 lightTerm = (ambCol * 0.52 + sunCol * (0.58 * sunDiff)) * (cavityAO * contactAO);\n"
+	"    vec3 lightTerm = (ambCol * (0.52 * nd_amb_trans(cloudSh)) + sunCol * (0.58 * sunDiff * nd_sun_trans(cloudSh))) * (cavityAO * contactAO);\n"
 	"    vec3 lit = albedo * mix(vec3(1.0), lightTerm, isLambGlow ? 0.32 : 0.78);\n"
-	"    if (!isLambGlow && uSeaLevel > -900.0 && !isSubmerged) {\n"
-	"        /* Capillary wet-rim darkening just above the waterline (matches terrain shoreWetMoisture) */\n"
-	"        float heightAboveWater = vLocalPos.z - waveSurfZ;\n"
-	"        float wetRim = smoothstep(0.45, 0.0, heightAboveWater);\n"
-	"        lit *= (1.0 - wetRim * 0.18);\n"
-	"    }\n"
 	"    if (isLambGlow) {\n"
 	"        /* Subtle self-luminance: slightly brighter than the environment with a soft warm rim */\n"
 	"        float rimGlow = smoothstep(0.85, 0.25, baseCol.a) * edgeAlpha;\n"
@@ -2547,101 +2522,11 @@ static const char *s_fs_billboard =
 	"            lit += (albedo * 0.72 + vec3(0.28)) * warmGlow;\n"
 	"        }\n"
 	"    }\n"
-	"    /* 5. Physical Volumetric Water Column + Exact s_fs_water Surface Interface Over Submerged Parts */\n"
-	"    if (isSubmerged) {\n"
-	"        float dClamped = clamp(d, 0.0, 64.0);\n"
-	"        float baseWaterDepth = max(dClamped, uSeaLevel - vQuadUV.z);\n"
-	"        float baseSubFade = clamp((waveSurfZ + 0.35 - vQuadUV.z) / 0.50, 0.0, 1.0);\n"
-	"        float wetBlend = smoothstep(0.0, 0.25, dClamped) * baseSubFade * (isLambGlow ? edgeAlpha : 1.0);\n"
-	"        float caustDistFade = clamp(1.0 - (vDist - 900.0) / 2500.0, 0.0, 1.0);\n"
-	"        float caustCloseZoom = clamp((420.0 - vDist) / 300.0, 0.0, 1.0);\n"
-	"        float caustic = 0.0;\n"
-	"        if (caustDistFade > 0.01 && dClamped < 16.0) {\n"
-	"            float tC = mod(uAnimTime, 256.0);\n"
-	"            vec2 cUV = waterSurfPos + waveRefGrad * 1.6;\n"
-	"            caustic = nd_caustic_web(cUV, tC, caustCloseZoom) * caustDistFade;\n"
-	"        }\n"
-	"        float causticFocus = smoothstep(0.10, 1.10, dClamped) * exp(-0.15 * dClamped);\n"
-	"        vec3 caustLit = lit * (1.0 + caustic * causticFocus * 0.38);\n"
-	"        /* 5a. Underwater column Beer-Lambert spectral absorption & volumetric water body in-scattering\n"
-	"         * Matches s_fs_terrain (lines 744-776): shallow water stays crystal-clear with zero extra blue wash! */\n"
-	"        float cosView = 0.819152;\n"
-	"        float opticalDepth = dClamped / cosView;\n"
-	"        float shallowFactor = smoothstep(0.40, 15.0, dClamped);\n"
-	"        float effectiveOpticalDepth = opticalDepth * (0.14 + 0.86 * shallowFactor);\n"
-	"        vec3 seabedAbsorption = exp(-vec3(0.058, 0.022, 0.007) * effectiveOpticalDepth);\n"
-	"        vec3 transmittedSpr = caustLit * seabedAbsorption;\n"
-	"        vec3 C_SHALLOW = vec3(0.11, 0.42, 0.46);\n"
-	"        vec3 C_SHELF   = vec3(0.08, 0.32, 0.44);\n"
-	"        vec3 C_OUTER   = vec3(0.05, 0.21, 0.36);\n"
-	"        vec3 C_ABYSS   = vec3(0.024, 0.10, 0.24);\n"
-	"        vec3 inscatterCol = mix(C_SHALLOW, C_SHELF, smoothstep(2.5, 9.5, baseWaterDepth));\n"
-	"        inscatterCol = mix(inscatterCol, C_OUTER, smoothstep(9.5, 20.0, baseWaterDepth));\n"
-	"        inscatterCol = mix(inscatterCol, C_ABYSS, smoothstep(20.0, 42.0, baseWaterDepth));\n"
-	"        float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.072 * effectiveOpticalDepth));\n"
-	"        vec3 waterColumn = mix(transmittedSpr, inscatterCol, bodyScatterWeight);\n"
-	"        /* 5b. Exact s_fs_water Air-Water Surface Interface composited ON TOP of the water column\n"
-	"         * Matches s_fs_water (lines 1213-1281) term-for-term so wave patterns & reflections are 100% seamless */\n"
-	"        float shoreWaveDamp = smoothstep(0.0, 1.8, baseWaterDepth);\n"
-	"        float openSeaFactor = smoothstep(2.5, 12.0, baseWaterDepth);\n"
-	"        float windFetch     = clamp(0.25 + 0.75 * smoothstep(0.4, 8.0, baseWaterDepth), 0.25, 1.0);\n"
-	"        float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
-	"        vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45;\n"
-	"        vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35;\n"
-	"        vec3 surfViewDir = vec3(0.0, 0.573576, 0.819152);\n"
-	"        vec3 waveNormal  = normalize(vec3(-waveGrad.x, -waveGrad.y, 1.0));\n"
-	"        vec3 specNormal  = normalize(vec3(-specGrad.x, -specGrad.y, 1.0));\n"
-	"        float NdotV = max(0.0, dot(waveNormal, surfViewDir));\n"
-	"        vec3 flatRefl = reflect(-surfViewDir, vec3(0.0, 0.0, 1.0));\n"
-	"        vec3 glintSunDir = normalize(flatRefl - vec3(0.14, 0.04, -0.08));\n"
-	"        vec3 halfVec = normalize(glintSunDir + surfViewDir);\n"
-	"        float NdotH_cap  = max(0.0, dot(specNormal, halfVec));\n"
-	"        float NdotH_wave = max(0.0, dot(waveNormal, halfVec));\n"
-	"        float closeWeight = clamp(1.0 - (vDist - 350.0) / 1400.0, 0.0, 1.0);\n"
-	"        float specMicro   = pow(smoothstep(0.9942, 0.9997, NdotH_cap), 2.5) * (0.42 + 0.52 * wind.w) * (0.50 + 0.50 * closeWeight);\n"
-	"        float specWavelet = pow(smoothstep(0.9840, 0.9982, NdotH_wave), 2.0) * (0.22 + 0.18 * wind.z);\n"
-	"        float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
-	"        float specSun     = (specMicro + specWavelet + specBroad) * smoothstep(0.0, 0.25, baseWaterDepth);\n"
-	"        float flatNdotV = surfViewDir.z;\n"
-	"        float facetTilt = clamp((flatNdotV - dot(specNormal, surfViewDir)) * 2.8, -0.18, 0.32);\n"
-	"        float fresnel = clamp(0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0) + max(0.0, facetTilt) * 0.22, 0.015, 0.65);\n"
-	"        float waveSlopeDiff = dot(specNormal, L_sun) - L_sun.z;\n"
-	"        float hillshadeLit  = max(0.0, waveSlopeDiff);\n"
-	"        float hillshadeShd  = max(0.0, -waveSlopeDiff);\n"
-	"        vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40);\n"
-	"        float deepSssMask = smoothstep(2.5, 10.0, baseWaterDepth);\n"
-	"        float crestGlow = clamp(waves.w * 0.60 + hillshadeLit * 1.40, 0.0, 1.0) * deepSssMask;\n"
-	"        vec3 sssTint = mix(C_SHALLOW, waveShade, 0.55) * (crestGlow * 0.22);\n"
-	"        float shallowGlassMask = smoothstep(0.0, 4.5, baseWaterDepth);\n"
-	"        float skyReflWeight = fresnel * (0.18 + 0.82 * shallowGlassMask);\n"
-	"        float sssWeight     = crestGlow * 0.16;\n"
-	"        float specWeight    = clamp(specSun, 0.0, 0.92);\n"
-	"        float totalWeight   = skyReflWeight + sssWeight + specWeight;\n"
-	"        vec3 reflSkyCol = mix(sky * 0.92, sky * 1.08, clamp(0.5 + facetTilt * 2.2, 0.0, 1.0));\n"
-	"        vec3 sunColor   = vec3(1.0, 0.98, 0.92);\n"
-	"        vec3 surfaceNum = reflSkyCol * skyReflWeight + sssTint + sunColor * specSun;\n"
-	"        vec3 surfaceRgb = (totalWeight > 1e-4) ? clamp(surfaceNum / max(totalWeight, 1e-4), 0.0, 1.0) : reflSkyCol;\n"
-	"        if (uLambLight.w > 0.001 && !isLambGlow) {\n"
-	"            vec2 dXY = uLambLight.xy - waterSurfPos;\n"
-	"            float d2 = dot(dXY, dXY);\n"
-	"            float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
-	"            surfaceRgb += vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.16 * atten);\n"
-	"        }\n"
-	"        float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight), 0.0, 0.94) * smoothstep(0.0, 0.14, dClamped) * (isLambGlow ? 0.45 : 1.0);\n"
-	"        vec3 submergedComposite = mix(waterColumn, surfaceRgb, surfAlpha);\n"
-	"        lit = mix(lit, submergedComposite, wetBlend);\n"
-	"        if (isLambGlow && edgeAlpha < 0.99) {\n"
-	"            outAlpha = clamp(edgeAlpha + auraAlpha * clamp(1.0 - dClamped * 0.35, 0.0, 1.0), 0.0, 1.0) * vTint.a;\n"
-	"        }\n"
-	"        /* Subtle air-water meniscus highlight right along the live wave intersection */\n"
-	"        float meniscus = smoothstep(0.0, 0.14, dClamped) * smoothstep(0.75, 0.14, dClamped) * clamp(1.0 - (vDist - 600.0) / 1800.0, 0.0, 1.0) * baseSubFade * (isLambGlow ? edgeAlpha * 0.45 : 1.0);\n"
-	"        vec3 meniscusColor = mix(reflSkyCol, vec3(0.96, 0.99, 1.0), 0.70);\n"
-	"        lit = mix(lit, meniscusColor, meniscus * 0.38);\n"
-	"    }\n"
-	"    /* 6. Atmospheric Distance Fog & Planetary Limb Scattering Parity with Terrain */\n"
+	"    /* Atmospheric Distance Fog & Planetary Limb Scattering Parity with Terrain */\n"
 	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95), 0.22 * uAtmoIntensity);\n"
 	"    vec3 finalRgb = mix(surfaceLit, sky, fogFactor * uAtmoIntensity);\n"
-	"    FragColor = vec4(finalRgb, outAlpha);\n"
+	"    /* Core pass marks sprite pixels with alpha 0 (the water pass tells them from already water-shaded seabed by it) */\n"
+	"    FragColor = vec4(finalRgb, (uPass == 0) ? 0.0 : outAlpha);\n"
 	"}\n";
 
 const char *nd_seven_gl_vs_terrain(void) { return s_vs_terrain; }
@@ -2650,6 +2535,44 @@ const char *nd_seven_gl_vs_water(void) { return s_vs_water; }
 const char *nd_seven_gl_fs_water(void) { return s_fs_water; }
 const char *nd_seven_gl_vs_billboard(void) { return s_vs_billboard; }
 const char *nd_seven_gl_fs_billboard(void) { return s_fs_billboard; }
+
+/* Cloud-shadow map pass: one full-frame evaluation of the synoptic cloud density on the cloud slice (z = 920) over the
+ * snapped window described by uCsm. Wind shear displacement is baked in; terrain, water and sprites index the map by
+ * projected slice position. R channel = density (0..1). */
+static const char *s_vs_csm =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"out vec2 vUv;\n"
+	"void main() {\n"
+	"    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+	"    vUv = p;\n"
+	"    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+	"}\n";
+
+static const char *s_fs_csm =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"precision highp int;\n"
+	"in vec2 vUv;\n"
+	"uniform vec3 uCsm;\n"
+	"uniform float uAnimTime;\n"
+	"uniform float uSeaWet;\n"
+	"out vec4 FragColor;\n"
+	CHAFF_GLSL_HASH_FN
+	CHAFF_GLSL_GRAD_NOISE_FN
+	CHAFF_GLSL_FLOW_FN
+	ND_GLSL_SYNOPTIC_CLOUD_FN
+	"void main() {\n"
+	"    vec2 projXY = uCsm.xy + (vUv - 0.5) * (2.0 * uCsm.z);\n"
+	"    float fw = (2.0 * uCsm.z) / " ND_SL_STR(ND_CSM_RES) ".0;\n"
+	"    vec3 worldClimate = chaff_grad_noise2d(projXY * 0.000045, 0x434C494Du);\n"
+	"    float humidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + 0.10 * uSeaWet, 0.22, 0.90);\n"
+	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n"
+	"    float atmoGust = 0.65, updraft = 0.50;\n"
+	"    chaff_eval_wind_3d(vec3(projXY, 920.0), 420.0, 2820.0, uAnimTime, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
+	"    vec4 syn = eval_synoptic_macro_cloud_fw(projXY - shearDisp, uAnimTime, humidity, fw);\n"
+	"    FragColor = vec4(clamp(syn.x, 0.0, 1.0), 0.0, 0.0, 1.0);\n"
+	"}\n";
 
 static const char *s_vs_cloud =
 	"#version 300 es\n"
@@ -3111,6 +3034,8 @@ static const char *s_fs_cloud =
 	"    FragColor = vec4(mix(cloudRgb, sky, fogFactor * uAtmoIntensity), cloudAlpha);\n"
 	"}\n";
 
+const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
+const char *nd_seven_gl_fs_csm(void) { return s_fs_csm; }
 const char *nd_seven_gl_vs_cloud(void) { return s_vs_cloud; }
 const char *nd_seven_gl_fs_cloud(void) { return s_fs_cloud; }
 
@@ -3680,6 +3605,8 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uLambLight;
+	GLint uCloudShadowMap;
+	GLint uCsm;
 	GLint uBaseSeaLevel;
 	GLint uSunDir;
 	GLint uMoonDir;
@@ -3714,6 +3641,8 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uLambLight;
+	GLint uCloudShadowMap;
+	GLint uCsm;
 	GLint uBaseSeaLevel;
 	GLint uSunDir;
 	GLint uMoonDir;
@@ -3723,6 +3652,11 @@ typedef struct {
 	GLint uLambWakeVel0;
 	GLint uLambWakeVel1;
 	GLint aGridUV;
+	GLint uSceneColor;
+	GLint uSceneDepth;
+	GLint uViewport;
+	GLint uNearFar;
+	GLint uProjScale;
 } gl_water_pipe_t;
 
 typedef struct {
@@ -3737,6 +3671,9 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uLambLight;
+	GLint uCloudShadowMap;
+	GLint uCsm;
+	GLint uPass;
 	GLint aPos;
 	GLint aUV;
 	GLint aTint;
@@ -3770,6 +3707,13 @@ typedef struct {
 } gl_cloud_pipe_t;
 
 typedef struct {
+	GLuint prog;
+	GLint uCsm;
+	GLint uAnimTime;
+	GLint uSeaWet;
+} gl_csm_pipe_t;
+
+typedef struct {
 	uint16_t world;
 	uint8_t level;
 	uint8_t active;
@@ -3801,6 +3745,29 @@ static struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_cloud_pipe_t cloud_pipe;
+	gl_csm_pipe_t csm_pipe;
+	GLuint csm_tex;
+	GLuint csm_fbo;
+	bool csm_failed;
+	bool csm_valid;
+	nd_seven_gl_csm_window_t csm_win;
+	uint32_t stage_w;
+	uint32_t stage_h;
+
+	/* Scene render target: MSAA colour+depth renderbuffers; the resolve FBO holds sampleable colour+depth snapshots */
+	GLuint scene_fbo;
+	GLuint scene_rb_color;
+	GLuint scene_rb_depth;
+	GLuint res_fbo;
+	GLuint res_color_tex;
+	GLuint res_depth_tex;
+	uint32_t scene_w;
+	uint32_t scene_h;
+	int scene_samples;
+	bool scene_ok;
+	bool scene_failed;
+	bool frame_open;
+	bool sprites_in_water;
 
 	GLuint grid_vbo_macro;
 	GLuint grid_ibo_macro;
@@ -3830,6 +3797,10 @@ static struct {
 	float cur_ty;
 	float cur_ref_trig[4];
 	float cur_dist;
+	float cur_near;
+	float cur_far;
+	float cur_tan_half;
+	float cur_aspect;
 	float cur_pitch_deg;
 	float cur_anim_time;
 	float cur_sea_level;
@@ -3943,9 +3914,10 @@ static void init_grid_buffers(void)
 static void init_pipelines(void)
 {
 	s_gl.terrain_pipe.prog = create_program_async(s_vs_terrain, s_fs_terrain);
-	s_gl.water_pipe.prog   = 0;
+	s_gl.water_pipe.prog   = create_program_async(s_vs_water, s_fs_water);
 	s_gl.bb_pipe.prog      = create_program_async(s_vs_billboard, s_fs_billboard);
 	s_gl.cloud_pipe.prog   = create_program_async(s_vs_cloud, s_fs_cloud);
+	s_gl.csm_pipe.prog     = create_program_async(s_vs_csm, s_fs_csm);
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
@@ -3965,6 +3937,8 @@ static bool check_pipelines_ready(void)
 	if (s_gl.bb_pipe.prog && !glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.cloud_pipe.prog && !glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.csm_pipe.prog && !glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 
 	/* Terrain pipeline */
@@ -3993,6 +3967,8 @@ static bool check_pipelines_ready(void)
 			s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 			s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 			s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.terrain_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.terrain_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
 			s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
@@ -4033,6 +4009,8 @@ static bool check_pipelines_ready(void)
 			s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
 			s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 			s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.water_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.water_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.water_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
 			s_gl.water_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.water_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
@@ -4041,6 +4019,11 @@ static bool check_pipelines_ready(void)
 			s_gl.water_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
 			s_gl.water_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
 			s_gl.water_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
+			s_gl.water_pipe.uSceneColor     = glGetUniformLocation(p, "uSceneColor", 11);
+			s_gl.water_pipe.uSceneDepth     = glGetUniformLocation(p, "uSceneDepth", 11);
+			s_gl.water_pipe.uViewport       = glGetUniformLocation(p, "uViewport", 9);
+			s_gl.water_pipe.uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
+			s_gl.water_pipe.uProjScale      = glGetUniformLocation(p, "uProjScale", 10);
 			s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
@@ -4062,6 +4045,9 @@ static bool check_pipelines_ready(void)
 			s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
 			s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
 			s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.bb_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.bb_pipe.uCsm           = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.bb_pipe.uPass          = glGetUniformLocation(p, "uPass", 5);
 			s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
 			s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
 			s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
@@ -4098,6 +4084,19 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
 			s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
 			s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+		}
+	}
+
+	/* Cloud-shadow map pipeline */
+	if (s_gl.csm_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.csm_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.csm_pipe.prog);
+			s_gl.csm_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.csm_pipe.prog;
+			s_gl.csm_pipe.uCsm      = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.csm_pipe.uAnimTime = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.csm_pipe.uSeaWet   = glGetUniformLocation(p, "uSeaWet", 7);
 		}
 	}
 
@@ -4142,6 +4141,215 @@ float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
 	return intensity * 0.24f * atten;
 }
 
+bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_window_t *out)
+{
+	if (!out || dist > 14000.0f) return false;
+	float need = 4.5f * dist + 2000.0f;
+	float half = 4096.0f;
+	while (half < need && half < 65536.0f) half *= 2.0f;
+	float texel = (2.0f * half) / (float)ND_CSM_RES;
+	out->half = half;
+	out->cx = floorf(tx / texel + 0.5f) * texel;
+	out->cy = floorf(ty / texel + 0.5f) * texel;
+	return true;
+}
+
+static void gl_free_scene_targets(void)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if (s_gl.scene_fbo) glDeleteFramebuffer(s_gl.scene_fbo);
+	if (s_gl.res_fbo) glDeleteFramebuffer(s_gl.res_fbo);
+	if (s_gl.scene_rb_color) glDeleteRenderbuffer(s_gl.scene_rb_color);
+	if (s_gl.scene_rb_depth) glDeleteRenderbuffer(s_gl.scene_rb_depth);
+	if (s_gl.res_color_tex) glDeleteTexture(s_gl.res_color_tex);
+	if (s_gl.res_depth_tex) glDeleteTexture(s_gl.res_depth_tex);
+	s_gl.scene_fbo = s_gl.res_fbo = 0;
+	s_gl.scene_rb_color = s_gl.scene_rb_depth = 0;
+	s_gl.res_color_tex = s_gl.res_depth_tex = 0;
+	s_gl.scene_ok = false;
+}
+
+static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
+{
+	/* Multisampled colour + depth renderbuffers (antialiased scene) */
+	s_gl.scene_rb_color = glCreateRenderbuffer();
+	glBindRenderbuffer(GL_RENDERBUFFER, s_gl.scene_rb_color);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, (GLsizei)w, (GLsizei)h);
+	s_gl.scene_rb_depth = glCreateRenderbuffer();
+	glBindRenderbuffer(GL_RENDERBUFFER, s_gl.scene_rb_depth);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH32F_STENCIL8, (GLsizei)w, (GLsizei)h);
+	s_gl.scene_fbo = glCreateFramebuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.scene_fbo);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, s_gl.scene_rb_color);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s_gl.scene_rb_depth);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
+
+	/* Resolved, sampleable colour + depth */
+	s_gl.res_color_tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	s_gl.res_depth_tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH32F_STENCIL8, (GLsizei)w, (GLsizei)h, 0, GL_DEPTH_STENCIL,
+	             GL_FLOAT_32_UNSIGNED_INT_24_8_REV, NULL);
+	s_gl.res_fbo = glCreateFramebuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.res_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.res_color_tex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_gl.res_depth_tex, 0);
+	return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+/* (Re)create the scene targets for the stage size; falls back to single-sampled, then to the canvas itself. */
+static void gl_ensure_scene_targets(uint32_t w, uint32_t h)
+{
+	if (s_gl.scene_failed || w == 0 || h == 0) return;
+	if (s_gl.scene_ok && s_gl.scene_w == w && s_gl.scene_h == h) return;
+	if (s_gl.scene_fbo || s_gl.res_fbo) gl_free_scene_targets();
+	static const int try_samples[2] = { ND_SCENE_MSAA_SAMPLES, 0 };
+	for (int i = 0; i < 2; i++) {
+		if (gl_alloc_scene_targets(w, h, try_samples[i])) {
+			s_gl.scene_ok = true;
+			s_gl.scene_w = w;
+			s_gl.scene_h = h;
+			s_gl.scene_samples = try_samples[i];
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			return;
+		}
+		gl_free_scene_targets();
+	}
+	s_gl.scene_failed = true;
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+/* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and the stage viewport. */
+static void gl_bind_scene_target(void)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.scene_ok ? s_gl.scene_fbo : 0);
+	glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
+}
+
+/* Resolve the multisampled scene into the sampleable colour (and depth) textures. */
+static void gl_resolve_scene(GLbitfield mask)
+{
+	if (!s_gl.scene_ok) return;
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.res_fbo);
+	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
+	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, mask, GL_NEAREST);
+	gl_bind_scene_target();
+}
+
+void nd_seven_gl_end_frame(void)
+{
+	if (!s_gl.frame_open) return;
+	s_gl.frame_open = false;
+	if (!s_gl.scene_ok) return;
+	gl_resolve_scene(GL_COLOR_BUFFER_BIT);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
+	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	/* The sprite marker lives in the scene alpha: the canvas must end up fully opaque */
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+}
+
+static bool gl_ensure_csm_target(void)
+{
+	if (s_gl.csm_fbo) return true;
+	if (s_gl.csm_failed) return false;
+	s_gl.csm_tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, s_gl.csm_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, ND_CSM_RES, ND_CSM_RES, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+	s_gl.csm_fbo = glCreateFramebuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.csm_tex, 0);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glDeleteFramebuffer(s_gl.csm_fbo);
+		glDeleteTexture(s_gl.csm_tex);
+		s_gl.csm_fbo = 0;
+		s_gl.csm_tex = 0;
+		s_gl.csm_failed = true;
+		return false;
+	}
+	return true;
+}
+
+/* One frame-wide evaluation of the cloud density on the cloud slice (replaces per-pixel shadow evaluation). */
+static void gl_render_cloud_shadow_map(void)
+{
+	s_gl.csm_valid = false;
+	if (!s_gl.csm_pipe.prog || !nd_seven_gl_csm_window(s_gl.cur_dist, s_gl.cur_tx, s_gl.cur_ty, &s_gl.csm_win))
+		return;
+	if (!gl_ensure_csm_target()) return;
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
+	glViewport(0, 0, ND_CSM_RES, ND_CSM_RES);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glUseProgram(s_gl.csm_pipe.prog);
+	glUniform3f(s_gl.csm_pipe.uCsm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
+	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);
+	glUniform1f(s_gl.csm_pipe.uSeaWet, (s_gl.cur_sea_level > -900.0f) ? 1.0f : 0.0f);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	gl_bind_scene_target();
+	glEnable(GL_DEPTH_TEST);
+	s_gl.csm_valid = true;
+}
+
+/* Bind the cloud-shadow map (texture unit 7) and window to a program; half = 0 tells the shader no map is available. */
+static void gl_bind_csm(GLint loc_tex, GLint loc_csm)
+{
+	glActiveTexture(GL_TEXTURE0 + 7);
+	glBindTexture(GL_TEXTURE_2D, s_gl.csm_valid ? s_gl.csm_tex : 0);
+	glUniform1i(loc_tex, 7);
+	if (s_gl.csm_valid)
+		glUniform3f(loc_csm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
+	else
+		glUniform3f(loc_csm, 0.0f, 0.0f, 0.0f);
+	glActiveTexture(GL_TEXTURE0);
+}
+
+static float gl_smoothstep01(float e0, float e1, float x)
+{
+	float t = (x - e0) / (e1 - e0);
+	t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+	return t * t * (3.0f - 2.0f * t);
+}
+
+float nd_seven_gl_cloud_shadow_from_density(float density, float frag_z)
+{
+	const float zk = 920.0f;
+	if (frag_z >= zk + 240.0f) return 0.0f;
+	float slice_fade = gl_smoothstep01(zk + 240.0f, zk - 120.0f, frag_z);
+	float s = gl_smoothstep01(0.05f, 0.66f, density * slice_fade);
+	return s > 0.95f ? 0.95f : s;
+}
+
+float nd_seven_gl_scene_light(float cloud_shadow, float diffuse)
+{
+	float sun_trans = 1.0f - (float)ND_CLOUD_SHADOW_DIRECT_LOSS * cloud_shadow;
+	float amb_trans = 1.0f - (float)ND_CLOUD_SHADOW_AMBIENT_LOSS * cloud_shadow;
+	return 0.45f * amb_trans + 0.55f * diffuse * sun_trans;
+}
+
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
                              float tx, float ty, float tz,
                              float dist, float pitch_deg, float fov_deg,
@@ -4151,6 +4359,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.frame_count++;
 	s_gl.water_count = 0;
 	s_gl.cloud_count = 0;
+	s_gl.sprites_in_water = false;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_base_sea_level = s_gl.cur_sea_level;
 	nd_seven_gl_eval_celestial_dirs(anim_time, s_gl.cur_sun_dir, s_gl.cur_moon_dir);
@@ -4199,12 +4408,21 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
 	float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
 	ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
+	s_gl.cur_near = near_z;
+	s_gl.cur_far = far_z;
+	s_gl.cur_tan_half = tanf(fov_rad * 0.5f);
+	s_gl.cur_aspect = aspect;
 	ar_mat4_multiply(s_gl.cur_mvp, proj, modelview);
 
 	if (!s_gl.initialized) init_pipelines();
 	(void)check_pipelines_ready();
 
-	glViewport(0, 0, (GLsizei)stage_w, (GLsizei)stage_h);
+	s_gl.stage_w = stage_w;
+	s_gl.stage_h = stage_h;
+	s_gl.frame_open = true;
+	if (s_gl.pipelines_ready)
+		gl_ensure_scene_targets(stage_w, stage_h);
+	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_TRUE);
@@ -4216,7 +4434,14 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	float sky_b = 0.85f * (1.0f - space_t) + 0.035f * space_t;
 
 	glClearColor(sky_r, sky_g, sky_b, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glClearStencil(0);
+	glStencilMask(0xFF);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+	if (s_gl.pipelines_ready)
+		gl_render_cloud_shadow_map();
+	else
+		s_gl.csm_valid = false;
 }
 
 static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
@@ -4362,6 +4587,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
 	glUniform1i(s_gl.terrain_pipe.uSubstrateTex, 1);
+	gl_bind_csm(s_gl.terrain_pipe.uCloudShadowMap, s_gl.terrain_pipe.uCsm);
 
 	glUniformMatrix4fv(s_gl.terrain_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform2f(s_gl.terrain_pipe.uChunkOrigin, (float)ox, (float)oy);
@@ -4450,23 +4676,62 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		s_gl.cloud_queue[s_gl.cloud_count].minor_r = eff_pdef->minor_r;
 		s_gl.cloud_count++;
 	}
+
+	/* Queue the water surface of this chunk for the submerged-object pass */
+	if (terrain_sea_lvl > -900.0f && s_gl.water_count < MAX_WATER_QUEUE) {
+		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];
+		wq->ox = ox;
+		wq->oy = oy;
+		wq->span_w = span_w;
+		wq->span_h = span_h;
+		wq->level = level;
+		wq->sea_level = terrain_sea_lvl;
+		wq->height_tex = slot->height_tex;
+		wq->substrate_tex = slot->substrate_tex;
+		wq->rel_center[0] = rel_center[0];
+		wq->rel_center[1] = rel_center[1];
+		wq->rel_center[2] = rel_center[2];
+		wq->major_r = eff_pdef->major_r;
+		wq->minor_r = eff_pdef->minor_r;
+	}
 }
 
 void nd_seven_gl_flush_water(void)
 {
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.water_pipe.prog || s_gl.water_count == 0) {
+	/* The terrain pass already shades water over the seabed. This pass composites only what stands BELOW the surface on top
+	 * of that (sprites, marked in the stencil buffer): refraction of the resolved scene, true view-ray absorption from the
+	 * depth difference, then the same air-water surface layer as the terrain pass. Skipped when nothing is submerged. */
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.water_pipe.prog || s_gl.water_count == 0 ||
+	    !s_gl.sprites_in_water || !s_gl.scene_ok || s_gl.cur_dist > 2000.0f) {
 		s_gl.water_count = 0;
 		return;
 	}
 
+	gl_resolve_scene(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 	glUseProgram(s_gl.water_pipe.prog);
+	gl_bind_csm(s_gl.water_pipe.uCloudShadowMap, s_gl.water_pipe.uCsm);
+
+	glActiveTexture(GL_TEXTURE0 + 4);
+	glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex);
+	glUniform1i(s_gl.water_pipe.uSceneColor, 4);
+	glActiveTexture(GL_TEXTURE0 + 5);
+	glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
+	glUniform1i(s_gl.water_pipe.uSceneDepth, 5);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform2f(s_gl.water_pipe.uViewport, (float)s_gl.scene_w, (float)s_gl.scene_h);
+	glUniform2f(s_gl.water_pipe.uNearFar, s_gl.cur_near, s_gl.cur_far);
+	glUniform2f(s_gl.water_pipe.uProjScale, s_gl.cur_tan_half * s_gl.cur_aspect, s_gl.cur_tan_half);
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_FALSE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+	glEnable(GL_STENCIL_TEST);
+	glStencilMask(0);
+	glStencilFunc(GL_EQUAL, 1, 0xFF);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
 	glUniformMatrix4fv(s_gl.water_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
@@ -4536,6 +4801,9 @@ void nd_seven_gl_flush_water(void)
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
+	glDisable(GL_STENCIL_TEST);
+	glStencilMask(0xFF);
+	glEnable(GL_BLEND);
 	s_gl.water_count = 0;
 }
 
@@ -4651,21 +4919,17 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	}
 
 	static nd_seven_gl_bb_vert_t bb_verts[MAX_BB_VERTS];
-	uint32_t out_verts_count = 0;
 	bool emit_shadows = (s_gl.cur_dist < 16000.0f);
 
 	glUseProgram(s_gl.bb_pipe.prog);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
-	/* Disable depth writes across billboards so overlapping sprites strictly follow back-to-front painter's order without Z-fighting */
-	glDepthMask(GL_FALSE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
 	glUniform1i(s_gl.bb_pipe.uAtlasTex, 0);
+	gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap, s_gl.bb_pipe.uCsm);
 
 	glUniformMatrix4fv(s_gl.bb_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform1f(s_gl.bb_pipe.uSeaLevel, s_gl.cur_sea_level);
@@ -4688,50 +4952,88 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), 0);
-
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)12);
-
 	glEnableVertexAttribArray(2);
 	glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)20);
-
 	glEnableVertexAttribArray(3);
 	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)36);
-
 	glEnableVertexAttribArray(4);
 	glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)48);
-
 	glEnableVertexAttribArray(5);
 	glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)64);
 
-	for (uint32_t i = 0; i < count; i++) {
-		bool want_shadow = emit_shadows &&
-		                   (batch[i].style != ND_BB_STYLE_GLOW) &&
-		                   (batch[i].style != ND_BB_STYLE_GRASS) &&
-		                   (batch[i].style != ND_BB_STYLE_PARTICLE) &&
-		                   (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
-		uint32_t needed = want_shadow ? 12u : 6u;
-		if (out_verts_count + needed > MAX_BB_VERTS) {
-			if (out_verts_count > 0) {
-				glBufferData(GL_ARRAY_BUFFER, bb_verts,
-				             out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
-				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)out_verts_count);
+	/* Sprites are drawn in the same depth buffer as terrain and water:
+	 *   pass 0 (core)   opaque pixels (alpha >= 0.5): depth write + stencil mark, so the water pass can refract and
+	 *                   absorb exactly the pixels that stand below the surface;
+	 *   pass 1 (fringe) anti-aliased edges of the same sprites (alpha < 0.5), blended, no depth write;
+	 *   pass 2 (other)  ground contact shadows, glow auras and spray particles, blended, no depth write.
+	 * Core and "other" quads are collected in separate arrays so each pass draws its quads in submission (painter) order. */
+	static nd_seven_gl_bb_vert_t other_verts[MAX_BB_OTHER_VERTS];
+	uint32_t core_n = 0, other_n = 0;
+	for (uint32_t i = 0; i <= count; i++) {
+		bool last = (i == count);
+		bool is_other = false, want_shadow = false;
+		uint32_t need_core = 0, need_other = 0;
+		if (!last) {
+			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
+			want_shadow = emit_shadows && !is_other &&
+			              (batch[i].style != ND_BB_STYLE_GRASS) &&
+			              (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
+			need_core = is_other ? 0u : 6u;
+			need_other = (is_other ? 6u : 0u) + (want_shadow ? 6u : 0u);
+		}
+		if (last || core_n + need_core > MAX_BB_VERTS || other_n + need_other > MAX_BB_OTHER_VERTS) {
+			if (core_n > 0) {
+				glBufferData(GL_ARRAY_BUFFER, bb_verts, core_n * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+				/* pass 0: core */
+				glUniform1i(s_gl.bb_pipe.uPass, 0);
+				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+				glDisable(GL_BLEND);
+				glDepthMask(GL_TRUE);
+				glEnable(GL_STENCIL_TEST);
+				glStencilMask(0xFF);
+				glStencilFunc(GL_ALWAYS, 1, 0xFF);
+				glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)core_n);
+				glDisable(GL_STENCIL_TEST);
+				/* pass 1: anti-aliased fringe */
+				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+				glUniform1i(s_gl.bb_pipe.uPass, 1);
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				glDepthMask(GL_FALSE);
+				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)core_n);
 			}
-			out_verts_count = 0;
+			if (other_n > 0) {
+				glBufferData(GL_ARRAY_BUFFER, other_verts,
+				             other_n * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+				glUniform1i(s_gl.bb_pipe.uPass, 2);
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				glDepthMask(GL_FALSE);
+				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)other_n);
+			}
+			core_n = 0;
+			other_n = 0;
 		}
+		if (last) break;
 		if (want_shadow) {
-			eval_billboard_shadow_quad_with_origin(&batch[i], &s_gl.cur_pdef,
-			                                       s_gl.cur_origin, &bb_verts[out_verts_count]);
-			out_verts_count += 6u;
+			eval_billboard_shadow_quad_with_origin(&batch[i], &s_gl.cur_pdef, s_gl.cur_origin,
+			                                       &other_verts[other_n]);
+			other_n += 6u;
 		}
-		eval_billboard_quad_with_origin(&batch[i], s_gl.cur_pitch_deg, &s_gl.cur_pdef,
-		                                s_gl.cur_origin, &bb_verts[out_verts_count]);
-		out_verts_count += 6u;
-	}
-	if (out_verts_count > 0) {
-		glBufferData(GL_ARRAY_BUFFER, bb_verts,
-		             out_verts_count * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
-		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)out_verts_count);
+		if (is_other) {
+			eval_billboard_quad_with_origin(&batch[i], s_gl.cur_pitch_deg, &s_gl.cur_pdef, s_gl.cur_origin,
+			                                &other_verts[other_n]);
+			other_n += 6u;
+		} else {
+			eval_billboard_quad_with_origin(&batch[i], s_gl.cur_pitch_deg, &s_gl.cur_pdef, s_gl.cur_origin,
+			                                &bb_verts[core_n]);
+			core_n += 6u;
+			if (s_gl.cur_sea_level > -900.0f && batch[i].z < s_gl.cur_sea_level + 1.0f)
+				s_gl.sprites_in_water = true;
+		}
 	}
 
 	glDisableVertexAttribArray(1);

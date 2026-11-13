@@ -16,11 +16,13 @@
     "test": "node --test tests/hyle-react.test.mjs"
   },
   "peerDependencies": {
-    "react": ">=18.0.0"
-  },
-  "dependencies": {
+    "react": ">=18.0.0",
     "@tty-pt/hyle": ">=1.7.2",
     "@tty-pt/hyle-source": ">=1.4.0"
+  },
+  "devDependencies": {
+    "@tty-pt/hyle": "^1.7.2",
+    "@tty-pt/hyle-source": "^1.4.0"
   },
   "keywords": [
     "hyle",

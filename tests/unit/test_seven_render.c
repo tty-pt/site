@@ -2101,8 +2101,11 @@ int main(void)
 		assert(fs_w && strstr(fs_w, "sampleHeightSmooth(vUV, shoreGrad)"));
 		assert(fs_w && !strstr(fs_w, "cSeabed"));
 		assert(vs_b && strstr(vs_b, "a_local_pos"));
-		assert(fs_b && strstr(fs_b, "seabedAbsorption"));
-		assert(fs_b && strstr(fs_b, "snellTexelShift"));
+		/* Sprites carry no private water model any more: the water pass refracts and absorbs whatever stands below the surface */
+		assert(fs_b && !strstr(fs_b, "seabedAbsorption"));
+		assert(fs_b && !strstr(fs_b, "snellTexelShift"));
+		assert(fs_b && strstr(fs_b, "uPass"));
+		assert(fs_b && strstr(fs_b, "nd_cloud_shadow_map"));
 
 		/* 2. Verify pitch-rotated billboard basis orthogonality and 1:1 projected aspect ratio at 55 deg */
 		const nd_planet_def_t *pdef = nd_seven_get_planet(1);
@@ -2639,6 +2642,60 @@ int main(void)
 		assert(nd_field_bimodal_hypsometry(-12) < -14);
 		assert(nd_field_bimodal_hypsometry(-30) < -60);
 
+		/* 4b. Cloud-shadow lighting: overcast must stay readable (not night), monotone in shadow strength,
+		 * and the GLSL helpers must carry the very same constants as the CPU mirror. */
+		{
+			float lit_clear = nd_seven_gl_scene_light(0.0f, 0.8f);
+			float lit_thick = nd_seven_gl_scene_light(0.95f, 0.8f);
+			float ratio = lit_thick / lit_clear;
+			assert(ratio > 0.58f && ratio < 0.70f);
+			float prev = lit_clear;
+			for (int k = 1; k <= 19; k++) {
+				float cur = nd_seven_gl_scene_light(0.05f * (float)k, 0.8f);
+				assert(cur < prev);
+				prev = cur;
+			}
+			/* Neutral shadow: ambient fill is not tinted (scalar only), shading is identical for all channels */
+			assert(strstr(nd_seven_gl_fs_terrain(), "float nd_sun_trans(float s) { return 1.0 - 0.58 * s; }") != NULL);
+			assert(strstr(nd_seven_gl_fs_water(), "float nd_amb_trans(float s) { return 1.0 - 0.20 * s; }") != NULL);
+			assert(strstr(nd_seven_gl_fs_terrain(), "cloudShadow * 0.92") == NULL);
+			printf("PASS: cloud shadow keeps %.0f%% of sunlit brightness under thick overcast (monotone, shader/CPU constants agree)\n", ratio * 100.0f);
+		}
+
+		/* 4c. Cloud-shadow map window: power-of-two half-extent, texel-snapped centre (no shimmer when panning),
+		 * full coverage of the visible ground plus the sun-ward slice shift, none above 14 km (analytic path). */
+		{
+			nd_seven_gl_csm_window_t w;
+			assert(nd_seven_gl_csm_window(400.0f, 123456.0f, 654321.0f, &w) && w.half == 4096.0f);
+			assert(nd_seven_gl_csm_window(3000.0f, 0.0f, 0.0f, &w) && w.half == 16384.0f);
+			assert(nd_seven_gl_csm_window(14000.0f, 0.0f, 0.0f, &w) && w.half == 65536.0f);
+			assert(!nd_seven_gl_csm_window(14001.0f, 0.0f, 0.0f, &w));
+			for (float d = 160.0f; d <= 14000.0f; d *= 1.3f) {
+				assert(nd_seven_gl_csm_window(d, 5000.0f, 5000.0f, &w));
+				assert(w.half >= 4.5f * d + 1100.0f);
+				assert(w.half <= 2.0f * (4.5f * d + 2000.0f) || w.half == 4096.0f);
+			}
+			nd_seven_gl_csm_window_t a0, a1, b0;
+			nd_seven_gl_csm_window(400.0f, 100000.0f, 200000.0f, &a0);
+			float texel = 2.0f * a0.half / (float)ND_CSM_RES;
+			nd_seven_gl_csm_window(400.0f, 100000.0f + 0.2f * texel, 200000.0f - 0.2f * texel, &a1);
+			assert(a0.cx == a1.cx && a0.cy == a1.cy);
+			assert(fmodf(a0.cx, texel) == 0.0f && fmodf(a0.cy, texel) == 0.0f);
+			nd_seven_gl_csm_window(400.0f, 100000.0f + 1.2f * texel, 200000.0f, &b0);
+			assert(fabsf((b0.cx - a0.cx) - texel) < 1e-3f || fabsf((b0.cx - a0.cx) - 2.0f * texel) < 1e-3f);
+			/* density -> shadow: zero above the slice, monotone, capped at 0.95 */
+			assert(nd_seven_gl_cloud_shadow_from_density(1.0f, 1200.0f) == 0.0f);
+			assert(nd_seven_gl_cloud_shadow_from_density(0.02f, 0.0f) == 0.0f);
+			assert(nd_seven_gl_cloud_shadow_from_density(1.0f, 0.0f) == 0.95f);
+			float ps = 0.0f;
+			for (int k = 0; k <= 20; k++) {
+				float sh = nd_seven_gl_cloud_shadow_from_density(0.05f * (float)k, 100.0f);
+				assert(sh >= ps);
+				ps = sh;
+			}
+			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
+		}
+
 		/* 5. Verify all 4 WebGL2 shader programs (terrain, water, billboard, cloud) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
@@ -2646,13 +2703,14 @@ int main(void)
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[4] = {
+			} progs[5] = {
 				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
 				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
 				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() },
-				{ "cloud",     nd_seven_gl_vs_cloud(),     nd_seven_gl_fs_cloud()     }
+				{ "cloud",     nd_seven_gl_vs_cloud(),     nd_seven_gl_fs_cloud()     },
+				{ "csm",       nd_seven_gl_vs_csm(),       nd_seven_gl_fs_csm()       }
 			};
-			for (int p = 0; p < 4; p++) {
+			for (int p = 0; p < 5; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
@@ -2708,9 +2766,8 @@ int main(void)
 		assert(strstr(fs_b, "sampleAtlasSmooth") != NULL);
 		assert(strstr(fs_b, "fetchBoundedTexel") != NULL);
 		assert(strstr(fs_b, "chaff_grad_noise2d") != NULL);
-		assert(strstr(fs_b, "snellTexelShift") != NULL);
-		assert(strstr(fs_b, "waveRefGrad") != NULL);
-		assert(strstr(fs_b, "seabedAbsorption") != NULL);
+		assert(strstr(fs_b, "snellTexelShift") == NULL);   /* refraction lives in the water pass */
+		assert(strstr(fs_b, "nd_cloud_shadow_map") != NULL);
 		assert(strstr(fs_b, "1.2 / 328.0") == NULL);
 		assert(strstr(fs_b, "contactAO") != NULL);
 		assert(strstr(fs_b, "fogFactor") != NULL);

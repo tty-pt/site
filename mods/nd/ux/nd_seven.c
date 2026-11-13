@@ -658,8 +658,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 
-	/* Flush deferred water queue across all active chunks in pure C */
-	nd_seven_gl_flush_water();
+	/* The water queue is flushed after the sprites (nd_seven_render): the water pass composites what stands below the surface */
 }
 
 #define MID_MAX_DRAW 262144
@@ -1914,7 +1913,10 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (!near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
+	/* Water pass over submerged sprites (refraction, absorption, surface layer), then clouds and present */
+	nd_seven_gl_flush_water();
 	nd_seven_gl_flush_clouds();
+	nd_seven_gl_end_frame();
 }
 
 uint32_t nd_seven_last_mid_billboard_count(void)

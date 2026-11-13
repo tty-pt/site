@@ -18,6 +18,8 @@ function makeGl(log) {
 		framebufferTexture2D: (t, a, tt, tex, l) => log.push(['fbTex', a, tex ? tex.n : null, l]),
 		checkFramebufferStatus: () => 0x8CD5,
 		blitFramebuffer: (...a) => log.push(['blit', ...a]),
+		stencilFunc: (...a) => log.push(['stencilFunc', ...a]), stencilOp: (...a) => log.push(['stencilOp', ...a]),
+		stencilMask: (...a) => log.push(['stencilMask', ...a]), clearStencil: (...a) => log.push(['clearStencil', ...a]),
 		getExtension: () => null, activeTexture: () => {},
 	};
 	return gl;
@@ -40,7 +42,8 @@ const imp = bridge.makeImports();
 assert.ok(imp, 'bridge exposes imports');
 for (const name of ['glCreateFramebuffer', 'glDeleteFramebuffer', 'glBindFramebuffer', 'glFramebufferTexture2D',
 	'glFramebufferRenderbuffer', 'glCheckFramebufferStatus', 'glCreateRenderbuffer', 'glDeleteRenderbuffer',
-	'glBindRenderbuffer', 'glRenderbufferStorageMultisample', 'glBlitFramebuffer']) {
+	'glBindRenderbuffer', 'glRenderbufferStorageMultisample', 'glBlitFramebuffer',
+	'glStencilFunc', 'glStencilOp', 'glStencilMask', 'glClearStencil']) {
 	assert.equal(typeof imp[name], 'function', name);
 }
 
@@ -63,7 +66,13 @@ imp.glBlitFramebuffer(0, 0, 320, 200, 0, 0, 320, 200, 0x4100, 0x2600);
 assert.ok(log.some((e) => e[0] === 'rbStorageMS' && e[1] === 4 && e[4] === 200));
 assert.ok(log.some((e) => e[0] === 'blit' && e[9] === 0x4100));
 assert.ok(log.some((e) => e[0] === 'bindFramebuffer' && e[1] === 0x8CA9 && e[2] === null), 'id 0 binds the default framebuffer');
-console.log('PASS: webgl bridge routes framebuffer / renderbuffer / blit calls');
+imp.glStencilFunc(0x0207, 1, 0xFFFFFFFF);
+imp.glStencilOp(0x1E00, 0x1E00, 0x1E01);
+imp.glStencilMask(0xFF);
+imp.glClearStencil(0);
+assert.ok(log.some((e) => e[0] === 'stencilFunc' && e[1] === 0x0207 && e[2] === 1 && e[3] === 0xFFFFFFFF));
+assert.ok(log.some((e) => e[0] === 'stencilOp' && e[3] === 0x1E01));
+console.log('PASS: webgl bridge routes framebuffer / renderbuffer / blit / stencil calls');
 
 // Re-attachment bookkeeping: re-attaching the same slot replaces, never duplicates.
 imp.glBindFramebuffer(GL_FRAMEBUFFER, fb);

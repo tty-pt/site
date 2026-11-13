@@ -10,6 +10,28 @@
 extern "C" {
 #endif
 
+/* Cloud-shadow response (shared by terrain, water and sprite shaders; stringified into GLSL):
+ * direct sun lost under full cloud shadow, and neutral ambient lost. Under thick overcast the lit
+ * ground keeps about 64% of its sunlit brightness instead of reading as night. */
+#define ND_CLOUD_SHADOW_DIRECT_LOSS  0.58
+#define ND_CLOUD_SHADOW_AMBIENT_LOSS 0.20
+
+/* CPU mirror of GLSL nd_cloud_shadow_map after the map fetch: density on the cloud slice -> shadow strength. */
+float nd_seven_gl_cloud_shadow_from_density(float density, float frag_z);
+
+/* CPU mirror of the shader lighting: ambient 0.45 + direct 0.55 * diffuse, attenuated by cloud shadow s. */
+float nd_seven_gl_scene_light(float cloud_shadow, float diffuse);
+
+/* Cloud-shadow map window: the R8 map (ND_CSM_RES^2) covers a power-of-two half-extent around the camera target on the
+ * cloud slice and is snapped to whole texels so panning never shimmers. Returns false (no map) above 14 km, where the
+ * analytic shadow evaluation is used. */
+#define ND_CSM_RES 1024
+typedef struct {
+	float cx, cy;   /* window centre on the slice (world XY, texel-snapped) */
+	float half;     /* half-extent in world units (power of two) */
+} nd_seven_gl_csm_window_t;
+bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_window_t *out);
+
 /* Billboard shading / material style hints */
 #define ND_BB_STYLE_STANDARD  0u  /* General sprite / entity / lamb */
 #define ND_BB_STYLE_LEAF_TINT 1u  /* Flora with leaf-selective plant_tint in tint_rgba.rgb */
@@ -132,6 +154,12 @@ float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
                                   float lamb_wx, float lamb_wy, float lamb_wz,
                                   float intensity);
 
+/* Samples of the multisampled scene target (resolved before water and at end of frame). */
+#define ND_SCENE_MSAA_SAMPLES 4
+
+/* Resolve the scene and present it to the canvas. Must follow the last draw of a begin_frame()d frame. */
+void nd_seven_gl_end_frame(void);
+
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
                              float tx, float ty, float tz,
                              float dist, float pitch_deg, float fov_deg,
@@ -161,6 +189,8 @@ const char *nd_seven_gl_vs_water(void);
 const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
+const char *nd_seven_gl_vs_csm(void);
+const char *nd_seven_gl_fs_csm(void);
 const char *nd_seven_gl_vs_cloud(void);
 const char *nd_seven_gl_fs_cloud(void);
 
