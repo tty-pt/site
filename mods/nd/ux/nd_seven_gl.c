@@ -3743,8 +3743,8 @@ static const char *s_fs_cloud =
 	"    float worldBioHumidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.22, 0.90);\n"
 	"    float bioHumidity = mix(texBioHumidity, worldBioHumidity, gpuFieldBlend);\n"
 	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    /* Observer-adaptive 2-to-4 step stratified 3D volumetric raymarch (zero screen-space white-noise stipple) */\n"
-	"    int numSteps = (vDistance > 24000.0) ? 2 : ((vDistance > 4500.0) ? 3 : 4);\n"
+	"    /* Observer-adaptive 4-to-5 step stratified 3D volumetric raymarch (zero screen-space white-noise stipple) */\n"
+	"    int numSteps = (vDistance > 24000.0) ? 4 : ((vDistance > 4500.0) ? 4 : 5);\n"
 	"    float marchSpan    = tExit - tEnter;\n"
 	"    float canonScale   = (zTop - zBase) / max(1.0, deckSpan);\n"
 	"    float canonStepLen = (marchSpan * canonScale) / float(numSteps);\n"
@@ -3755,8 +3755,8 @@ static const char *s_fs_cloud =
 	"    float hgForward = 0.58 + 0.62 * pow(clamp(0.5 + 0.5 * cosTheta, 0.0, 1.0), 3.2);\n"
 	"    float hgBack    = 0.18 * pow(clamp(0.5 - 0.5 * cosTheta, 0.0, 1.0), 2.0);\n"
 	"    float hgPhase   = hgForward + hgBack;\n"
-	"    for (int s = 0; s < 4; s++) {\n"
-	"        if (s >= numSteps || (1.0 - trans) >= 0.98) break;\n"
+	"    for (int s = 0; s < 5; s++) {\n"
+	"        if (s >= numSteps || (1.0 - trans) >= 0.96) break;\n"
 	"        float uStep  = (float(s) + 0.5) / float(numSteps);\n"
 	"        float sStep  = mix(tEnter, tExit, uStep);\n"
 	"        float hFrac  = clamp(vShellH + (sStep * effDz) / max(1.0, deckSpan), 0.02, 0.98);\n"
@@ -3765,10 +3765,12 @@ static const char *s_fs_cloud =
 	"        float stepDist = max(120.0, fragDist + sStep);\n"
 	"        float dens = eval_zoom_cloud_density(vec3(sampleXY, z), uAnimTime, bioHumidity, stepDist, fw);\n"
 	"        if (dens > 0.002) {\n"
-	"            /* Fast analytic solar optical depth & dome normal without extra 4D raymarch sampling loops */\n"
-	"            vec3 cloudGradN = normalize(vec3(-0.35, -0.35, 0.38 + 0.42 * hFrac));\n"
-	"            float tauSun = dens * 2.20 + (1.0 - hFrac) * 0.45;\n"
-	"            float domeLambert = clamp(0.54 + 0.46 * dot(cloudGradN, vec3(-0.509, -0.509, 0.694)), 0.36, 1.08);\n"
+	"            /* Scale-proportional 3D solar optical depth probe & dynamic directional normal */\n"
+	"            float dSun = eval_zoom_cloud_density(vec3(sampleXY + vec2(-0.7071, -0.7071) * sunProbeXY, min(zTop - 1.0, z + 18.0)), uAnimTime, bioHumidity, stepDist, fw);\n"
+	"            float dDens = dens - dSun;\n"
+	"            vec3 cloudGradN = normalize(vec3(dDens * 0.7071, dDens * 0.7071, 0.38 + 0.48 * hFrac + dDens * 0.45));\n"
+	"            float tauSun = dens * 1.50 + dSun * 1.85 + (1.0 - hFrac) * 0.38;\n"
+	"            float domeLambert = clamp(0.50 + 0.50 * dot(cloudGradN, vec3(-0.509, -0.509, 0.694)), 0.30, 1.15);\n"
 	"            /* 2-Octave Beer-Powder multi-scattering silver-lining approximation */\n"
 	"            float beer   = exp(-tauSun);\n"
 	"            float powder = 1.0 - exp(-tauSun * 2.40);\n"
@@ -5043,11 +5045,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, active_ibo);
 	glDrawElements(GL_TRIANGLES, active_indices, GL_UNSIGNED_SHORT, 0);
 
-	/* Queue volumetric cloud shell pass for this chunk:
-	 * Filter out redundant fine chunks when viewing from mid/far distance
-	 * to prevent hundreds of transparent overlapping draw calls from stalling the GPU */
-	bool enqueue_cloud = (level >= 1) || (s_gl.cur_dist < 400.0f);
-	if (enqueue_cloud && s_gl.cloud_count < 48) {
+	/* Queue volumetric cloud shell pass for this chunk */
+	if (s_gl.cloud_count < MAX_WATER_QUEUE) {
 		s_gl.cloud_queue[s_gl.cloud_count].ox = ox;
 		s_gl.cloud_queue[s_gl.cloud_count].oy = oy;
 		s_gl.cloud_queue[s_gl.cloud_count].span_w = span_w;
