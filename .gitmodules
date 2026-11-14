@@ -127,3 +127,6 @@
 [submodule "external/liblamina"]
 	path = external/liblamina
 	url = git@github.com:tty-pt/liblamina.git
+[submodule "external/libhyle-react"]
+	path = external/libhyle-react
+	url = git@github.com:tty-pt/libhyle-react.git

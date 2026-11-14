@@ -354,9 +354,6 @@ nd_field_bio_blend(uint32_t rn, int16_t tmp, uint8_t *bio_out, uint8_t *bio2_out
 	if (tmp_bit == 0 && tmp_frac < 48) {
 		secondary = BIOME_PERMANENT_ICE;
 		min_d = (int32_t)tmp_frac;
-	} else if (tmp_bit == 3 && tmp_frac > 208) {
-		secondary = BIOME_VOLCANIC;
-		min_d = (int32_t)(256 - tmp_frac);
 	} else if (d_rn < d_tmp) {
 		min_d = d_rn;
 		if (rn_frac < 128 && rn_bit > 0)
@@ -879,35 +876,47 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	uint32_t tm_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 253 + world);
 
 	/* 4-octave continuous climate hierarchy across scales:
-	 *   40% continental macro (shift 14: 16k rooms = 2.6M world units)
-	 *   30% continental provinces (shift 10: 1k rooms = 164k world units)
-	 *   20% regional corridors (shift 7: 128 rooms = 20.5k world units)
-	 *   10% local eco-regions (shift 4: 16 rooms = 2.5k world units)
-	 * Biomes form broad, natural geographical realms (like Earth's Sahara, Savannah, Taiga)
-	 * that maintain continuous multi-octave level of detail when zooming out! */
-	uint32_t cl_raw = (cl_macro * 4u + cl_prov * 3u + cl_reg * 2u + cl_loc * 1u) / 10u;
-	uint32_t tm_raw = (tm_macro * 4u + tm_prov * 3u + tm_reg * 2u + tm_loc * 1u) / 10u;
+	 *   30% continental macro (shift 14: 16k rooms = 2.6M world units)
+	 *   35% continental provinces (shift 10: 1k rooms = 164k world units)
+	 *   25% regional corridors (shift 7: 128 rooms = 20.5k world units)
+	 *   10% local eco-regions (shift 4: 16 rooms = 2.5k world units) */
+	uint32_t cl_raw = (cl_macro * 30u + cl_prov * 35u + cl_reg * 25u + cl_loc * 10u) / 100u;
+	uint32_t tm_raw = (tm_macro * 40u + tm_prov * 30u + tm_reg * 20u + tm_loc * 10u) / 100u;
 
-	/* Contrast-stretch rainfall to utilize full dry-to-wet spectrum */
+	/* Contrast-stretch rainfall to utilize full dry-to-wet spectrum (0..512) */
 	int32_t rn_centered = (int32_t)(cl_raw >> 15) - 256;
-	int32_t rn_val = 256 + (rn_centered * 16) / 10;
+	int32_t rn_val = 256 + (rn_centered * 18) / 10;
 
 	/* Toroidal distance from nearest equator (0 at outer equator ry=0 and inner equator ry=+-32768;
 	 * 16384 at North/South poles ry=+-16384). */
 	int32_t abs_ry = abs((int32_t)room_y);
 	int32_t eq_dist = (abs_ry <= 16384) ? abs_ry : (32768 - abs_ry);
 
-	/* Intertropical Convergence Zone (ITCZ) equatorial rainfall enhancement (latitudes < 13 deg == eq_dist < 2400) */
-	if (eq_dist < 2400) {
-		int32_t wet_weight = (2400 - eq_dist) * 85 / 2400;
-		rn_val += wet_weight;
+	/* 1. Intertropical Convergence Zone (ITCZ) convective rainfall belt (0..15 deg == eq_dist < 2800):
+	 * Lifts equatorial moisture toward the tropical rainforest/seasonal forest sweet spot (280..404)
+	 * without exceeding the canopy tree rn_max < 410 envelope in nd_plant_noise_eval. */
+	if (eq_dist < 2800 && rn_val < 402) {
+		int32_t wet_lift = ((402 - rn_val) * (2800 - eq_dist) * 68) / (2800 * 100);
+		rn_val += wet_lift;
 	}
-	/* Subtropical Hadley subsidence drying belt (latitudes ~13..48 deg == eq_dist ~2200..9200) creates vast desert/savannah belts */
-	if (eq_dist >= 2000 && eq_dist <= 9600) {
-		int32_t sub_dist = abs(eq_dist - 5600);
-		if (sub_dist < 3800) {
-			int32_t dry_weight = (3800 - sub_dist) * 165 / 3800;
+	/* 2. Subtropical Hadley subsidence drying belt (14..37 deg == eq_dist 2500..6800, centered at 25 deg = 4650):
+	 * Creates major hot deserts and savannahs while allowing humid eastern/monsoon margins to remain forested. */
+	if (eq_dist >= 2500 && eq_dist <= 6800) {
+		int32_t sub_dist = abs(eq_dist - 4650);
+		if (sub_dist < 2150) {
+			/* Stronger subsidence drying in dry continental provinces, gentler in humid monsoon provinces */
+			int32_t aridity_amp = (rn_val < 290) ? 160 : 85;
+			int32_t dry_weight = (2150 - sub_dist) * aridity_amp / 2150;
 			rn_val -= dry_weight;
+		}
+	}
+	/* 3. Subpolar / Boreal low-evaporation positive moisture balance (50..67 deg == eq_dist 9000..12300):
+	 * Low potential evapotranspiration in cold boreal latitudes favors circumpolar Taiga/Coniferous forests. */
+	if (eq_dist >= 9000 && eq_dist <= 12300) {
+		int32_t bor_dist = abs(eq_dist - 10650);
+		if (bor_dist < 1650) {
+			int32_t bor_wet = (1650 - bor_dist) * 90 / 1650;
+			rn_val += bor_wet;
 		}
 	}
 	if (rn_val < 0) rn_val = 0;
@@ -922,19 +931,23 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	}
 
 	/* 2. Mean annual latitudinal & alpine climate temperature for permanent biome classification:
-	 * Biomes (rainforest, desert, savannah, boreal, tundra, polar ice) depend on latitude |cos(phi)|
-	 * and elevation above sea level—never freezing the equator at night! */
+	 * Combines 32% linear meridional heat transport (eq_dist) + 68% solar incidence (1 - |cos(phi)|)
+	 * so Tropical/Subtropical (0-35 deg), Temperate (35-53 deg), Boreal/Taiga (53-66 deg), and Polar (66-90 deg)
+	 * belts each span their authentic Earth latitudinal width while staying within [ND_FIELD_TEMP_MIN..MAX]. */
 	int32_t lat_insol_q15 = abs(nd_field_cos_q15((uint16_t)room_y));
-	int32_t lat_cool = ((32768 - lat_insol_q15) * 162) >> 15;
-	if (eq_dist > 11000) {
-		/* Polar ice-albedo feedback above 60 deg latitude (eq_dist > 11000) */
-		lat_cool += ((eq_dist - 11000) * 38) / (16384 - 11000);
+	int32_t lat_frac_q15 = (((eq_dist << 1) * 10486) + ((32768 - lat_insol_q15) * 22282)) >> 15;
+	int32_t lat_cool = (lat_frac_q15 * 140) >> 15;
+	if (eq_dist > 11400) {
+		/* Polar ice-albedo cooling above the Polar Circle (63..90 deg) */
+		lat_cool += ((eq_dist - 11400) * 40) / (16384 - 11400);
 	}
 	int32_t tm_var = (int32_t)(tm_raw >> 16) - 128;
-	int32_t bio_temp = (int32_t)ND_FIELD_SOLAR_TEMP_MAX - lat_cool + (tm_var * 36 / 128);
+	/* Attenuate temperature noise inside the high polar circle so warm noise pockets don't leak boreal into poles */
+	int32_t tm_amp = (eq_dist > 12000) ? 14 : 22;
+	int32_t bio_temp = 94 - lat_cool + (tm_var * tm_amp / 128);
 	if (elev_rel > 220) {
 		/* High mountain environmental lapse rate: summits > 1200..1854 wu cool into alpine tundra and permanent snowcaps */
-		int32_t bio_lapse = ((elev_rel - 220) * 115) / 1000;
+		int32_t bio_lapse = ((elev_rel - 220) * 95) / 1000;
 		bio_temp -= bio_lapse;
 	}
 	if (bio_temp < -32000) bio_temp = -32000;
