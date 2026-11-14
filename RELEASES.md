@@ -25,18 +25,20 @@ brew, OpenBSD, winget where the repository builds them) were published by the ta
 | `@tty-pt/lamina` | 1.1.0 (23:41), first publish | 1.1.0 |
 | `@tty-pt/hyle-react` | 1.0.0 (23:59), first publish through `npm.yml` | 1.0.0 |
 
+| `@tty-pt/hyle-bud` | 1.2.0 (00:12 on 2026-11-14), first publish | 1.2.0 |
+| `@tty-pt/axil` | 1.8.0 (00:29 on 2026-11-14), first publish | 1.8.0 |
+| `axil-auth` (OS packages) | 1.3.2 (00:50 on 2026-11-14) | 1.3.2 |
+| `@tty-pt/axil-tty` | 1.6.0 (00:50 on 2026-11-14) | 1.6.0 |
+| `@tty-pt/auren` | 1.5.0 (01:12 on 2026-11-14), first publish | 1.5.0 |
+
 Notes:
 - `@tty-pt/joint` 1.7.1 and `@tty-pt/hyle` 1.7.1 were tagged but never reached npm (1.7.0 went to
   1.7.2).
 - Tags moved and re-pushed so CI would rebuild with a fixed workflow: `libjoint` v1.7.3, `liblemma`
-  v1.3.2, `libhyle-source` v1.4.0 (twice), `liblamina` v1.1.0. Each republished every package format
-  over the previous one.
-- `@tty-pt/hyle-bud` 1.2.0 was published by CI at 00:12 UTC on 2026-11-14 (`+ @tty-pt/hyle-bud@1.2.0`; the tag run
-  published every format and the verified tarball).
-- `axil-auren` v1.5.0 was tagged but **failed in its `test` job and nothing was published**: see
-  "Problems met" (it needs a new `axil` release first).
-  - Its npm package had its own number (1.2.0, never published). It now carries the repository
-    version (1.5.0), because the npm workflow requires the package version to equal the tag.
+  v1.3.2, `libhyle-source` v1.4.0 (twice), `liblamina` v1.1.0, `axil` v1.8.0, `axil-auren` v1.5.0.
+  Each republished every package format over the previous one.
+- `axil-auren`'s npm package previously had its own number (1.2.0, never published). It now carries
+  the repository version (1.5.0), matching the tag and `.pc` version parity rule.
 
 Dependants updated to the new versions: `duna` now uses npm for every `@tty-pt/*` package it
 depends on (`corm`, `hyle`, `hyle-react`, `hyle-source`, `islet`, `joint`, `lemma`, `sepal`,
@@ -60,7 +62,8 @@ A repository that is only an npm package (`libhyle-react`) calls `npm.yml` direc
 package matrix.
 
 Rules that fell out of this:
-- The npm package is detected from `npm/package.json`. Nothing is declared in the caller.
+- The npm package is detected from `npm/package.json` (or root `package.json` when non-private, as in
+  `axil-tty`, via the `dir` input in `npm.yml`). Nothing is declared in the caller.
 - `package.json` version, tag, and `.pc` versions must agree (`scripts/check-pkgconfig-versions.sh`).
 - Platforms that get a native addon: `rpm` gives linux-x64 (oldest glibc), `brew` gives
   darwin-arm64 and darwin-x64, `winget` gives win32-x64. Anything else uses WebAssembly.
@@ -81,7 +84,10 @@ Rules that fell out of this:
 - **Missing `libxxhash.dll` on Windows** (`libjoint`, `liblemma`). `libcorm.dll` imports it, and the
   winget job did not install xxhash, so the bundler skipped it as "a system DLL". The bundler now
   fails naming the DLL, and those repositories' winget jobs install `mingw-w64-x86_64-xxhash`. The
-  same fix was applied pre-emptively to `libhyle` and `libxylem`.
+  same fix was applied pre-emptively to `libhyle`, `libxylem`, and `axil`.
+- **DLL data import of `stllog` on Windows** (`axil`). `axil_init()` assigned `stllog = stl_syslog`
+  directly, which failed to link `libaxil.dll` under mingw (`undefined reference to 'stllog'`).
+  Replaced with `stllog_set(stl_syslog)`.
 - **`npm publish pkg/x.tgz`** is read by npm as a GitHub `user/repo`. The path must start with `./`.
 - **Registry lag.** New versions took 1 to 5 minutes to show in `npm view`; a brand-new package
   longer. Check the registry API (`curl https://registry.npmjs.org/@tty-pt%2f<name>`) before
@@ -91,24 +97,26 @@ Rules that fell out of this:
   pushed several minutes apart, and failed jobs were re-run. The cause is not confirmed; see
   `PLAN-publish-traffic-and-locks.md` in `tty-pt/ci`.
 - **Re-running a run does not pick up workflow changes.** It reuses the caller workflow from the
-  tagged commit, so a fix to `ci.yml` needs a new tag (or a moved one).
-- **`axil-auren` v1.5.0 cannot build against the released `axil`.** Its `test` job compiles against
-  the `axil` package installed from the tty.pt repository, whose header
-  `/usr/include/ttypt/axil.h` still includes `<ttypt/qsys.h>`. The repository's `axil` (1.8.0,
-  unreleased; last tag v1.7.1) includes `<ttypt/stele.h>`. `axil` has to be released first. Its own
-  `ci.yml` also needs `secrets: inherit` and `mingw-w64-x86_64-xxhash` in `deps_winget` before that.
+  tagged commit, so a fix to `ci.yml` needs a new tag (or deleting and re-pushing the tag).
+- **`axil-auren` v1.5.0 required `axil` 1.8.0 and `<ttypt/stele.h>` migration.** Released `axil`
+  1.8.0 first (replacing the old `/usr/include/ttypt/axil.h` that still included `<ttypt/qsys.h>`),
+  migrated remaining `<ttypt/qsys.h>` / `qsyslog` references in `axil-auren/src/` and
+  `axil-auren/tests/mocks/ttypt/stele.h` to `<ttypt/stele.h>` / `stl_syslog`, added
+  `submodules: true` to `tty-pt/ci/test/action.yml`, and added `-Inpm/node_modules/@tty-pt/stele/include`
+  to `WASM_CFLAGS` in `axil-auren/Makefile`.
+- **`axil-tty` v1.6.0 root package and Node ESM verification.** Extended `npm.yml` with `dir: .`
+  for root `package.json` repos, guarded browser globals (`window`, `location`, `WebSocket`,
+  `FitAddon`, `Terminal`) in `axil-tty.js`, removed its top-level `.css` import, and made
+  `cjs/axil-tty.js` Node-20 safe without `ERR_REQUIRE_ESM`.
 - **`libjoint` WebAssembly state.** In WebAssembly mode every `JointTimeline` shared one
   interval buffer. The constructor and `close()` now clear it. A per-timeline handle in the C code
   would be the proper fix.
 
 ### Open work
 
-- Release `axil` 1.8.0 (fix its `ci.yml` first: `secrets: inherit`, xxhash for winget), then
-  move `axil-auren`'s `v1.5.0` tag to re-run it. `@tty-pt/auren` 1.5.0 and `@tty-pt/axil` 1.8.0 are
-  not on npm yet.
 - `libpitch`, `libchaff` and `libareole` have no `ci.yml`, so they have no pipeline.
-- `axil`, `axil-auth`, `axil-hyle`, `axil-nd` and `axil-tty` still use an explicit secrets list
-  without `NPM_TOKEN`. Switch them to `secrets: inherit` before releasing them.
+- `axil-hyle` and `axil-nd` still use an explicit secrets list without `NPM_TOKEN`. Switch them to
+  `secrets: inherit` before releasing them.
 - `libcorm`'s winget package does not carry or declare `libxxhash.dll`, so every Windows package that
   depends on it has to install xxhash itself.
 - Native addons need `linux-arm64` and `linux-musl` prebuilds (the `@tty-pt/stele` loader has no
