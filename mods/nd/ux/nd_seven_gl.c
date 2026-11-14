@@ -90,6 +90,27 @@
 	"    return nd_cloud_shadow_map(fragXY, fragZ, dist);\n" \
 	"}\n"
 
+/* Toroidal geometric self-eclipse raymarch:
+ * Tests if the ray towards the sun traverses across the central throat and penetrates the opposite ring rim.
+ * In the torus frame (Z = axis of revolution), core circle has radius R in Z=0, tube radius r0.
+ * Euclidean SDF to the torus tube is: length(vec2(length(Q.xy) - R, Q.z)) - r0. */
+#define ND_GLSL_TORUS_ECLIPSE_FN \
+	"float eval_torus_self_eclipse(vec3 P, vec3 sDir, float R, float r0) {\n" \
+	"    float t = r0 * 0.45;\n" \
+	"    float maxT = 2.0 * (R + r0);\n" \
+	"    float occ = 1.0;\n" \
+	"    for (int i = 0; i < 4; i++) {\n" \
+	"        vec3 Q = P + t * sDir;\n" \
+	"        float rho = length(Q.xy);\n" \
+	"        float d = length(vec2(rho - R, Q.z)) - r0;\n" \
+	"        if (d < 0.0) return 0.0;\n" \
+	"        occ = min(occ, clamp(d / (0.07 * r0), 0.0, 1.0));\n" \
+	"        t += max(d, r0 * 0.35);\n" \
+	"        if (t > maxT) break;\n" \
+	"    }\n" \
+	"    return occ;\n" \
+	"}\n"
+
 /* Canonical 2D Synoptic & Mesoscale Cellular Weather Envelope Function:
  * Pure function of (worldXY, anim_time, humidity, fw). Zero camera-distance morphing.
  * Driven by the evolved synoptic wind streamfunction and divergence-free curl flow:
@@ -458,6 +479,9 @@ static const char *s_fs_terrain =
 	"uniform mat4 uLambWakeVel1;\n"
 	"uniform int uWorldId;\n"
 	"uniform int uSeaOffsetQ12_4;\n"
+	"uniform vec3 uCameraPos;\n"
+	"uniform vec3 uPlanetCenter;\n"
+	"uniform vec2 uTorusRadii;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -534,6 +558,7 @@ static const char *s_fs_terrain =
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
 	ND_GLSL_SYNOPTIC_CLOUD_FN
+	ND_GLSL_TORUS_ECLIPSE_FN
 	"int chaff_octave_amplitude_ex(int shift, int min_shift, int base_amp) {\n"
 	"    if (shift < min_shift || base_amp <= 0) return 0;\n"
 	"    int k = shift - min_shift;\n"
@@ -1285,10 +1310,16 @@ static const char *s_fs_terrain =
 	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
 	"    vec3 L_frag = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    float sunDot = dot(torusN, sDir);\n"
-	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.45 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    vec3 P_torus = (uCameraPos - vViewDir) - uPlanetCenter;\n"
+	"    float R_torus = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
+	"    float r0_torus = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
+	"    float innerEclipse = (sunDot > 0.0 && innerHole > 0.001) ? eval_torus_self_eclipse(P_torus, sDir, R_torus, r0_torus) : 1.0;\n"
 	"    float effSun = sunDot * innerEclipse;\n"
 	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, effSun), 0.12, 1.0);\n"
 	"    float directSun = smoothstep(-0.06, 0.18, effSun);\n"
+	"    float twilight = smoothstep(0.32, -0.06, effSun) * smoothstep(-0.16, 0.12, effSun);\n"
+	"    vec3 sunColor = mix(vec3(1.0, 0.98, 0.92), mix(vec3(1.0, 0.62, 0.28), vec3(0.96, 0.38, 0.18), smoothstep(0.18, -0.06, effSun)), twilight);\n"
+	"    vec3 sunLitCol = mix(vec3(1.0), sunColor, twilight * 0.80);\n"
 	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans * directSun;\n"
 	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor)) + 0.55 * baseDiff;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
@@ -1426,6 +1457,9 @@ static const char *s_fs_terrain =
 	"        littoralSand = mix(littoralSand, vec3(0.45, 0.43, 0.38), pebble * 0.42);\n"
 	"        vec3 benthicSubstrate = mix(baseCol.rgb, bioSand * 0.78, 0.42);\n"
 	"        subCol = mix(benthicSubstrate, littoralSand, shallowSandMask * (0.45 + 0.55 * distFade));\n"
+	"        float littoralSilt = smoothstep(18.0, 1.0, fragWaterDepth) * clamp(bioHumidity * 1.5 - 0.30, 0.0, 1.0) * (1.0 - wDesert * 0.88);\n"
+	"        vec3 C_SILT_BED = mix(vec3(0.20, 0.56, 0.48) * (1.0 - wPolar) + vec3(0.36, 0.62, 0.68) * wPolar, vec3(0.14, 0.30, 0.32), wVolcanic * 0.70);\n"
+	"        subCol = mix(subCol, C_SILT_BED * 0.85, littoralSilt * 0.35);\n"
 	"        if (distFade > 0.01 && fragWaterDepth < 18.0) {\n"
 	"            vec3 N_sub = normalize(fragNormal - detail.y * (0.30 * distFade) * tangentU - detail.z * (0.30 * distFade) * tangentV);\n"
 	"            float subDiff = max(0.0, dot(N_sub, L_frag));\n"
@@ -1438,7 +1472,10 @@ static const char *s_fs_terrain =
 	"    /* Alpine progression on mountain summits: subalpine granite scree and permanent snowcaps across all zooms */\n"
 	"    float peakElevAboveWater = (uSeaLevel > -900.0) ? max(elevAboveWater, texZ - liveSeaLevel) : max(elevAboveWater, texZ);\n"
 	"    float effElev = peakElevAboveWater + max(0.0, macroDetail.x * 3.0);\n"
-	"    float snowBaseZ = 280.0 - 220.0 * wPolar + 140.0 * wTropical + 120.0 * wDesert;\n"
+	"    float equatorAspect = dot(fragNormal, tangentV) * sign(sin(latPhi));\n"
+	"    float sunAspect = dot(fragNormal, L_frag) - 0.35;\n"
+	"    float aspectShift = (equatorAspect * 65.0 + clamp(sunAspect, -0.4, 0.4) * 45.0) * (1.0 - wPolar);\n"
+	"    float snowBaseZ = 280.0 - 220.0 * wPolar + 140.0 * wTropical + 120.0 * wDesert + aspectShift;\n"
 	"    float snowShed = smoothstep(0.52, 0.15, slope);\n"
 	"    float alpineSnow = smoothstep(snowBaseZ, snowBaseZ + 180.0, effElev) * snowShed;\n"
 	"    float alpineRock = smoothstep(snowBaseZ - 120.0, snowBaseZ + 40.0, effElev) * (1.0 - wPolar);\n"
@@ -1466,7 +1503,7 @@ static const char *s_fs_terrain =
 	"        /* 1. Polar ice caps & frozen summits visible from orbit: brilliant white where biome is polar/snow (wPolar) */\n"
 	"        float polarIce = wPolar * smoothstep(-1.0, 2.5, peakElevAboveWater);\n"
 	"        /* 2. Alpine mountain snowcaps visible from orbit: high summits and cordillera ridges */\n"
-	"        float alpineSnowline = 280.0 - 220.0 * wPolar + 140.0 * wTropical + 120.0 * wDesert;\n"
+	"        float alpineSnowline = 280.0 - 220.0 * wPolar + 140.0 * wTropical + 120.0 * wDesert + aspectShift;\n"
 	"        float mountainSnow = smoothstep(alpineSnowline, alpineSnowline + 180.0, effElev) * smoothstep(0.55, 0.15, slope);\n"
 	"        float spaceSnow = max(polarIce, mountainSnow);\n"
 	"        vec3 snowOrbitCol = vec3(0.97, 0.99, 1.00);\n"
@@ -1481,7 +1518,7 @@ static const char *s_fs_terrain =
 	"        subCol = mix(subCol, vec3(0.96, 0.98, 1.00), seaIce * 0.96);\n"
 	"    }\n"
 	"    vec3 baseAlbedo = mix(dryCol, subCol, submergedBlend);\n"
-	"    vec3 lit = mix(dryCol * dryLighting, subCol * subLighting, submergedBlend);\n"
+	"    vec3 lit = mix(dryCol * dryLighting * sunLitCol, subCol * subLighting, submergedBlend);\n"
 	"    if (uLambLight.w > 0.001) {\n"
 	"        vec3 toLamb = vec3((uLambLight.x - vWorldPos.x) * tangentU + (uLambLight.y - vWorldPos.y) * tangentV + (uLambLight.z + 10.0 - fragZ) * torusN);\n"
 	"        float d2 = dot(toLamb, toLamb);\n"
@@ -1544,7 +1581,16 @@ static const char *s_fs_terrain =
 	"        inscatterCol = mix(inscatterCol, C_OUTER, tOuter);\n"
 	"        inscatterCol = mix(inscatterCol, C_ABYSS, tAbyss);\n"
 	"        inscatterCol = mix(inscatterCol, C_ABYSS * 0.55, tTrench);\n"
+	"        /* Coastal sediment plumes & estuary runoff in humid / high-rainfall basins */\n"
+	"        float runoffMoisture = clamp(bioHumidity * 1.5 - 0.30, 0.0, 1.0) * (1.0 - wDesert * 0.88);\n"
+	"        float coastalZone = smoothstep(28.0, 1.5, d);\n"
+	"        vec3 siltTurb = (distFade > 0.01) ? chaff_grad_noise2d(vWorldPos * 0.024 + vec2(11.2, -7.5), 0x53494C54u) : vec3(0.5, 0.0, 0.0);\n"
+	"        float siltSwirl = (siltTurb.x - 0.5) * 0.25;\n"
+	"        float siltDensity = coastalZone * runoffMoisture * clamp(0.75 + siltSwirl, 0.0, 1.25);\n"
+	"        vec3 C_SILT = mix(vec3(0.20, 0.56, 0.48) * (1.0 - wPolar) + vec3(0.36, 0.62, 0.68) * wPolar, vec3(0.14, 0.30, 0.32), wVolcanic * 0.70);\n"
+	"        inscatterCol = mix(inscatterCol, C_SILT, siltDensity * 0.65);\n"
 	"        float bodyScatterWeight = shallowFactor * (1.0 - exp(-0.052 * effectiveOpticalDepth));\n"
+	"        bodyScatterWeight = clamp(bodyScatterWeight + siltDensity * 0.40, 0.0, 1.0);\n"
 	"        vec3 waterBody = mix(transmittedBed, inscatterCol, bodyScatterWeight);\n"
 	"        /* Single-pass unified air-water surface reflection, 3-tier sun glitter, Fresnel & surf foam\n"
 	"         * (eliminates the duplicate overlapping water mesh and all water/earth Z-fighting flicker) */\n"
@@ -1574,7 +1620,6 @@ static const char *s_fs_terrain =
 	"        float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
 	"        float fresnel = clamp(0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0) + max(0.0, facetTilt) * 0.22, 0.015, 0.65);\n"
 	"        vec3 skySurf = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.72, 0.88)) * (0.16 + 0.84 * dayFactor);\n"
-	"        vec3 sunColor = vec3(1.0, 0.98, 0.92);\n"
 	"        float waveSlopeDiff = dot(specNormal, L_frag) - dot(torusN, L_frag);\n"
 	"        float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans * directSun;\n"
 	"        float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
@@ -1637,8 +1682,13 @@ static const char *s_fs_terrain =
 	"    vec3 dustHaze = vec3(0.84, 0.76, 0.60) * (0.28 + 0.72 * dayFactor);\n"
 	"    vec3 atmoSky = mix(sky, dustHaze, wDesert * 0.42 * (1.0 - wPolar));\n"
 	"    vec3 viewDirNorm = normalize(vViewDir);\n"
+	"    float sunAlign = max(0.0, dot(viewDirNorm, -sDir));\n"
+	"    vec3 twilightGlow = mix(vec3(0.98, 0.54, 0.28), vec3(0.82, 0.36, 0.48), smoothstep(0.12, -0.08, effSun));\n"
+	"    vec3 twilightSky = mix(twilightGlow * 0.78, twilightGlow * 1.30, pow(sunAlign, 3.0));\n"
+	"    atmoSky = mix(atmoSky, twilightSky, twilight * 0.76 * (1.0 - wPolar * 0.35));\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDirNorm)), 0.0, 1.0), 3.0);\n"
-	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95) * (0.15 + 0.85 * dayFactor), limb * 0.45 * uAtmoIntensity);\n"
+	"    vec3 limbColor = mix(vec3(0.35, 0.65, 0.95), vec3(0.96, 0.54, 0.30), twilight * 0.85);\n"
+	"    vec3 surfaceLit = mix(lit, limbColor * (0.15 + 0.85 * dayFactor), limb * 0.45 * uAtmoIntensity);\n"
 	"    FragColor = vec4(mix(surfaceLit, atmoSky, fogFactor * uAtmoIntensity), 1.0);\n"
 	"}\n";
 
@@ -1795,6 +1845,9 @@ static const char *s_fs_water =
 	"uniform vec2 uViewport;\n"
 	"uniform vec2 uNearFar;\n"
 	"uniform vec2 uProjScale;\n"
+	"uniform vec3 uCameraPos;\n"
+	"uniform vec3 uPlanetCenter;\n"
+	"uniform vec2 uTorusRadii;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -1866,6 +1919,7 @@ static const char *s_fs_water =
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
 	ND_GLSL_SYNOPTIC_CLOUD_FN
+	ND_GLSL_TORUS_ECLIPSE_FN
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    return chaff_eval_flow_2d(worldPos, anim_time);\n"
 	"}\n"
@@ -2208,7 +2262,10 @@ static const char *s_fs_water =
 	"    float latDeg = asin(clamp(abs(sin(latPhi)), 0.0, 1.0)) * 57.2957795;\n"
 	"    float innerHole = max(0.0, -cos(latPhi));\n"
 	"    float sunDot = dot(torusN, sDir);\n"
-	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.45 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    vec3 P_torus = (uCameraPos - vViewDir) - uPlanetCenter;\n"
+	"    float R_torus = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
+	"    float r0_torus = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
+	"    float innerEclipse = (sunDot > 0.0 && innerHole > 0.001) ? eval_torus_self_eclipse(P_torus, sDir, R_torus, r0_torus) : 1.0;\n"
 	"    float effSun = sunDot * innerEclipse;\n"
 	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, effSun), 0.12, 1.0);\n"
 	"    float directSun = smoothstep(-0.06, 0.18, effSun);\n"
@@ -3021,6 +3078,8 @@ static const char *s_fs_cloud =
 	"uniform float uCamDist;\n"
 	"uniform vec4 uCloudDeck;\n"
 	"uniform vec3 uSunDir;\n"
+	"uniform vec3 uCameraPos;\n"
+	"uniform vec3 uPlanetCenter;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -3054,6 +3113,7 @@ static const char *s_fs_cloud =
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
 	ND_GLSL_SYNOPTIC_CLOUD_FN
+	ND_GLSL_TORUS_ECLIPSE_FN
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    return chaff_eval_flow_2d(worldPos, anim_time);\n"
 	"}\n"
@@ -3289,9 +3349,14 @@ static const char *s_fs_cloud =
 	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
 	"    vec3 sunDir = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    float sunDot = dot(torusN, sDir);\n"
-	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.45 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    vec3 P_torus = (uCameraPos - vViewDir) - uPlanetCenter;\n"
+	"    float R_torus = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
+	"    float r0_torus = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
+	"    float innerEclipse = (sunDot > 0.0 && innerHole > 0.001) ? eval_torus_self_eclipse(P_torus, sDir, R_torus, r0_torus) : 1.0;\n"
 	"    float effSun = sunDot * innerEclipse;\n"
 	"    float cloudDayFactor = clamp(0.16 + 0.84 * smoothstep(-0.16, 0.22, effSun), 0.16, 1.0);\n"
+	"    float cloudTwilight = smoothstep(0.32, -0.06, effSun) * smoothstep(-0.16, 0.12, effSun);\n"
+	"    vec3 cloudSunCol = mix(vec3(1.06, 1.00, 0.91), vec3(1.14, 0.62, 0.32), cloudTwilight);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
 	"    /* 4-Step Asymmetric Deck-Stratified 3D Raymarching (1 step in Deck 3, 1 step in Deck 2, 2 steps in Deck 1):\n"
 	"     * Gives the primary lower cumulus deck (Deck 1) a true 2-slice 3D base + eroded turret crown volume while\n"
@@ -3379,7 +3444,7 @@ static const char *s_fs_cloud =
 	"            vec3 shadowCol = (deckIdx == 2) ? deck1Sh : ((deckIdx == 1) ? deck2Sh : deck3Sh);\n"
 	"            shadowCol *= (1.0 - 0.42 * clamp(upperDeckOcc, 0.0, 1.0));\n"
 	"            vec3 scatterCol = vec3(0.84, 0.89, 0.96);\n"
-	"            vec3 sunLitCol  = vec3(1.06, 1.00, 0.91);\n"
+	"            vec3 sunLitCol  = cloudSunCol;\n"
 	"            vec3 stepCol = mix(shadowCol, scatterCol * (1.0 - 0.30 * clamp(upperDeckOcc, 0.0, 1.0)), clamp(multiScatter * 0.85, 0.0, 1.0));\n"
 	"            stepCol = mix(stepCol, sunLitCol * (0.88 + 0.12 * clamp(hgPhase, 0.0, 2.0)), clamp(directSun * 1.20, 0.0, 1.0));\n"
 	"            stepCol += sunLitCol * silverLining;\n"
@@ -3397,6 +3462,10 @@ static const char *s_fs_cloud =
 	"    if (cloudAlpha <= 0.003) discard;\n"
 	"    vec3 cloudRgb = (accumLight / max(1e-4, rawAlpha)) * cloudDayFactor;\n"
 	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * cloudDayFactor);\n"
+	"    float cloudSunAlign = max(0.0, dot(normalize(viewDir), -sDir));\n"
+	"    vec3 cloudTwilightGlow = mix(vec3(0.98, 0.54, 0.28), vec3(0.82, 0.36, 0.48), smoothstep(0.12, -0.08, effSun));\n"
+	"    vec3 cloudTwilightSky = mix(cloudTwilightGlow * 0.78, cloudTwilightGlow * 1.30, pow(cloudSunAlign, 3.0));\n"
+	"    sky = mix(sky, cloudTwilightSky, cloudTwilight * 0.76);\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
