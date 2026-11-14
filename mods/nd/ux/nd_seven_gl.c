@@ -1260,16 +1260,30 @@ static const char *s_fs_terrain =
 	"    float wTropical = smoothstep(0.40, 0.65, rawBiome.g) * smoothstep(0.04, 0.35, rawBiome.g - rawBiome.r) * (1.0 - wPolar) * (1.0 - wDesert);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical + wDesert), 0.0, 1.0);\n"
 	"    float texBioHumidity = clamp(0.52 * wTemperate + 0.80 * wTropical + 0.45 * wPolar + 0.15 * wVolcanic + 0.10 * wDesert + 0.25 * smoothstep(-4.0, 8.0, fragWaterDepth), 0.08, 0.95);\n"
-	"    vec3 worldClimate = chaff_grad_noise2d(vWorldPos * 0.000045, 0x434C494Du);\n"
-	"    float worldBioHumidity = clamp(0.56 + 0.26 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.22, 0.90);\n"
-	"    float bioHumidity = mix(texBioHumidity, worldBioHumidity, gpuFieldBlend);\n"
+	"    /* Toroidal atmospheric circulation profile (matching <nd/field.h>):\n"
+	"     * latPhi = 2*pi*(64 - wy)/8388608: 0 at outer equator (y=0), +-pi/2 at polar crowns, +-pi at inner equator (y=+-32768).\n"
+	"     * Solar evaporation dries the scorched equators (latDeg < 24 deg), while moisture condenses in mid/subpolar latitudes. */\n"
+	"    float latPhi = 6.28318530718 * ((64.0 - vWorldPos.y) / 8388608.0);\n"
+	"    float latDeg = asin(clamp(abs(sin(latPhi)), 0.0, 1.0)) * 57.2957795;\n"
+	"    float innerHole = max(0.0, -cos(latPhi));\n"
+	"    float eqEvapDry = smoothstep(24.0, 0.0, latDeg) * 0.18;\n"
+	"    float midLatWet = smoothstep(18.0, 0.0, abs(latDeg - 38.0)) * 0.12;\n"
+	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
+	"    float worldBioHumidity = clamp(texBioHumidity - eqEvapDry + midLatWet + subpolarWet, 0.06, 0.92);\n"
+	"    float bioHumidity = worldBioHumidity;\n"
 	"    float cloudFw = mix(fw, max(0.18, vDistance * 0.00055), gpuFieldBlend);\n"
 	"    float rawCloudShadow = nd_cloud_shadow(vWorldPos, fragZ, uAnimTime, bioHumidity, vDistance, cloudFw);\n"
 	"    float cloudShadow = rawCloudShadow;\n"
 	"    float sunTrans = nd_sun_trans(cloudShadow);\n"
-	"    vec3 L_frag = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans;\n"
-	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow)) + 0.55 * baseDiff;\n"
+	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    float orbitLight = smoothstep(24000.0, 220000.0, vDistance);\n"
+	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
+	"    vec3 L_frag = normalize(mix(L_local, normalize(sDir + 0.35 * torusN), orbitLight));\n"
+	"    float sunDot = dot(torusN, sDir);\n"
+	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.35 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    float dayFactor = mix(1.0, 0.42 + 0.58 * smoothstep(-0.22, 0.32, sunDot * innerEclipse), orbitLight);\n"
+	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans * dayFactor;\n"
+	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow) * (0.65 + 0.35 * dayFactor)) + 0.55 * baseDiff;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
 	"    float dryLighting = effLighting;\n"
 	"    float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
@@ -2135,7 +2149,10 @@ static const char *s_fs_water =
 	"    if (fragWaterDepth <= 0.0) {\n"
 	"        discard;\n"
 	"    }\n"
-	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
+	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    float orbitLight = smoothstep(24000.0, 220000.0, vDistance);\n"
+	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
+	"    vec3 sunDir = normalize(mix(L_local, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    /* Biome-aware water optics derived from uSubstrateTex (populated via ndw_biome_base_rgb) */\n"
 	"    vec3 rawBiome = texture(uSubstrateTex, vUV).rgb;\n"
 	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
@@ -2144,7 +2161,13 @@ static const char *s_fs_water =
 	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
 	"    float wTropical = smoothstep(0.46, 0.68, rawBiome.r) * smoothstep(0.38, 0.58, rawBiome.g) * (1.0 - wPolar);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical), 0.0, 1.0);\n"
-	"    float bioHumidity = clamp(0.65 * wTemperate + 0.88 * wTropical + 0.52 * wPolar + 0.25 * wVolcanic + 0.15 * smoothstep(0.0, 16.0, fragWaterDepth), 0.25, 0.95);\n"
+	"    float latPhi = 6.28318530718 * ((64.0 - vWorldPos.y) / 8388608.0);\n"
+	"    float latDeg = asin(clamp(abs(sin(latPhi)), 0.0, 1.0)) * 57.2957795;\n"
+	"    float innerHole = max(0.0, -cos(latPhi));\n"
+	"    float eqEvapDry = smoothstep(24.0, 0.0, latDeg) * 0.18;\n"
+	"    float midLatWet = smoothstep(18.0, 0.0, abs(latDeg - 38.0)) * 0.12;\n"
+	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
+	"    float bioHumidity = clamp(0.65 * wTemperate + 0.88 * wTropical + 0.52 * wPolar + 0.25 * wVolcanic + 0.15 * smoothstep(0.0, 16.0, fragWaterDepth) - eqEvapDry + midLatWet + subpolarWet, 0.15, 0.95);\n"
 	"    float cloudShadow = nd_cloud_shadow(vWorldPos, uSeaLevel, uAnimTime, bioHumidity, vDistance, fw);\n"
 	"    float sunTrans = nd_sun_trans(cloudShadow);\n"
 	"    vec3 C_SHALLOW = vec3(0.16, 0.56, 0.62) * wTropical\n"
@@ -2926,6 +2949,7 @@ static const char *s_fs_cloud =
 	"uniform float uAtmoIntensity;\n"
 	"uniform float uCamDist;\n"
 	"uniform vec4 uCloudDeck;\n"
+	"uniform vec3 uSunDir;\n"
 	"out vec4 FragColor;\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
@@ -3179,10 +3203,21 @@ static const char *s_fs_cloud =
 	"    float wTropical = smoothstep(0.40, 0.65, rawBiome.g) * smoothstep(0.04, 0.35, rawBiome.g - rawBiome.r) * (1.0 - wPolar) * (1.0 - wDesert);\n"
 	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical + wDesert), 0.0, 1.0);\n"
 	"    float texBioHumidity = clamp(0.52 * wTemperate + 0.80 * wTropical + 0.45 * wPolar + 0.15 * wVolcanic + 0.10 * wDesert + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.08, 0.95);\n"
-	"    vec3 worldClimate = chaff_grad_noise2d(entryWorldPos * 0.000045, 0x434C494Du);\n"
-	"    float worldBioHumidity = clamp(0.50 + 0.28 * (worldClimate.x - 0.5) + ((uSeaLevel > -900.0) ? 0.08 : 0.0), 0.15, 0.88);\n"
-	"    float bioHumidity = mix(texBioHumidity, worldBioHumidity, clamp(uCamDist * 0.00002, 0.0, 1.0));\n"
-	"    vec3 sunDir = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
+	"    float latPhi = 6.28318530718 * ((64.0 - entryWorldPos.y) / 8388608.0);\n"
+	"    float latDeg = asin(clamp(abs(sin(latPhi)), 0.0, 1.0)) * 57.2957795;\n"
+	"    float innerHole = max(0.0, -cos(latPhi));\n"
+	"    float eqEvapDry = smoothstep(24.0, 0.0, latDeg) * 0.18;\n"
+	"    float midLatWet = smoothstep(18.0, 0.0, abs(latDeg - 38.0)) * 0.12;\n"
+	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
+	"    float worldBioHumidity = clamp(texBioHumidity - eqEvapDry + midLatWet + subpolarWet, 0.06, 0.92);\n"
+	"    float bioHumidity = worldBioHumidity;\n"
+	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    float orbitLight = smoothstep(24000.0, 220000.0, uCamDist);\n"
+	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
+	"    vec3 sunDir = normalize(mix(L_local, normalize(sDir + 0.35 * torusN), orbitLight));\n"
+	"    float sunDot = dot(torusN, sDir);\n"
+	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.35 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    float cloudDayFactor = mix(1.0, 0.46 + 0.54 * smoothstep(-0.22, 0.32, sunDot * innerEclipse), orbitLight);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
 	"    /* 4-Step Asymmetric Deck-Stratified 3D Raymarching (1 step in Deck 3, 1 step in Deck 2, 2 steps in Deck 1):\n"
 	"     * Gives the primary lower cumulus deck (Deck 1) a true 2-slice 3D base + eroded turret crown volume while\n"
@@ -3285,7 +3320,7 @@ static const char *s_fs_cloud =
 	"    float rawAlpha = 1.0 - trans;\n"
 	"    float cloudAlpha = clamp(rawAlpha, 0.0, 0.96);\n"
 	"    if (cloudAlpha <= 0.003) discard;\n"
-	"    vec3 cloudRgb = accumLight / max(1e-4, rawAlpha);\n"
+	"    vec3 cloudRgb = (accumLight / max(1e-4, rawAlpha)) * cloudDayFactor;\n"
 	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
@@ -3962,6 +3997,7 @@ typedef struct {
 	GLint uAtmoIntensity;
 	GLint uCamDist;
 	GLint uCloudDeck;
+	GLint uSunDir;
 	GLint aGridUV;
 } gl_cloud_pipe_t;
 
@@ -4343,6 +4379,7 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 			s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
 			s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
+			s_gl.cloud_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
@@ -5112,6 +5149,7 @@ void nd_seven_gl_flush_clouds(void)
 	glUniform1f(s_gl.cloud_pipe.uFogEnd, s_gl.cur_dist * 4.0f * fog_scale);
 	glUniform1f(s_gl.cloud_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.cloud_pipe.uCamDist, s_gl.cur_dist);
+	glUniform3fv(s_gl.cloud_pipe.uSunDir, 1, s_gl.cur_sun_dir);
 	{
 		/* Place proxy shell above the highest mountain peaks (up to +1,981 wu, eff_shell_z = 2,150 wu)
 		 * while keeping it strictly below 58% of the camera's altitude so it can never approach

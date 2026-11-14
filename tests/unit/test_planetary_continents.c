@@ -239,27 +239,31 @@ static void test_toroidal_solar_incidence_and_temperature(void)
 	assert(nd_field_sample(world, 0, 80, 64).temp > nd_field_sample(world, 0, W / 2 + 80, 64).temp);
 	assert(nd_field_sample(world, 0, 80, 64).temp > nd_field_sample(world, 0, 80, H / 4 + 64).temp);
 
-	/* 2 & 3. Inner surface (phi=pi): illuminated through hole on far side, in shadow on near side */
+	/* 2 & 3. Inner surface (phi=pi): illuminated through hole on far side, in shadow on near side,
+	 * with a realistic diurnal swing (warmer on sunlit side, never freezing the night side of the equator),
+	 * and slightly milder than the unobstructed outer equator due to midday arch-eclipse cooling. */
 	assert(nd_field_torus_solar_incidence_q15(-32768, -32768, 0) == 32768);
 	assert(nd_field_torus_solar_incidence_q15(0, -32768, 0) == 0);
-	assert(nd_field_temp(world, 0, tm_neutral, -32768, -32768) == ND_FIELD_SOLAR_TEMP_MAX);
-	assert(nd_field_temp(world, 0, tm_neutral, 0, -32768) == ND_FIELD_SOLAR_TEMP_MAX - ND_FIELD_SOLAR_TEMP_SPAN);
-	assert(nd_field_sample(world, 0, W / 2 + 80, H / 2 + 64).temp > nd_field_sample(world, 0, 80, H / 2 + 64).temp + 80);
+	int16_t t_inner_day   = nd_field_temp(world, 0, tm_neutral, -32768, -32768);
+	int16_t t_inner_night = nd_field_temp(world, 0, tm_neutral, 0, -32768);
+	assert(t_inner_day > t_inner_night + 15);
+	assert(t_inner_night > 60); /* Equatorial night stays warm, never freezing to polar ice */
+	assert(nd_field_sample(world, 0, W / 2 + 80, H / 2 + 64).temp > nd_field_sample(world, 0, 80, H / 2 + 64).temp + 10);
 
-	/* 4. Upper (phi=pi/2) and lower (phi=3*pi/2) tube surfaces receive zero direct illumination */
+	/* 4. Upper (phi=pi/2) and lower (phi=3*pi/2) polar crowns receive zero direct illumination and stay freezing */
 	for (int k = 0; k < 16; k++) {
 		int16_t px = (int16_t)(k * 4096);
 		assert(nd_field_torus_solar_incidence_q15(px, 16384, 0) == 0);
 		assert(nd_field_torus_solar_incidence_q15(px, -16384, 0) == 0);
-		assert(nd_field_temp(world, 0, tm_neutral, px, 16384) == ND_FIELD_SOLAR_TEMP_MAX - ND_FIELD_SOLAR_TEMP_SPAN);
-		assert(nd_field_temp(world, 0, tm_neutral, px, -16384) == ND_FIELD_SOLAR_TEMP_MAX - ND_FIELD_SOLAR_TEMP_SPAN);
+		assert(nd_field_temp(world, 0, tm_neutral, px, 16384) <= ND_FIELD_TEMP_MIN);
+		assert(nd_field_temp(world, 0, tm_neutral, px, -16384) <= ND_FIELD_TEMP_MIN);
 	}
 
 	/* 5. Outer surface (phi=0) receives max direct illumination when facing Sun */
 	int32_t inc_outer_sun = nd_field_torus_solar_incidence_q15(0, 0, 0);
 	assert(inc_outer_sun == 32768 && nd_field_torus_solar_incidence_q15(-32768, 0, 0) == 0);
 	int16_t t_outer_sun = nd_field_temp(world, 0, tm_neutral, 0, 0);
-	assert(t_outer_sun == ND_FIELD_SOLAR_TEMP_MAX);
+	assert(t_outer_sun > t_inner_day); /* Outer equator is hotter than partially-eclipsed inner equator */
 	for (int y = -8; y < 8; y++)
 		for (int x = -8; x < 8; x++) {
 			int16_t px = (int16_t)(x * 4096), py = (int16_t)(y * 4096);
@@ -301,12 +305,12 @@ static void test_toroidal_solar_incidence_and_temperature(void)
 		int16_t sun_x = (int16_t)az, anti_x = (int16_t)(az + 32768u);
 		assert(nd_field_torus_solar_incidence_q15(sun_x, 0, az) == 32768);
 		assert(nd_field_torus_solar_incidence_q15(anti_x, 0, az) == 0);
-		assert(nd_field_temp(world, 0, tm_neutral, sun_x, 0) == ND_FIELD_SOLAR_TEMP_MAX);
-		assert(nd_field_temp(world, 0, tm_neutral, anti_x, 0) == ND_FIELD_SOLAR_TEMP_MAX - ND_FIELD_SOLAR_TEMP_SPAN);
+		assert(nd_field_temp(world, 0, tm_neutral, sun_x, 0) == t_outer_sun);
+		assert(nd_field_temp(world, 0, tm_neutral, sun_x, 0) > nd_field_temp(world, 0, tm_neutral, anti_x, 0) + 20);
 		assert(nd_field_torus_solar_incidence_q15(sun_x, -32768, az) == 0);
 		assert(nd_field_torus_solar_incidence_q15(anti_x, -32768, az) == 32768);
-		assert(nd_field_temp(world, 0, tm_neutral, sun_x, -32768) == ND_FIELD_SOLAR_TEMP_MAX - ND_FIELD_SOLAR_TEMP_SPAN);
-		assert(nd_field_temp(world, 0, tm_neutral, anti_x, -32768) == ND_FIELD_SOLAR_TEMP_MAX);
+		assert(nd_field_temp(world, 0, tm_neutral, anti_x, -32768) == t_inner_day);
+		assert(nd_field_temp(world, 0, tm_neutral, sun_x, -32768) == t_inner_night);
 		assert(nd_field_sun_azimuth_from_day_tick((uint64_t)i * 256ULL) == az);
 	}
 	nd_field_set_sun_azimuth(0);
