@@ -285,20 +285,20 @@ nd_field_lat_climate_temp(int16_t pos_y, uint32_t tm, int32_t elev_rel)
 
 	/* 32% linear meridional heat transport (eq_dist) + 68% solar incidence (1 - |cos(phi)|) */
 	int32_t lat_frac_q15 = (((eq_dist << 1) * 10486) + ((32768 - lat_insol_q15) * 22282)) >> 15;
-	int32_t lat_cool = (lat_frac_q15 * 140) >> 15;
-	if (eq_dist > 11400) {
-		/* Polar ice-albedo feedback on the top and bottom crowns (63..90 deg == eq_dist > 11400) */
-		lat_cool += ((eq_dist - 11400) * 42) / (16384 - 11400);
+	int32_t lat_cool = (lat_frac_q15 * 142) >> 15;
+	if (eq_dist > 10800) {
+		/* Polar ice-albedo feedback on the top and bottom crowns (59..90 deg == eq_dist > 10800) */
+		lat_cool += ((eq_dist - 10800) * 52) / (16384 - 10800);
 	}
 	/* Inner-hole arch-eclipse cooling: -4 units at the inner equator (phi = +-pi) vs outer equator (phi = 0) */
 	int32_t inner_eclipse_cool = (inner_q15 * 4) >> 15;
 
 	int32_t tm_var = (int32_t)(tm >> 16) - 128;
-	int32_t tm_amp = (eq_dist > 12000) ? 14 : 18;
+	int32_t tm_amp = (eq_dist > 11500) ? 12 : 18;
 	int32_t bio_temp = 96 - lat_cool - inner_eclipse_cool + (tm_var * tm_amp / 128);
-	if (elev_rel > 220) {
-		/* High mountain environmental lapse rate: summits > 1200..1854 wu cool into alpine tundra and snowcaps */
-		bio_temp -= ((elev_rel - 220) * 95) / 1000;
+	if (elev_rel > 180) {
+		/* High mountain environmental lapse rate: cordilleras & summits (> 350..750+ wu) cool into alpine tundra and snowcaps */
+		bio_temp -= ((elev_rel - 180) * 165) / 1000;
 	}
 	if (bio_temp < -32000) bio_temp = -32000;
 	if (bio_temp > 32000) bio_temp = 32000;

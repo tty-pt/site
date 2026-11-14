@@ -1195,10 +1195,13 @@ static const char *s_fs_terrain =
 	"    float spanBlend = smoothstep(3.3, 13.5, texelSpan);\n"
 	"    float distBlend = smoothstep(1400.0, 4800.0, vDistance);\n"
 	"    float gpuFieldBlend = clamp(max(spanBlend, distBlend), 0.0, 1.0);\n"
+	"    float texZ = fragZ;\n"
 	"    float gpuFineElev = 0.0;\n"
 	"    if (gpuFieldBlend > 0.001) {\n"
 	"        vec3 gpuField = nd_gpu_eval_canonical_field(vWorldPos, fw, gpuFineElev);\n"
 	"        fragZ = mix(fragZ, gpuField.x, gpuFieldBlend);\n"
+	"        /* Never let Nyquist octave band-limiting in gpuField submerge dry land or flatten mountain peaks */\n"
+	"        if (texZ > uSeaLevel) fragZ = max(fragZ, texZ);\n"
 	"        worldSlopeGrad = mix(worldSlopeGrad, gpuField.yz, gpuFieldBlend);\n"
 	"    }\n"
 	"    vec3 torusN = normalize(vTorusNormal);\n"
@@ -1278,12 +1281,16 @@ static const char *s_fs_terrain =
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float orbitLight = smoothstep(24000.0, 220000.0, vDistance);\n"
 	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    vec3 L_frag = normalize(mix(L_local, normalize(sDir + 0.35 * torusN), orbitLight));\n"
+	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
+	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
+	"    vec3 L_frag = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    float sunDot = dot(torusN, sDir);\n"
-	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.35 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
-	"    float dayFactor = mix(1.0, 0.42 + 0.58 * smoothstep(-0.22, 0.32, sunDot * innerEclipse), orbitLight);\n"
-	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans * dayFactor;\n"
-	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow) * (0.65 + 0.35 * dayFactor)) + 0.55 * baseDiff;\n"
+	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.45 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    float effSun = sunDot * innerEclipse;\n"
+	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, effSun), 0.12, 1.0);\n"
+	"    float directSun = smoothstep(-0.06, 0.18, effSun);\n"
+	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans * directSun;\n"
+	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor)) + 0.55 * baseDiff;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
 	"    float dryLighting = effLighting;\n"
 	"    float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
@@ -1416,46 +1423,49 @@ static const char *s_fs_terrain =
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
 	"    float submergedBlend = smoothstep(0.35, 5.5, fragWaterDepth);\n"
 	"    /* Alpine progression on mountain summits: subalpine granite scree and permanent snowcaps across all zooms */\n"
-	"    float effElev = elevAboveWater + macroDetail.x * 2.5;\n"
-	"    float snowBaseZ = 650.0 - 580.0 * wPolar + 350.0 * wTropical + 250.0 * wDesert;\n"
-	"    float snowShed = smoothstep(0.44, 0.15, slope);\n"
-	"    float alpineSnow = smoothstep(snowBaseZ, snowBaseZ + 280.0, effElev) * snowShed;\n"
-	"    float alpineRock = smoothstep(snowBaseZ - 180.0, snowBaseZ + 60.0, effElev) * (1.0 - wPolar);\n"
-	"    if (alpineRock > 0.001) {\n"
+	"    float peakElevAboveWater = (uSeaLevel > -900.0) ? max(elevAboveWater, texZ - liveSeaLevel) : max(elevAboveWater, texZ);\n"
+	"    float effElev = peakElevAboveWater + max(0.0, macroDetail.x * 3.0);\n"
+	"    float snowBaseZ = 280.0 - 220.0 * wPolar + 140.0 * wTropical + 120.0 * wDesert;\n"
+	"    float snowShed = smoothstep(0.52, 0.15, slope);\n"
+	"    float alpineSnow = smoothstep(snowBaseZ, snowBaseZ + 180.0, effElev) * snowShed;\n"
+	"    float alpineRock = smoothstep(snowBaseZ - 120.0, snowBaseZ + 40.0, effElev) * (1.0 - wPolar);\n"
+	"    if (alpineRock > 0.001 || wPolar > 0.01) {\n"
 	"        vec3 graniteRock = vec3(0.62, 0.60, 0.57);\n"
-	"        dryCol = mix(dryCol, graniteRock, alpineRock * 0.65);\n"
-	"        if (alpineSnow > 0.001) {\n"
-	"            float snowNoise = (nStd - 0.5) * 0.12 * distFade + (nClose - 0.5) * 0.10 * closeZoom;\n"
-	"            vec3 snowCol = vec3(0.96, 0.98, 1.00) * (0.97 + snowNoise);\n"
-	"            dryCol = mix(dryCol, snowCol, alpineSnow * 0.95);\n"
+	"        dryCol = mix(dryCol, graniteRock, alpineRock * 0.55);\n"
+	"        float snowMask = max(alpineSnow, wPolar * smoothstep(-1.0, 2.5, peakElevAboveWater));\n"
+	"        if (snowMask > 0.001) {\n"
+	"            float snowNoise = (nStd - 0.5) * 0.10 * distFade + (nClose - 0.5) * 0.08 * closeZoom;\n"
+	"            vec3 snowCol = vec3(0.97, 0.99, 1.00) * (0.98 + snowNoise);\n"
+	"            dryCol = mix(dryCol, snowCol, snowMask * 0.97);\n"
 	"        }\n"
 	"    }\n"
 	"    /* High-definition orbital/atmospheric procedural albedo modulation on dry land & ocean basins:\n"
-	"     * Calibrated to true planetary hypsometry (+1,854 wu Mount Everest = 8,849 m):\n"
-	"     *   - Polar ice caps: brilliant white snow & ice from sea level up (wPolar)!\n"
-	"     *   - Subalpine granite scree emergence: 550..950 wu\n"
-	"     *   - Climate-modulated permanent alpine snow & glacier caps on mountain summits: 650..1200+ wu\n"
+	"     *   - Polar ice caps & arctic tundra: crisp white snow & ice from sea level up (wPolar)\n"
+	"     *   - Subalpine granite scree emergence: 200..420 wu\n"
+	"     *   - Climate-modulated permanent alpine snow & glacier caps on mountain summits: 280..600+ wu\n"
 	"     *   - Golden desert erg sand modulation visible across space */\n"
 	"    float orbitDetailWeight = smoothstep(1800.0, 6500.0, vDistance);\n"
 	"    if (orbitDetailWeight > 0.001) {\n"
 	"        float contTex = (macroOct.x - 0.5) * 0.16 + (macroOct.y - 0.5) * 0.18 + (macroOct.z - 0.5) * 0.14 + (macroOct.w - 0.5) * 0.10;\n"
 	"        float ridgeCrest = macroDetail.w * orbitDetailWeight;\n"
-	"        float subalpineRock = smoothstep(550.0, 950.0, effElev) * (1.0 - wPolar);\n"
-	"        vec3 ridgeTint = mix(dryCol * (1.0 + contTex), vec3(0.62, 0.60, 0.57), clamp(ridgeCrest * 0.42 + subalpineRock * 0.35, 0.0, 0.58));\n"
-	"        /* 1. Polar ice caps & frozen summits visible from orbit: brilliant white where biome is PERMANENT_ICE (wPolar) */\n"
-	"        float polarIce = wPolar * smoothstep(-1.0, 3.5, elevAboveWater);\n"
+	"        float subalpineRock = smoothstep(200.0, 420.0, effElev) * (1.0 - wPolar);\n"
+	"        vec3 ridgeTint = mix(dryCol * (1.0 + contTex), vec3(0.62, 0.60, 0.57), clamp(ridgeCrest * 0.35 + subalpineRock * 0.30, 0.0, 0.48));\n"
+	"        /* 1. Polar ice caps & frozen summits visible from orbit: brilliant white where biome is polar/snow (wPolar) */\n"
+	"        float polarIce = wPolar * smoothstep(-1.0, 2.5, peakElevAboveWater);\n"
 	"        /* 2. Alpine mountain snowcaps visible from orbit: high summits and cordillera ridges */\n"
-	"        float alpineSnowline = 650.0 - 580.0 * wPolar + 350.0 * wTropical + 250.0 * wDesert;\n"
-	"        float mountainSnow = smoothstep(alpineSnowline, alpineSnowline + 280.0, effElev) * smoothstep(0.44, 0.15, slope);\n"
+	"        float alpineSnowline = 280.0 - 220.0 * wPolar + 140.0 * wTropical + 120.0 * wDesert;\n"
+	"        float mountainSnow = smoothstep(alpineSnowline, alpineSnowline + 180.0, effElev) * smoothstep(0.55, 0.15, slope);\n"
 	"        float spaceSnow = max(polarIce, mountainSnow);\n"
-	"        vec3 snowOrbitCol = vec3(0.96, 0.98, 1.00);\n"
-	"        ridgeTint = mix(ridgeTint, snowOrbitCol, spaceSnow * 0.96);\n"
-	"        /* 3. Golden desert erg sand visible from orbit */\n"
+	"        vec3 snowOrbitCol = vec3(0.97, 0.99, 1.00);\n"
+	"        ridgeTint = mix(ridgeTint, snowOrbitCol, spaceSnow * 0.98);\n"
+	"        /* 3. Golden desert erg sand visible from orbit (never overriding alpine snowcaps) */\n"
 	"        vec3 desertOrbitCol = vec3(0.86, 0.74, 0.52);\n"
-	"        ridgeTint = mix(ridgeTint, desertOrbitCol, wDesert * 0.75);\n"
+	"        ridgeTint = mix(ridgeTint, desertOrbitCol, wDesert * (1.0 - spaceSnow) * 0.75);\n"
 	"        dryCol = mix(dryCol, ridgeTint, orbitDetailWeight * 0.88);\n"
-	"        dryCol = mix(dryCol, snowOrbitCol, polarIce * 0.96);\n"
+	"        dryCol = mix(dryCol, snowOrbitCol, spaceSnow * 0.96);\n"
 	"        subCol *= clamp(1.0 + contTex * 0.75 * orbitDetailWeight, 0.78, 1.22);\n"
+	"        float seaIce = clamp(max(wPolar, smoothstep(54.0, 68.0, latDeg)), 0.0, 1.0);\n"
+	"        subCol = mix(subCol, vec3(0.96, 0.98, 1.00), seaIce * 0.96);\n"
 	"    }\n"
 	"    vec3 baseAlbedo = mix(dryCol, subCol, submergedBlend);\n"
 	"    vec3 lit = mix(dryCol * dryLighting, subCol * subLighting, submergedBlend);\n"
@@ -1473,12 +1483,15 @@ static const char *s_fs_terrain =
 	"        float wetBlend = smoothstep(0.0, 0.28, fragWaterDepth);\n"
 	"        float distFade = clamp(1.0 - (vDistance - 900.0) / 2500.0, 0.0, 1.0);\n"
 	"        float closeZoom = clamp((420.0 - vDistance) / 300.0, 0.0, 1.0);\n"
+	"        float latPolar = smoothstep(54.0, 68.0, latDeg);\n"
+	"        float alpineFreeze = smoothstep(280.0, 480.0, fragZ) * (1.0 - wTropical);\n"
+	"        float freezeFactor = clamp(max(wPolar, max(latPolar, alpineFreeze)), 0.0, 1.0);\n"
 	"        /* Subsurface wave-refracted caustic light web projected onto seabed before Beer-Lambert absorption */\n"
 	"        float caustic = 0.0;\n"
 	"        if (distFade > 0.01 && d < 16.0) {\n"
 	"            float tC = mod(uAnimTime, 256.0);\n"
 	"            vec2 cUV = vWorldPos + waveRefGrad * 1.6;\n"
-	"            caustic = nd_caustic_web(cUV, tC, closeZoom) * distFade;\n"
+	"            caustic = nd_caustic_web(cUV, tC, closeZoom) * distFade * (1.0 - freezeFactor);\n"
 	"        }\n"
 	"        float causticFocus = smoothstep(0.04, 0.85, d) * exp(-0.11 * d);\n"
 	"        lit *= (1.0 + caustic * causticFocus * 0.52);\n"
@@ -1523,11 +1536,11 @@ static const char *s_fs_terrain =
 	"        /* Single-pass unified air-water surface reflection, 3-tier sun glitter, Fresnel & surf foam\n"
 	"         * (eliminates the duplicate overlapping water mesh and all water/earth Z-fighting flicker) */\n"
 	"        float shoreWaveDamp = smoothstep(0.0, 1.8, fragWaterDepth);\n"
-	"        float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
-	"        vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw, openSeaFactor);\n"
-	"        vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.4, 2.8, fragWaterDepth);\n"
-	"        vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85;\n"
-	"        vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85;\n"
+	"        float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp) * (1.0 - freezeFactor * 0.95);\n"
+	"        vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw, openSeaFactor) * (1.0 - freezeFactor * 0.95);\n"
+	"        vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.4, 2.8, fragWaterDepth) * (1.0 - freezeFactor * 0.95);\n"
+	"        vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85 * (1.0 - freezeFactor);\n"
+	"        vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85 * (1.0 - freezeFactor);\n"
 	"        vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
 	"        vec3 specNormal = normalize(torusN - specGrad.x * tangentU - specGrad.y * tangentV);\n"
 	"        float NdotV = max(0.0, dot(waveNormal, viewDir));\n"
@@ -1542,13 +1555,15 @@ static const char *s_fs_terrain =
 	"        float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
 	"        float shoreSpecDamp = smoothstep(0.3, 3.2, fragWaterDepth);\n"
 	"        float specSun     = (specMicro * 0.70 + specWavelet * 0.85 + specBroad * 0.55) * shoreSpecDamp * sunTrans;\n"
+	"        float iceGlint    = pow(max(0.0, dot(torusN, halfVec)), 22.0) * 0.42;\n"
+	"        specSun           = mix(specSun * directSun, iceGlint * sunTrans * directSun, freezeFactor);\n"
 	"        float flatNdotV = max(0.0, dot(torusN, viewDir));\n"
 	"        float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
 	"        float fresnel = clamp(0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0) + max(0.0, facetTilt) * 0.22, 0.015, 0.65);\n"
-	"        vec3 skySurf = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.72, 0.88);\n"
+	"        vec3 skySurf = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.72, 0.88)) * (0.16 + 0.84 * dayFactor);\n"
 	"        vec3 sunColor = vec3(1.0, 0.98, 0.92);\n"
 	"        float waveSlopeDiff = dot(specNormal, L_frag) - dot(torusN, L_frag);\n"
-	"        float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans;\n"
+	"        float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans * directSun;\n"
 	"        float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
 	"        vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40) * nd_amb_trans(cloudShadow);\n"
 	"        float deepSssMask = smoothstep(2.5, 10.0, fragWaterDepth);\n"
@@ -1560,7 +1575,7 @@ static const char *s_fs_terrain =
 	"        float openSeaSurfEnergy = openSeaFactor * windFetch * smoothstep(0.55, 1.15, wind.z);\n"
 	"        float crestLap = smoothstep(1.6, 0.20, shoreDist) * smoothstep(0.48, 0.82, waves.w) * openSeaSurfEnergy * 0.22;\n"
 	"        float whitecap = smoothstep(0.68, 0.94, waves.w) * smoothstep(6.0, 16.0, fragWaterDepth) * openSeaSurfEnergy * 0.24;\n"
-	"        float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.55);\n"
+	"        float foam = clamp(((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w) * (1.0 - freezeFactor), 0.0, 0.55);\n"
 	"        vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
 	"        float shallowGlassMask = smoothstep(0.5, 4.0, fragWaterDepth);\n"
 	"        float skyReflWeight = fresnel * (0.15 + 0.85 * shallowGlassMask);\n"
@@ -1588,16 +1603,27 @@ static const char *s_fs_terrain =
 	"            float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
 	"            surfaceRgb += vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.16 * atten);\n"
 	"        }\n"
+	"        /* Procedural frozen ice sheet structure (crystals, micro-fractures, pack-ice crevasses) */\n"
+	"        vec3 iceNoise = chaff_grad_noise2d(vWorldPos * 0.05, 0x1CE54E5Eu);\n"
+	"        vec3 iceDetail = chaff_grad_noise2d(vWorldPos * 0.28, 0x1CE07E17u);\n"
+	"        float icePebble = (iceNoise.x - 0.5) * 0.16 + (iceDetail.x - 0.5) * 0.08;\n"
+	"        float iceCracks = smoothstep(0.47, 0.52, abs(iceNoise.x - 0.5)) * 0.22;\n"
+	"        vec3 iceAlbedo = mix(vec3(0.68, 0.86, 0.96), vec3(0.96, 0.98, 1.00), clamp(0.52 + icePebble + iceCracks, 0.0, 1.0));\n"
+	"        vec3 iceLit = iceAlbedo * effLighting;\n"
+	"        waterBody = mix(waterBody, iceLit, freezeFactor * 0.95);\n"
+	"        surfaceRgb = mix(surfaceRgb, iceLit, freezeFactor * 0.96);\n"
 	"        float surfEdgeFade = smoothstep(0.0, 0.18, fragWaterDepth);\n"
-	"        float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight), 0.0, 0.94) * surfEdgeFade;\n"
-	"        vec3 finalWater = mix(waterBody, surfaceRgb, surfAlpha);\n"
+	"        float liquidAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight), 0.0, 0.94) * surfEdgeFade;\n"
+	"        float iceAlpha = clamp(0.88 + 0.10 * smoothstep(0.2, 3.0, fragWaterDepth), 0.0, 0.98);\n"
+	"        float surfAlpha = mix(liquidAlpha, iceAlpha, freezeFactor);\n"
+	"        vec3 finalWater = mix(waterBody, surfaceRgb, surfAlpha) * (0.16 + 0.84 * dayFactor);\n"
 	"        lit = mix(lit, finalWater, wetBlend);\n"
 	"    }\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
-	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
+	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.18 + 0.82 * dayFactor);\n"
 	"    vec3 viewDirNorm = normalize(vViewDir);\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDirNorm)), 0.0, 1.0), 3.0);\n"
-	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95), limb * 0.45 * uAtmoIntensity);\n"
+	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95) * (0.15 + 0.85 * dayFactor), limb * 0.45 * uAtmoIntensity);\n"
 	"    FragColor = vec4(mix(surfaceLit, sky, fogFactor * uAtmoIntensity), 1.0);\n"
 	"}\n";
 
@@ -2152,7 +2178,9 @@ static const char *s_fs_water =
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float orbitLight = smoothstep(24000.0, 220000.0, vDistance);\n"
 	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    vec3 sunDir = normalize(mix(L_local, normalize(sDir + 0.35 * torusN), orbitLight));\n"
+	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
+	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
+	"    vec3 sunDir = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    /* Biome-aware water optics derived from uSubstrateTex (populated via ndw_biome_base_rgb) */\n"
 	"    vec3 rawBiome = texture(uSubstrateTex, vUV).rgb;\n"
 	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
@@ -2164,6 +2192,14 @@ static const char *s_fs_water =
 	"    float latPhi = 6.28318530718 * ((64.0 - vWorldPos.y) / 8388608.0);\n"
 	"    float latDeg = asin(clamp(abs(sin(latPhi)), 0.0, 1.0)) * 57.2957795;\n"
 	"    float innerHole = max(0.0, -cos(latPhi));\n"
+	"    float sunDot = dot(torusN, sDir);\n"
+	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.45 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    float effSun = sunDot * innerEclipse;\n"
+	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, effSun), 0.12, 1.0);\n"
+	"    float directSun = smoothstep(-0.06, 0.18, effSun);\n"
+	"    float latPolar = smoothstep(54.0, 68.0, latDeg);\n"
+	"    float alpineFreeze = smoothstep(280.0, 480.0, fragZ) * (1.0 - wTropical);\n"
+	"    float freezeFactor = clamp(max(wPolar, max(latPolar, alpineFreeze)), 0.0, 1.0);\n"
 	"    float eqEvapDry = smoothstep(24.0, 0.0, latDeg) * 0.18;\n"
 	"    float midLatWet = smoothstep(18.0, 0.0, abs(latDeg - 38.0)) * 0.12;\n"
 	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
@@ -2189,11 +2225,11 @@ static const char *s_fs_water =
 	"    /* Evaluate recursive moving wind field & height-model basin/fetch profile */\n"
 	"    vec4 wind = eval_recursive_wind(vWorldPos, uAnimTime);\n"
 	"    float shoreWaveDamp = smoothstep(0.0, 1.8, fragWaterDepth);\n"
-	"    float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp);\n"
-	"    vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw, openSeaFactor);\n"
-	"    vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.4, 2.8, fragWaterDepth);\n"
-	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85;\n"
-	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85;\n"
+	"    float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp) * (1.0 - freezeFactor * 0.95);\n"
+	"    vec4 waves = eval_zoom_water_waves(vWorldPos, uAnimTime, vDistance, fw, openSeaFactor) * (1.0 - freezeFactor * 0.95);\n"
+	"    vec2 capGrad = eval_wind_capillary_facets(vWorldPos, uAnimTime, wind, vDistance, fw) * smoothstep(0.4, 2.8, fragWaterDepth) * (1.0 - freezeFactor * 0.95);\n"
+	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.45 + lambWake.yz * 1.85 * (1.0 - freezeFactor);\n"
+	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.45 + 0.35) + capGrad * 1.35 + lambWake.yz * 2.85 * (1.0 - freezeFactor);\n"
 	"    vec3 waveNormal = normalize(torusN - waveGrad.x * tangentU - waveGrad.y * tangentV);\n"
 	"    vec3 specNormal = normalize(torusN - specGrad.x * tangentU - specGrad.y * tangentV);\n"
 	"    float NdotV = max(0.0, dot(waveNormal, viewDir));\n"
@@ -2214,15 +2250,17 @@ static const char *s_fs_water =
 	"    float specBroad   = smoothstep(0.9620, 0.9935, NdotH_wave) * (0.09 + 0.05 * (1.0 - closeWeight));\n"
 	"    float shoreSpecDamp = smoothstep(0.3, 3.2, fragWaterDepth);\n"
 	"    float specSun     = (specMicro * 0.70 + specWavelet * 0.85 + specBroad * 0.55) * shoreSpecDamp * sunTrans;\n"
+	"    float iceGlint    = pow(max(0.0, dot(torusN, halfVec)), 22.0) * 0.42;\n"
+	"    specSun           = mix(specSun * directSun, iceGlint * sunTrans * directSun, freezeFactor);\n"
 	"    /* Schlick Fresnel for air-water interface (R0 = 0.02) + per-wavelet facet tilt contrast */\n"
 	"    float flatNdotV = max(0.0, dot(torusN, viewDir));\n"
 	"    float facetTilt = clamp((flatNdotV - dot(specNormal, viewDir)) * 2.8, -0.18, 0.32);\n"
 	"    float fresnel = clamp(0.02 + 0.98 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0) + max(0.0, facetTilt) * 0.22, 0.015, 0.65);\n"
-	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.72, 0.88);\n"
+	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.72, 0.88)) * (0.16 + 0.84 * dayFactor);\n"
 	"    vec3 sunColor = vec3(1.0, 0.98, 0.92);\n"
 	"    /* 3D wave slope hillshading: sunward wave faces tilt luminous, leeward troughs deepen */\n"
 	"    float waveSlopeDiff = dot(specNormal, sunDir) - dot(torusN, sunDir);\n"
-	"    float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans;\n"
+	"    float hillshadeLit = max(0.0, waveSlopeDiff) * sunTrans * directSun;\n"
 	"    float hillshadeShd = max(0.0, -waveSlopeDiff);\n"
 	"    vec3 waveShade = C_SHELF * (1.0 + hillshadeLit * 0.55 - hillshadeShd * 0.40) * nd_amb_trans(cloudShadow);\n"
 	"    /* Subsurface wave-crest back-scattering only in deeper water (suppressed in crystal shallows) */\n"
@@ -2236,7 +2274,7 @@ static const char *s_fs_water =
 	"    float openSeaSurfEnergy = openSeaFactor * windFetch * smoothstep(0.55, 1.15, wind.z);\n"
 	"    float crestLap = smoothstep(1.6, 0.20, shoreDist) * smoothstep(0.48, 0.82, waves.w) * openSeaSurfEnergy * 0.22;\n"
 	"    float whitecap = smoothstep(0.68, 0.94, waves.w) * smoothstep(6.0, 16.0, fragWaterDepth) * openSeaSurfEnergy * 0.24;\n"
-	"    float foam = clamp((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w, 0.0, 0.55);\n"
+	"    float foam = clamp(((crestLap + whitecap + swashState.z) * foamDistFade + lambWake.w) * (1.0 - freezeFactor), 0.0, 0.55);\n"
 	"    vec3 foamColor = vec3(0.92, 0.96, 1.0);\n"
 	"    /* Pure air-water surface compositing: shallow water stays glass-clear except for wavelet specularity & Fresnel */\n"
 	"    float shallowGlassMask = smoothstep(0.5, 4.0, fragWaterDepth);\n"
@@ -2264,15 +2302,23 @@ static const char *s_fs_water =
 	"        float atten = (1.0 / (1.0 + d2 * 0.00055)) * smoothstep(220.0 * 220.0, 28.0 * 28.0, d2);\n"
 	"        surfaceRgb += vec3(1.06, 0.99, 0.84) * (uLambLight.w * 0.16 * atten);\n"
 	"    }\n"
+	"    /* Procedural frozen ice sheet structure (crystals, micro-fractures, pack-ice crevasses) */\n"
+	"    vec3 iceNoise = chaff_grad_noise2d(vWorldPos * 0.05, 0x1CE54E5Eu);\n"
+	"    vec3 iceDetail = chaff_grad_noise2d(vWorldPos * 0.28, 0x1CE07E17u);\n"
+	"    float icePebble = (iceNoise.x - 0.5) * 0.16 + (iceDetail.x - 0.5) * 0.08;\n"
+	"    float iceCracks = smoothstep(0.47, 0.52, abs(iceNoise.x - 0.5)) * 0.22;\n"
+	"    vec3 iceAlbedo = mix(vec3(0.68, 0.86, 0.96), vec3(0.96, 0.98, 1.00), clamp(0.52 + icePebble + iceCracks, 0.0, 1.0));\n"
+	"    vec3 iceLit = iceAlbedo * ((0.45 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor)) + 0.55 * max(0.0, dot(torusN, sunDir)) * sunTrans * directSun);\n"
+	"    surfaceRgb = mix(surfaceRgb * (0.16 + 0.84 * dayFactor), iceLit, freezeFactor * 0.96);\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
-	"    surfaceRgb = mix(surfaceRgb, vec3(0.35, 0.70, 1.0), limb * 0.55 * uAtmoIntensity);\n"
+	"    surfaceRgb = mix(surfaceRgb, vec3(0.35, 0.70, 1.0) * (0.15 + 0.85 * dayFactor), limb * 0.55 * uAtmoIntensity);\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    float fogW = fogFactor * uAtmoIntensity;\n"
 	"    /* --- Submerged sprite: refracted lookup of the resolved scene + true view-ray absorption --- */\n"
 	"    float cosV = max(0.35, dot(torusN, viewDir));\n"
 	"    float subDepthV = objPath1 * cosV;\n"
 	"    float refrFade = smoothstep(2000.0, 500.0, vDistance);\n"
-	"    float refrDepth = min(subDepthV, 8.0) * refrFade;\n"
+	"    float refrDepth = min(subDepthV, 8.0) * refrFade * (1.0 - freezeFactor * 0.90);\n"
 	"    /* Snell-style lateral shift from the local wave slope (world units -> screen UV) plus the apparent lift of submerged things */\n"
 	"    vec2 refrWorld = waveGrad * (0.30 * refrDepth);\n"
 	"    vec2 refrUV = 0.5 * vec2(-refrWorld.x / (vDistance * uProjScale.x),\n"
@@ -2302,7 +2348,9 @@ static const char *s_fs_water =
 	"    vec3 sceneOut = mix(sceneS.rgb, objCol, objW);\n"
 	"    /* Air-water surface layer over the submerged sprite, identical terms to the terrain pass */\n"
 	"    float surfEdgeFade = smoothstep(0.0, 0.18, fragWaterDepth);\n"
-	"    float surfAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight), 0.0, 0.94) * surfEdgeFade;\n"
+	"    float liquidAlpha = clamp(1.0 - (1.0 - skyReflWeight) * (1.0 - sssWeight) * (1.0 - specWeight) * (1.0 - foamWeight), 0.0, 0.94) * surfEdgeFade;\n"
+	"    float iceAlpha = clamp(0.88 + 0.10 * smoothstep(0.2, 3.0, fragWaterDepth), 0.0, 0.98);\n"
+	"    float surfAlpha = mix(liquidAlpha, iceAlpha, freezeFactor);\n"
 	"    vec3 comp = mix(sceneOut, mix(surfaceRgb, sky, fogW), surfAlpha);\n"
 	"    /* The waterline fades in over the first quarter unit below the surface */\n"
 	"    float wetBlend = smoothstep(0.0, 0.25, subDepthV);\n"
@@ -2362,6 +2410,7 @@ static const char *s_fs_billboard =
 	"uniform float uAtmoIntensity;\n"
 	"uniform vec4 uLambLight;\n"
 	"uniform int uPass;\n"
+	"uniform vec3 uSunDir;\n"
 	"out vec4 FragColor;\n"
 	ND_GLSL_SCENE_LIGHT
 	ND_GLSL_CSM_LOOKUP_FN
@@ -2530,7 +2579,14 @@ static const char *s_fs_billboard =
 	"}\n"	"void main() {\n"
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
 	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
-	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
+	"    float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
+	"    float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
+	"    vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
+	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    float sunDot = dot(torusN, sDir);\n"
+	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
+	"    float directSun = smoothstep(-0.06, 0.16, sunDot);\n"
+	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
 	"    /* Same cloud shadow as terrain and water: one fetch from the shared cloud-shadow map at the sprite's ground position */\n"
 	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vQuadUV.z, vDist);\n"
 	"    /* Exact horizontal water-plane (Z = uSeaLevel) intersection of the camera ray through this billboard pixel */\n"
@@ -2673,7 +2729,7 @@ static const char *s_fs_billboard =
 	"        albedo *= clamp(1.0 + leafRelief, 0.80, 1.22);\n"
 	"        if (isGrass) {\n"
 	"            /* Cheap travelling gust phase wave replaces a per-pixel 3-noise wind evaluation on every grass fragment */\n"
-	"            float gustWave = 0.5 + 0.5 * sin(dot(vLocalPos.xy, vec2(0.052, -0.047)) + mod(uAnimTime, 628.3185) * 1.9 + (g1.x - 0.5) * 3.0);\n"
+	"            float gustWave = 0.5 + 0.5 * sin(dot(vLocalPos.xy, vec2(0.052, -0.047)) + mod(uAnimTime, 628.3185) * " ND_SL_STR(ND_GRASS_SHEEN_FREQ_RAD) " + (g1.x - 0.5) * 3.0);\n"
 	"            float tipSheen = smoothstep(0.28, 0.96, qy) * clamp(gustWave * 0.80, 0.0, 1.0);\n"
 	"            vec3 groundTurf = mix(vec3(0.29, 0.49, 0.23), vec3(0.37, 0.60, 0.27), smoothstep(0.25, 0.75, g1.x)) * vTint.rgb;\n"
 	"            vec3 bladeBody  = mix(albedo * vec3(0.98, 1.02, 0.92), albedo * vec3(1.16, 1.14, 0.88), smoothstep(0.18, 0.92, qy + tipSheen * 0.32));\n"
@@ -2700,7 +2756,7 @@ static const char *s_fs_billboard =
 	"    float hemiSky = 0.5 + 0.5 * N_bb.z;\n"
 	"    vec3 ambCol = mix(vec3(0.50, 0.55, 0.62), vec3(0.68, 0.74, 0.82), hemiSky);\n"
 	"    vec3 sunCol = vec3(1.06, 1.02, 0.95);\n"
-	"    vec3 lightTerm = (ambCol * (0.52 * nd_amb_trans(cloudSh)) + sunCol * (0.58 * sunDiff * nd_sun_trans(cloudSh))) * (cavityAO * contactAO);\n"
+	"    vec3 lightTerm = (ambCol * (0.52 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor)) + sunCol * (0.58 * sunDiff * nd_sun_trans(cloudSh) * directSun)) * (cavityAO * contactAO);\n"
 	"    vec3 lit = albedo * mix(vec3(1.0), lightTerm, isLambGlow ? 0.32 : 0.78);\n"
 	"    if (uSeaLevel > -900.0 && canSubmerge && vQuadUV.z < waveSurfZ + 0.35 && !isSubmerged) {\n"
 	"        /* Capillary wet-rim darkening just above the waterline (including on the universe-owner lamb) */\n"
@@ -3214,10 +3270,13 @@ static const char *s_fs_cloud =
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float orbitLight = smoothstep(24000.0, 220000.0, uCamDist);\n"
 	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
-	"    vec3 sunDir = normalize(mix(L_local, normalize(sDir + 0.35 * torusN), orbitLight));\n"
+	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
+	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
+	"    vec3 sunDir = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    float sunDot = dot(torusN, sDir);\n"
-	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.35 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
-	"    float cloudDayFactor = mix(1.0, 0.46 + 0.54 * smoothstep(-0.22, 0.32, sunDot * innerEclipse), orbitLight);\n"
+	"    float innerEclipse = (sunDot > 0.0) ? (1.0 - 0.45 * innerHole * (1.0 - abs(sDir.z))) : 1.0;\n"
+	"    float effSun = sunDot * innerEclipse;\n"
+	"    float cloudDayFactor = clamp(0.16 + 0.84 * smoothstep(-0.16, 0.22, effSun), 0.16, 1.0);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
 	"    /* 4-Step Asymmetric Deck-Stratified 3D Raymarching (1 step in Deck 3, 1 step in Deck 2, 2 steps in Deck 1):\n"
 	"     * Gives the primary lower cumulus deck (Deck 1) a true 2-slice 3D base + eroded turret crown volume while\n"
@@ -3321,7 +3380,7 @@ static const char *s_fs_cloud =
 	"    float cloudAlpha = clamp(rawAlpha, 0.0, 0.96);\n"
 	"    if (cloudAlpha <= 0.003) discard;\n"
 	"    vec3 cloudRgb = (accumLight / max(1e-4, rawAlpha)) * cloudDayFactor;\n"
-	"    vec3 sky = (length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85);\n"
+	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * cloudDayFactor);\n"
 	"    float limb = pow(clamp(1.0 - max(0.0, dot(torusN, viewDir)), 0.0, 1.0), 3.0);\n"
 	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
@@ -3602,9 +3661,9 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 			float phase = (float)(th & 0xFFFFu) * (TWO_PI_F / 65536.0f);
 			float stiff = 0.92f + 0.16f * ((float)((th >> 16u) & 0xFFu) / 255.0f);
 			float wind_proj = b->x * wDirX + b->y * wDirY;
-			float slow_sway = sinf(s_grass_anim_time * 0.42f - wind_proj * 0.024f + phase * 0.25f) * (0.14f + 0.14f * gust);
-			float bough_nod = sinf(s_grass_anim_time * 0.72f - wind_proj * 0.038f + phase * 0.20f) * (0.05f + 0.07f * catspaw);
-			float wind_mag = (0.52f + 0.58f * gust + 0.20f * catspaw + slow_sway + bough_nod) * stiff * flora_sway_scale;
+			float slow_sway = sinf(s_grass_anim_time * ND_TREE_TRUNK_SWAY_FREQ_RAD - wind_proj * 0.024f + phase * 0.25f) * (0.10f + 0.12f * gust);
+			float bough_nod = sinf(s_grass_anim_time * ND_TREE_BOUGH_NOD_FREQ_RAD - wind_proj * 0.038f + phase * 0.20f) * (0.04f + 0.06f * catspaw);
+			float wind_mag = (ND_TREE_WIND_BASE_LEAN + ND_TREE_WIND_GUST_SCALE * gust + ND_TREE_WIND_CATSPAW_SCALE * catspaw + slow_sway + bough_nod) * stiff * flora_sway_scale;
 			grass_sx = wDirX * wind_mag + (-wDirY) * (bough_nod * 0.10f * flora_sway_scale);
 			grass_sy = wDirY * wind_mag + ( wDirX) * (bough_nod * 0.10f * flora_sway_scale);
 			grass_dz = 0.0f;
@@ -3965,6 +4024,7 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uAtmoIntensity;
 	GLint uLambLight;
+	GLint uSunDir;
 	GLint uCloudShadowMap;
 	GLint uCsm;
 	GLint uPass;
@@ -4341,6 +4401,7 @@ static bool check_pipelines_ready(void)
 			s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
 			s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
 			s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.bb_pipe.uSunDir        = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.bb_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
 			s_gl.bb_pipe.uCsm           = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.bb_pipe.uPass          = glGetUniformLocation(p, "uPass", 5);
@@ -5256,6 +5317,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glUniform4f(s_gl.bb_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
 	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
+	glUniform3fv(s_gl.bb_pipe.uSunDir, 1, s_gl.cur_sun_dir);
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
 
@@ -5750,13 +5812,14 @@ void nd_seven_gl_eval_grass_displacement(float wx, float wy,
 
 	float wind_proj = wx * wDirX + wy * wDirY;
 	float cross_proj = wx * (-wDirY) + wy * wDirX;
-	float gust_wave = sinf(anim_time * 0.80f - wind_proj * 0.035f + phase * 0.16f) * (0.20f + 0.22f * gust);
-	float flutter = sinf(anim_time * 1.30f - wind_proj * 0.055f + cross_proj * 0.025f + phase * 0.20f) * (0.06f + 0.10f * catspaw);
-	float wind_mag = (0.88f * gust + 0.48f * catspaw + gust_wave + flutter) * stiff;
+	float gust_wave = sinf(anim_time * ND_GRASS_WAVE_FREQ_RAD - wind_proj * 0.035f + phase * 0.16f) * (ND_GRASS_WAVE_AMP * (0.60f + 0.40f * gust));
+	float flutter = sinf(anim_time * ND_GRASS_FLUTTER_FREQ_RAD - wind_proj * 0.055f + cross_proj * 0.025f + phase * 0.20f) * (ND_GRASS_FLUTTER_AMP * (0.50f + 0.50f * catspaw));
+	float wind_mag = (ND_GRASS_WIND_BASE_LEAN + ND_GRASS_WIND_GUST_SCALE * (gust - 0.70f > 0.0f ? gust - 0.70f : 0.0f) + ND_GRASS_WIND_CATSPAW_SCALE * catspaw + gust_wave + flutter) * stiff;
+	if (wind_mag < 0.0f) wind_mag = 0.0f;
 	float sx = wDirX * wind_mag + (-wDirY) * (flutter * 0.12f);
 	float sy = wDirY * wind_mag + ( wDirX) * (flutter * 0.12f);
 	float dz = (wind_mag * wind_mag) * 0.06f;
-	float rustle = 0.09f * catspaw;
+	float rustle = 0.05f * catspaw;
 
 	/* 2. Calm physical hoof/ankle contact parting & trampling within R = 11.0 world units
 	 *    (no artificial high-frequency sine tremor so blades close to the Lamb never tremble) */
@@ -6380,8 +6443,9 @@ void nd_seven_gl_eval_celestial_dirs(float t_sec,
                                      float out_sun_dir[3],
                                      float out_moon_dir[3])
 {
-	/* Solar ecliptic longitude (21,600s = 6h real day, 23.44 deg axial obliquity) */
-	float lambda_sun = TWO_PI_F * (t_sec / ND_ASTRO_SOLAR_DAY_SEC);
+	/* Solar ecliptic longitude (180s = 3m orbital day/night cycle, 23.44 deg axial obliquity,
+	 * +1.20 rad initial phase so the day/night terminator is visible across the torus ring from t=0) */
+	float lambda_sun = TWO_PI_F * (t_sec / ND_ASTRO_SOLAR_DAY_SEC) + 1.20f;
 	float obliq = 23.43928f * (PI_F / 180.0f);
 	float sx = cosf(lambda_sun);
 	float sy = sinf(lambda_sun);

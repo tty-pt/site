@@ -93,8 +93,8 @@ static uint32_t ndw_ground_base_rgb(const ndw_ground_t *g)
 	case NDW_G_WATER:
 	case NDW_G_SHALLOW_WATER:
 	case NDW_G_SAND:   r = 226; gg = 200; b = 140; break;
-	case NDW_G_SNOW:   r = 234; gg = 240; b = 250; break;
-	case NDW_G_TUNDRA: r = 150; gg = 166; b = 148; break;
+	case NDW_G_SNOW:   r = 248; gg = 252; b = 255; break;
+	case NDW_G_TUNDRA: r = 216; gg = 224; b = 236; break;
 	case NDW_G_ASH:    r = 54;  gg = 48;  b = 52;  break;
 	default:           r = 78;  gg = 128; b = 60;  break;
 	}

@@ -252,15 +252,40 @@ float nd_seven_gl_eval_cloud_density(float wx, float wy, float wz,
                                      float *out_grad_x, float *out_grad_y,
                                      float *out_grad_z, float *out_grad_t);
 
-/* 4x Real-Life Astronomical Solar & Lunar Cycle Constants:
- * - Solar Day (1/4 real day = 4x real speed): 86,400 / 4 = 21,600 seconds (6.0 real hours)
- * - Sidereal Lunar Month (4x real speed): 27.321661 * 21,600 = 590,147.88 seconds (~6.83 real days)
- * - Synodic Lunar Month (4x real speed):  29.530589 * 21,600 = 637,860.72 seconds (~7.38 real days)
- * - Lunar Tidal Day (meridian transit to transit): 24h50m / 4 = 22,356.86 seconds (~6.21 real hours) */
-#define ND_ASTRO_SOLAR_DAY_SEC      21600.0f
-#define ND_ASTRO_SIDEREAL_MONTH_SEC 590147.88f
-#define ND_ASTRO_SYNODIC_MONTH_SEC  637860.72f
-#define ND_ASTRO_LUNAR_DAY_SEC      22356.86f
+/* Astronomical Solar & Lunar Cycle Constants:
+ * Option B: 1 real hour per 24-hour diurnal cycle (24x real speed: 86,400 / 24 = 3,600 seconds).
+ *   - Solar Day: 3,600.0 seconds (30m day, 30m night)
+ *   - Sidereal Lunar Month: 27.321661 * 3,600 = 98,357.98 seconds (~27.3 real hours)
+ *   - Synodic Lunar Month:  29.530589 * 3,600 = 106,310.12 seconds (~29.5 real hours)
+ *   - Lunar Tidal Day: (24.8333h / 24) * 3,600 = 3,725.0 seconds (~62.1 real minutes) */
+#define ND_ASTRO_SOLAR_DAY_SEC      3600.0f
+#define ND_ASTRO_SIDEREAL_MONTH_SEC 98357.98f
+#define ND_ASTRO_SYNODIC_MONTH_SEC  106310.12f
+#define ND_ASTRO_LUNAR_DAY_SEC      3725.0f
+
+/* =========================================================================
+ * Vegetation & Surface Wind Tuning Parameters
+ * Single source of truth for grass, flora, tree, and meadow wind dynamics.
+ * ========================================================================= */
+
+/* Grass tuft sway & lean dynamics (calm, upright meadow with gentle rolling waves) */
+#define ND_GRASS_WIND_BASE_LEAN       0.16f  /* Static upright rest lean (was 0.88f) */
+#define ND_GRASS_WIND_GUST_SCALE      0.20f  /* Sway deflection added by passing gusts */
+#define ND_GRASS_WIND_CATSPAW_SCALE   0.08f  /* High-frequency shear response */
+#define ND_GRASS_WAVE_FREQ_RAD        0.38f  /* Rolling meadow wave frequency in rad/s (was 0.80f) */
+#define ND_GRASS_FLUTTER_FREQ_RAD     0.65f  /* Subtle blade flutter frequency in rad/s (was 1.30f) */
+#define ND_GRASS_WAVE_AMP             0.20f  /* Wave deflection amplitude */
+#define ND_GRASS_FLUTTER_AMP          0.06f  /* Flutter deflection amplitude */
+
+/* Woody tree canopy & trunk dynamics (stately, heavy pendulum inertia) */
+#define ND_TREE_WIND_BASE_LEAN        0.18f  /* Static upright trunk rest lean */
+#define ND_TREE_WIND_GUST_SCALE       0.24f  /* Trunk deflection added by gusts */
+#define ND_TREE_WIND_CATSPAW_SCALE    0.08f  /* Canopy shear added by catspaw */
+#define ND_TREE_TRUNK_SWAY_FREQ_RAD   0.18f  /* Slow trunk pendulum frequency in rad/s (was 0.42f) */
+#define ND_TREE_BOUGH_NOD_FREQ_RAD    0.32f  /* Canopy bough nod frequency in rad/s (was 0.72f) */
+
+/* Billboard shader travelling grass sheen frequency in rad/s (was 1.9f) */
+#define ND_GRASS_SHEEN_FREQ_RAD       0.60f
 
 /* Evaluate 3D unit vectors toward the Sun and Moon in the planet's frame at time `t_sec` (4x real-life clock):
  *   out_sun_dir[3]  = (cos(lambda_sun), sin(lambda_sun), sin(obliquity) * sin(lambda_sun)) normalized

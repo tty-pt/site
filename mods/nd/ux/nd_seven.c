@@ -106,12 +106,13 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		if (elev_rel < -2000) elev_rel = -2000;
 		if (elev_rel > 1854) elev_rel = 1854;
 
-		/* Natural alpine transition on high mountain summits (> 950..1400 wu):
-		 * Lowlands, plateaus, and foothills (< 950 wu) preserve their authentic biome
-		 * color in uSubstrateTex so s_fs_terrain never misclassifies warm highlands as polar ice. */
-		if (elev_rel > 950 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
-			uint32_t c_snow = 0xFFFCF8F0u; /* Pure alpine snow RGB(240, 248, 252) */
-			int snow_w = (elev_rel <= 1400) ? ((elev_rel - 950) * 255 / 450) : 255;
+		/* Natural alpine snowline transition on mountain ranges (> 320..620 wu):
+		 * Lowlands, plains, and foothills (< 320 wu) preserve their authentic biome color in
+		 * uSubstrateTex, while mountain cordilleras and summits (> 320..620+ wu) are capped in white snow. */
+		int snow_w = 0;
+		if (elev_rel > 320 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
+			uint32_t c_snow = 0xFFFFFAF6u; /* Pure alpine snow RGB(246, 250, 255) */
+			snow_w = (elev_rel <= 620) ? ((elev_rel - 320) * 255 / 300) : 255;
 			col = macro_blend_rgb(col, c_snow, snow_w);
 		}
 
@@ -128,12 +129,13 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		int r = (int)(col & 0xFF);
 		int g = (int)((col >> 8) & 0xFF);
 		int b = (int)((col >> 16) & 0xFF);
-		if (fs.bio == BIOME_PERMANENT_ICE) {
-			/* Keep polar & summit ice cool-white (B >= G >= R) so wPolar in s_fs_terrain is exact */
-			int ice_shade = 248 + (fine_rel >> 1);
-			r = (236 * ice_shade) >> 8;
-			g = (242 * ice_shade) >> 8;
-			b = (252 * ice_shade) >> 8;
+		if (fs.bio == BIOME_PERMANENT_ICE || snow_w >= 192) {
+			/* Keep polar & summit snow crisp cool-white (B >= G >= R) so wPolar in s_fs_terrain is exact */
+			int ice_shade = 250 + (fine_rel >> 2);
+			if (ice_shade < 238) ice_shade = 238;
+			r = (244 * ice_shade) >> 8;
+			g = (249 * ice_shade) >> 8;
+			b = (255 * ice_shade) >> 8;
 		} else {
 			r = (r * shade_q8) >> 8;
 			g = (g * (shade_q8 + (fine_rel >> 2))) >> 8;
