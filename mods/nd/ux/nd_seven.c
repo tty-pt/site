@@ -991,6 +991,12 @@ static uint32_t meadow_biome_tint(unsigned biome, int zone, uint32_t h, uint8_t 
 			0xC8D8CC00u, 0xD2CCC000u, 0xBECFCE00u, 0xC4D4C200u
 		};
 		rgb = tundra_tints[idx];
+	} else if (biome == 6u || biome == 14u) {
+		/* Cold desert (6) & Desert (14): parched straw, weathered sage & dry bunchgrass */
+		static const uint32_t desert_tints[4] = {
+			0xE6D4A000u, 0xD8D09E00u, 0xDEC89400u, 0xD0C49000u
+		};
+		rgb = desert_tints[idx];
 	} else if (biome == 7u || biome == 15u) {
 		/* Shrubland & Savannah: sun-cured golden-ochre & warm straw */
 		static const uint32_t savanna_tints[4] = {

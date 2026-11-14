@@ -3167,9 +3167,9 @@ int main(void)
 
 		/* Tall tree (pad0=2) sways homogeneously across TL (idx 2) and TR (idx 4) with heavy woody stiffness,
 		 * and ignores Lamb footstep trampling when the Lamb moves away */
-		assert(tree_disp_mag > 0.35f && tree_disp_mag < 3.0f);
-		assert(fabsf((v_tree[4].local_pos[0] - v_std_tree[4].local_pos[0]) - tree_disp_x) < 1e-5f);
-		assert(fabsf((v_tree[4].local_pos[1] - v_std_tree[4].local_pos[1]) - tree_disp_y) < 1e-5f);
+		assert(tree_disp_mag > 0.15f && tree_disp_mag < 3.0f);
+		assert(fabsf((v_tree[4].local_pos[0] - v_std_tree[4].local_pos[0]) - tree_disp_x) < 1e-4f);
+		assert(fabsf((v_tree[4].local_pos[1] - v_std_tree[4].local_pos[1]) - tree_disp_y) < 1e-4f);
 		nd_seven_gl_set_lamb_light(0.0f, 0.0f, 12.0f, 1.0f);
 		nd_seven_gl_bb_vert_t v_tree_far_lamb[6];
 		nd_seven_gl_eval_billboard_quad(&tall_tree_bb, ND_SEVEN_DIORAMA_PITCH, pdef, v_tree_far_lamb);

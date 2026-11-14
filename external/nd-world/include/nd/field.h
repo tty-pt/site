@@ -974,35 +974,44 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	int32_t rn_centered = (int32_t)(cl_raw >> 15) - 256;
 	int32_t rn_val = 256 + (rn_centered * 20) / 10;
 
-	/* Toroidal Solar Evaporation & Moisture Belts (relative to the torus plane Z = 0):
+	/* Toroidal Circulation & Planetary Moisture Belts (relative to the torus plane Z = 0):
 	 *   - eq_dist == 0 at BOTH y = 0 (starting position, Outer Equator) and y = +-32768 (max/min y, Inner Equator).
 	 *   - eq_dist == 16384 at y = +-16384 (North & South Polar Crowns at top/bottom of torus tube).
 	 *
-	 * 1. Equatorial Solar Evaporation Belt (0..25 deg == eq_dist < 4600, peaking at y = 0 and y = +-32768):
-	 *    Direct overhead solar insolation drives intense evaporation at y = 0 and y = +-32768,
-	 *    creating vast Equatorial Deserts and Savannahs at the starting position (y = 0)
-	 *    and at max/min y (+32767 / -32768). */
-	if (eq_dist < 4200) {
-		int32_t desert_rn = 76 + ((rn_val * 46) / 512);
-		int32_t t_eq = 4200 - eq_dist;
-		rn_val = rn_val - (((rn_val - desert_rn) * t_eq) / 4200);
+	 * 1. Equatorial Convective Moisture Belt (ITCZ: 0..16 deg == eq_dist < 2800):
+	 *    Intense equatorial solar heating drives strong convective updrafts and heavy precipitation,
+	 *    fostering lush Tropical Rainforests and Seasonal Jungles along the equators. */
+	if (eq_dist < 2800) {
+		int32_t itcz_lift = ((2800 - eq_dist) * 85) / 2800;
+		rn_val += itcz_lift;
 	}
-	/* 2. Subtropical / Mid-Latitude Monsoon & Forest Moisture Belt (22..50 deg == eq_dist 4000..9200):
-	 *    As solar evaporation eases away from the scorched equators, moisture condenses into
-	 *    Tropical Seasonal/Rainforest belts (22..36 deg) and lush Temperate Forests/Woodlands (36..50 deg). */
-	if (eq_dist >= 4000 && eq_dist <= 9200) {
-		int32_t mid_dist = abs(eq_dist - 6400);
-		if (mid_dist < 2600 && rn_val < 406) {
-			int32_t wet_lift = ((406 - rn_val) * (2600 - mid_dist) * 62) / (2600 * 100);
+	/* 2. Subtropical Arid Highs / Descending Hadley Belt (18..35 deg == eq_dist 3000..6200):
+	 *    Descending dry tropospheric air mass from the Hadley circulation suppresses clouds,
+	 *    carving realistic Subtropical Deserts (Erg sand dunes) and Arid Acacia Savannahs. */
+	if (eq_dist >= 3000 && eq_dist <= 6200) {
+		int32_t hadley_center = abs(eq_dist - 4600);
+		if (hadley_center < 1600) {
+			int32_t t_hadley = 1600 - hadley_center;
+			int32_t desert_rn = 72 + ((rn_val * 42) / 512);
+			rn_val = rn_val - (((rn_val - desert_rn) * t_hadley * 78) / (1600 * 100));
+		}
+	}
+	/* 3. Mid-Latitude Temperate Moisture Belt (35..55 deg == eq_dist 6200..9800):
+	 *    Ferrel cell / polar front cyclonic storm tracks sustain Temperate Forests,
+	 *    Grasslands, and Woodlands. */
+	if (eq_dist >= 6200 && eq_dist <= 9800) {
+		int32_t mid_dist = abs(eq_dist - 7800);
+		if (mid_dist < 1600 && rn_val < 420) {
+			int32_t wet_lift = ((420 - rn_val) * (1600 - mid_dist) * 58) / (1600 * 100);
 			rn_val += wet_lift;
 		}
 	}
-	/* 3. Subpolar / Boreal low-evaporation positive moisture balance (50..67 deg == eq_dist 9000..12300):
+	/* 4. Subpolar / Boreal low-evaporation positive moisture balance (55..72 deg == eq_dist 9800..12800):
 	 *    Low potential evapotranspiration approaching the top & bottom polar crowns (y = +-16384) favors Taiga. */
-	if (eq_dist >= 9000 && eq_dist <= 12300) {
-		int32_t bor_dist = abs(eq_dist - 10650);
-		if (bor_dist < 1650) {
-			int32_t bor_wet = (1650 - bor_dist) * 90 / 1650;
+	if (eq_dist >= 9800 && eq_dist <= 12800) {
+		int32_t bor_dist = abs(eq_dist - 11300);
+		if (bor_dist < 1500) {
+			int32_t bor_wet = (1500 - bor_dist) * 85 / 1500;
 			rn_val += bor_wet;
 		}
 	}
