@@ -249,6 +249,80 @@ nd_field_torus_solar_incidence_q15(int16_t pos_x, int16_t pos_y, uint16_t sun_az
 	return (dot_q15 > 0) ? dot_q15 : 0;
 }
 
+/* Signed toroidal solar dot product in Q15 [-32768..+32768], accounting for partial
+ * midday arch-eclipse self-shadowing when sunlight crosses the central hole onto the inner rim (cos_phi < 0). */
+static inline int32_t
+nd_field_torus_signed_solar_q15(int16_t pos_x, int16_t pos_y, uint16_t sun_azimuth)
+{
+	int32_t cos_phi = nd_field_cos_q15((uint16_t)pos_y);
+	int32_t cos_theta_rel = nd_field_cos_q15((uint16_t)((uint16_t)pos_x - sun_azimuth));
+	int32_t dot_q15 = (cos_phi * cos_theta_rel) >> 15;
+	/* On the inner rim (cos_phi < 0), when facing the sun across the central hole (dot_q15 > 0),
+	 * the sunward side of the torus ring partially eclipses the midday sun (~25% attenuation). */
+	if (cos_phi < 0 && dot_q15 > 0) {
+		int32_t inner_q15 = -cos_phi;
+		int32_t atten_q15 = 32768 - ((inner_q15 * 8192) >> 15);
+		dot_q15 = (dot_q15 * atten_q15) >> 15;
+	}
+	return dot_q15;
+}
+
+/* Canonical Mean Annual Toroidal Climate Temperature (in NeverDark temperature units):
+ * Governed by poloidal latitude phi (room_y) relative to the plane of the torus (Z = 0):
+ *   - Outer Equator (room_y = 0, phi = 0): unobstructed overhead insolation (+94 base)
+ *   - Inner Equator (room_y = +-32768, phi = +-pi): in the torus plane but partially eclipsed
+ *     by the opposite side of the ring around equinox noon (-8 arch-shadow cooling -> +86 base)
+ *   - North & South Polar Crowns (room_y = +-16384, phi = +-pi/2): tangent to orbital plane (-46 base)
+ *   - High mountain environmental lapse rate above elev_rel > 220 world units. */
+static inline int16_t
+nd_field_lat_climate_temp(int16_t pos_y, uint32_t tm, int32_t elev_rel)
+{
+	int32_t abs_ry = abs((int32_t)pos_y);
+	int32_t eq_dist = (abs_ry <= 16384) ? abs_ry : (32768 - abs_ry);
+	int32_t cos_phi = nd_field_cos_q15((uint16_t)pos_y);
+	int32_t lat_insol_q15 = abs(cos_phi);
+	int32_t inner_q15 = (cos_phi < 0) ? -cos_phi : 0;
+
+	/* 32% linear meridional heat transport (eq_dist) + 68% solar incidence (1 - |cos(phi)|) */
+	int32_t lat_frac_q15 = (((eq_dist << 1) * 10486) + ((32768 - lat_insol_q15) * 22282)) >> 15;
+	int32_t lat_cool = (lat_frac_q15 * 140) >> 15;
+	if (eq_dist > 11400) {
+		/* Polar ice-albedo feedback on the top and bottom crowns (63..90 deg == eq_dist > 11400) */
+		lat_cool += ((eq_dist - 11400) * 42) / (16384 - 11400);
+	}
+	/* Inner-hole arch-eclipse cooling: -4 units at the inner equator (phi = +-pi) vs outer equator (phi = 0) */
+	int32_t inner_eclipse_cool = (inner_q15 * 4) >> 15;
+
+	int32_t tm_var = (int32_t)(tm >> 16) - 128;
+	int32_t tm_amp = (eq_dist > 12000) ? 14 : 18;
+	int32_t bio_temp = 96 - lat_cool - inner_eclipse_cool + (tm_var * tm_amp / 128);
+	if (elev_rel > 220) {
+		/* High mountain environmental lapse rate: summits > 1200..1854 wu cool into alpine tundra and snowcaps */
+		bio_temp -= ((elev_rel - 220) * 95) / 1000;
+	}
+	if (bio_temp < -32000) bio_temp = -32000;
+	if (bio_temp > 32000) bio_temp = 32000;
+	return (int16_t)bio_temp;
+}
+
+/* Realistic Diurnal Day/Night Temperature Swing on the Rotating Torus:
+ * Warms sunlit longitudes during the day and cools shadowed longitudes at night
+ * without turning the night side of the Equator into polar ice. */
+static inline int16_t
+nd_field_diurnal_temp_delta(int16_t pos_x, int16_t pos_y, uint16_t sun_azimuth,
+                            uint32_t rain, uint8_t is_water)
+{
+	int32_t signed_dot_q15 = nd_field_torus_signed_solar_q15(pos_x, pos_y, sun_azimuth);
+	int32_t diurnal_amp = 15;
+	if (is_water) {
+		diurnal_amp = 13; /* High oceanic thermal inertia moderates day/night swing */
+	} else if (rain < 200u) {
+		/* Arid desert/steppe skies have stronger daytime solar heating & radiative night cooling */
+		diurnal_amp += (int32_t)(((200u - rain) * 3u) / 200u);
+	}
+	return (int16_t)((signed_dot_q15 * diurnal_amp) >> 15);
+}
+
 static inline int16_t
 nd_field_torus_solar_cooling(int16_t pos_x, int16_t pos_y, uint16_t sun_azimuth)
 {
@@ -259,7 +333,8 @@ nd_field_torus_solar_cooling(int16_t pos_x, int16_t pos_y, uint16_t sun_azimuth)
 static inline int16_t
 nd_field_torus_latitude_cooling(int16_t pos_y)
 {
-	return nd_field_torus_solar_cooling(0, pos_y, nd_field_get_sun_azimuth());
+	const uint32_t tm_neutral = 128u << 16;
+	return (int16_t)(96 - nd_field_lat_climate_temp(pos_y, tm_neutral, 0));
 }
 
 static inline int16_t
@@ -267,9 +342,9 @@ nd_field_temp_at_azimuth(uint16_t obits, uint32_t he, uint32_t tm,
                          int16_t pos_x, int16_t pos_y, uint16_t sun_azimuth)
 {
 	(void)obits; (void)he;
-	int16_t solar_cool = nd_field_torus_solar_cooling(pos_x, pos_y, sun_azimuth);
-	int32_t tm_var = (int32_t)(tm >> 16) - 128;
-	return (int16_t)(ND_FIELD_SOLAR_TEMP_MAX - solar_cool + (tm_var * 30 / 128));
+	int16_t base_climate = nd_field_lat_climate_temp(pos_y, tm, 0);
+	int16_t diurnal = nd_field_diurnal_temp_delta(pos_x, pos_y, sun_azimuth, 256u, 0);
+	return (int16_t)(base_climate + diurnal);
 }
 
 static inline int16_t
@@ -875,43 +950,54 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	uint32_t cl_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 201 + world);
 	uint32_t tm_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 253 + world);
 
-	/* 4-octave continuous climate hierarchy across scales:
-	 *   30% continental macro (shift 14: 16k rooms = 2.6M world units)
-	 *   35% continental provinces (shift 10: 1k rooms = 164k world units)
-	 *   25% regional corridors (shift 7: 128 rooms = 20.5k world units)
-	 *   10% local eco-regions (shift 4: 16 rooms = 2.5k world units) */
-	uint32_t cl_raw = (cl_macro * 30u + cl_prov * 35u + cl_reg * 25u + cl_loc * 10u) / 100u;
-	uint32_t tm_raw = (tm_macro * 40u + tm_prov * 30u + tm_reg * 20u + tm_loc * 10u) / 100u;
+	/* Toroidal distance from the equatorial plane (Z = 0: 0 at outer equator ry=0 and inner equator ry=+-32768;
+	 * 16384 at North/South polar crowns ry=+-16384) and inner-throat factor inner_q15 = max(0, -cos(phi)). */
+	int32_t abs_ry = abs((int32_t)room_y);
+	int32_t eq_dist = (abs_ry <= 16384) ? abs_ry : (32768 - abs_ry);
+	int32_t cos_phi = nd_field_cos_q15((uint16_t)room_y);
+	int32_t inner_q15 = (cos_phi < 0) ? -cos_phi : 0;
+
+	/* 4-octave continuous climate hierarchy weighted by the torus circumference metric (R + r0 * cos(phi)):
+	 * On the wide outer rim (R + r0 = 3.335M), regional/local octaves resolve the broader circumference;
+	 * inside the 5x narrower central hole (R - r0 = 0.665M), weight shifts from fine local octaves to
+	 * shift-10 provinces so inner-hole biomes maintain natural physical aspect ratio without pinching. */
+	uint32_t inner_shift = (uint32_t)((inner_q15 * 10) >> 15); /* 0 on outer half -> 10 at inner equator */
+	uint32_t w_macro = 20u;
+	uint32_t w_prov  = 35u + inner_shift;
+	uint32_t w_reg   = 30u - (inner_shift * 6u) / 10u;
+	uint32_t w_loc   = 100u - (w_macro + w_prov + w_reg);
+	uint32_t cl_raw = (cl_macro * w_macro + cl_prov * w_prov + cl_reg * w_reg + cl_loc * w_loc) / 100u;
+	uint32_t tm_raw = (tm_macro * 35u + tm_prov * 35u + tm_reg * 20u + tm_loc * 10u) / 100u;
 
 	/* Contrast-stretch rainfall to utilize full dry-to-wet spectrum (0..512) */
 	int32_t rn_centered = (int32_t)(cl_raw >> 15) - 256;
-	int32_t rn_val = 256 + (rn_centered * 18) / 10;
+	int32_t rn_val = 256 + (rn_centered * 20) / 10;
 
-	/* Toroidal distance from nearest equator (0 at outer equator ry=0 and inner equator ry=+-32768;
-	 * 16384 at North/South poles ry=+-16384). */
-	int32_t abs_ry = abs((int32_t)room_y);
-	int32_t eq_dist = (abs_ry <= 16384) ? abs_ry : (32768 - abs_ry);
-
-	/* 1. Intertropical Convergence Zone (ITCZ) convective rainfall belt (0..15 deg == eq_dist < 2800):
-	 * Lifts equatorial moisture toward the tropical rainforest/seasonal forest sweet spot (280..404)
-	 * without exceeding the canopy tree rn_max < 410 envelope in nd_plant_noise_eval. */
-	if (eq_dist < 2800 && rn_val < 402) {
-		int32_t wet_lift = ((402 - rn_val) * (2800 - eq_dist) * 68) / (2800 * 100);
-		rn_val += wet_lift;
+	/* Toroidal Solar Evaporation & Moisture Belts (relative to the torus plane Z = 0):
+	 *   - eq_dist == 0 at BOTH y = 0 (starting position, Outer Equator) and y = +-32768 (max/min y, Inner Equator).
+	 *   - eq_dist == 16384 at y = +-16384 (North & South Polar Crowns at top/bottom of torus tube).
+	 *
+	 * 1. Equatorial Solar Evaporation Belt (0..25 deg == eq_dist < 4600, peaking at y = 0 and y = +-32768):
+	 *    Direct overhead solar insolation drives intense evaporation at y = 0 and y = +-32768,
+	 *    creating vast Equatorial Deserts and Savannahs at the starting position (y = 0)
+	 *    and at max/min y (+32767 / -32768). */
+	if (eq_dist < 4200) {
+		int32_t desert_rn = 76 + ((rn_val * 46) / 512);
+		int32_t t_eq = 4200 - eq_dist;
+		rn_val = rn_val - (((rn_val - desert_rn) * t_eq) / 4200);
 	}
-	/* 2. Subtropical Hadley subsidence drying belt (14..37 deg == eq_dist 2500..6800, centered at 25 deg = 4650):
-	 * Creates major hot deserts and savannahs while allowing humid eastern/monsoon margins to remain forested. */
-	if (eq_dist >= 2500 && eq_dist <= 6800) {
-		int32_t sub_dist = abs(eq_dist - 4650);
-		if (sub_dist < 2150) {
-			/* Stronger subsidence drying in dry continental provinces, gentler in humid monsoon provinces */
-			int32_t aridity_amp = (rn_val < 290) ? 160 : 85;
-			int32_t dry_weight = (2150 - sub_dist) * aridity_amp / 2150;
-			rn_val -= dry_weight;
+	/* 2. Subtropical / Mid-Latitude Monsoon & Forest Moisture Belt (22..50 deg == eq_dist 4000..9200):
+	 *    As solar evaporation eases away from the scorched equators, moisture condenses into
+	 *    Tropical Seasonal/Rainforest belts (22..36 deg) and lush Temperate Forests/Woodlands (36..50 deg). */
+	if (eq_dist >= 4000 && eq_dist <= 9200) {
+		int32_t mid_dist = abs(eq_dist - 6400);
+		if (mid_dist < 2600 && rn_val < 406) {
+			int32_t wet_lift = ((406 - rn_val) * (2600 - mid_dist) * 62) / (2600 * 100);
+			rn_val += wet_lift;
 		}
 	}
 	/* 3. Subpolar / Boreal low-evaporation positive moisture balance (50..67 deg == eq_dist 9000..12300):
-	 * Low potential evapotranspiration in cold boreal latitudes favors circumpolar Taiga/Coniferous forests. */
+	 *    Low potential evapotranspiration approaching the top & bottom polar crowns (y = +-16384) favors Taiga. */
 	if (eq_dist >= 9000 && eq_dist <= 12300) {
 		int32_t bor_dist = abs(eq_dist - 10650);
 		if (bor_dist < 1650) {
@@ -923,36 +1009,15 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	if (rn_val > (int32_t)ND_FIELD_RAIN_MAX) rn_val = ND_FIELD_RAIN_MAX;
 	s.rain = (uint32_t)rn_val;
 
-	/* 1. Instantaneous diurnal temperature (varies with both longitude pos_x - sun_azimuth and latitude pos_y) */
-	s.temp = nd_field_temp_at_azimuth(world, (uint32_t)s.elevation, tm_raw, room_x, room_y, sun_azimuth);
+	/* Unified Toroidal Climate & Diurnal Temperature:
+	 *   - bio_temp: Mean annual latitudinal + inner-arch-eclipse + alpine lapse temperature (drives permanent biomes)
+	 *   - s.temp:   bio_temp + dry-soil solar heating in hot deserts/savannahs (enabling cacti & acacias > 115)
+	 *               + realistic diurnal day/night solar swing (drives live room temp, server worldgen & flora) */
 	int32_t elev_rel = (int32_t)s.elevation - (int32_t)s.water_level;
-	if (elev_rel > 30) {
-		s.temp -= (int16_t)(((elev_rel - 30) * 7) / 100);
-	}
-
-	/* 2. Mean annual latitudinal & alpine climate temperature for permanent biome classification:
-	 * Combines 32% linear meridional heat transport (eq_dist) + 68% solar incidence (1 - |cos(phi)|)
-	 * so Tropical/Subtropical (0-35 deg), Temperate (35-53 deg), Boreal/Taiga (53-66 deg), and Polar (66-90 deg)
-	 * belts each span their authentic Earth latitudinal width while staying within [ND_FIELD_TEMP_MIN..MAX]. */
-	int32_t lat_insol_q15 = abs(nd_field_cos_q15((uint16_t)room_y));
-	int32_t lat_frac_q15 = (((eq_dist << 1) * 10486) + ((32768 - lat_insol_q15) * 22282)) >> 15;
-	int32_t lat_cool = (lat_frac_q15 * 140) >> 15;
-	if (eq_dist > 11400) {
-		/* Polar ice-albedo cooling above the Polar Circle (63..90 deg) */
-		lat_cool += ((eq_dist - 11400) * 40) / (16384 - 11400);
-	}
-	int32_t tm_var = (int32_t)(tm_raw >> 16) - 128;
-	/* Attenuate temperature noise inside the high polar circle so warm noise pockets don't leak boreal into poles */
-	int32_t tm_amp = (eq_dist > 12000) ? 14 : 22;
-	int32_t bio_temp = 94 - lat_cool + (tm_var * tm_amp / 128);
-	if (elev_rel > 220) {
-		/* High mountain environmental lapse rate: summits > 1200..1854 wu cool into alpine tundra and permanent snowcaps */
-		int32_t bio_lapse = ((elev_rel - 220) * 95) / 1000;
-		bio_temp -= bio_lapse;
-	}
-	if (bio_temp < -32000) bio_temp = -32000;
-	if (bio_temp > 32000) bio_temp = 32000;
-	nd_field_bio_blend(s.rain, (int16_t)bio_temp, &s.bio, &s.bio2, &s.blend);
+	int16_t bio_temp = nd_field_lat_climate_temp(room_y, tm_raw, elev_rel);
+	int16_t diurnal_delta = nd_field_diurnal_temp_delta(room_x, room_y, sun_azimuth, s.rain, s.is_water);
+	s.temp = (int16_t)(bio_temp + diurnal_delta);
+	nd_field_bio_blend(s.rain, bio_temp, &s.bio, &s.bio2, &s.blend);
 
 	/* Volcanic Hotspots: Rare localized tectonic rifts/calderas on dry land (~0.2% of terrain),
 	 * rather than covering equatorial climate bands */
