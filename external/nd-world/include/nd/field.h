@@ -519,7 +519,8 @@ typedef struct {
 	int16_t water_level;      /* W */
 	int16_t depth;            /* max(0, W - H) */
 	uint8_t is_water;         /* H < W */
-	int16_t temp;             /* Temperature */
+	int16_t temp;             /* Live temperature (climate_temp + diurnal day/night delta) */
+	int16_t climate_temp;     /* Mean annual latitudinal & alpine climate temperature */
 	uint32_t rain;            /* Rain */
 	uint8_t bio;              /* Primary biome */
 	uint8_t bio2;             /* Secondary biome */
@@ -1016,6 +1017,7 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	int32_t elev_rel = (int32_t)s.elevation - (int32_t)s.water_level;
 	int16_t bio_temp = nd_field_lat_climate_temp(room_y, tm_raw, elev_rel);
 	int16_t diurnal_delta = nd_field_diurnal_temp_delta(room_x, room_y, sun_azimuth, s.rain, s.is_water);
+	s.climate_temp = bio_temp;
 	s.temp = (int16_t)(bio_temp + diurnal_delta);
 	nd_field_bio_blend(s.rain, bio_temp, &s.bio, &s.bio2, &s.blend);
 
@@ -1075,7 +1077,9 @@ nd_field_normalize_noise(const nd_field_sample_t *fs, uint16_t obits,
 		if (norm_he <= (int64_t)w) norm_he = (int64_t)w + 1 + (int64_t)(rhash & 0xFFu);
 		if (norm_he > NOISE_MAX) norm_he = NOISE_MAX;
 	}
-	uint32_t tm = (uint32_t)(((int64_t)(fs->temp - ND_FIELD_TEMP_MIN) * NOISE_MAX) /
+	/* Use permanent climate_temp for normalized noise seed tm so flora/stone placement
+	 * hashes (ty = xxh32(tm ^ he)) remain stationary across the diurnal day/night cycle. */
+	uint32_t tm = (uint32_t)(((int64_t)(fs->climate_temp - ND_FIELD_TEMP_MIN) * NOISE_MAX) /
 	                         (ND_FIELD_TEMP_MAX - ND_FIELD_TEMP_MIN));
 	tm ^= (rhash >> 12) & 0xFFFu;
 	if (out_he) *out_he = (uint32_t)norm_he;
