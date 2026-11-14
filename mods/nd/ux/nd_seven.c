@@ -1071,9 +1071,10 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 	if (elev_above_water <= 0.10f)
 		return 0;
 
-	/* 2. Substrate check: only vegetated grass/forest/savanna biomes (or tundra sedge) */
+	/* 2. Substrate check: vegetated grass/forest/savanna biomes (or tundra sedge), or sparse arid bunchgrass */
 	ndw_ground_t g = ndw_biome_style(biome);
-	if (g.kind != NDW_G_GRASS && g.kind != NDW_G_TUNDRA)
+	int is_arid = (g.kind == NDW_G_SAND || biome == 6u || biome == 14u);
+	if (g.kind != NDW_G_GRASS && g.kind != NDW_G_TUNDRA && !is_arid)
 		return 0;
 
 	/* 3. Suppress flora on sheer cliff faces or directly inside a large tree trunk (r < 9 units) */
@@ -1117,9 +1118,10 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 		float u_macro = meadow_noise_2d(wx_f, wy_f, 48.0f, 0x554E4452u);
 		float u_fine  = meadow_noise_2d(wx_f, wy_f, 20.0f, 0x554E4432u);
 		float u_env   = 0.62f * u_macro + 0.38f * u_fine - slope_pen;
-		if (u_env > 0.34f) {
+		float u_thresh = is_arid ? 0.48f : 0.34f;
+		if (u_env > u_thresh) {
 			if (out_zone) *out_zone = ND_MEADOW_UNDERSTORY;
-			if (out_scale) *out_scale = 0.38f + 0.14f * u_env;
+			if (out_scale) *out_scale = (is_arid ? 0.28f : 0.38f) + 0.14f * u_env;
 			return 1;
 		}
 		return 0;
@@ -1154,7 +1156,12 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 	float bio_mult = 1.0f;
 	float base_sc  = 0.40f;
 	float span_sc  = 0.22f;
-	if (g.kind == NDW_G_TUNDRA) {
+	if (is_arid) {
+		/* Deserts (6, 14): sparse, wind-sheared xerophytic bunchgrass & parched sagebrush (~15% density) */
+		bio_mult = 0.52f;
+		base_sc  = 0.26f;
+		span_sc  = 0.12f;
+	} else if (g.kind == NDW_G_TUNDRA) {
 		/* Tundra (2..5): sparse, low-profile hardy sedge */
 		bio_mult = 0.78f;
 		base_sc  = 0.30f;
@@ -1178,18 +1185,34 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 
 	float fertility = bio_mult * (noise_env + moisture_bonus - ridge_pen - slope_pen);
 
-	/* Contiguous area threshold: outside meadow areas (fertility <= 0.42) is open ground;
-	 * inside (fertility > 0.42), 100% of the contiguous area is filled without random holes. */
-	if (fertility <= 0.42f)
+	/* Contiguous area threshold: outside meadow areas (fertility <= threshold) is open ground */
+	if (is_arid) {
+		/* Arid clumping: sparse dry bunchgrass in micro-swales */
+		if (fertility <= 0.35f || ((h >> 12u) & 7u) > 1u)
+			return 0;
+	} else if (fertility <= 0.42f) {
 		return 0;
+	}
 
-	float core_t = (fertility - 0.42f) * (1.0f / 0.36f);
+	float core_t = (fertility - (is_arid ? 0.35f : 0.42f)) * (1.0f / 0.36f);
+	if (core_t < 0.0f)
+		core_t = 0.0f;
 	if (core_t > 1.0f)
 		core_t = 1.0f;
 
 	float sc = base_sc + span_sc * core_t + ((float)(int32_t)(h & 7u) - 3.5f) * 0.008f;
 	if (out_scale)
 		*out_scale = sc;
+
+	if (is_arid) {
+		/* Arid bunchgrass & sparse dry seed plumes */
+		if (core_t > 0.65f && ((h >> 10u) & 3u) == 0u) {
+			if (out_zone) *out_zone = ND_MEADOW_TALL_GRASS;
+		} else {
+			if (out_zone) *out_zone = ND_MEADOW_GRASS;
+		}
+		return 1;
+	}
 
 	if (g.kind == NDW_G_TUNDRA) {
 		/* Tundra has hardy low sedge only — no summer wildflowers or tall seed-plumes */

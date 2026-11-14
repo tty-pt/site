@@ -895,47 +895,6 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	int32_t coarse_q12_4 = nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
 	s.water_level = nd_field_water_level(world);
 	nd_field_eval_mountain_lake(world, wx, wy, &coarse_q12_4, &s.water_level);
-	int32_t fine_q12_4 = 0;
-	if (lod > 0) {
-		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
-
-		/* Smooth C1 coastal/bathymetric transition: keep immediate beach & surf zone
-		 * (-8..+6 world units relative to water_level) gently sloped without hard shelf clamps. */
-		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
-		if (rel_water_q12_4 <= -(8 << 4)) {
-			fine_q12_4 >>= 1;
-		} else if (rel_water_q12_4 <= 0) {
-			/* -8..0 world units: ramp from 50% (128/256) at depth 8 down to 25% (64/256) at shoreline */
-			int32_t w_sub = 64 + ((-rel_water_q12_4) >> 1);
-			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
-		} else if (rel_water_q12_4 < (6 << 4)) {
-			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) / (6 << 4));
-			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);
-		}
-
-		/* Fine elevation budget bound: |fine_elev| <= ND_FIELD_FINE_AMP_BUDGET */
-		int32_t max_fine_q12_4 = (int32_t)ND_FIELD_FINE_AMP_BUDGET << 4;
-		if (fine_q12_4 > max_fine_q12_4) fine_q12_4 = max_fine_q12_4;
-		if (fine_q12_4 < -max_fine_q12_4) fine_q12_4 = -max_fine_q12_4;
-	}
-
-	s.coarse_elev = (int16_t)(coarse_q12_4 >> 4);
-	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
-
-	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
-	if (total_q12_4 > 32000) total_q12_4 = 32000;
-	if (total_q12_4 < -32000) total_q12_4 = -32000;
-	s.elevation = (int16_t)(total_q12_4 >> 4);
-	s.elevation_q12_4 = (lod == 0) ? (int16_t)((int32_t)s.elevation << 4) : (int16_t)total_q12_4;
-
-	if (s.elevation < s.water_level) {
-		s.is_water = 1;
-		s.depth = (int16_t)(s.water_level - s.elevation);
-	} else {
-		s.is_water = 0;
-		s.depth = 0;
-	}
-
 	nd_field_room_memo_t *rm = nd_field_room_memo_slot(world, room_x, room_y);
 	if (!rm->macro_valid) {
 		rm->cl_macro = chaff_sample_torus_macro((int32_t)room_x, (int32_t)room_y, 14, 1 + world);
@@ -1015,20 +974,110 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 			rn_val += bor_wet;
 		}
 	}
+
+	/* 5. Orographic Precipitation & Rain Shadows:
+	 *    Prevailing planetary surface wind blows from (-0.741, +0.671) towards (+0.741, -0.671).
+	 *    We sample coarse hypsometry 3 rooms upwind (rx - 3, ry + 3) to test for mountain ranges. */
+	int16_t up_hyp = nd_field_room_hyp_coarse(world, (int16_t)(room_x - 3), (int16_t)(room_y + 3));
+	int16_t cur_hyp = (int16_t)(coarse_q12_4 >> 4);
+	int16_t sea_lvl = s.water_level;
+	if (up_hyp > sea_lvl + 140 && cur_hyp < up_hyp - 25) {
+		/* Rain Shadow: Downwind in the lee of high mountains, descending dry air suppresses precipitation */
+		int32_t shadow_depth = (int32_t)(up_hyp - (sea_lvl + 140));
+		if (shadow_depth > 180) shadow_depth = 180;
+		int32_t rain_shadow = (shadow_depth * 64) / 180;
+		rn_val -= rain_shadow;
+	} else if (cur_hyp > up_hyp + 35 && cur_hyp > sea_lvl + 80) {
+		/* Orographic Lift: Windward rising slopes condense moisture and enhance rainfall */
+		int32_t lift_height = (int32_t)(cur_hyp - up_hyp);
+		if (lift_height > 160) lift_height = 160;
+		int32_t oro_lift = (lift_height * 48) / 160;
+		rn_val += oro_lift;
+	}
 	if (rn_val < 0) rn_val = 0;
 	if (rn_val > (int32_t)ND_FIELD_RAIN_MAX) rn_val = ND_FIELD_RAIN_MAX;
 	s.rain = (uint32_t)rn_val;
 
-	/* Unified Toroidal Climate & Diurnal Temperature:
-	 *   - bio_temp: Mean annual latitudinal + inner-arch-eclipse + alpine lapse temperature (drives permanent biomes)
-	 *   - s.temp:   bio_temp + dry-soil solar heating in hot deserts/savannahs (enabling cacti & acacias > 115)
-	 *               + realistic diurnal day/night solar swing (drives live room temp, server worldgen & flora) */
-	int32_t elev_rel = (int32_t)s.elevation - (int32_t)s.water_level;
-	int16_t bio_temp = nd_field_lat_climate_temp(room_y, tm_raw, elev_rel);
-	int16_t diurnal_delta = nd_field_diurnal_temp_delta(room_x, room_y, sun_azimuth, s.rain, s.is_water);
+	int32_t elev_rel_coarse = (int32_t)(coarse_q12_4 >> 4) - (int32_t)s.water_level;
+	int16_t bio_temp = nd_field_lat_climate_temp(room_y, tm_raw, elev_rel_coarse);
+	int16_t diurnal_delta = nd_field_diurnal_temp_delta(room_x, room_y, sun_azimuth, s.rain, (coarse_q12_4 < ((int32_t)s.water_level << 4)));
 	s.climate_temp = bio_temp;
 	s.temp = (int16_t)(bio_temp + diurnal_delta);
 	nd_field_bio_blend(s.rain, bio_temp, &s.bio, &s.bio2, &s.blend);
+
+	/* 6. Riparian Oasis Corridors:
+	 *    In arid deserts & dry savannahs (rn < 150), proximity to the water table
+	 *    (highland lakes, ocean shoreline, wadis) provides sub-surface groundwater access.
+	 *    Within 12 world units of water level, capillary wick raises soil moisture,
+	 *    transforming barren shores into vibrant ribbon oases of palms, willows, and reeds. */
+	if (coarse_q12_4 >= ((int32_t)s.water_level << 4) && (s.bio == BIOME_DESERT || s.rain < 150)) {
+		int32_t elev_above_wl = (int32_t)(coarse_q12_4 >> 4) - (int32_t)s.water_level;
+		if (elev_above_wl >= 0 && elev_above_wl < 12) {
+			int32_t oasis_wick = ((12 - elev_above_wl) * 115) / 12;
+			s.rain += (uint32_t)oasis_wick;
+			if (s.rain > ND_FIELD_RAIN_MAX) s.rain = ND_FIELD_RAIN_MAX;
+			nd_field_bio_blend(s.rain, bio_temp, &s.bio, &s.bio2, &s.blend);
+		}
+	}
+
+	int32_t fine_q12_4 = 0;
+	if (lod > 0) {
+		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
+
+		/* Smooth C1 coastal/bathymetric transition: keep immediate beach & surf zone
+		 * (-8..+6 world units relative to water_level) gently sloped without hard shelf clamps. */
+		int32_t rel_water_q12_4 = coarse_q12_4 - ((int32_t)s.water_level << 4);
+		if (rel_water_q12_4 <= -(8 << 4)) {
+			fine_q12_4 >>= 1;
+		} else if (rel_water_q12_4 <= 0) {
+			/* -8..0 world units: ramp from 50% (128/256) at depth 8 down to 25% (64/256) at shoreline */
+			int32_t w_sub = 64 + ((-rel_water_q12_4) >> 1);
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_sub) >> 8);
+		} else if (rel_water_q12_4 < (6 << 4)) {
+			int32_t w_coast = 64 + ((rel_water_q12_4 * 192) / (6 << 4));
+			fine_q12_4 = (int32_t)(((int64_t)fine_q12_4 * w_coast) >> 8);
+		} else if (rel_water_q12_4 < (220 << 4) && (s.bio == BIOME_DESERT || s.rain < 130)) {
+			/* Eolian dune morphology & sand basin smoothing:
+			 * In arid deserts & dry erg basins, wind aligns dunes into asymmetric transverse ridges
+			 * with gentle windward slopes and sharp leeward slip-faces, while dampening jagged noise. */
+			int32_t sand_factor_q8 = (s.rain < 130) ? ((130 - (int32_t)s.rain) * 256 / 130) : 180;
+			if (sand_factor_q8 > 256) sand_factor_q8 = 256;
+
+			/* Project along prevailing surface wind vector (0.741, -0.671) */
+			int32_t wind_proj = (wx * 759 - wy * 687) >> 10;
+			uint16_t dune_turn = (uint16_t)(((uint32_t)(wind_proj & 0xFFFF) * 65536u) / 192u);
+			int32_t s1 = nd_field_sin_q15(dune_turn);
+			int32_t s2 = nd_field_sin_q15((uint16_t)(dune_turn << 1));
+			int32_t dune_wave_q15 = s1 - ((s2 * 35) / 100);
+			int32_t dune_amp_q12_4 = (dune_wave_q15 * (10 << 4)) >> 15;
+
+			/* High-frequency noise damping in loose sand + asymmetric dune ridge addition */
+			fine_q12_4 = fine_q12_4 - (((fine_q12_4 * 55) / 100) * sand_factor_q8 >> 8) +
+			             ((dune_amp_q12_4 * sand_factor_q8) >> 8);
+		}
+
+		/* Fine elevation budget bound: |fine_elev| <= ND_FIELD_FINE_AMP_BUDGET */
+		int32_t max_fine_q12_4 = (int32_t)ND_FIELD_FINE_AMP_BUDGET << 4;
+		if (fine_q12_4 > max_fine_q12_4) fine_q12_4 = max_fine_q12_4;
+		if (fine_q12_4 < -max_fine_q12_4) fine_q12_4 = -max_fine_q12_4;
+	}
+
+	s.coarse_elev = (int16_t)(coarse_q12_4 >> 4);
+	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
+
+	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
+	if (total_q12_4 > 32000) total_q12_4 = 32000;
+	if (total_q12_4 < -32000) total_q12_4 = -32000;
+	s.elevation = (int16_t)(total_q12_4 >> 4);
+	s.elevation_q12_4 = (lod == 0) ? (int16_t)((int32_t)s.elevation << 4) : (int16_t)total_q12_4;
+
+	if (s.elevation < s.water_level) {
+		s.is_water = 1;
+		s.depth = (int16_t)(s.water_level - s.elevation);
+	} else {
+		s.is_water = 0;
+		s.depth = 0;
+	}
 
 	/* Volcanic Hotspots: Rare localized tectonic rifts/calderas on dry land (~0.2% of terrain),
 	 * rather than covering equatorial climate bands */
