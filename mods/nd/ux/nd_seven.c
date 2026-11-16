@@ -103,9 +103,10 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		/* Natural ecological ecotone mosaic: modulate smooth Whittaker blend (0..128)
 		 * with multi-scale spatial patches and micro-relief (hollows vs rises) so
 		 * adjacent biomes interdigitate organically without hard seams or flat washes. */
+		static noise_wcache_t s_eco_c5, s_eco_c3;
 		int16_t p_eco[2] = { (int16_t)wy, (int16_t)wx };
-		uint32_t n_meso = noise_wpoint_n(p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
-		uint32_t n_loc  = noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_meso = noise_wpoint_c(&s_eco_c5, p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_loc  = noise_wpoint_c(&s_eco_c3, p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
 		int32_t eco_jitter = ((int32_t)n_meso - 128) + (((int32_t)n_loc - 128) >> 1) - ((int32_t)fs.fine_elev * 2);
 		int32_t span = (blend <= 128) ? 128 : 252;
 		int32_t env_w = (int32_t)blend * (span - (int32_t)blend);
@@ -1119,7 +1120,7 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 		int16_t wz = nd_field_elevation_to_block(elev_q);
 
-		if (wz <= local_wl && node->level >= 2) {
+		if (wz <= local_wl && node->level >= 2 && (node->max_val >> 4) > local_wl) {
 			int16_t canon_elev = nd_field_sample((uint16_t)pos[3], 0, wx, wy).elevation;
 			if (canon_elev > local_wl)
 				wz = canon_elev;
@@ -1204,10 +1205,32 @@ static inline float meadow_noise_2d(float wx, float wy, float scale, uint32_t se
 	float fy = py - (float)iy;
 	float ux = fx * fx * (3.0f - 2.0f * fx);
 	float uy = fy * fy * (3.0f - 2.0f * fy);
-	float v00 = (float)(meadow_hash32(ix,     iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
-	float v10 = (float)(meadow_hash32(ix + 1, iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
-	float v01 = (float)(meadow_hash32(ix,     iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
-	float v11 = (float)(meadow_hash32(ix + 1, iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+
+	typedef struct {
+		int32_t ix, iy;
+		uint32_t seed;
+		uint8_t valid;
+		float v00, v10, v01, v11;
+	} meadow_cell_cache_t;
+	static meadow_cell_cache_t s_mc[32];
+	uint32_t idx = (((uint32_t)ix * 0x9E3779B1u) ^
+	                ((uint32_t)iy * 0x85EBCA77u) ^
+	                seed) & 31u;
+	meadow_cell_cache_t *slot = &s_mc[idx];
+	float v00, v10, v01, v11;
+	if (slot->valid && slot->ix == ix && slot->iy == iy && slot->seed == seed) {
+		v00 = slot->v00; v10 = slot->v10;
+		v01 = slot->v01; v11 = slot->v11;
+	} else {
+		v00 = (float)(meadow_hash32(ix,     iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
+		v10 = (float)(meadow_hash32(ix + 1, iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
+		v01 = (float)(meadow_hash32(ix,     iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+		v11 = (float)(meadow_hash32(ix + 1, iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+		slot->ix = ix; slot->iy = iy; slot->seed = seed;
+		slot->v00 = v00; slot->v10 = v10;
+		slot->v01 = v01; slot->v11 = v11;
+		slot->valid = 1;
+	}
 	float a = v00 + (v10 - v00) * ux;
 	float b = v01 + (v11 - v01) * ux;
 	return a + (b - a) * uy;

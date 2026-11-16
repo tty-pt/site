@@ -897,8 +897,34 @@ ndw_vnoise(uint32_t seed, int x, int y, int shift)
 	int fy = ((y - gy * cell) * 256) >> shift;
 	int sx = (fx * fx * (768 - 2 * fx)) >> 16;   /* smoothstep, 0..255 */
 	int sy = (fy * fy * (768 - 2 * fy)) >> 16;
-	int a = ndw_lattice(seed, gx, gy),     b = ndw_lattice(seed, gx + 1, gy);
-	int c = ndw_lattice(seed, gx, gy + 1), d = ndw_lattice(seed, gx + 1, gy + 1);
+
+	typedef struct {
+		int16_t gx, gy;
+		uint32_t seed;
+		uint8_t a, b, c, d, valid;
+	} ndw_vnoise_cache_t;
+	static ndw_vnoise_cache_t s_vc[32];
+	uint32_t idx = (((uint32_t)(uint16_t)gx * 0x9E3779B1u) ^
+	                ((uint32_t)(uint16_t)gy * 0x85EBCA77u) ^
+	                seed ^ (uint32_t)shift) & 31u;
+	ndw_vnoise_cache_t *slot = &s_vc[idx];
+	int a, b, c, d;
+	if (slot->valid && slot->gx == (int16_t)gx && slot->gy == (int16_t)gy && slot->seed == seed) {
+		a = slot->a; b = slot->b; c = slot->c; d = slot->d;
+	} else {
+		a = ndw_lattice(seed, gx, gy);
+		b = ndw_lattice(seed, gx + 1, gy);
+		c = ndw_lattice(seed, gx, gy + 1);
+		d = ndw_lattice(seed, gx + 1, gy + 1);
+		slot->gx = (int16_t)gx;
+		slot->gy = (int16_t)gy;
+		slot->seed = seed;
+		slot->a = (uint8_t)a;
+		slot->b = (uint8_t)b;
+		slot->c = (uint8_t)c;
+		slot->d = (uint8_t)d;
+		slot->valid = 1;
+	}
 	int top = a + (b - a) * sx / 256;
 	int bot = c + (d - c) * sx / 256;
 

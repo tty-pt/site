@@ -1034,6 +1034,7 @@ nd_field_elevation_to_block(int16_t elev_q12_4)
 static inline int32_t
 nd_field_eval_coarse_unwrapped_q12_4(uint32_t seed, int32_t rx, int32_t ry)
 {
+	static noise_wcache_t s_coarse_wc[9];
 	int32_t cur_rx = rx, cur_ry = ry, coarse_q12_4 = 0;
 
 	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_CONTINENT_MIN; s--) {
@@ -1049,7 +1050,7 @@ nd_field_eval_coarse_unwrapped_q12_4(uint32_t seed, int32_t rx, int32_t ry)
 		int16_t amp = chaff_octave_amplitude(s);
 		uint32_t oct_seed = seed ^ (uint32_t)(s * 0x85EBCA77u + 1u);
 		int16_t p[2] = { (int16_t)cur_ry, (int16_t)cur_rx };
-		uint32_t raw = noise_wpoint_n(p, s, 8, oct_seed, 2, NOISE_FADE5);
+		uint32_t raw = noise_wpoint_c(&s_coarse_wc[s], p, s, 8, oct_seed, 2, NOISE_FADE5);
 		int32_t val = (int32_t)(raw >> 16) - 128;
 		coarse_q12_4 += (int32_t)((((int64_t)val * amp) << 4) / 128);
 		chaff_rot2d_i32_q15(&cur_rx, &cur_ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
@@ -1141,22 +1142,20 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 
 	if (chaff_octave_weight_q16(ND_FIELD_SHIFT_FINE_MAX, step_q16) > 0u) {
 		int32_t base_fine_q12_4 = chaff_fbm_rotated_2d_step_q12_4(
-			wx, wy,
+			wx, wy, step_q16,
 			ND_FIELD_SHIFT_FINE_MIN, ND_FIELD_SHIFT_FINE_MAX,
 			7, ND_FIELD_FINE_MIN_SHIFT, 1,
 			seed, 0xBEEFu,
-			CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15,
-			step_q16);
+			CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
 
 		uint16_t rug_q8 = nd_field_ruggedness_q8(world, wx, wy);
 		if (rug_q8 > 0) {
 			int32_t meso_ridge_q12_4 = chaff_fbm_rotated_2d_step_q12_4(
-				wx, wy,
+				wx, wy, step_q16,
 				5, ND_FIELD_SHIFT_FINE_MAX,
 				6, 5, 10,
 				seed ^ 0x7F4A7C15u, 0xCAFEu,
-				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15,
-				step_q16);
+				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
 			int32_t base_scale_q8 = 128 + ((int32_t)rug_q8 * 3 >> 1);
 			int32_t scaled_base = (int32_t)(((int64_t)base_fine_q12_4 * base_scale_q8) >> 8);
 			fine_q12_4 = scaled_base + (int32_t)(((int64_t)meso_ridge_q12_4 * (int32_t)rug_q8) >> 8);
@@ -1418,9 +1417,8 @@ nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, i
 
 	uint32_t seed = 0x4C414B45u ^ ((uint32_t)world * 0x9E3779B1u);
 	int32_t warp_q12_4 = chaff_fbm_rotated_2d_step_q12_4(
-		wx, wy, 6, 7, 2, 6, 3, seed, 0x5752u,
-		CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15,
-		step_q16);
+		wx, wy, step_q16, 6, 7, 2, 6, 3, seed, 0x5752u,
+		CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
 	int32_t eff_r2_q16 = (int32_t)r2_q16 + (warp_q12_4 * 140);
 	if (eff_r2_q16 >= 65536)
 		return;
@@ -1465,6 +1463,7 @@ nd_field_eval_river(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
                     int32_t *inout_coarse_q12_4, int16_t *inout_water_level,
                     uint8_t *out_river_carve_q4, uint16_t *out_fine_damp_q8)
 {
+	static noise_wcache_t s_riv_c12, s_riv_c10, s_riv_c8, s_riv_c7, s_riv_c6;
 	*out_river_carve_q4 = 0;
 	*out_fine_damp_q8 = 0;
 
@@ -1484,8 +1483,8 @@ nd_field_eval_river(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
 	int16_t p[2] = { (int16_t)wy, (int16_t)wx };
 
 	/* Macro watershed province (shift 12 = 4,096 wu, ~25.6x32 rooms) & regional contour (shift 10 = 1,024 wu) */
-	int32_t v12_q4 = (int32_t)(noise_wpoint_n(p, 12, 8, r_seed ^ 0x4096u, 2, NOISE_FADE5) >> 12) - 2048;
-	int32_t v10_q4 = (int32_t)(noise_wpoint_n(p, 10, 8, r_seed ^ 0x1024u, 2, NOISE_FADE5) >> 12) - 2048;
+	int32_t v12_q4 = (int32_t)(noise_wpoint_c(&s_riv_c12, p, 12, 8, r_seed ^ 0x4096u, 2, NOISE_FADE5) >> 12) - 2048;
+	int32_t v10_q4 = (int32_t)(noise_wpoint_c(&s_riv_c10, p, 10, 8, r_seed ^ 0x1024u, 2, NOISE_FADE5) >> 12) - 2048;
 
 	int32_t abs_v12_raw = (v12_q4 < 0) ? -v12_q4 : v12_q4;
 	int32_t abs_v10_raw = (v10_q4 < 0) ? -v10_q4 : v10_q4;
@@ -1493,9 +1492,9 @@ nd_field_eval_river(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
 		return;
 
 	/* Meso meander bends (shift 8 = 256 wu) and room-scale S-curve sinuosity (shifts 7 = 128 wu, 6 = 64 wu) */
-	int32_t v8_q4 = (int32_t)(noise_wpoint_n(p, 8, 8, r_seed ^ 0x0256u, 2, NOISE_FADE5) >> 12) - 2048;
-	int32_t v7_q4 = (int32_t)(noise_wpoint_n(p, 7, 8, r_seed ^ 0x0128u, 2, NOISE_FADE5) >> 12) - 2048;
-	int32_t v6_q4 = (int32_t)(noise_wpoint_n(p, 6, 8, r_seed ^ 0x0064u, 2, NOISE_FADE5) >> 12) - 2048;
+	int32_t v8_q4 = (int32_t)(noise_wpoint_c(&s_riv_c8, p, 8, 8, r_seed ^ 0x0256u, 2, NOISE_FADE5) >> 12) - 2048;
+	int32_t v7_q4 = (int32_t)(noise_wpoint_c(&s_riv_c7, p, 7, 8, r_seed ^ 0x0128u, 2, NOISE_FADE5) >> 12) - 2048;
+	int32_t v6_q4 = (int32_t)(noise_wpoint_c(&s_riv_c6, p, 6, 8, r_seed ^ 0x0064u, 2, NOISE_FADE5) >> 12) - 2048;
 	int32_t meander_q4 = ((v8_q4 * 5) >> 4) + ((v7_q4 * 3) >> 4) + (v6_q4 >> 4);
 
 	/* Topographic valley deflection: deflect river contours away from high ridges (> +45 wu)

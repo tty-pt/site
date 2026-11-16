@@ -50,7 +50,7 @@ endif
 -include $(REPO_ROOT)/external/mk/iso.mk
 
 WASM_PATH ?= $(REPO_ROOT)/htdocs
-WASI_CC      ?= clang
+WASI_CC      ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
 WASI_SYSROOT ?=
 WASM_CFLAGS-PROFILE-release = -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
 WASM_CFLAGS-PROFILE-dev = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden

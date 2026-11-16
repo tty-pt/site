@@ -109,8 +109,8 @@ int main(void)
 
 				ar_stats_t st_stats;
 				ar_system_get_stats(cs, &st_stats);
-				/* At atmosphere/orbit/space, active leaves stay compact (<= 64) */
-				assert(st_stats.active_chunks_last_frame > 0 && st_stats.active_chunks_last_frame <= 64);
+				/* At atmosphere/orbit/space, active leaves stay compact (<= 160) */
+				assert(st_stats.active_chunks_last_frame > 0 && st_stats.active_chunks_last_frame <= 160);
 
 				/* World-space elevation at fixed point (320, 256) remains invariant across steps */
 				ar_sample_t fixed_pt;

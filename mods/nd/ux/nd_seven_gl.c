@@ -6201,8 +6201,8 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	}
 
 	static nd_seven_gl_bb_vert_t bb_verts[MAX_BB_VERTS];
-	bool emit_shadows = (s_gl.cur_dist < 6500.0f);
-	bool emit_grass_shadows = (s_gl.cur_dist < 2200.0f);
+	bool emit_shadows = (s_gl.cur_dist < 5000.0f);
+	bool emit_grass_shadows = (s_gl.cur_dist < 1800.0f);
 	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3200.0f);
 	float pitch_rad = s_gl.cur_pitch_deg * (PI_F / 180.0f);
 	float cos_p = cosf(pitch_rad);

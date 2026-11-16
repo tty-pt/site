@@ -1,7 +1,8 @@
 CC  ?= clang
 DEV ?= 0
 PROFILE ?= dev
-WASI_CC ?= clang
+WASI_CC ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
+export WASI_CC
 WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
 WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
@@ -123,7 +124,7 @@ stage-assets:
 		ln -sfn ../../../axil-auren/npm node_modules/@tty-pt/auren; \
 	elif [ -d "$(HOME)/.pi/agent/npm/node_modules/@tty-pt/auren" ]; then \
 		ln -sfn "$(HOME)/.pi/agent/npm/node_modules/@tty-pt/auren" node_modules/@tty-pt/auren; \
-	elif [ -L node_modules/@tty-pt/auren ] && [ ! -e node_modules/@tty-pt/auren ]; then \
+	elif [ -h node_modules/@tty-pt/auren ] && [ ! -e node_modules/@tty-pt/auren ]; then \
 		rm -f node_modules/@tty-pt/auren; \
 	fi
 	@for d in external/*/npm; do \
