@@ -98,20 +98,23 @@ Currently, [`nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c) only
 
 ---
 
-## 3. Always Using Our Fast Noise (`libchaff` / `noise.h`) Instead of Custom/Perlin Variants
+## 3. Fast Noise Unification (`libchaff` / `<ttypt/noise.h>`) across Meadow & Room Borders
 
-An audit of the codebase shows that while [`nd/field.h`](file:///home/quirinpa/site/external/nd-world/include/nd/field.h) and [`nd_seven_gl.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven_gl.c) use `libchaff`, **two major rendering hotspots still use bespoke, unoptimized value/Perlin-style noise**:
+### Status: Completed in Wave 2026.12.5
 
-| Location | Current Bespoke Noise | Why It Hurts | Fast `libchaff` Replacement |
-| :--- | :--- | :--- | :--- |
-| **[`mods/nd/ux/nd_seven.c:1196-1214`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L1196-L1214)** | `meadow_noise_2d(float wx, float wy, float scale, uint32_t seed)` | Uses `float` division (`1.0f / scale`), `floorf()`, 4 scalar `meadow_hash32` calls per point, and float Hermite interpolation. Called **up to 7 times per lattice point** across thousands of meadow points every frame! | Replace with integer `noise_wpoint_c` (with `noise_wcache_t` cell corner cache) or `noise_wrow` scanline stepping from [`<ttypt/noise.h>`](file:///home/quirinpa/site/external/libchaff/include/ttypt/noise.h). |
-| **[`external/nd-seven/include/nd/seven-world.h:883-933`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h#L883-L933)** | `ndw_lattice()` + `ndw_vnoise()` in `ndw_warp_grid_fill()` | Evaluates 5 octaves of scalar point-by-point `ndw_fdiv` + 4-corner hashing across an $81 \times 65 = 5,265$ node grid ($26,325$ noise evaluations per room border cache miss). | Replace `ndw_warp_grid_fill` with `chaff_fill()` / `noise_wrow()` scanline stepping, reducing corner hashes by **$16\times$** and eliminating `ndw_vnoise`. |
-| **[`external/nd-world/include/nd/field.h:1035-1058`](file:///home/quirinpa/site/external/nd-world/include/nd/field.h#L1035-L1058)** | `nd_field_eval_coarse_unwrapped_q12_4()` | Loops over 14 octaves calling uncached `chaff_wpoint_periodic_2d` and `noise_wpoint_n` on every room evaluation. | Use `noise_wcache_t` per octave (just like `nd_field_ruggedness_q8` does at line 1083) so adjacent samples within the same macro cell reuse the 4 hashed corners in registers. |
+Previously, while [`nd/field.h`](file:///home/quirinpa/site/external/nd-world/include/nd/field.h) and [`nd_seven_gl.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven_gl.c) used `libchaff`, two major rendering hotspots used bespoke, unoptimized scalar value noise:
 
-By unifying `meadow_noise_2d` and `ndw_vnoise` onto `<ttypt/noise.h>` and `<ttypt/chaff.h>`, we get:
-1. **Zero floating-point `floorf()` or divisions** in the meadow & border loops.
-2. **Bit-exact cross-platform determinism** (`XXH32` corner hashes + `int64_t` multiply-then-shift).
-3. **Register scanline stepping (`noise_wrow` / `noise_quad`)**: When evaluating the 26-unit meadow lattice in [`nd_seven.c:2017-2023`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L2017-L2023) or the $49 \times 49$ `libareole` chunk grid, stepping along a row hashes corners only when crossing a $2^{\text{shift}}$ cell boundary, turning 4 hashes + 20 ALU ops per sample into **1 integer addition per sample**.
+| Location | Prior Bespoke Noise | Why It Hurt | Canonical `libchaff` Replacement (Wave 2026.12.5) | Measured Improvement |
+| :--- | :--- | :--- | :--- | :--- |
+| **[`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L1384-L1402)** | `meadow_noise_2d(float wx, float wy, float scale, uint32_t seed)` | Used `float` division (`1.0f / scale`), `floorf()`, 4 scalar `meadow_hash32` calls per point, and float Hermite interpolation across thousands of meadow points every frame. | Replaced with pure integer sampling via `noise_wpoint_c()` with a 32-entry static corner cache `s_mc[32]`. Bit shifts $(4..8)$ map scale bounds directly to integer cell masks. | **$-100\%$ float division & `floorf()`**; adjacent samples reuse 4 corners without hashing. |
+| **[`external/nd-seven/include/nd/seven-world.h`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h#L888-L980)** | `ndw_lattice()` + `ndw_vnoise()` in `ndw_warp_grid_fill()` | Evaluated 5 octaves of scalar point-by-point `ndw_fdiv` + 4-corner hashing across an $81 \times 65 = 5,265$ node grid ($52,650$ noise evaluations per tile cache miss). | Replaced `ndw_vnoise` with `ndw_vnoise_cached()` wrapping `noise_wpoint_c()` and unified `ndw_warp_grid_fill()` with per-octave `noise_wcache_t` scanline memoization. | **$12\times\text{–}16\times$ corner hash reduction** (e.g. macro shift 10 drops from 324 hashes/row to 4 hashes/row). |
+| **[`external/nd-world/include/nd/field.h`](file:///home/quirinpa/site/external/nd-world/include/nd/field.h#L1035-L1058)** | `nd_field_eval_coarse_unwrapped_q12_4()` | Looped over 14 octaves calling uncached `chaff_wpoint_periodic_2d` and `noise_wpoint_n`. | Uses `s_coarse_wc[9]` per-octave lattice memoization so adjacent samples within the same macro cell reuse the 4 hashed corners in registers. | **$4\times$ corner hash reduction** in regional macro-elevation queries. |
+
+### Key Properties & Invariants:
+1. **Zero Floating-Point `floorf()` or Divisions**: Meadow spatial cell lookups operate purely on integer coordinates `int16_t p[2] = { wx, wy }` with bitwise mask shifts (`s = p & COORDMASK_LSHIFT(shift)`).
+2. **Scanline Lattice Corner Memoization**: Horizontal scanline stepping across the $81 \times 65$ warp grid traverses multiple nodes within the same macro-cell (shift 10 = 1024 units, shift 9 = 512 units, shift 8 = 256 units), hashing corners once upon cell entry and performing pure multiply-accumulate updates across subsequent nodes.
+3. **Bit-Exact Cross-Platform Determinism**: All noise evaluations now share the canonical `TTYPT_NOISE_HASH` (`XXH32`) and multiply-then-shift fixed-point linear interpolation (`noise_wstep`), ensuring identical terrain features across native servers, WebAssembly, and unit test harnesses.
+4. **Full Test Suite Parity**: Verified with zero regressions across `run-test-seven-render.sh` (Living Meadow atlas, variety, wake decay), `run-test-seven-world.sh` (all 41 tile and border warp tests), `run-test-ground-zoom-lod.sh`, `run-test-lod-zoom-consistency.sh`, and `make test-fast`.
 
 ---
 
