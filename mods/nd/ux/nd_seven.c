@@ -507,6 +507,168 @@ static inline uint32_t seven_pack_white_alpha(float alpha)
 	return 0xFFFFFF00u | (uint32_t)a;
 }
 
+#define SEVEN_HORIZON_BINS 128
+static float s_horizon_y[SEVEN_HORIZON_BINS];
+
+static inline bool seven_project_point(const float m[16], float x, float y, float z,
+                                      float *out_ndc_x, float *out_ndc_y)
+{
+	float rx = m[0] * x + m[4] * y + m[8]  * z + m[12];
+	float ry = m[1] * x + m[5] * y + m[9]  * z + m[13];
+	float rw = m[3] * x + m[7] * y + m[11] * z + m[15];
+	if (rw <= 0.1f) return false;
+	float inv_w = 1.0f / rw;
+	*out_ndc_x = rx * inv_w;
+	*out_ndc_y = ry * inv_w;
+	return true;
+}
+
+static bool seven_node_occluded_by_horizon(const ar_node_t *node, const float mvp[16])
+{
+	if (!node) return false;
+	float x0 = (float)node->ox;
+	float x1 = (float)(node->ox + node->w);
+	float y0 = (float)node->oy;
+	float y1 = (float)(node->oy + node->h);
+	float z0 = (float)node->min_val * (1.0f / 16.0f);
+	/* Include 64m scenery margin so trees/rocks on peaks don't trigger false culling */
+	float z1 = (float)node->max_val * (1.0f / 16.0f) + 64.0f;
+
+	float xs[2] = { x0, x1 };
+	float ys[2] = { y0, y1 };
+	float zs[2] = { z0, z1 };
+
+	float min_ndc_x =  1e9f, max_ndc_x = -1e9f;
+	float min_ndc_y =  1e9f, max_ndc_y = -1e9f;
+
+	for (int xi = 0; xi < 2; xi++) {
+		for (int yi = 0; yi < 2; yi++) {
+			for (int zi = 0; zi < 2; zi++) {
+				float px, py;
+				if (!seven_project_point(mvp, xs[xi], ys[yi], zs[zi], &px, &py)) {
+					return false;
+				}
+				if (px < min_ndc_x) min_ndc_x = px;
+				if (px > max_ndc_x) max_ndc_x = px;
+				if (py < min_ndc_y) min_ndc_y = py;
+				if (py > max_ndc_y) max_ndc_y = py;
+			}
+		}
+	}
+
+	if (max_ndc_x < -1.0f || min_ndc_x > 1.0f || max_ndc_y < -1.0f || min_ndc_y > 1.0f)
+		return false;
+
+	float cx0 = fmaxf(-1.0f, min_ndc_x);
+	float cx1 = fminf( 1.0f, max_ndc_x);
+	if (cx0 > cx1) return false;
+
+	int b0 = (int)floorf((cx0 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
+	int b1 = (int)floorf((cx1 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
+	if (b0 < 0) b0 = 0;
+	if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
+	if (b0 > b1) return false;
+
+	for (int b = b0; b <= b1; b++) {
+		if (max_ndc_y >= s_horizon_y[b] - 0.02f) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static void seven_horizon_update(const ar_node_t *node, const float mvp[16], float sea_lvl)
+{
+	if (!node) return;
+	float x0 = (float)node->ox;
+	float x1 = (float)(node->ox + node->w);
+	float y_back = (float)(node->oy + node->h);
+	float z_min = (float)node->min_val * (1.0f / 16.0f);
+	float z_surf = (sea_lvl > -900.0f) ? fmaxf(z_min, sea_lvl) : z_min;
+
+	float px0, py0, px1, py1;
+	if (!seven_project_point(mvp, x0, y_back, z_surf, &px0, &py0)) return;
+	if (!seven_project_point(mvp, x1, y_back, z_surf, &px1, &py1)) return;
+
+	float min_x = fminf(px0, px1);
+	float max_x = fmaxf(px0, px1);
+	if (max_x < -1.0f || min_x > 1.0f) return;
+
+	float cx0 = fmaxf(-1.0f, min_x);
+	float cx1 = fminf( 1.0f, max_x);
+	if (cx0 >= cx1) return;
+
+	int b0 = (int)floorf((cx0 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
+	int b1 = (int)floorf((cx1 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
+	if (b0 < 0) b0 = 0;
+	if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
+
+	float dx = px1 - px0;
+	for (int b = b0; b <= b1; b++) {
+		float bin_x = ((float)b + 0.5f) * (2.0f / (float)SEVEN_HORIZON_BINS) - 1.0f;
+		float t = (fabsf(dx) > 1e-5f) ? ((bin_x - px0) / dx) : 0.5f;
+		if (t < 0.0f) t = 0.0f;
+		if (t > 1.0f) t = 1.0f;
+		float seg_y = py0 + t * (py1 - py0);
+		if (seg_y > s_horizon_y[b]) {
+			s_horizon_y[b] = seg_y;
+		}
+	}
+}
+
+static void seven_sort_leaves_front_to_back(const ar_node_t **leaves, size_t count,
+                                            bool use_3d_primary,
+                                            const float eye_flat[3],
+                                            const float eye_3d[3],
+                                            const nd_planet_def_t *pdef)
+{
+	if (count <= 1) return;
+	float dist_sq[SEVEN_MAX_VISIBLE_LEAVES];
+
+	for (size_t i = 0; i < count; i++) {
+		const ar_node_t *node = leaves[i];
+		if (!node) {
+			dist_sq[i] = 1e30f;
+			continue;
+		}
+		float z_min = (float)node->min_val * (1.0f / 16.0f);
+		float z_max = (float)node->max_val * (1.0f / 16.0f);
+
+		if (use_3d_primary) {
+			float mx = (float)node->ox + (float)node->w * 0.5f;
+			float my = (float)node->oy + (float)node->h * 0.5f;
+			float mz = (z_min + z_max) * 0.5f;
+			float pos_3d[3];
+			nd_seven_gl_torus_frame(mx, my, mz, pdef, pos_3d, NULL, NULL, NULL);
+			float dx = eye_3d[0] - pos_3d[0];
+			float dy = eye_3d[1] - pos_3d[1];
+			float dz = eye_3d[2] - pos_3d[2];
+			dist_sq[i] = dx * dx + dy * dy + dz * dz;
+		} else {
+			float cx = fmaxf((float)node->ox, fminf(eye_flat[0], (float)(node->ox + node->w)));
+			float cy = fmaxf((float)node->oy, fminf(eye_flat[1], (float)(node->oy + node->h)));
+			float cz = fmaxf(z_min, fminf(eye_flat[2], z_max));
+			float dx = eye_flat[0] - cx;
+			float dy = eye_flat[1] - cy;
+			float dz = eye_flat[2] - cz;
+			dist_sq[i] = dx * dx + dy * dy + dz * dz;
+		}
+	}
+
+	for (size_t a = 1; a < count; a++) {
+		const ar_node_t *key_node = leaves[a];
+		float key_dist = dist_sq[a];
+		size_t b = a;
+		while (b > 0 && dist_sq[b - 1] > key_dist) {
+			leaves[b] = leaves[b - 1];
+			dist_sq[b] = dist_sq[b - 1];
+			b--;
+		}
+		leaves[b] = key_node;
+		dist_sq[b] = key_dist;
+	}
+}
+
 static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t *st,
                                          float zoom, float eff_cam_dist)
 {
@@ -801,9 +963,30 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 
+	float pitch_rad = ND_SEVEN_DIORAMA_PITCH * ((float)COROLLA_PI / 180.0f);
+	float cos_p = cosf(pitch_rad);
+	float sin_p = sinf(pitch_rad);
+	float eye_flat[3] = { (float)lwx, (float)lwy + dist * cos_p, lwz_est + dist * sin_p };
+
+	/* 1. Front-to-back sorting for zero-cost GPU hardware Early-Z */
+	seven_sort_leaves_front_to_back(s_visible_leaves, macro_count, use_3d_primary, eye_flat, eye_3d, pdef);
+
+	/* 2. Initialize 1D horizon occlusion buffer */
+	for (int i = 0; i < SEVEN_HORIZON_BINS; i++) {
+		s_horizon_y[i] = -1.0f;
+	}
+
+	size_t unoccluded_count = 0;
 	for (size_t m = 0; m < macro_count; m++) {
 		const ar_node_t *node = s_visible_leaves[m];
 		if (!node) continue;
+
+		/* CPU 1D horizon occlusion culling for diorama views */
+		if (!use_3d_primary && seven_node_occluded_by_horizon(node, flat_mvp)) {
+			continue;
+		}
+
+		s_visible_leaves[unoccluded_count++] = node;
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
@@ -830,7 +1013,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                                vdim, vdim,
 		                                (uint32_t)w, (uint32_t)h,
 		                                sea_lvl, pdef);
+
+		if (!use_3d_primary) {
+			seven_horizon_update(node, flat_mvp, sea_lvl);
+		}
 	}
+	s_visible_leaf_count = unoccluded_count;
 
 	/* Multi-Planet 3D Manifold Rendering:
 	 * Evaluate the companion body's dynamic 3D Keplerian orbit & tilted spin pose at anim_t,

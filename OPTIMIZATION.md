@@ -79,6 +79,19 @@ Currently, [`nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c) only
 4. **WebGL2 Hardware Occlusion Queries (`GL_ANY_SAMPLES_PASSED_CONSERVATIVE`)**:
    - For the companion planet/moon pass ([`nd_seven.c:838-885`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L838-L885)) or large macro-regions behind high mountains, WebGL2 supports asynchronous non-blocking occlusion queries (`glBeginQuery(GL_ANY_SAMPLES_PASSED_CONSERVATIVE, q)`), using the previous frame's visibility result to skip entire occluded regions with zero GPU pipeline stalls.
 
+### C. Implementation Status (Completed in Wave 2026.12.3)
+
+1. **Front-to-Back Opaque Terrain Sorting (Zero-Cost Hardware Early-Z)**:
+   - In [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c), implemented `seven_sort_leaves_front_to_back()`, sorting up to 160 active leaf chunks in ascending order of camera eye distance.
+   - For diorama mode (`dist < 250,000`), the camera eye is clamped to each node's 3D bounding box `[ox, ox+w] x [oy, oy+h] x [z_min, z_max]`.
+   - For 3D curved-torus mode (`dist >= 250,000`), the node center is mapped to 3D Cartesian space via `nd_seven_gl_torus_frame()` and measured against `eye_3d`.
+   - Because WebGL uses `glDepthFunc(GL_LEQUAL)` and `glDepthMask(GL_TRUE)` for opaque terrain, hardware Early-Z rasterizers on the GPU reject occluded fragments of background mountains and valleys with zero fragment shader ALU cost ($2\times\text{–}4\times$ fill-rate reduction).
+2. **CPU 1D Horizon / Ridge Occlusion Culling**:
+   - Implemented a 128-bin screen-space horizon buffer `s_horizon_y[SEVEN_HORIZON_BINS]` in [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c).
+   - In `seven_node_occluded_by_horizon()`, each node's 8 bounding box corners (including a 64m margin for scenery flora) are projected via `flat_mvp` to NDC. If across all covered screen bins its maximum projected screen elevation is strictly below the recorded foreground horizon (`max_ndc_y < s_horizon_y[b] - 0.02f`), the chunk is flagged as fully occluded.
+   - Fully occluded chunks skip `nd_seven_gl_flush_terrain_chunk` (0 WebGL draw calls, 0 texture binds) and are pruned from `s_visible_leaves`, automatically skipping CPU billboard generation and room block queries in the downstream scenery pass.
+   - Visible chunks conservatively update the horizon buffer via `seven_horizon_update()`, rasterizing their far edge at minimum elevation ($z_{\min}$) across the covered horizontal bins.
+
 ---
 
 ## 3. Always Using Our Fast Noise (`libchaff` / `noise.h`) Instead of Custom/Perlin Variants
@@ -205,11 +218,17 @@ With `<ttypt/wq.h>` + `pthread` over shared WASM memory, NeverDark can split its
 
 ## 6. Recommended Implementation Order (Abstraction-First TDD)
 
-1. **Fast Noise Unification (`libchaff` / `noise.h`)**:
-   - Replace `meadow_noise_2d` in [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L1196-L1214) and `ndw_vnoise` in [`external/nd-seven/include/nd/seven-world.h`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h#L892-L906) with `<ttypt/noise.h>` / `<ttypt/chaff.h>` cached/scanline steppers, and pass level-appropriate `step_q16` Nyquist cutoffs in `seven_macro_chunk_sampler`.
-2. **Parallel Shader Compilation Fix & Progressive Pipeline Activation**:
-   - Fix [`external/liblamina/htdocs/webgl-bridge.js`](file:///home/quirinpa/site/external/liblamina/htdocs/webgl-bridge.js) so native `KHR_parallel_shader_compile` compiles all shaders and links all programs in parallel directly on the active WebGL context without double-compiling, and let [`nd_seven_gl.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven_gl.c) render terrain immediately while water/clouds finish linking.
-3. **Occlusion & GPU Instancing (`libareole` + `nd_seven_gl.c`)**:
-   - Sort opaque terrain leaves front-to-back for hardware Early-Z, add the 1D horizon occlusion buffer for distant chunks/scenery, and switch billboards to hardware instancing (`glDrawArraysInstanced`).
-4. **POSIX Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)**:
-   - Create standalone `<ttypt/wq.h>` (`external/libstele` or `external/libwq`) using standard `<pthread.h>` + `<stdatomic.h>` with a lock-free ring buffer, add the `wasm32-wasi-threads` build target + `pthread-cap.js` Web HAL bridge, and wire `libareole` async node population and `nd_seven` scenery synthesis onto dedicated worker threads.
+1. **[COMPLETED] Scale-Locked Nyquist Band-Limiting & 4-Corner Lattice Memoization (Wave 2026.12.2)**:
+   - Eliminates sub-Nyquist noise octave evaluation on macro-chunks and caches 4-corner grid evaluations across periodic and rotated FBM noise.
+2. **[COMPLETED] Front-to-Back Opaque Terrain Sorting & CPU 1D Horizon Culling (Wave 2026.12.3)**:
+   - Near-to-far leaf sorting allows hardware Early-Z to drop occluded background terrain at 0 fragment shader cost.
+   - 128-bin CPU screen-space horizon buffer culls fully occluded distant mountain chunks before WebGL draw calls and skips downstream scenery billboard generation.
+3. **Fast Noise Unification (`libchaff` / `noise.h`) across Meadow & Room Borders**:
+   - Replace scalar `meadow_noise_2d` in [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L1196-L1214) with `<ttypt/noise.h>` integer scanline steppers (`noise_wpoint_c` with cell cache), eliminating `float` division and `floorf()`.
+   - Replace scalar 5-octave `ndw_vnoise` in [`external/nd-seven/include/nd/seven-world.h`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h#L892-L906) with `chaff_fill()` / `noise_wrow()` scanline stepping, cutting corner hashes by $16\times$.
+4. **GPU Billboard Instancing (`glDrawArraysInstanced`)**:
+   - Upload 48-byte [`lam_billboard_gpu_t`](file:///home/quirinpa/site/mods/nd/ux/nd_seven_gl.h#L44-L55) directly into an instanced VBO with divisor 1, moving torus basis expansion to the vertex shader and reducing CPU-to-GPU bandwidth by $10\times$.
+5. **Parallel Shader Compilation Fix & Progressive Pipeline Activation**:
+   - Fix [`external/liblamina/htdocs/webgl-bridge.js`](file:///home/quirinpa/site/external/liblamina/htdocs/webgl-bridge.js) to compile all shaders in parallel directly on the main context when `KHR_parallel_shader_compile` is present without double-compiling via dummy workers, and activate terrain progressively while water/clouds link.
+6. **POSIX Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)**:
+   - Create standalone `<ttypt/wq.h>` using standard `<pthread.h>` + `<stdatomic.h>` with a lock-free ring buffer, configure `wasm32-wasi-threads` + `pthread-cap.js` Web HAL bridge, and wire `libareole` async node population and `nd_seven` scenery synthesis onto dedicated background threads.
