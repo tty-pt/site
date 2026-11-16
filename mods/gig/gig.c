@@ -439,7 +439,8 @@ static char *sb_emit_state_json(void)
 }
 
 /* GET /api/gig/:id/transpose - Return transposed chord HTML for
- * song at index n (ephemeral — does not persist). Used by WASM bridge. */
+ * song at index n, and persist when t is supplied by the gig owner.
+ * Used by WASM bridge. */
 static int api_sb_transpose_get(int fd, char *body)
 {
 	(void)body;
@@ -473,7 +474,22 @@ static int api_sb_transpose_get(int fd, char *body)
 		return respond_error(fd, 404, "Song not found");
 
 	int transpose = t_str[0] ? atoi(t_str) : 0;
-	if (!t_str[0]) {
+	if (t_str[0]) {
+		const char *user = get_request_user(fd);
+		if (user && module_item_owner_check(fd, "gig", id, user)) {
+			const char *key =
+			        source_ordered_key_at("gig.songs", id, idx);
+			if (key) {
+				char norm_t[16];
+				const char *names[1] = { "transpose" };
+				const char *vals[1] = { norm_t };
+				snprintf(norm_t, sizeof(norm_t), "%d", transpose);
+				source_put_row("gig.songs", key, names, vals, 1);
+				source_ordered_save("gig.songs", id);
+				gig_sync_repertoire(id);
+			}
+		}
+	} else {
 		const char *db_tr =
 		        source_ordered_get_field("gig.songs", id, idx, "transpose");
 		if (db_tr)

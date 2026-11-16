@@ -155,6 +155,16 @@ PINNED_COUNT=$(wc -l < "$GRP_DATAFILE" 2>/dev/null || echo 0)
 	fail "got $PINNED_COUNT, expected 2"
 }
 
+# ── 11b. Verify WASM transpose endpoint persists for gig owner ──
+echo -n "11b. GET /api/gig/:id/transpose persists transpose for owner... "
+api "$BASE/api/gig/$SB_ID/transpose?n=1&t=4" > /dev/null
+sleep 0.1
+grep -q "^sb_sg3:4:" "$DATAFILE" && pass "persisted (sb_sg3:4)" || {
+	echo "DEBUG: gig data.txt content:"
+	cat "$DATAFILE"
+	fail "expected sb_sg3:4 in $DATAFILE"
+}
+
 # ── 12. Unauthenticated access rejected ──
 echo -n "12. Unauthenticated add rejected... "
 code=$(curl -sw "%{http_code}" -o /dev/null -X POST "$BASE/gig/add" \

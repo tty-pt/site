@@ -178,6 +178,9 @@ static int on_sb_transpose_change(bud_event *event)
 	const char *n_str = bud_get_attr(event->target, "data-n");
 	int song_index = n_str ? atoi(n_str) : 0;
 
+	if (song_index >= 0 && song_index < sb_app_state.n_songs)
+		g_sb_songs[song_index].transpose = semitones;
+
 	fetch_sb_transpose(song_index, semitones);
 	return 0;
 }

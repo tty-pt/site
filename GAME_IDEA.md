@@ -254,7 +254,52 @@ To bridge the discrete MUCK room/slot persistence model (`plant_tile_t`, `HD_OBJ
 
 ---
 
-## 8. Summary of Definite Decisions, Implementation Status & Remaining Open Explorations
+## 8. Embedding-Driven Semantic Game AI & Hybrid Utility Controllers (`libsepal` + `libcorm`)
+
+An embedding model does not generate text or decisions directly; it maps text into a vector space where **similarity equals relevance**. To drive fast, non-generative NPC and mob decisions from text-formatted game state, decision-making is framed as **vector retrieval / classification**—matching the current state vector against candidate action vectors or exemplar state-action pairs rather than running slow autoregressive LLM decoding.
+
+### 8.1 Three Architectures for Turning Embeddings into Game Decisions
+
+1. **Zero-Shot Action Scoring (State $\to$ Action Prototypes)**:
+   - Pre-compute embeddings for a fixed set of discrete actions or behaviors (written as descriptive situations/intents), embed the current state at runtime, and pick the action with the highest **cosine similarity** (or feed the similarities into a softmax / utility curve):
+     - **Pre-computed action anchors**:
+       - `ACT_FLEE`: *"Critically wounded, low health, outnumbered, needs to retreat to safety"*
+       - `ACT_FLANK`: *"Enemy is pinned down and distracted, high stamina, opportunity to attack from behind"*
+       - `ACT_HEAL`: *"Safe behind cover, ally or self is injured, healing potion available"*
+     - **Runtime**: Format qualitative state $\to$ embed $\to$ dot product against anchors via [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) $\to$ selects `ACT_FLEE`.
+2. **Case-Based Reasoning ($k$-NN over State $\to$ Action Memory)**:
+   - Rather than matching state-to-action directly (which can suffer from the modality gap between *"what is happening"* and *"what to do"*), store a library of **(Exemplar State Description $\to$ Chosen Action / Utility)** pairs in [`libcorm`](file:///home/quirinpa/site/external/libcorm/include/ttypt/corm.h) + [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h):
+     - Embed $500\text{–}5{,}000$ designer-authored or playtest-recorded situations.
+     - At runtime, embed the current game state, find the top-$k$ nearest historical states via dot product, and take a distance-weighted vote of their actions.
+     - **Episodic Adaptation**: NPCs can dynamically learn or adapt by inserting new `(state_vec, action, outcome_reward)` tuples into their episodic memory at runtime.
+3. **Tiny Policy Head on Top of Frozen Embeddings**:
+   - Use the text embedding (`384d` or `768d` float vector) as the feature extractor and pass it through a tiny 1- or 2-layer MLP (a couple of matrix multiplies in pure C) trained via imitation learning or RL to output action logits. This resolves arithmetic/threshold blind spots while retaining the open-ended semantic flexibility of text.
+
+### 8.2 Strengths vs. Failure Modes of Text Embeddings in Game AI
+
+| Strength | Limitation |
+| :--- | :--- |
+| **Fuzzy / Open-Ended Context**: Ideal for social state, faction attitudes, dialogue tone, rumors, weather/biome vibe, or emergent tags (`"player betrayed the guild and is carrying a cursed relic"`). | **Exact Numbers & Thresholds**: Text embeddings are poor at raw numbers (`"HP: 49"` vs. `"HP: 51"` or `"10m away"` vs. `"100m away"` look nearly identical in embedding space). |
+| **Fixed Millisecond Latency vs. LLMs**: A single forward pass of a small embedding model (`all-MiniLM`, `bge-small`, or local ONNX/GGUF) takes **$1\text{–}5\text{ ms}$**, whereas autoregressive LLM decoding takes hundreds of milliseconds. | **Combinatorial / Spatial Reasoning**: Pathfinding, line-of-sight geometry, turn-ahead tactics, and strict Boolean preconditions (`has_key == true`) should never be delegated to text embeddings. |
+| **Zero-Schema Extensibility**: Adding a new status effect, biome mood, or item does not require rewiring a fixed-size observation tensor—its text description automatically lands near semantically similar concepts. | **Negation Blindness**: `"Enemy is NOT armed"` and `"Enemy is armed"` often have high cosine similarity in smaller embedding models; represent negations via distinct positive descriptors (`"unarmed"` vs. `"heavily armed"`). |
+
+### 8.3 Best Practice: Qualitative Pre-Bucketing & the Hybrid Utility AI Pattern
+
+To use embeddings reliably in NeverDark without falling into numeric or precondition traps:
+
+1. **Pre-Bucket Numbers into Semantic Words Before Embedding**:
+   - Never pass raw numbers like `"hp: 14/100, dist: 2.1, enemies: 4"`. Translate numeric state into qualitative, polarity-distinct buckets first:
+     `"Health: critical. Range: melee. Threat: outnumbered. Environment: dark thunderstorm."`
+2. **Use Embeddings as One Term in a Hybrid Utility AI Scorer**:
+   - Combine hard game rules (masks/multipliers) and crisp tactical math with the embedding similarity score:
+     $$\text{Score}(a) = \text{HardMask}(s, a) \times \left( w_{\text{sim}} \cdot \cos(\vec{e}_s, \vec{e}_a) + w_{\text{utility}} \cdot U(s, a) \right)$$
+   - `HardMask(s, a)` strictly zeroes out impossible actions (on cooldown, out of range, missing item/mana, blocked line of sight).
+   - $\cos(\vec{e}_s, \vec{e}_a)$ provides the semantic "vibe/context" score (or $k$-NN episodic memory vote from [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) + [`libcorm`](file:///home/quirinpa/site/external/libcorm/include/ttypt/corm.h)).
+   - $U(s, a)$ handles exact tactical math (expected damage, distance, stamina cost).
+
+---
+
+## 9. Summary of Definite Decisions, Implementation Status & Remaining Open Explorations
 
 ### Definite Architectural Decisions (All Implemented & Verified)
 
@@ -281,10 +326,12 @@ To bridge the discrete MUCK room/slot persistence model (`plant_tile_t`, `HD_OBJ
    - Unifying 1:1 server-to-client slot counts (`count_base = 1, count_rand = 0`), replacing hardcoded `max_trees` with continuous crown-area and moisture-catchment competition in [`<nd/plant.h>`](file:///home/quirinpa/site/external/nd-plant/include/nd/plant.h), and projecting atlas-silhouette ground shadows along `uSunDir` for all stage billboards (trees, rocks, boulders, mobs, and the lamb).
 5. **Interactive Interplanetary Flight / Transit Camera**:
    - Adding an interactive spaceflight / orbital transit camera mode to pilot seamlessly between World 0 and companion moons (World 1 / World 2) in real time.
+6. **Embedding-Driven Semantic Game AI & Hybrid Utility Scorer (§8)**:
+   - Wiring [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) and [`libcorm`](file:///home/quirinpa/site/external/libcorm/include/ttypt/corm.h) into a hybrid utility AI controller for NeverDark mobs/NPCs using qualitative state pre-bucketing, action prototype anchors, and $k$-NN episodic case memory.
 
 ---
 
-## 9. Mathematical & Geometric References
+## 10. Mathematical & Geometric References
 - **Clifford Torus & Stereographic Projection ($\mathbb{R}^4 / S^3 \to \mathbb{R}^3$)**:
   - [Wikipedia — Clifford Torus](https://en.wikipedia.org/wiki/Clifford_torus)
   - [Virtual Math Museum — Clifford Torus in $S^3$](https://virtualmathmuseum.org/Surface/clifford_torus/clifford_torus.html)
