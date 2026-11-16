@@ -2864,12 +2864,13 @@ static const char *s_fs_water =
 static const char *s_vs_billboard =
 	"#version 300 es\n"
 	"precision highp float;\n"
-	"layout (location = 0) in vec3 a_pos;\n"
-	"layout (location = 1) in vec2 a_uv;\n"
-	"layout (location = 2) in vec4 a_tint;\n"
-	"layout (location = 3) in vec3 a_local_pos;\n"
-	"layout (location = 4) in vec4 a_quad_uv;\n"
-	"layout (location = 5) in vec4 a_sprite_bounds;\n"
+	"layout (location = 0) in vec4 a_pos0;\n"
+	"layout (location = 1) in vec4 a_pos1;\n"
+	"layout (location = 2) in vec4 a_pos2;\n"
+	"layout (location = 3) in vec4 a_pos3;\n"
+	"layout (location = 4) in vec4 a_uv;\n"
+	"layout (location = 5) in vec4 a_tint;\n"
+	"layout (location = 6) in vec4 a_param;\n"
 	"uniform mat4 uMVP;\n"
 	"uniform vec3 uCameraPos;\n"
 	"out vec2 vUV;\n"
@@ -2879,17 +2880,24 @@ static const char *s_vs_billboard =
 	"out vec4 vQuadUV;\n"
 	"out vec4 vSpriteBounds;\n"
 	"void main() {\n"
-	"    vUV = a_uv;\n"
+	"    int vid = gl_VertexID & 3;\n"
+	"    vec4 p = (vid == 0) ? a_pos0 : ((vid == 1) ? a_pos1 : ((vid == 2) ? a_pos2 : a_pos3));\n"
+	"    vec2 q_uv = vec2((vid & 1) != 0 ? 1.0 : -1.0, (vid >= 2) ? 1.0 : ((a_param.w < -0.5) ? -1.0 : 0.0));\n"
+	"    vec2 uv_coord = vec2((vid & 1) != 0 ? a_uv.z : a_uv.x, (vid >= 2) ? a_uv.y : a_uv.w);\n"
+	"    vUV = uv_coord;\n"
 	"    vTint = a_tint;\n"
-	"    vWorldPos = a_pos;\n"
+	"    vWorldPos = p.xyz;\n"
+	"    vec3 a_local_pos = vec3(a_param.x + p.w, a_param.y + ((q_uv.y > 0.0) ? (p.y - a_pos0.y) : 0.0), a_param.z);\n"
+	"    vec4 a_quad_uv = vec4(q_uv.x, q_uv.y, a_param.z, a_param.w);\n"
+	"    vec4 a_sprite_bounds = vec4(min(a_uv.x, a_uv.z), min(a_uv.y, a_uv.w), max(a_uv.x, a_uv.z), max(a_uv.y, a_uv.w));\n"
 	"    vLocalPos = a_local_pos;\n"
 	"    vQuadUV = a_quad_uv;\n"
 	"    vSpriteBounds = a_sprite_bounds;\n"
-	"    vec3 toCam = uCameraPos - a_pos;\n"
+	"    vec3 toCam = uCameraPos - p.xyz;\n"
 	"    float dCam = length(toCam);\n"
 	"    vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
 	"    float bias = (a_quad_uv.w < -0.5) ? min(10.0, dCam * 0.035) : min(24.0, dCam * 0.08);\n"
-	"    gl_Position = uMVP * vec4(a_pos + dirToCam * bias, 1.0);\n"
+	"    gl_Position = uMVP * vec4(p.xyz + dirToCam * bias, 1.0);\n"
 	"}\n";
 
 static const char *s_fs_billboard =
@@ -4641,6 +4649,262 @@ bool nd_seven_gl_eval_billboard_lamb_shadow_quad(const lam_billboard_gpu_t *b,
 	return eval_billboard_lamb_shadow_quad_with_origin(b, pdef, NULL, out_verts);
 }
 
+#define MAX_BB_INSTANCES 16384
+static nd_seven_gl_bb_inst_t s_bb_instances[MAX_BB_INSTANCES];
+static nd_seven_gl_bb_inst_t s_bb_other_instances[MAX_BB_INSTANCES];
+
+static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
+                                         const billboard_basis_t *basis,
+                                         float cos_p, float sin_p,
+                                         nd_seven_gl_bb_inst_t *out)
+{
+	const float *E = basis->E;
+	const float *S = basis->S;
+	const float *N = basis->N;
+	const float *base_pos = basis->base_pos;
+
+	float right[3] = { E[0], E[1], E[2] };
+	float up[3] = {
+		cos_p * N[0] - sin_p * S[0],
+		cos_p * N[1] - sin_p * S[1],
+		cos_p * N[2] - sin_p * S[2]
+	};
+
+	float half_w = b->width * 0.5f;
+	float h = b->height;
+	float ay = b->anchor_y;
+
+	float tint[4] = {
+		(float)((b->tint_rgba >> 24) & 0xFF) / 255.0f,
+		(float)((b->tint_rgba >> 16) & 0xFF) / 255.0f,
+		(float)((b->tint_rgba >> 8) & 0xFF) / 255.0f,
+		(float)(b->tint_rgba & 0xFF) / 255.0f
+	};
+
+	float grass_sx = basis->grass_sx;
+	float grass_sy = basis->grass_sy;
+	float grass_dz = basis->grass_dz;
+	float grass_rustle = basis->grass_rustle;
+
+	if (basis->flora_sway_scale > 0.0f && h > 0.0f) {
+		float max_vert_loss = 0.40f * h;
+		float vert_loss = grass_sy * sin_p + grass_dz * cos_p;
+		if (vert_loss > max_vert_loss && vert_loss > 1e-4f) {
+			float keep = max_vert_loss / vert_loss;
+			grass_sy *= keep;
+			grass_dz *= keep;
+		}
+	}
+
+	float sx = (basis->flora_sway_scale > 0.0f) ? grass_sx : 0.0f;
+	float sy = (basis->flora_sway_scale > 0.0f) ? grass_sy : 0.0f;
+	float dz = (basis->flora_sway_scale > 0.0f) ? grass_dz : 0.0f;
+
+	out->pos0[0] = base_pos[0] - half_w * right[0] - ay * up[0];
+	out->pos0[1] = base_pos[1] - half_w * right[1] - ay * up[1];
+	out->pos0[2] = base_pos[2] - half_w * right[2] - ay * up[2];
+	out->pos0[3] = -half_w;
+
+	out->pos1[0] = base_pos[0] + half_w * right[0] - ay * up[0];
+	out->pos1[1] = base_pos[1] + half_w * right[1] - ay * up[1];
+	out->pos1[2] = base_pos[2] + half_w * right[2] - ay * up[2];
+	out->pos1[3] = half_w;
+
+	out->pos2[0] = base_pos[0] + (-half_w + sx) * right[0] + (h - ay) * up[0] + sy * S[0] - dz * N[0];
+	out->pos2[1] = base_pos[1] + (-half_w + sx) * right[1] + (h - ay) * up[1] + sy * S[1] - dz * N[1];
+	out->pos2[2] = base_pos[2] + (-half_w + sx) * right[2] + (h - ay) * up[2] + sy * S[2] - dz * N[2];
+	out->pos2[3] = -half_w + sx;
+
+	out->pos3[0] = base_pos[0] + (half_w + sx) * right[0] + (h - ay) * up[0] + sy * S[0] - dz * N[0];
+	out->pos3[1] = base_pos[1] + (half_w + sx) * right[1] + (h - ay) * up[1] + sy * S[1] - dz * N[1];
+	out->pos3[2] = base_pos[2] + (half_w + sx) * right[2] + (h - ay) * up[2] + sy * S[2] - dz * N[2];
+	out->pos3[3] = half_w + sx;
+
+	out->uv[0] = b->u0;
+	out->uv[1] = b->v0;
+	out->uv[2] = b->u1;
+	out->uv[3] = b->v1;
+
+	float sheen = (b->style == ND_BB_STYLE_GRASS || b->pad0 == 1u) ? (grass_rustle * 0.14f) : 0.0f;
+	out->tint[0] = fminf(1.0f, tint[0] + sheen);
+	out->tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
+	out->tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
+	out->tint[3] = tint[3];
+
+	out->param[0] = b->x;
+	out->param[1] = b->y;
+	out->param[2] = b->z;
+	out->param[3] = (float)b->style;
+}
+
+static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
+                                                const billboard_basis_t *basis,
+                                                nd_seven_gl_bb_inst_t *out)
+{
+	const float *E = basis->E;
+	const float *S = basis->S;
+	const float *N = basis->N;
+	const float *base_pos = basis->base_pos;
+
+	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(2.0f, b->width * 0.34f);
+	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(1.0f, rx * 0.45f);
+	float half_w = fmaxf(rx, b->width * 0.5f);
+	float h = fmaxf(ry * 2.0f, b->height);
+
+	float sun_len2 = s_shadow_sun_dir[0] * s_shadow_sun_dir[0] +
+	                 s_shadow_sun_dir[1] * s_shadow_sun_dir[1] +
+	                 s_shadow_sun_dir[2] * s_shadow_sun_dir[2];
+	float sun_e = -0.50f, sun_s = -0.42f, sun_n = 0.76f;
+	if (sun_len2 > 1e-4f) {
+		float le = s_shadow_sun_dir[0] * E[0] + s_shadow_sun_dir[1] * E[1] + s_shadow_sun_dir[2] * E[2];
+		float ls = s_shadow_sun_dir[0] * S[0] + s_shadow_sun_dir[1] * S[1] + s_shadow_sun_dir[2] * S[2];
+		float ln = s_shadow_sun_dir[0] * N[0] + s_shadow_sun_dir[1] * N[1] + s_shadow_sun_dir[2] * N[2];
+		if (ln > -0.05f) {
+			sun_e = -0.46f + 0.18f * le;
+			sun_s = -0.40f + 0.18f * ls;
+			sun_n = fmaxf(0.42f, 0.65f + 0.25f * ln);
+		}
+	}
+
+	float cast_scale = 0.72f / sun_n;
+	if (cast_scale > 1.65f) cast_scale = 1.65f;
+	float cast_dx = -sun_e * h * cast_scale;
+	float cast_dy = -sun_s * h * cast_scale;
+
+	float sway_dx = basis->grass_sx;
+	float sway_dy = basis->grass_sy;
+
+	float base_pad_y = fminf(ry * 0.55f, 4.0f);
+	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
+	float alpha = base_alpha * 0.65f;
+	float lift_z = 0.22f;
+
+	float c_dx[4] = { -half_w, half_w, -half_w + cast_dx + sway_dx, half_w + cast_dx + sway_dx };
+	float c_dy[4] = { -base_pad_y, -base_pad_y, cast_dy + sway_dy, cast_dy + sway_dy };
+
+	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + lift_z * N[0];
+	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + lift_z * N[1];
+	out->pos0[2] = base_pos[2] + c_dx[0] * E[2] + c_dy[0] * S[2] + lift_z * N[2];
+	out->pos0[3] = c_dx[0];
+
+	out->pos1[0] = base_pos[0] + c_dx[1] * E[0] + c_dy[1] * S[0] + lift_z * N[0];
+	out->pos1[1] = base_pos[1] + c_dx[1] * E[1] + c_dy[1] * S[1] + lift_z * N[1];
+	out->pos1[2] = base_pos[2] + c_dx[1] * E[2] + c_dy[1] * S[2] + lift_z * N[2];
+	out->pos1[3] = c_dx[1];
+
+	out->pos2[0] = base_pos[0] + c_dx[2] * E[0] + c_dy[2] * S[0] + lift_z * N[0];
+	out->pos2[1] = base_pos[1] + c_dx[2] * E[1] + c_dy[2] * S[1] + lift_z * N[1];
+	out->pos2[2] = base_pos[2] + c_dx[2] * E[2] + c_dy[2] * S[2] + lift_z * N[2];
+	out->pos2[3] = c_dx[2];
+
+	out->pos3[0] = base_pos[0] + c_dx[3] * E[0] + c_dy[3] * S[0] + lift_z * N[0];
+	out->pos3[1] = base_pos[1] + c_dx[3] * E[1] + c_dy[3] * S[1] + lift_z * N[1];
+	out->pos3[2] = base_pos[2] + c_dx[3] * E[2] + c_dy[3] * S[2] + lift_z * N[2];
+	out->pos3[3] = c_dx[3];
+
+	out->uv[0] = b->u0;
+	out->uv[1] = b->v0;
+	out->uv[2] = b->u1;
+	out->uv[3] = b->v1;
+
+	out->tint[0] = 0.0f;
+	out->tint[1] = 0.0f;
+	out->tint[2] = 0.0f;
+	out->tint[3] = alpha;
+
+	out->param[0] = b->x;
+	out->param[1] = b->y;
+	out->param[2] = b->z;
+	out->param[3] = -1.0f;
+}
+
+static inline bool pack_bb_lamb_shadow_quad_instance(const lam_billboard_gpu_t *b,
+                                                     const billboard_basis_t *basis,
+                                                     nd_seven_gl_bb_inst_t *out)
+{
+	if (!b || !basis || !out) return false;
+	float l_int = s_lamb_shadow_light[3];
+	if (l_int <= 0.01f) return false;
+
+	float dx_l = b->x - s_lamb_shadow_light[0];
+	float dy_l = b->y - s_lamb_shadow_light[1];
+	float dist2 = dx_l * dx_l + dy_l * dy_l;
+	if (dist2 < 4.0f || dist2 > 220.0f * 220.0f) return false;
+
+	float dist = sqrtf(dist2);
+	float t_fall = 1.0f - (dist * (1.0f / 220.0f));
+	float atten = t_fall * t_fall * (3.0f - 2.0f * t_fall) * l_int;
+	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
+	float alpha = base_alpha * atten * 0.78f;
+	if (alpha <= 0.01f) return false;
+
+	const float *E = basis->E;
+	const float *S = basis->S;
+	const float *N = basis->N;
+	const float *base_pos = basis->base_pos;
+
+	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(2.0f, b->width * 0.34f);
+	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(1.0f, rx * 0.45f);
+	float half_w = fmaxf(rx, b->width * 0.5f);
+	float h = fmaxf(ry * 2.0f, b->height);
+
+	float rad_x = dx_l / dist;
+	float rad_y = dy_l / dist;
+
+	float le = rad_x * E[0] + rad_y * E[1];
+	float ls = rad_x * S[0] + rad_y * S[1];
+
+	float cast_len = fminf(h * 1.25f, 32.0f) * (0.45f + 0.55f * atten);
+	float cast_dx = le * cast_len;
+	float cast_dy = ls * cast_len;
+
+	float sway_dx = basis->grass_sx * 0.45f;
+	float sway_dy = basis->grass_sy * 0.45f;
+
+	float base_pad_y = fminf(ry * 0.45f, 3.5f);
+	float top_half_w = half_w * (1.0f + 0.35f * (cast_len / 32.0f));
+	float lift_z = 0.35f;
+
+	float c_dx[4] = { -half_w, half_w, -top_half_w + cast_dx + sway_dx, top_half_w + cast_dx + sway_dx };
+	float c_dy[4] = { -base_pad_y, -base_pad_y, cast_dy + sway_dy, cast_dy + sway_dy };
+
+	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + lift_z * N[0];
+	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + lift_z * N[1];
+	out->pos0[2] = base_pos[2] + c_dx[0] * E[2] + c_dy[0] * S[2] + lift_z * N[2];
+	out->pos0[3] = c_dx[0];
+
+	out->pos1[0] = base_pos[0] + c_dx[1] * E[0] + c_dy[1] * S[0] + lift_z * N[0];
+	out->pos1[1] = base_pos[1] + c_dx[1] * E[1] + c_dy[1] * S[1] + lift_z * N[1];
+	out->pos1[2] = base_pos[2] + c_dx[1] * E[2] + c_dy[1] * S[2] + lift_z * N[2];
+	out->pos1[3] = c_dx[1];
+
+	out->pos2[0] = base_pos[0] + c_dx[2] * E[0] + c_dy[2] * S[0] + lift_z * N[0];
+	out->pos2[1] = base_pos[1] + c_dx[2] * E[1] + c_dy[2] * S[1] + lift_z * N[1];
+	out->pos2[2] = base_pos[2] + c_dx[2] * E[2] + c_dy[2] * S[2] + lift_z * N[2];
+	out->pos2[3] = c_dx[2];
+
+	out->pos3[0] = base_pos[0] + c_dx[3] * E[0] + c_dy[3] * S[0] + lift_z * N[0];
+	out->pos3[1] = base_pos[1] + c_dx[3] * E[1] + c_dy[3] * S[1] + lift_z * N[1];
+	out->pos3[2] = base_pos[2] + c_dx[3] * E[2] + c_dy[3] * S[2] + lift_z * N[2];
+	out->pos3[3] = c_dx[3];
+
+	out->uv[0] = b->u0;
+	out->uv[1] = b->v0;
+	out->uv[2] = b->u1;
+	out->uv[3] = b->v1;
+
+	out->tint[0] = 0.0f;
+	out->tint[1] = 0.0f;
+	out->tint[2] = 0.0f;
+	out->tint[3] = alpha;
+
+	out->param[0] = b->x;
+	out->param[1] = b->y;
+	out->param[2] = b->z;
+	out->param[3] = -2.0f;
+	return true;
+}
+
 static inline float get_h16(const int16_t *buf, int px, int py, int w, int h)
 {
 	if (px < 0) px = 0;
@@ -5107,7 +5371,7 @@ static void init_grid_buffers(void)
 
 	s_gl.bb_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
-	glBufferData(GL_ARRAY_BUFFER, NULL, MAX_BB_VERTS * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, NULL, MAX_BB_INSTANCES * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
 }
 
 static void init_pipelines(void)
@@ -6200,7 +6464,6 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		s_gl.atlas_ver = cur_ver;
 	}
 
-	static nd_seven_gl_bb_vert_t bb_verts[MAX_BB_VERTS];
 	bool emit_shadows = (s_gl.cur_dist < 5000.0f);
 	bool emit_grass_shadows = (s_gl.cur_dist < 1800.0f);
 	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3200.0f);
@@ -6242,26 +6505,18 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
 
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), 0);
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)12);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)20);
-	glEnableVertexAttribArray(3);
-	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)36);
-	glEnableVertexAttribArray(4);
-	glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)48);
-	glEnableVertexAttribArray(5);
-	glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_vert_t), (size_t)64);
+	for (GLuint a = 0; a < 7; a++) {
+		glEnableVertexAttribArray(a);
+		glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_inst_t), (size_t)(a * 16));
+		glVertexAttribDivisor(a, 1);
+	}
 
 	/* Sprites are drawn in the same depth buffer as terrain and water:
 	 *   pass 0 (core)   opaque pixels (alpha >= 0.5): depth write + stencil mark, so the water pass can refract and
 	 *                   absorb exactly the pixels that stand below the surface;
 	 *   pass 1 (fringe) anti-aliased edges of the same sprites (alpha < 0.5), blended, no depth write;
 	 *   pass 2 (other)  ground contact shadows, glow auras and spray particles, blended, no depth write.
-	 * Core and "other" quads are collected in separate arrays so each pass draws its quads in submission (painter) order. */
-	static nd_seven_gl_bb_vert_t other_verts[MAX_BB_OTHER_VERTS];
+	 * Core and "other" quads are streamed as instanced triangle strips via glDrawArraysInstanced. */
 	uint32_t core_n = 0, other_n = 0;
 	for (uint32_t i = 0; i <= count; i++) {
 		bool last = (i == count);
@@ -6282,12 +6537,12 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				float d2_l = dx_l * dx_l + dy_l * dy_l;
 				want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 220.0f * 220.0f);
 			}
-			need_core = is_other ? 0u : 6u;
-			need_other = (is_other ? 6u : 0u) + (want_shadow ? 6u : 0u) + (want_lamb_shadow ? 6u : 0u);
+			need_core = is_other ? 0u : 1u;
+			need_other = (is_other ? 1u : 0u) + (want_shadow ? 1u : 0u) + (want_lamb_shadow ? 1u : 0u);
 		}
-		if (last || core_n + need_core > MAX_BB_VERTS || other_n + need_other > MAX_BB_OTHER_VERTS) {
+		if (last || core_n + need_core > MAX_BB_INSTANCES || other_n + need_other > MAX_BB_INSTANCES) {
 			if (core_n > 0) {
-				glBufferData(GL_ARRAY_BUFFER, bb_verts, core_n * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+				glBufferData(GL_ARRAY_BUFFER, s_bb_instances, core_n * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
 				/* pass 0: core */
 				glUniform1i(s_gl.bb_pipe.uPass, 0);
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -6297,7 +6552,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glStencilMask(0xFF);
 				glStencilFunc(GL_ALWAYS, 1, 0xFF);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)core_n);
+				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
 				glDisable(GL_STENCIL_TEST);
 				/* pass 1: anti-aliased fringe */
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
@@ -6305,16 +6560,16 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDepthMask(GL_FALSE);
-				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)core_n);
+				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
 			}
 			if (other_n > 0) {
-				glBufferData(GL_ARRAY_BUFFER, other_verts,
-				             other_n * sizeof(nd_seven_gl_bb_vert_t), GL_DYNAMIC_DRAW);
+				glBufferData(GL_ARRAY_BUFFER, s_bb_other_instances,
+				             other_n * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
 				glUniform1i(s_gl.bb_pipe.uPass, 2);
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDepthMask(GL_FALSE);
-				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)other_n);
+				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)other_n);
 			}
 			core_n = 0;
 			other_n = 0;
@@ -6323,29 +6578,25 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		billboard_basis_t basis;
 		eval_billboard_basis(&batch[i], &s_gl.cur_pdef, s_gl.cur_origin, &basis);
 		if (want_shadow) {
-			eval_billboard_shadow_quad_from_basis(&batch[i], &basis, &other_verts[other_n]);
-			other_n += 6u;
+			pack_bb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n++]);
 		}
 		if (want_lamb_shadow) {
-			if (eval_billboard_lamb_shadow_quad_from_basis(&batch[i], &basis, &other_verts[other_n]))
-				other_n += 6u;
+			if (pack_bb_lamb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n]))
+				other_n++;
 		}
 		if (is_other) {
-			eval_billboard_quad_from_basis(&batch[i], &basis, cos_p, sin_p, &other_verts[other_n]);
-			other_n += 6u;
+			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_other_instances[other_n++]);
 		} else {
-			eval_billboard_quad_from_basis(&batch[i], &basis, cos_p, sin_p, &bb_verts[core_n]);
-			core_n += 6u;
+			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_instances[core_n++]);
 			if (bb_sea_level > -900.0f && batch[i].z < bb_sea_level + 1.0f)
 				s_gl.sprites_in_water = true;
 		}
 	}
 
-	glDisableVertexAttribArray(1);
-	glDisableVertexAttribArray(2);
-	glDisableVertexAttribArray(3);
-	glDisableVertexAttribArray(4);
-	glDisableVertexAttribArray(5);
+	for (GLuint a = 0; a < 7; a++) {
+		glVertexAttribDivisor(a, 0);
+		if (a > 0) glDisableVertexAttribArray(a);
+	}
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
 }

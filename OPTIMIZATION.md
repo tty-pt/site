@@ -227,11 +227,13 @@ With `<ttypt/wq.h>` + `pthread` over shared WASM memory, NeverDark can split its
 2. **[COMPLETED] Front-to-Back Opaque Terrain Sorting & CPU 1D Horizon Culling (Wave 2026.12.3)**:
    - Near-to-far leaf sorting allows hardware Early-Z to drop occluded background terrain at 0 fragment shader cost.
    - 128-bin CPU screen-space horizon buffer culls fully occluded distant mountain chunks before WebGL draw calls and skips downstream scenery billboard generation.
-3. **Fast Noise Unification (`libchaff` / `noise.h`) across Meadow & Room Borders**:
+3. **[COMPLETED] GPU Billboard Hardware Instancing (`glDrawArraysInstanced`) (Wave 2026.12.4)**:
+   - Replaced 6-vertex $\times$ 80-byte expansion (480 B/quad) with compact 112-byte `nd_seven_gl_bb_inst_t` instance records streamed directly to WebGL2 via `glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, N)`.
+   - Saves 77% memory bandwidth across the WASM/WebGL dynamic buffer bus and eliminates the 6-vertex index formatting loop on CPU while reducing vertex shader invocations by 33%.
+   - Added standard `glDrawArraysInstanced` and `glVertexAttribDivisor` capabilities to `liblamina` Web HAL bridge.
+4. **Fast Noise Unification (`libchaff` / `noise.h`) across Meadow & Room Borders**:
    - Replace scalar `meadow_noise_2d` in [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L1196-L1214) with `<ttypt/noise.h>` integer scanline steppers (`noise_wpoint_c` with cell cache), eliminating `float` division and `floorf()`.
    - Replace scalar 5-octave `ndw_vnoise` in [`external/nd-seven/include/nd/seven-world.h`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h#L892-L906) with `chaff_fill()` / `noise_wrow()` scanline stepping, cutting corner hashes by $16\times$.
-4. **GPU Billboard Instancing (`glDrawArraysInstanced`)**:
-   - Upload 48-byte [`lam_billboard_gpu_t`](file:///home/quirinpa/site/mods/nd/ux/nd_seven_gl.h#L44-L55) directly into an instanced VBO with divisor 1, moving torus basis expansion to the vertex shader and reducing CPU-to-GPU bandwidth by $10\times$.
 5. **Parallel Shader Compilation Fix & Progressive Pipeline Activation**:
    - Fix [`external/liblamina/htdocs/webgl-bridge.js`](file:///home/quirinpa/site/external/liblamina/htdocs/webgl-bridge.js) to compile all shaders in parallel directly on the main context when `KHR_parallel_shader_compile` is present without double-compiling via dummy workers, and activate terrain progressively while water/clouds link.
 6. **POSIX Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)**:

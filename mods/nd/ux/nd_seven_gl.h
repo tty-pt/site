@@ -65,6 +65,18 @@ typedef struct {
 	float sprite_bounds[4]; /* u_min, v_min, u_max, v_max in atlas UV space */
 } nd_seven_gl_bb_vert_t;
 
+/* 28 floats (112 bytes) per instanced billboard quad (streamed via glDrawArraysInstanced):
+ * 4 corners in world space, uv bounds, tint, and local entity params */
+typedef struct {
+	float pos0[4];  /* Corner 0 (BL): world_x, world_y, world_z, local_dx */
+	float pos1[4];  /* Corner 1 (BR): world_x, world_y, world_z, local_dx */
+	float pos2[4];  /* Corner 2 (TL): world_x, world_y, world_z, local_dx */
+	float pos3[4];  /* Corner 3 (TR): world_x, world_y, world_z, local_dx */
+	float uv[4];    /* u0, v0, u1, v1 in atlas */
+	float tint[4];  /* r, g, b, a */
+	float param[4]; /* local_base_x, local_base_y, local_base_z, style */
+} nd_seven_gl_bb_inst_t;
+
 /* Pure-C Torus Orthonormal Frame & Position Evaluation:
  * Evaluates 3D torus world position and unit basis vectors:
  *   out_E = East tangent (+wx)
