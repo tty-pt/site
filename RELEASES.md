@@ -256,6 +256,41 @@ Every repository pushed through `tty-pt/ci/.github/workflows/all-in-one.yml` bui
 | **Tier D**: `"deb,apk,rpm,brew,openbsd"` | `deb`, `apk`, `rpm`, `brew`, `openbsd` | None *(no `npm/` package)* | `pacman`, `winget` *(unreleased game modules / server)* | **`axil-nd`** and all **17 `nd-*` modules** |
 | **Tier E**: Pure JS / TS / Build (`npm.yml`) | None *(npm only)* | Universal ESM/TS | All OS formats | **`@tty-pt/hyle-react`**, **`@tty-pt/pi-mm`**, **`@tty-pt/pi-quest`**, **`@tty-pt/mk`** |
 
+### GitHub Releases & Git Tags Consolidation (`2026-11-16`)
+
+All 24 library, daemon, and extension repositories under `tty-pt/*` were consolidated so that each repository carries **at most two GitHub Release pages**:
+1. **Release 1 (First Branded Release)**: The initial release from the 2026-10-20 / 2026-10-21 branded wave (with `logo.png` / `cover.png`).
+2. **Release 2 (Latest Release)**: The latest release page, updated via `tty-pt/ci/scripts/release-notes.sh <CHANGELOG.md> <latest_tag> [first_tag]` so its body joins every intermediate `CHANGELOG.md` entry strictly after Release 1 up to Release 2 (plus the `CHECKSUMS` verification block where applicable).
+
+All intermediate and draft GitHub Release pages and all intermediate git tags strictly between Release 1 and Release 2 (plus un-released `v1.0.0` tags on the 1-release repositories `libareole`, `libchaff`, and `libpitch`, and the un-prefixed `1.2.0` tag on `axil-auren`) were pruned from GitHub and local clones after backfilling any missing release notes into `CHANGELOG.md` (`libstele` `[1.6.2]`, `libislet` `[1.3.0]`, `liblemma` `[1.2.2]`, `libsepal` `[1.3.2]`, and stripping duplicate inline `cover.png` `<img>` tags from `pi-mm` `[0.3.3]` and `pi-quest` `[1.3.0]`).
+
+| Repository | Release 1 (First Branded) | Release 2 (Latest) | Joined `CHANGELOG.md` Sections in Latest Release |
+| :--- | :--- | :--- | :--- |
+| `libstele` (`external/libstele`) | `v1.3.0` | `v1.7.1` | `[1.7.1]`, `[1.7.0]`, `[1.6.2]`, `[1.6.1]`, `[1.6.0]`, `[1.5.2]`, `[1.4.0]` |
+| `libcorm` (`external/libcorm`) | `v2.0.0` | `v2.4.2` | `[2.4.2]`, `[2.4.1]`, `[2.4.0]`, `[2.3.3]`, `[2.3.2]`, `[2.3.1]`, `[2.3.0]`, `[2.2.4]`, `[2.1.0]` |
+| `libjoint` (`external/libjoint`) | `v1.4.0` | `v1.8.1` | `[1.8.1]`, `[1.8.0]`, `[1.7.3]`, `[1.7.2]`, `[1.7.1]`, `[1.7.0]`, `[1.6.3]` |
+| `libislet` (`external/libislet`) | `v1.2.0` | `v1.6.2` | `[1.6.2]`, `[1.6.1]`, `[1.6.0]`, `[1.5.2]`, `[1.5.1]`, `[1.5.0]`, `[1.4.1]`, `[1.4.0]`, `[1.3.2]`, `[1.3.0]` |
+| `liblemma` (`external/liblemma`) | `v1.0.0` | `v1.4.2` | `[1.4.2]`, `[1.4.1]`, `[1.4.0]`, `[1.3.2]`, `[1.3.1]`, `[1.3.0]`, `[1.2.2]` |
+| `libsepal` (`external/libsepal`) | `v1.1.0` | `v1.5.2` | `[1.5.2]`, `[1.5.1]`, `[1.5.0]`, `[1.4.2]`, `[1.4.1]`, `[1.4.0]`, `[1.3.2]` |
+| `libhyle` (`external/libhyle`) | `v1.4.0` | `v1.7.4` | `[1.7.4]`, `[1.7.3]`, `[1.7.2]`, `[1.7.1]`, `[1.7.0]`, `[1.6.1]` |
+| `libbud` (`external/libbud`) | `v1.0.1` | `v1.3.2` | `[1.3.2]`, `[1.3.1]`, `[1.3.0]`, `[1.2.2]`, `[1.1.0]` |
+| `libxylem` (`external/libxylem`) | `v1.5.0` | `v1.8.1` | `[1.8.1]`, `[1.8.0]`, `[1.7.2]` |
+| `libhyle-source` (`external/libhyle-source`) | `v1.1.0` | `v1.4.1` | `[1.4.1]`, `[1.4.0]`, `[1.3.1]` |
+| `libhyle-bud` (`external/libhyle-bud`) | `v1.0.1` | `v1.2.1` | `[1.2.1]`, `[1.2.0]`, `[1.1.1]` |
+| `liblamina` (`external/liblamina`) | `v1.0.0` | `v1.1.1` | `[1.1.1]`, `[1.1.0]`, `[1.0.1]` |
+| `axil` (`external/axil`) | `v1.5.0` | `v1.8.4` | `[1.8.4]`, `[1.8.3]`, `[1.8.2]`, `[1.8.1]`, `[1.8.0]`, `[1.7.0]` |
+| `axil-auren` (`external/axil-auren`) | `v1.0.0` | `v1.5.2` | `[1.5.2]`, `[1.5.1]`, `[1.5.0]`, `[1.4.0]`, `[1.3.1]`, `[1.3.0]`, `[1.2.0]`, `[1.1.0]` |
+| `axil-auth` (`external/axil-auth`) | `v1.2.0` | `v1.3.4` | `[1.3.4]`, `[1.3.3]`, `[1.3.2]`, `[1.3.0]` |
+| `axil-hyle` (`external/axil-hyle`) | `v1.0.1` | `v1.1.4` | `[1.1.4]`, `[1.1.3]`, `[1.1.2]`, `[1.1.0]` |
+| `axil-tty` (`external/axil-tty`) | `v1.4.0` | `v1.6.1` | `[1.6.1]`, `[1.6.0]`, `[1.5.0]` |
+| `axil-nd` (`external/axil-nd`) | `v1.2.0` | `v1.3.0` | `[1.3.0]` |
+| `libareole` (`external/libareole`) | — | `v1.1.0` | `[1.1.0]`, `[1.0.0]` |
+| `libchaff` (`external/libchaff`) | — | `v1.1.0` | `[1.1.0]`, `[1.0.0]` |
+| `libpitch` (`external/libpitch`) | — | `v1.0.1` | `[1.0.1]`, `[1.0.0]` |
+| `libhyle-react` (`external/libhyle-react`) | — | `v1.0.0` | `[1.0.0]` |
+| `pi-mm` (`.pi/extensions/pi-mm`) | `v0.1.0` | `v0.8.0` | `[0.8.0]` .. `[0.2.0]` (15 sections) |
+| `pi-quest` (`.pi/extensions/pi-quest`) | `v1.1.0` | `v1.12.0` | `[1.12.0]` .. `[1.2.0]` (17 sections) |
+
 ---
 
 ## Ecosystem Platform & Distribution Holes
