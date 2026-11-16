@@ -5198,6 +5198,14 @@ typedef struct {
 static struct {
 	bool initialized;
 	bool pipelines_ready;
+	struct {
+		bool terrain_ready;
+		bool bb_ready;
+		bool water_ready;
+		bool cloud_ready;
+		bool csm_ready;
+	} pipe_status;
+	bool terrain_frame_uniforms_bound;
 	gl_terrain_pipe_t terrain_pipe;
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
@@ -5384,6 +5392,8 @@ static void init_pipelines(void)
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
+	memset(&s_gl.pipe_status, 0, sizeof(s_gl.pipe_status));
+	s_gl.terrain_frame_uniforms_bound = false;
 }
 
 static bool check_pipelines_ready(void)
@@ -5393,184 +5403,192 @@ static bool check_pipelines_ready(void)
 	if (!s_gl.initialized)
 		return false;
 
-	if (s_gl.terrain_pipe.prog && !glGetProgramParameter(s_gl.terrain_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
-	if (s_gl.water_pipe.prog && !glGetProgramParameter(s_gl.water_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
-	if (s_gl.bb_pipe.prog && !glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
-	if (s_gl.cloud_pipe.prog && !glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
-	if (s_gl.csm_pipe.prog && !glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
-
 	/* Terrain pipeline */
-	if (s_gl.terrain_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.terrain_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.terrain_pipe.prog);
-			s_gl.terrain_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.terrain_pipe.prog;
-			s_gl.terrain_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-			s_gl.terrain_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
-			s_gl.terrain_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
-			s_gl.terrain_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
-			s_gl.terrain_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-			s_gl.terrain_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
-			s_gl.terrain_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
-			s_gl.terrain_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
-			s_gl.terrain_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.terrain_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-			s_gl.terrain_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
-			s_gl.terrain_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
-			s_gl.terrain_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-			s_gl.terrain_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
-			s_gl.terrain_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-			s_gl.terrain_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-			s_gl.terrain_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-			s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-			s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
-			s_gl.terrain_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.terrain_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
-			s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
-			s_gl.terrain_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
-			s_gl.terrain_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
-			s_gl.terrain_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
-			s_gl.terrain_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
-			s_gl.terrain_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
-			s_gl.terrain_pipe.uWorldId        = glGetUniformLocation(p, "uWorldId", 8);
-			s_gl.terrain_pipe.uSeaOffsetQ12_4 = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
-			s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+	if (!s_gl.pipe_status.terrain_ready && s_gl.terrain_pipe.prog) {
+		if (glGetProgramParameter(s_gl.terrain_pipe.prog, GL_COMPLETION_STATUS_KHR)) {
+			if (!glGetProgramParameter(s_gl.terrain_pipe.prog, GL_LINK_STATUS)) {
+				glDeleteProgram(s_gl.terrain_pipe.prog);
+				s_gl.terrain_pipe.prog = 0;
+			} else {
+				GLuint p = s_gl.terrain_pipe.prog;
+				s_gl.terrain_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+				s_gl.terrain_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
+				s_gl.terrain_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+				s_gl.terrain_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
+				s_gl.terrain_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+				s_gl.terrain_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
+				s_gl.terrain_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
+				s_gl.terrain_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
+				s_gl.terrain_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+				s_gl.terrain_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
+				s_gl.terrain_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
+				s_gl.terrain_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
+				s_gl.terrain_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+				s_gl.terrain_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
+				s_gl.terrain_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
+				s_gl.terrain_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
+				s_gl.terrain_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
+				s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
+				s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+				s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+				s_gl.terrain_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+				s_gl.terrain_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
+				s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+				s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+				s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
+				s_gl.terrain_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
+				s_gl.terrain_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+				s_gl.terrain_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+				s_gl.terrain_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
+				s_gl.terrain_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
+				s_gl.terrain_pipe.uWorldId        = glGetUniformLocation(p, "uWorldId", 8);
+				s_gl.terrain_pipe.uSeaOffsetQ12_4 = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
+				s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+				s_gl.pipe_status.terrain_ready = true;
+			}
 		}
 	}
 
 	/* Water pipeline */
-	if (s_gl.water_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.water_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.water_pipe.prog);
-			s_gl.water_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.water_pipe.prog;
-			s_gl.water_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-			s_gl.water_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
-			s_gl.water_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
-			s_gl.water_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
-			s_gl.water_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-			s_gl.water_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
-			s_gl.water_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
-			s_gl.water_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
-			s_gl.water_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.water_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-			s_gl.water_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
-			s_gl.water_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
-			s_gl.water_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-			s_gl.water_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
-			s_gl.water_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-			s_gl.water_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-			s_gl.water_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-			s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-			s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
-			s_gl.water_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.water_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.water_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
-			s_gl.water_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.water_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
-			s_gl.water_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
-			s_gl.water_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
-			s_gl.water_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
-			s_gl.water_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
-			s_gl.water_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
-			s_gl.water_pipe.uSceneColor     = glGetUniformLocation(p, "uSceneColor", 11);
-			s_gl.water_pipe.uSceneDepth     = glGetUniformLocation(p, "uSceneDepth", 11);
-			s_gl.water_pipe.uViewport       = glGetUniformLocation(p, "uViewport", 9);
-			s_gl.water_pipe.uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
-			s_gl.water_pipe.uProjScale      = glGetUniformLocation(p, "uProjScale", 10);
-			s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+	if (!s_gl.pipe_status.water_ready && s_gl.water_pipe.prog) {
+		if (glGetProgramParameter(s_gl.water_pipe.prog, GL_COMPLETION_STATUS_KHR)) {
+			if (!glGetProgramParameter(s_gl.water_pipe.prog, GL_LINK_STATUS)) {
+				glDeleteProgram(s_gl.water_pipe.prog);
+				s_gl.water_pipe.prog = 0;
+			} else {
+				GLuint p = s_gl.water_pipe.prog;
+				s_gl.water_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+				s_gl.water_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
+				s_gl.water_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+				s_gl.water_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
+				s_gl.water_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+				s_gl.water_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
+				s_gl.water_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
+				s_gl.water_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
+				s_gl.water_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+				s_gl.water_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
+				s_gl.water_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
+				s_gl.water_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
+				s_gl.water_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+				s_gl.water_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
+				s_gl.water_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
+				s_gl.water_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
+				s_gl.water_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
+				s_gl.water_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
+				s_gl.water_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+				s_gl.water_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
+				s_gl.water_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+				s_gl.water_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
+				s_gl.water_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+				s_gl.water_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+				s_gl.water_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
+				s_gl.water_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
+				s_gl.water_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+				s_gl.water_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+				s_gl.water_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
+				s_gl.water_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
+				s_gl.water_pipe.uSceneColor     = glGetUniformLocation(p, "uSceneColor", 11);
+				s_gl.water_pipe.uSceneDepth     = glGetUniformLocation(p, "uSceneDepth", 11);
+				s_gl.water_pipe.uViewport       = glGetUniformLocation(p, "uViewport", 9);
+				s_gl.water_pipe.uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
+				s_gl.water_pipe.uProjScale      = glGetUniformLocation(p, "uProjScale", 10);
+				s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+				s_gl.pipe_status.water_ready = true;
+			}
 		}
 	}
 
 	/* Billboard pipeline */
-	if (s_gl.bb_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.bb_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.bb_pipe.prog);
-			s_gl.bb_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.bb_pipe.prog;
-			s_gl.bb_pipe.uMVP           = glGetUniformLocation(p, "uMVP", 4);
-			s_gl.bb_pipe.uAtlasTex      = glGetUniformLocation(p, "uAtlasTex", 9);
-			s_gl.bb_pipe.uAtlasNormTex  = glGetUniformLocation(p, "uAtlasNormTex", 13);
-			s_gl.bb_pipe.uSeaLevel      = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.bb_pipe.uAnimTime      = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.bb_pipe.uCameraPos     = glGetUniformLocation(p, "uCameraPos", 10);
-			s_gl.bb_pipe.uFogStart      = glGetUniformLocation(p, "uFogStart", 9);
-			s_gl.bb_pipe.uFogEnd        = glGetUniformLocation(p, "uFogEnd", 7);
-			s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
-			s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
-			s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
-			s_gl.bb_pipe.uSunDir        = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.bb_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.bb_pipe.uCsm           = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.bb_pipe.uPass          = glGetUniformLocation(p, "uPass", 5);
-			s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
-			s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
-			s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
-			s_gl.bb_pipe.aLocalPos      = glGetAttribLocation(p, "a_local_pos", 11);
-			s_gl.bb_pipe.aQuadUV        = glGetAttribLocation(p, "a_quad_uv", 9);
-			s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
+	if (!s_gl.pipe_status.bb_ready && s_gl.bb_pipe.prog) {
+		if (glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR)) {
+			if (!glGetProgramParameter(s_gl.bb_pipe.prog, GL_LINK_STATUS)) {
+				glDeleteProgram(s_gl.bb_pipe.prog);
+				s_gl.bb_pipe.prog = 0;
+			} else {
+				GLuint p = s_gl.bb_pipe.prog;
+				s_gl.bb_pipe.uMVP           = glGetUniformLocation(p, "uMVP", 4);
+				s_gl.bb_pipe.uAtlasTex      = glGetUniformLocation(p, "uAtlasTex", 9);
+				s_gl.bb_pipe.uAtlasNormTex  = glGetUniformLocation(p, "uAtlasNormTex", 13);
+				s_gl.bb_pipe.uSeaLevel      = glGetUniformLocation(p, "uSeaLevel", 9);
+				s_gl.bb_pipe.uAnimTime      = glGetUniformLocation(p, "uAnimTime", 9);
+				s_gl.bb_pipe.uCameraPos     = glGetUniformLocation(p, "uCameraPos", 10);
+				s_gl.bb_pipe.uFogStart      = glGetUniformLocation(p, "uFogStart", 9);
+				s_gl.bb_pipe.uFogEnd        = glGetUniformLocation(p, "uFogEnd", 7);
+				s_gl.bb_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
+				s_gl.bb_pipe.uAtmoIntensity = glGetUniformLocation(p, "uAtmoIntensity", 14);
+				s_gl.bb_pipe.uLambLight     = glGetUniformLocation(p, "uLambLight", 10);
+				s_gl.bb_pipe.uSunDir        = glGetUniformLocation(p, "uSunDir", 7);
+				s_gl.bb_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+				s_gl.bb_pipe.uCsm           = glGetUniformLocation(p, "uCsm", 4);
+				s_gl.bb_pipe.uPass          = glGetUniformLocation(p, "uPass", 5);
+				s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
+				s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
+				s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
+				s_gl.bb_pipe.aLocalPos      = glGetAttribLocation(p, "a_local_pos", 11);
+				s_gl.bb_pipe.aQuadUV        = glGetAttribLocation(p, "a_quad_uv", 9);
+				s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
+				s_gl.pipe_status.bb_ready = true;
+			}
 		}
 	}
 
 	/* Cloud pipeline */
-	if (s_gl.cloud_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.cloud_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.cloud_pipe.prog);
-			s_gl.cloud_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.cloud_pipe.prog;
-			s_gl.cloud_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-			s_gl.cloud_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
-			s_gl.cloud_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
-			s_gl.cloud_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
-			s_gl.cloud_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-			s_gl.cloud_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
-			s_gl.cloud_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
-			s_gl.cloud_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.cloud_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-			s_gl.cloud_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
-			s_gl.cloud_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
-			s_gl.cloud_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-			s_gl.cloud_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
-			s_gl.cloud_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-			s_gl.cloud_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-			s_gl.cloud_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.cloud_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-			s_gl.cloud_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-			s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
-			s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
-			s_gl.cloud_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+	if (!s_gl.pipe_status.cloud_ready && s_gl.cloud_pipe.prog) {
+		if (glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR)) {
+			if (!glGetProgramParameter(s_gl.cloud_pipe.prog, GL_LINK_STATUS)) {
+				glDeleteProgram(s_gl.cloud_pipe.prog);
+				s_gl.cloud_pipe.prog = 0;
+			} else {
+				GLuint p = s_gl.cloud_pipe.prog;
+				s_gl.cloud_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
+				s_gl.cloud_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
+				s_gl.cloud_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+				s_gl.cloud_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
+				s_gl.cloud_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+				s_gl.cloud_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
+				s_gl.cloud_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
+				s_gl.cloud_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+				s_gl.cloud_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
+				s_gl.cloud_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
+				s_gl.cloud_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
+				s_gl.cloud_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+				s_gl.cloud_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
+				s_gl.cloud_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
+				s_gl.cloud_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
+				s_gl.cloud_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
+				s_gl.cloud_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
+				s_gl.cloud_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
+				s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
+				s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
+				s_gl.cloud_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+				s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+				s_gl.pipe_status.cloud_ready = true;
+			}
 		}
 	}
 
 	/* Cloud-shadow map pipeline */
-	if (s_gl.csm_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.csm_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.csm_pipe.prog);
-			s_gl.csm_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.csm_pipe.prog;
-			s_gl.csm_pipe.uCsm      = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.csm_pipe.uAnimTime = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.csm_pipe.uSeaWet   = glGetUniformLocation(p, "uSeaWet", 7);
+	if (!s_gl.pipe_status.csm_ready && s_gl.csm_pipe.prog) {
+		if (glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR)) {
+			if (!glGetProgramParameter(s_gl.csm_pipe.prog, GL_LINK_STATUS)) {
+				glDeleteProgram(s_gl.csm_pipe.prog);
+				s_gl.csm_pipe.prog = 0;
+			} else {
+				GLuint p = s_gl.csm_pipe.prog;
+				s_gl.csm_pipe.uCsm      = glGetUniformLocation(p, "uCsm", 4);
+				s_gl.csm_pipe.uAnimTime = glGetUniformLocation(p, "uAnimTime", 9);
+				s_gl.csm_pipe.uSeaWet   = glGetUniformLocation(p, "uSeaWet", 7);
+				s_gl.pipe_status.csm_ready = true;
+			}
 		}
 	}
 
-	s_gl.pipelines_ready = true;
-	return true;
+	if (s_gl.pipe_status.terrain_ready && s_gl.pipe_status.bb_ready &&
+	    s_gl.pipe_status.water_ready && s_gl.pipe_status.cloud_ready && s_gl.pipe_status.csm_ready) {
+		s_gl.pipelines_ready = true;
+	}
+
+	return s_gl.pipe_status.terrain_ready && s_gl.pipe_status.bb_ready;
 }
 
 bool nd_seven_gl_pipelines_ready(void)
@@ -5814,13 +5832,14 @@ static void gl_render_cloud_shadow_map(void)
 /* Bind the cloud-shadow map (texture unit 7) and window to a program; half = 0 tells the shader no map is available. */
 static void gl_bind_csm(GLint loc_tex, GLint loc_csm)
 {
-	glActiveTexture(GL_TEXTURE0 + 7);
-	glBindTexture(GL_TEXTURE_2D, s_gl.csm_valid ? s_gl.csm_tex : 0);
-	glUniform1i(loc_tex, 7);
-	if (s_gl.csm_valid)
-		glUniform3f(loc_csm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
-	else
+	if (!s_gl.pipe_status.csm_ready || !s_gl.csm_valid) {
 		glUniform3f(loc_csm, 0.0f, 0.0f, 0.0f);
+		return;
+	}
+	glActiveTexture(GL_TEXTURE0 + 7);
+	glBindTexture(GL_TEXTURE_2D, s_gl.csm_tex);
+	glUniform1i(loc_tex, 7);
+	glUniform3f(loc_csm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
 	glActiveTexture(GL_TEXTURE0);
 }
 
@@ -5857,6 +5876,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.water_count = 0;
 	s_gl.cloud_count = 0;
 	s_gl.sprites_in_water = false;
+	s_gl.terrain_frame_uniforms_bound = false;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_base_sea_level = s_gl.cur_sea_level;
 	s_gl.focal_sea_level = -999.0f;
@@ -5930,7 +5950,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.stage_w = stage_w;
 	s_gl.stage_h = stage_h;
 	s_gl.frame_open = true;
-	if (s_gl.pipelines_ready)
+	if (s_gl.pipe_status.terrain_ready)
 		gl_ensure_scene_targets(stage_w, stage_h);
 	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
@@ -5948,7 +5968,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	glStencilMask(0xFF);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-	if (s_gl.pipelines_ready)
+	if (s_gl.pipe_status.csm_ready)
 		gl_render_cloud_shadow_map();
 	else
 		s_gl.csm_valid = false;
@@ -5992,7 +6012,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
                                      const nd_planet_def_t *pdef)
 {
 	(void)stage_w; (void)stage_h;
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.terrain_pipe.prog) return;
+	if (!s_gl.initialized || !s_gl.pipe_status.terrain_ready || !s_gl.terrain_pipe.prog) return;
 	const nd_planet_def_t *eff_pdef = pdef ? pdef : &s_gl.cur_pdef;
 
 	float terrain_sea_lvl = sea_level;
@@ -6097,74 +6117,82 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	/* Draw terrain chunk mesh */
 	glUseProgram(s_gl.terrain_pipe.prog);
 
+	static const nd_planet_def_t *s_bound_pdef = NULL;
+	static uint16_t s_bound_world = 0xFFFFu;
+
+	if (!s_gl.terrain_frame_uniforms_bound) {
+		s_gl.terrain_frame_uniforms_bound = true;
+		s_bound_pdef = NULL;
+		s_bound_world = 0xFFFFu;
+
+		glUniform1i(s_gl.terrain_pipe.uHeightTex, 0);
+		glUniform1i(s_gl.terrain_pipe.uSubstrateTex, 1);
+		gl_bind_csm(s_gl.terrain_pipe.uCloudShadowMap, s_gl.terrain_pipe.uCsm);
+
+		glUniformMatrix4fv(s_gl.terrain_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
+		glUniform4f(s_gl.terrain_pipe.uRefTrig,
+		            s_gl.cur_ref_trig[0], s_gl.cur_ref_trig[1],
+		            s_gl.cur_ref_trig[2], s_gl.cur_ref_trig[3]);
+		glUniform1f(s_gl.terrain_pipe.uHeightScale, 1.0f);
+		glUniform3fv(s_gl.terrain_pipe.uCameraPos, 1, s_gl.cur_eye);
+		glUniform2f(s_gl.terrain_pipe.uWorldDim, ND_SEVEN_WORLD_DIM_W, ND_SEVEN_WORLD_DIM_H);
+
+		float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+		float fog_scale = 1.0f + space_t * 250.0f;
+		glUniform1f(s_gl.terrain_pipe.uFogStart, s_gl.cur_dist * 1.5f * fog_scale);
+		glUniform1f(s_gl.terrain_pipe.uFogEnd, s_gl.cur_dist * 4.0f * fog_scale);
+		glUniform1f(s_gl.terrain_pipe.uAnimTime, s_gl.cur_anim_time);
+
+		glUniform3f(s_gl.terrain_pipe.uSkyColor,
+		            0.55f * (1.0f - space_t) + 0.012f * space_t,
+		            0.70f * (1.0f - space_t) + 0.016f * space_t,
+		            0.85f * (1.0f - space_t) + 0.035f * space_t);
+		glUniform1f(s_gl.terrain_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+		glUniform4f(s_gl.terrain_pipe.uLambLight,
+		            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+		            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
+		glUniform1f(s_gl.terrain_pipe.uBaseSeaLevel, s_gl.cur_base_sea_level);
+		glUniform3fv(s_gl.terrain_pipe.uSunDir, 1, s_gl.cur_sun_dir);
+		glUniform3fv(s_gl.terrain_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
+		glUniform4f(s_gl.terrain_pipe.uLambWakeHead,
+		            s_gl.cur_wake_head[0], s_gl.cur_wake_head[1],
+		            s_gl.cur_wake_head[2], s_gl.cur_wake_head[3]);
+		glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeXYT0, 1, GL_FALSE, &s_gl.cur_wake_xyt[0][0]);
+		glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeXYT1, 1, GL_FALSE, &s_gl.cur_wake_xyt[4][0]);
+		glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeVel0, 1, GL_FALSE, &s_gl.cur_wake_vel[0][0]);
+		glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeVel1, 1, GL_FALSE, &s_gl.cur_wake_vel[4][0]);
+	}
+
+	if (eff_pdef != s_bound_pdef) {
+		s_bound_pdef = eff_pdef;
+		glUniform3fv(s_gl.terrain_pipe.uPlanetCenter, 1, rel_center);
+		glUniformMatrix4fv(s_gl.terrain_pipe.uBodyRot, 1, GL_FALSE, rot_mat4);
+		glUniform2f(s_gl.terrain_pipe.uTorusRadii, eff_pdef->major_r, eff_pdef->minor_r);
+	}
+
+	if (world != s_bound_world) {
+		s_bound_world = world;
+		uint32_t w_seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
+		int32_t origin_bias = nd_field_eval_coarse_unwrapped_q12_4(w_seed, 0, 0) >> 2;
+		uint32_t w_noise = (((world >> 2) + 2) & 3) * 65536u;
+		int32_t s_cached_gl_sea_offset = (int32_t)((((int64_t)w_noise * 200 / 262144 - 100)) << 4) +
+		                                 ND_FIELD_ORIGIN_SEA_OFFSET_Q12_4 + origin_bias;
+		glUniform1i(s_gl.terrain_pipe.uWorldId, (GLint)world);
+		glUniform1i(s_gl.terrain_pipe.uSeaOffsetQ12_4, (GLint)s_cached_gl_sea_offset);
+	}
+
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, slot->height_tex);
-	glUniform1i(s_gl.terrain_pipe.uHeightTex, 0);
 
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
-	glUniform1i(s_gl.terrain_pipe.uSubstrateTex, 1);
-	gl_bind_csm(s_gl.terrain_pipe.uCloudShadowMap, s_gl.terrain_pipe.uCsm);
 
-	glUniformMatrix4fv(s_gl.terrain_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform2f(s_gl.terrain_pipe.uChunkOrigin, (float)ox, (float)oy);
 	glUniform2f(s_gl.terrain_pipe.uChunkRelOrigin,
 	            (float)((double)ox - (double)s_gl.cur_tx),
 	            (float)((double)oy - (double)s_gl.cur_ty));
 	glUniform2f(s_gl.terrain_pipe.uChunkSpan, (float)span_w, (float)span_h);
-	glUniform4f(s_gl.terrain_pipe.uRefTrig,
-	            s_gl.cur_ref_trig[0], s_gl.cur_ref_trig[1],
-	            s_gl.cur_ref_trig[2], s_gl.cur_ref_trig[3]);
-	glUniform1f(s_gl.terrain_pipe.uHeightScale, 1.0f);
 	glUniform1f(s_gl.terrain_pipe.uSeaLevel, terrain_sea_lvl);
-	glUniform3fv(s_gl.terrain_pipe.uCameraPos, 1, s_gl.cur_eye);
-	glUniform3fv(s_gl.terrain_pipe.uPlanetCenter, 1, rel_center);
-	glUniformMatrix4fv(s_gl.terrain_pipe.uBodyRot, 1, GL_FALSE, rot_mat4);
-	glUniform2f(s_gl.terrain_pipe.uTorusRadii, eff_pdef->major_r, eff_pdef->minor_r);
-	glUniform2f(s_gl.terrain_pipe.uWorldDim, ND_SEVEN_WORLD_DIM_W, ND_SEVEN_WORLD_DIM_H);
-
-	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
-	/* In deep space (space_t -> 1), push distance fog out to infinity so distant celestial bodies
-	 * (like the Moon behind the main planet) remain crisp and un-fogged against space */
-	float fog_scale = 1.0f + space_t * 250.0f;
-	glUniform1f(s_gl.terrain_pipe.uFogStart, s_gl.cur_dist * 1.5f * fog_scale);
-	glUniform1f(s_gl.terrain_pipe.uFogEnd, s_gl.cur_dist * 4.0f * fog_scale);
-	glUniform1f(s_gl.terrain_pipe.uAnimTime, s_gl.cur_anim_time);
-
-	glUniform3f(s_gl.terrain_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
-	glUniform1f(s_gl.terrain_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
-	glUniform4f(s_gl.terrain_pipe.uLambLight,
-	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
-	glUniform1f(s_gl.terrain_pipe.uBaseSeaLevel, s_gl.cur_base_sea_level);
-	glUniform3fv(s_gl.terrain_pipe.uSunDir, 1, s_gl.cur_sun_dir);
-	glUniform3fv(s_gl.terrain_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
-	glUniform4f(s_gl.terrain_pipe.uLambWakeHead,
-	            s_gl.cur_wake_head[0], s_gl.cur_wake_head[1],
-	            s_gl.cur_wake_head[2], s_gl.cur_wake_head[3]);
-	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeXYT0, 1, GL_FALSE, &s_gl.cur_wake_xyt[0][0]);
-	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeXYT1, 1, GL_FALSE, &s_gl.cur_wake_xyt[4][0]);
-	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeVel0, 1, GL_FALSE, &s_gl.cur_wake_vel[0][0]);
-	glUniformMatrix4fv(s_gl.terrain_pipe.uLambWakeVel1, 1, GL_FALSE, &s_gl.cur_wake_vel[4][0]);
-
-	/* Pass canonical world ID and sea_offset_q12_4 for GPU canonical field evaluation */
-	{
-		static uint16_t s_cached_gl_world = 0xFFFFu;
-		static int32_t s_cached_gl_sea_offset = 0;
-		if (world != s_cached_gl_world) {
-			uint32_t w_seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
-			int32_t origin_bias = nd_field_eval_coarse_unwrapped_q12_4(w_seed, 0, 0) >> 2;
-			uint32_t w_noise = (((world >> 2) + 2) & 3) * 65536u;
-			s_cached_gl_sea_offset = (int32_t)((((int64_t)w_noise * 200 / 262144 - 100)) << 4) +
-			                         ND_FIELD_ORIGIN_SEA_OFFSET_Q12_4 + origin_bias;
-			s_cached_gl_world = world;
-		}
-		glUniform1i(s_gl.terrain_pipe.uWorldId, (GLint)world);
-		glUniform1i(s_gl.terrain_pipe.uSeaOffsetQ12_4, (GLint)s_cached_gl_sea_offset);
-	}
 
 	GLuint active_vbo = 0, active_ibo = 0;
 	GLsizei active_indices = 0;
@@ -6221,7 +6249,7 @@ void nd_seven_gl_flush_water(void)
 	/* The terrain pass already shades water over the seabed. This pass composites only what stands BELOW the surface on top
 	 * of that (sprites, marked in the stencil buffer): refraction of the resolved scene, true view-ray absorption from the
 	 * depth difference, then the same air-water surface layer as the terrain pass. Skipped when nothing is submerged. */
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.water_pipe.prog || s_gl.water_count == 0 ||
+	if (!s_gl.initialized || !s_gl.pipe_status.water_ready || !s_gl.water_pipe.prog || s_gl.water_count == 0 ||
 	    !s_gl.sprites_in_water || !s_gl.scene_ok || s_gl.cur_dist > 2000.0f) {
 		s_gl.water_count = 0;
 		return;
@@ -6330,7 +6358,7 @@ void nd_seven_gl_flush_water(void)
 
 void nd_seven_gl_flush_clouds(void)
 {
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0 ||
+	if (!s_gl.initialized || !s_gl.pipe_status.cloud_ready || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0 ||
 	    s_gl.cur_dist <= 480.0f) {
 		s_gl.cloud_count = 0;
 		return;
@@ -6433,7 +6461,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   const uint32_t *atlas_rgba)
 {
 	if (!batch || count == 0) return;
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
+	if (!s_gl.initialized || !s_gl.pipe_status.bb_ready || !s_gl.bb_pipe.prog) return;
 
 	uint32_t cur_ver = atlas_rgba_version();
 	if ((!s_gl.atlas_tex || !s_gl.atlas_norm_tex || s_gl.atlas_ver != cur_ver) && atlas_rgba) {

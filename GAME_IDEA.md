@@ -297,6 +297,21 @@ To use embeddings reliably in NeverDark without falling into numeric or precondi
    - $\cos(\vec{e}_s, \vec{e}_a)$ provides the semantic "vibe/context" score (or $k$-NN episodic memory vote from [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) + [`libcorm`](file:///home/quirinpa/site/external/libcorm/include/ttypt/corm.h)).
    - $U(s, a)$ handles exact tactical math (expected damage, distance, stamina cost).
 
+### 8.4 Client-Offloaded Browser Embedding Search & Exclusive Single-Client Mob Leases
+
+To preserve the **Lean OpenBSD Server** invariant (§1), the server **never** runs embedding inference or vector similarity search. All embedding generation and [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) vector lookup run inside the **client browser (WASM / WebGPU)**, while the server acts solely as a lightweight lease coordinator and authoritative rule validator:
+
+1. **Zero Server-Side Embedding Compute**:
+   - The client browser formats the local room/mob state into qualitative text, computes the state embedding locally, runs the cosine similarity / $k$-NN lookup against the mob's action prototypes or case memory in client WASM, and submits only a compact **chosen action intent** (e.g., `(mob_ref, lease_epoch, action_id, target_ref)`) to the server.
+2. **Exclusive Single-Client Control Leases (No Split-Brain Mob Control)**:
+   - A mob controlled by one client **cannot** be simultaneously controlled by another client in the same or adjacent room.
+   - Each active mob carries an exclusive server-side lease `(controller_player_ref, lease_epoch, lease_expires_at)`:
+     - **Acquisition**: When an unobserved mob enters the active observation horizon of one or more players, the server assigns the exclusive control lease to **at most one** observing client (e.g., the first observer in the room, or lowest-RTT / round-robin across nearby clients to spread browser load).
+     - **Fencing via `lease_epoch`**: Every AI action packet sent by a client must carry the current `lease_epoch` and originate from `controller_player_ref`. Any action packet from a non-holder or with a stale epoch is silently dropped by the server.
+     - **Failover & Handoff**: If the controlling client leaves the observation radius, disconnects, or lets its lease heartbeat expire (`now > lease_expires_at`), the server increments `lease_epoch` and hands the lease to the next observing client in the area—or, if no players remain nearby, evicts the mob back to zero-cost deterministic dormancy (§2.2).
+3. **Server-Side Authoritative Validation (`HardMask` Enforcement)**:
+   - Even though the leased client chooses *which* action the mob wants to take, the server still validates the resulting command against authoritative game rules (cooldowns, range, line-of-sight, movement speed, and valid action set) so a modified client cannot make a leased mob cheat or perform illegal state transitions.
+
 ---
 
 ## 9. Summary of Definite Decisions, Implementation Status & Remaining Open Explorations
@@ -326,8 +341,8 @@ To use embeddings reliably in NeverDark without falling into numeric or precondi
    - Unifying 1:1 server-to-client slot counts (`count_base = 1, count_rand = 0`), replacing hardcoded `max_trees` with continuous crown-area and moisture-catchment competition in [`<nd/plant.h>`](file:///home/quirinpa/site/external/nd-plant/include/nd/plant.h), and projecting atlas-silhouette ground shadows along `uSunDir` for all stage billboards (trees, rocks, boulders, mobs, and the lamb).
 5. **Interactive Interplanetary Flight / Transit Camera**:
    - Adding an interactive spaceflight / orbital transit camera mode to pilot seamlessly between World 0 and companion moons (World 1 / World 2) in real time.
-6. **Embedding-Driven Semantic Game AI & Hybrid Utility Scorer (§8)**:
-   - Wiring [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) and [`libcorm`](file:///home/quirinpa/site/external/libcorm/include/ttypt/corm.h) into a hybrid utility AI controller for NeverDark mobs/NPCs using qualitative state pre-bucketing, action prototype anchors, and $k$-NN episodic case memory.
+6. **Client-Offloaded Embedding Game AI & Exclusive Mob Control Leases (§8)**:
+   - Running qualitative state embedding and [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) similarity search strictly inside the client browser (WASM) so the OpenBSD server does zero vector compute, coordinated by exclusive single-client mob leases `(controller_player_ref, lease_epoch, lease_expires_at)` with automatic failover and server-side rule validation.
 
 ---
 

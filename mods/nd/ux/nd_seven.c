@@ -188,7 +188,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
 		cfg.row_sampler = seven_macro_chunk_row_sampler;
-		cfg.max_populates_per_frame = 4;
+		cfg.max_populates_per_frame = 0;
 		cfg.max_active = 160;
 		cfg.pool_capacity = 384;
 		cfg.max_levels = 17;
@@ -775,6 +775,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.split_hysteresis = 0.14f
 	};
 
+	ar_system_begin_frame(cs);
 	s_visible_leaf_count = ar_system_query_matrix(cs, world, use_3d_primary ? mvp_3d : flat_mvp,
 	                                              &opts, s_visible_leaves, max_leaves);
 	size_t macro_count = s_visible_leaf_count;
