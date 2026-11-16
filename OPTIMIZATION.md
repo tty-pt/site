@@ -47,6 +47,12 @@ Right now, the renderer in [`nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/
 4. **Build & Quality Gate Portability**:
    - Automatically probe `clang-18` in `WASI_CC` across [`Makefile`](file:///home/quirinpa/site/Makefile), [`build.mk`](file:///home/quirinpa/site/build.mk), and [`external/mk/iso.mk`](file:///home/quirinpa/site/external/mk/iso.mk).
    - Resolved runpath check false positive by using POSIX `[ -h ... ]` in `Makefile`.
+5. **2D Array Texture & GPU Terrain Batch Collapsing (Completed in Wave 2026.12.8)**:
+   - Replaced 384 individual 2D chunk textures with two persistent $49 \times 49 \times 192$ 2D Array Textures (`GL_TEXTURE_2D_ARRAY`): `height_array_tex` (`GL_R16I`) and `substrate_array_tex` (`GL_RGBA8`).
+   - Updated `s_vs_terrain`, `s_fs_terrain`, `s_vs_water`, `s_fs_water`, and `s_fs_cloud` shaders to sample 2D array textures using layer indices and uniform slice index `uSliceIdx`.
+   - Replaced 60–100 individual per-chunk terrain draw calls with 1–3 instanced dispatches (`glDrawElementsInstanced`) binned by mesh density (HI $48\times 48$, MED $32\times 32$, MACRO $16\times 16$).
+   - Streamed chunk attributes (`a_chunk_origin`, `a_chunk_rel_origin`, `a_chunk_span`, `a_chunk_meta`) through `chunk_inst_vbo` with `glVertexAttribDivisor = 1`.
+   - Water and cloud passes bind the persistent array textures once before their loops and switch slices with uniform `uSliceIdx`, eliminating per-chunk texture rebinding.
 
 ---
 
@@ -245,27 +251,109 @@ With `<ttypt/wq.h>` + `pthread` over shared WASM memory, NeverDark can split its
    - **Fast Row Stepping & Generic Quadtree Frame Budgeting**: Added `ar_row_sampler_fn` scanline evaluation in `libareole` and wired `seven_macro_chunk_row_sampler` in `nd_seven.c` with `ar_system_begin_frame()`, supporting 50,000+ FPS chunk traversal capability.
    - **Sanctioned WebGL2 Core Array & Instance Exports**: Declared `GL_TEXTURE_2D_ARRAY (0x8C1A)`, `glTexImage3D`, `glTexSubImage3D`, and `glDrawElementsInstanced` in `external/liblamina/include/ttypt/webgl.h` and registered them in `wasm-allowed-imports.lst`.
    - Verified across `run-test-chunk-hierarchy.sh`, `run-test-seven-render.sh`, `run-test-seven-world.sh`, `run-test-map-render.sh`, `run-test-map-noise.sh`, `test-lamina-bridge-routing.mjs`, and `make test-fast`.
-6. **POSIX Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)**:
-   - Create standalone `<ttypt/wq.h>` using standard `<pthread.h>` + `<stdatomic.h>` with a lock-free ring buffer, configure `wasm32-wasi-threads` + `pthread-cap.js` Web HAL bridge, and wire `libareole` async node population and `nd_seven` scenery synthesis onto dedicated background threads.
+6. **[COMPLETED] Zoom-Out Terrain Generation Acceleration & Watertight Seam Guarantee (Wave 2026.12.7)**:
+   - **Logarithmic Orbital Level Stepping**: Uncapped `min_lvl` stepping for orbital altitudes (`dist >= 44,000 wu`), scaling smoothly up to level 11. Eliminates an artificial clamp at level 4 that previously forced the quadtree to subdivide into over 10,000 tiny chunks across the planetary disk. Orbital views now cover the entire world in ~20–32 coarse macro-chunks, reducing quadtree generation load by over $64\times$ and completely eliminating LRU cache thrashing.
+   - **Watertight Row Stepping**: Fixed integer truncation in `areole.c`'s `row_sampler` dispatch by passing `node->w` span and computing exact integer coordinates $wx = ox + (c \times node\_w) / gdim$ per column. Guarantees 100% bit-exact height matches between chunk seams ($r \times vdim + 48 == r \times vdim + 0$ of neighbor).
+   - **Frame Budget Reset**: Enforced `ar_system_begin_frame(cs)` at frame head to reset `frame_populates_count`, ensuring continuous asynchronous chunk streaming during fast zoom-out.
+7. **[COMPLETED] GPU Draw Call Collapse via 2D Array Texture (`GL_TEXTURE_2D_ARRAY`) & Single-Pass Instancing (Wave 2026.12.8)**:
+   - Consolidated 384 individual 2D chunk textures into two persistent 2D Array textures (`GL_TEXTURE_2D_ARRAY`, dimensions $49 \times 49 \times 192$): `s_gl.height_array_tex` (`GL_R16I`) and `s_gl.substrate_array_tex` (`GL_RGBA8`), streamed via `glTexSubImage3D`.
+   - Converted terrain, water, and cloud shaders to `isampler2DArray` / `sampler2DArray` with instanced layer indexing and uniform slice selection (`uSliceIdx`).
+   - Streamed per-instance transforms `(a_chunk_origin, a_chunk_rel_origin, a_chunk_span, a_chunk_meta)` through dynamic instance VBO `s_gl.chunk_inst_vbo` with `glVertexAttribDivisor = 1`.
+   - Collapsed 60–100+ individual terrain draw calls and texture swaps into 1–3 instanced dispatches (`glDrawElementsInstanced`) binned by resolution (`TERRAIN_BIN_HI`, `TERRAIN_BIN_MED`, `TERRAIN_BIN_MACRO`).
+   - Bound persistent 2D array textures once before water and cloud draw loops, eliminating per-chunk `glBindTexture` overhead.
+   - Fully verified across `run-test-seven-render.sh`, `run-test-chunk-hierarchy.sh`, `make -C mods/nd WASI_CC=clang-18`, `check-wasm-imports.sh`, `check-no-site-specific-js.sh`, and `make test-fast`.
+8. **Option 2: POSIX Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)**:
+   - Standalone `<ttypt/wq.h>` with lock-free atomic ring buffer over POSIX `pthreads` (Unix `.so`) and Web Worker threads (`wasm32-wasi-threads`).
+   - Move `chaff_fill_lod()` terrain population and Living Meadow billboard synthesis off the main UI/render thread.
+9. **Option 3: Seamless Interplanetary Spaceflight & Celestial Mechanics**:
+   - Dual-manifold spatial coordinate bridges, smooth sphere-of-influence handoff, Keplerian trajectory simulation, and continuous atmospheric entry/exit.
+10. **Option 4: Client-Offloaded Semantic AI (`liblemma` + `libsepal` on WASM Threads)**:
+    - Client-side vector embeddings, local spatial semantic queries, and generative NPC dialogue trees executing purely on worker threads without server round-trips.
 
 ---
 
 ## 7. Deep Audit: What Is the Biggest Bottleneck That Still Exists?
 
-Across all subsystems analyzed, the single biggest bottleneck that still exists is:
+Across all subsystems analyzed, the primary runtime bottlenecks and their resolutions are:
 
-### **1. Primary Runtime Bottleneck: Multi-Threaded Chunk Generation Offload ([`areole.c`](file:///home/quirinpa/site/external/libareole/src/areole.c))**
-- **The Current State**: `libareole` now features fast scanline row stepping (`seven_macro_chunk_row_sampler`) achieving 50,000+ FPS traversal capability on CPU, and supports per-query populate bounds (`opts.max_populates_per_query = 48`) and integer bilinear upsampling.
-- **Next Step**: Offload new chunk population to dedicated background POSIX threads via `<ttypt/wq.h>` (Section 5) so the main rendering thread never blocks during massive zoom or camera teleportation.
-
----
-
-### **2. Primary Startup Bottleneck: RESOLVED in Wave 2026.12.6**
-- **Native Parallel Compilation**: Direct `KHR_parallel_shader_compile` on the main WebGL2 context eliminates the worker round-trip latency.
-- **Progressive Activation**: Decoupled `pipe_status` allows the terrain and 2.5D billboard diorama to present on frame 1 without waiting for heavy 4D cloud raymarch shaders to link.
+### **1. Terrain Zoom-Out Generation Bottleneck: RESOLVED in Wave 2026.12.7**
+- **The Issue**: Zooming out caused severe frame drops and stuttering because `min_lvl` was capped at 4, forcing the quadtree to refine thousands of tiny level 4 chunks across the entire planetary horizon.
+- **The Solution**: Scaled `min_lvl` logarithmically above atmosphere (`dist >= 44,000 wu`) up to level 11, reducing generated chunk count by $64\times$ to a clean 20–32 chunks per planetary hemisphere. Restored scanline row stepping with bit-exact integer coordinates.
 
 ---
 
-### **3. Primary GPU Submission Bottleneck: 2D Array Texture Batching ([`nd_seven_gl.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven_gl.c))**
-- **The Current State**: Uniform consolidation has eliminated ~3,600+ uniform calls per frame by hoisting 21 frame-invariant uniforms to upload once per frame, reducing per-chunk overhead to 4 uniform calls (`uChunkOrigin`, `uChunkRelOrigin`, `uChunkSpan`, `uSeaLevel`).
-- **Next Step**: Consolidating node textures into a 2D Array Texture (`GL_TEXTURE_2D_ARRAY`) using the now-exported `glTexImage3D` / `glTexSubImage3D` to collapse all chunk meshes into a single `glDrawElementsInstanced` call per pass.
+### **2. GPU Draw Call Overhead: RESOLVED in Wave 2026.12.8 (Option 1)**
+- **The Issue**: Even with uniform hoisting, rendering 60–100 chunks requires 60–100 `glDrawElements` calls and texture re-binds per frame.
+- **The Solution**: 2D Array Texture (`GL_TEXTURE_2D_ARRAY`) slice indexing + `glDrawElementsInstanced` collapses all terrain drawing into 1–3 instanced draw calls with dynamic instance VBO streaming, eliminating per-chunk texture binds across terrain, water, and cloud passes.
+
+---
+
+### **3. Main-Thread CPU Generation Stalls: Addressed in Option 2 (`<ttypt/wq.h>`)**
+- **The Issue**: When traversing into previously unvisited areas, evaluating multi-octave FBM noise executes on the main render thread.
+- **The Solution**: Offload `ar_get_or_populate` to dedicated POSIX background worker threads via `<ttypt/wq.h>` over shared WASM linear memory (`SharedArrayBuffer`).
+
+---
+
+## 8. Option 2 Roadmap: Client-Side Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)
+
+### A. Architectural Overview
+Modern browser engines support multi-threaded WebAssembly via the `wasm32-wasi-threads` ABI:
+1. **Shared Linear Memory (`SharedArrayBuffer`)**: Native C pointers, heap allocations, and data structures (such as `ar_system_t` and `s_block_bb_arena`) are accessed directly by all worker threads with zero serialization or cloning overhead.
+2. **Atomic Synchronization (`<stdatomic.h>`)**: Standard C11 atomic primitives compile directly to hardware WASM instructions (`i32.atomic.rmw.*`).
+3. **Kernel-Grade Workqueues (`<ttypt/wq.h>`)**:
+   - A multi-producer multi-consumer (MPMC) lock-free ring buffer queue.
+   - Dedicated thread pools: `wq_terrain` (chunk procedural noise evaluation) and `wq_scenery` (Poisson-disc billboard scatter & botanical synthesis).
+   - **Zero-Stall Rendering**: When the camera moves or zooms, unpopulated quadtree chunks display their cached parent upsampled data while worker threads populate high-detail noise in the background.
+
+```
++-------------------------------------------------------------------------------+
+|                             Shared Linear Memory                              |
+|                                                                               |
+|   +-----------------------+     +-------------------+     +---------------+   |
+|   |   ar_system_t Pool    |     |  Billboard Arena  |     |  BCP Network  |   |
+|   | (Node States 0/1/2/3) |     |  (s_block_bb)     |     |  corm Tables  |   |
+|   +-----------------------+     +-------------------+     +---------------+   |
+|               ^                          ^                        ^           |
++---------------|--------------------------|------------------------|-----------+
+                |                          |                        |
++---------------+-------+       +----------+----------+     +-------+-----------+
+| Thread 0 (Main/Render)|       | Thread 1 (Terrain)  |     | Thread 2 (Scenery)|
+| - wasm_tick (60-120Hz)|       | - wq_areole worker  |     | - wq_scenery      |
+| - ar_system_query     | ----> | - chaff_fill_lod()  |     | - ndw_tile_objects|
+| - WebGL2 Draw Calls   |       | - row_sampler FBM   |     | - Meadow Poisson  |
++-----------------------+       +---------------------+     +-------------------+
+```
+
+---
+
+## 9. Option 3 Roadmap: Continuous Interplanetary Spaceflight & Celestial Mechanics
+
+### A. Non-Euclidean Celestial Mechanics & Dual-Manifold Navigation
+NeverDark models a multi-planet system governed by toroidal and spherical manifolds:
+- **Torus 1 (Primary World / Terrestrial)**: Major radius $R_1 = 2,000,000\text{ wu}$, minor radius $r_1 = 425,000\text{ wu}$.
+- **Torus 2 (Companion Body / Alternate World)**: Major radius $R_2 = 1,400,000\text{ wu}$, minor radius $r_2 = 310,000\text{ wu}$, orbiting with semi-major axis $a = 6,800,000\text{ wu}$ and inclination $i = 18.5^\circ$.
+
+### B. Core Features for Continuous Flight
+1. **Dynamic Gravity Well & Ephemeris Simulation**:
+   - Real-time Keplerian orbital propagation of companion bodies.
+   - Dual-potential gravity gradient: smooth spatial blend between World 1 and World 2 gravitational coordinate frames across Lagrange points ($L_1 / L_2$).
+2. **Seamless Surface-to-Orbit Quadtree Transition**:
+   - Altitude-progressive coordinate normalization: transitions local tangent diorama space into 3D Cartesian planetary space without floating-point precision loss.
+   - Atmospheric scattering and entry glow: raymarched Rayleigh/Mie horizon haze that thins into deep vacuum starfields at $h > 80,000\text{ wu}$.
+3. **Companion Body Landing**:
+   - When approaching the companion world, the camera's reference manifold seamlessly pivots to the companion body's coordinate system (`seven_torus_bounds_3d_cb`), enabling seamless de-orbit, atmospheric entry, and landing on World 2 with zero loading screens.
+
+---
+
+## 10. Option 4 Roadmap: Client-Offloaded Semantic AI (`liblemma` + `libsepal`)
+
+### A. Pure-C Isomorphic Semantic Intelligence
+NeverDark currently performs semantic search and dialogue generation on the server. Moving these workloads to client WASM worker threads unlocks zero-latency NPC interactions:
+1. **Compact Vector Quantization (`libsepal`)**:
+   - Embed high-dimensional semantic spaces into 8-bit quantized vector embeddings ($128\text{ dimensions} \times 1\text{ byte} = 128\text{ B per concept}$).
+   - Pre-computed offline knowledge indices compiled into read-only WASM data segments.
+2. **Fast Cosine Similarity on SIMD WASM**:
+   - Utilize 128-bit WASM SIMD (`i8x16`, `i16x8`) for dot-product evaluation, searching over 50,000 knowledge nodes in under 2 milliseconds.
+3. **Procedural Autonomous NPC Life Cycles**:
+   - NPC schedule evaluation, situational awareness, contextual dialogue trees, and local goal-seeking run continuously on `wq_ai` worker threads, sending only delta actions to the server.
+

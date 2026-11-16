@@ -168,13 +168,14 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 }
 
 static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_t level,
-                                         int32_t wy, int32_t wx_start, int32_t wx_step,
+                                         int32_t wy, int32_t ox, int32_t span_w,
                                          uint32_t count, ar_sample_t *out_row)
 {
 	(void)user_ctx;
-	int32_t cur_wx = wx_start;
-	for (uint32_t i = 0; i < count; i++, cur_wx += wx_step) {
-		seven_macro_chunk_sampler(NULL, world, level, cur_wx, wy, &out_row[i]);
+	uint32_t gdim = (count > 1) ? (count - 1) : 1;
+	for (uint32_t c = 0; c < count; c++) {
+		int32_t wx = ox + (int32_t)(((int64_t)c * span_w) / gdim);
+		seven_macro_chunk_sampler(NULL, world, level, wx, wy, &out_row[c]);
 	}
 }
 
@@ -741,7 +742,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		target_quad_px = 1.33f + 3.80f * atmo_t;
 		int lvl_step = (int)floorf(log2f(dist * (1.0f / 5000.0f)));
 		if (lvl_step < 1) lvl_step = 1;
-		if (lvl_step > 4) lvl_step = 4;
+		if (dist < 44000.0f && lvl_step > 4) lvl_step = 4;
+		else if (lvl_step > 11) lvl_step = 11;
 		min_lvl = (uint8_t)lvl_step;
 	}
 
@@ -1033,6 +1035,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 	s_visible_leaf_count = unoccluded_count;
+	nd_seven_gl_flush_terrain_batches();
 
 	/* Multi-Planet 3D Manifold Rendering:
 	 * Evaluate the companion body's dynamic 3D Keplerian orbit & tilted spin pose at anim_t,
@@ -1084,6 +1087,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 				                                (uint32_t)w, (uint32_t)h,
 				                                (float)alt_wl_i, &alt_pdef);
 			}
+			nd_seven_gl_flush_terrain_batches();
 		}
 	}
 

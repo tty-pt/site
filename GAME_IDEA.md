@@ -312,6 +312,29 @@ To preserve the **Lean OpenBSD Server** invariant (§1), the server **never** ru
 3. **Server-Side Authoritative Validation (`HardMask` Enforcement)**:
    - Even though the leased client chooses *which* action the mob wants to take, the server still validates the resulting command against authoritative game rules (cooldowns, range, line-of-sight, movement speed, and valid action set) so a modified client cannot make a leased mob cheat or perform illegal state transitions.
 
+### 8.5 Deterministic Unobserved Mob Wandering (Tethered 1D Noise & Time-Bucketed Waypoints)
+
+While a procedural mob is **unobserved** (no player within observation range holding an AI lease, `0` bytes in [`libcorm`](file:///home/quirinpa/site/external/libcorm/include/ttypt/corm.h), zero server ticks), it should not stand frozen like a statue on its spawn coordinate waiting for a player to arrive. Instead, its world position $(x(t), y(t))$ is evaluated as a **stateless, $O(1)$ pure function of time $t$** around its deterministic home anchor $(x_0, y_0)$:
+
+$$x(t) = x_0 + \Delta x(\text{mob\_seed},\, t), \qquad y(t) = y_0 + \Delta y(\text{mob\_seed},\, t)$$
+
+1. **Why 1D Time-Hashing Replaces Heavy 3D Noise (`noise3d(x, y, t)`)**:
+   - Because a given mob's home room $(hx, hy)$ and slot index are fixed constants for that entity, hashing `(world_seed, hx, hy, mob_slot)` into a 32-bit `mob_seed` eliminates the spatial dimensions from the noise evaluation.
+   - Instead of stepping a 3D noise field through time, $\Delta x$ and $\Delta y$ are evaluated directly at timestamp $t$ in $O(1)$ time (~15 CPU instructions, zero history stepping) using one of two creature-appropriate motion profiles:
+     - **Profile A — Continuous 1D Noise (`noise1d(t * freq, mob_seed_x/y)`) for Floating / Flying / Swimming Entities**:
+       Hashes the two bounding integer time steps $\lfloor t \cdot f \rfloor$ and $\lfloor t \cdot f \rfloor + 1$ on independent $X$ and $Y$ seeds and interpolates via cubic Hermite / `smoothstep`. Produces a smooth, non-repeating trajectory suited to wisps, ghosts, birds, or fish.
+     - **Profile B — Time-Bucketed Hash Waypoints ("Pause-and-Stroll") for Terrestrial Creatures**:
+       Slices time into epochs $k = \lfloor t / T \rfloor$ (e.g., $T = 8\text{ s}$) and hashes `(mob_seed, k - 1)` and `(mob_seed, k)` to draw two bounded waypoints $\mathbf{p}_{k-1}, \mathbf{p}_k \in [-R_{\text{max}}, +R_{\text{max}}]^2$ plus a random departure offset $t_{\text{start}}$ within the window (and a $\sim 30\%$ probability that $\mathbf{p}_k = \mathbf{p}_{k-1}$ for longer rests). During the walking sub-interval of duration $\|\mathbf{p}_k - \mathbf{p}_{k-1}\| / v_{\text{walk}}$, the mob interpolates at its natural walking speed $v_{\text{walk}}$; for the remainder of the epoch it stands still in its idle/grazing state. Because every epoch draws from an avalanche integer hash, the path never repeats and is visually indistinguishable from a live server `rand()` state machine.
+2. **Deriving Which Mobs Appear on Screen from `(screen_area, t)` Alone**:
+   - Because the displacement $(\Delta x(t), \Delta y(t))$ is strictly bounded by a maximum roam radius $R_{\text{max}}$ (e.g., $R_{\text{max}} = 1\text{ or }2\text{ rooms}$ around the home room center $(x_0, y_0)$), a mob anchored in home room $(hx, hy)$ can **mathematically never** be more than $R_{\text{max}}$ rooms away from $(hx, hy)$ at any time $t$.
+   - Given a visible screen covering rooms $[rx_{\min}..rx_{\max}] \times [ry_{\min}..ry_{\max}]$ at time $t$, both server and client find every visible mob in three deterministic steps:
+     1. **Pad the visible room box by $R_{\text{max}}$**: Iterate candidate home rooms $(hx, hy) \in [rx_{\min} - R_{\text{max}} \dots rx_{\max} + R_{\text{max}}] \times [ry_{\min} - R_{\text{max}} \dots ry_{\max} + R_{\text{max}}]$ (e.g., a $5\times 5 = 25$-room loop for a $3\times 3$ view with $R_{\text{max}} = 1$).
+     2. **Check deterministic home spawn**: If `mob_spawn_check(world_seed, hx, hy)` indicates a mob belongs to home room $(hx, hy)$, compute its home anchor $(x_0, y_0) = ((hx + 0.5)W_{\text{room}},\, (hy + 0.5)H_{\text{room}})$ and `mob_seed`.
+     3. **Evaluate $(x(t), y(t))$ and filter**: Compute $(x(t), y(t))$ via Profile A or B (clamping or re-hashing waypoints that would land in water or solid obstacles) and test whether $(x(t), y(t))$ falls inside the visible screen bounds (and which room $\lfloor x(t)/W_{\text{room}}\rfloor, \lfloor y(t)/H_{\text{room}}\rfloor$ it currently occupies).
+3. **Seamless Handoff to & from Client Lease AI (§2.2 + §8.4)**:
+   - Even with $R_{\text{max}} = 1\text{ room}$, each mob's $3\times 3$-room territory ($480 \times 384\text{ wu} \approx 19.2\text{ m} \times 15.4\text{ m}$) is wider than the local viewport, so mobs naturally walk in from off-screen, graze across room borders, and walk off-screen with zero network traffic while unobserved.
+   - The instant a mob enters a player's active AI lease radius, it materializes at $(x(t_{\text{observe}}), y(t_{\text{observe}}))$ and transitions to client-leased hybrid utility AI (§8.4). Once all players leave and the relaxation cooldown $\tau_{\text{relax}}$ elapses, its database delta is evicted (`0` bytes) and it resumes its deterministic $(x(t), y(t))$ schedule.
+
 ---
 
 ## 9. Summary of Definite Decisions, Implementation Status & Remaining Open Explorations
@@ -341,8 +364,8 @@ To preserve the **Lean OpenBSD Server** invariant (§1), the server **never** ru
    - Unifying 1:1 server-to-client slot counts (`count_base = 1, count_rand = 0`), replacing hardcoded `max_trees` with continuous crown-area and moisture-catchment competition in [`<nd/plant.h>`](file:///home/quirinpa/site/external/nd-plant/include/nd/plant.h), and projecting atlas-silhouette ground shadows along `uSunDir` for all stage billboards (trees, rocks, boulders, mobs, and the lamb).
 5. **Interactive Interplanetary Flight / Transit Camera**:
    - Adding an interactive spaceflight / orbital transit camera mode to pilot seamlessly between World 0 and companion moons (World 1 / World 2) in real time.
-6. **Client-Offloaded Embedding Game AI & Exclusive Mob Control Leases (§8)**:
-   - Running qualitative state embedding and [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) similarity search strictly inside the client browser (WASM) so the OpenBSD server does zero vector compute, coordinated by exclusive single-client mob leases `(controller_player_ref, lease_epoch, lease_expires_at)` with automatic failover and server-side rule validation.
+6. **Client-Offloaded Embedding Game AI, Exclusive Mob Leases & Deterministic Unobserved Wandering (§8)**:
+   - Running qualitative state embedding and [`libsepal`](file:///home/quirinpa/site/external/libsepal/include/ttypt/sepal.h) similarity search strictly inside the client browser (WASM) under exclusive single-client mob leases `(controller_player_ref, lease_epoch, lease_expires_at)`, paired with $O(1)$ tethered 1D noise / time-bucketed hash waypoints so unobserved mobs roam across room borders with zero server ticks or DB storage.
 
 ---
 
