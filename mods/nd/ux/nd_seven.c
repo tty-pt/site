@@ -1384,44 +1384,20 @@ static inline uint32_t meadow_hash32(int32_t x, int32_t y, uint32_t seed)
 
 static inline float meadow_noise_2d(float wx, float wy, float scale, uint32_t seed)
 {
-	float inv_s = 1.0f / scale;
-	float px = wx * inv_s;
-	float py = wy * inv_s;
-	int32_t ix = (int32_t)floorf(px);
-	int32_t iy = (int32_t)floorf(py);
-	float fx = px - (float)ix;
-	float fy = py - (float)iy;
-	float ux = fx * fx * (3.0f - 2.0f * fx);
-	float uy = fy * fy * (3.0f - 2.0f * fy);
+	unsigned shift;
+	if (scale <= 24.0f) shift = 4u;
+	else if (scale <= 36.0f) shift = 5u;
+	else if (scale <= 72.0f) shift = 6u;
+	else if (scale <= 144.0f) shift = 7u;
+	else shift = 8u;
 
-	typedef struct {
-		int32_t ix, iy;
-		uint32_t seed;
-		uint8_t valid;
-		float v00, v10, v01, v11;
-	} meadow_cell_cache_t;
-	static meadow_cell_cache_t s_mc[32];
-	uint32_t idx = (((uint32_t)ix * 0x9E3779B1u) ^
-	                ((uint32_t)iy * 0x85EBCA77u) ^
-	                seed) & 31u;
-	meadow_cell_cache_t *slot = &s_mc[idx];
-	float v00, v10, v01, v11;
-	if (slot->valid && slot->ix == ix && slot->iy == iy && slot->seed == seed) {
-		v00 = slot->v00; v10 = slot->v10;
-		v01 = slot->v01; v11 = slot->v11;
-	} else {
-		v00 = (float)(meadow_hash32(ix,     iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
-		v10 = (float)(meadow_hash32(ix + 1, iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
-		v01 = (float)(meadow_hash32(ix,     iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
-		v11 = (float)(meadow_hash32(ix + 1, iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
-		slot->ix = ix; slot->iy = iy; slot->seed = seed;
-		slot->v00 = v00; slot->v10 = v10;
-		slot->v01 = v01; slot->v11 = v11;
-		slot->valid = 1;
-	}
-	float a = v00 + (v10 - v00) * ux;
-	float b = v01 + (v11 - v01) * ux;
-	return a + (b - a) * uy;
+	static noise_wcache_t s_mc[32];
+	uint32_t idx = (seed ^ (seed >> 8u) ^ (uint32_t)shift) & 31u;
+	noise_wcache_t *c = &s_mc[idx];
+
+	int16_t p[2] = { (int16_t)(int32_t)wx, (int16_t)(int32_t)wy };
+	uint32_t raw = noise_wpoint_c(c, p, shift, 16u, seed, 2u, NOISE_FADE);
+	return (float)raw * (1.0f / 65535.0f);
 }
 
 static int meadow_lookup_rect(int zone, unsigned biome, uint32_t h, nd_seven_sprite_rect_t *out_rect)

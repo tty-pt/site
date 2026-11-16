@@ -231,9 +231,10 @@ With `<ttypt/wq.h>` + `pthread` over shared WASM memory, NeverDark can split its
    - Replaced 6-vertex $\times$ 80-byte expansion (480 B/quad) with compact 112-byte `nd_seven_gl_bb_inst_t` instance records streamed directly to WebGL2 via `glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, N)`.
    - Saves 77% memory bandwidth across the WASM/WebGL dynamic buffer bus and eliminates the 6-vertex index formatting loop on CPU while reducing vertex shader invocations by 33%.
    - Added standard `glDrawArraysInstanced` and `glVertexAttribDivisor` capabilities to `liblamina` Web HAL bridge.
-4. **Fast Noise Unification (`libchaff` / `noise.h`) across Meadow & Room Borders**:
-   - Replace scalar `meadow_noise_2d` in [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c#L1196-L1214) with `<ttypt/noise.h>` integer scanline steppers (`noise_wpoint_c` with cell cache), eliminating `float` division and `floorf()`.
-   - Replace scalar 5-octave `ndw_vnoise` in [`external/nd-seven/include/nd/seven-world.h`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h#L892-L906) with `chaff_fill()` / `noise_wrow()` scanline stepping, cutting corner hashes by $16\times$.
+4. **[COMPLETED] Fast Noise Unification (`libchaff` / `<ttypt/noise.h>`) across Meadow & Room Borders (Wave 2026.12.5)**:
+   - Replaced scalar `meadow_noise_2d` in [`mods/nd/ux/nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c) with canonical `<ttypt/noise.h>` integer sampling via `noise_wpoint_c` and dedicated per-seed 32-entry static lattice caches, eliminating all `float` divisions and `floorf()`.
+   - Unified `ndw_vnoise` and `ndw_warp_grid_fill` in [`external/nd-seven/include/nd/seven-world.h`](file:///home/quirinpa/site/external/nd-seven/include/nd/seven-world.h) onto `<ttypt/noise.h>` with 2-axis $\times$ 5-octave `noise_wcache_t` scanline stepping, cutting corner hashing across the $81 \times 65$ node grid by $12\times\text{–}16\times$ and eliminating bespoke `ndw_lattice`.
+   - Fully verified with zero regressions across `run-test-seven-render.sh`, `run-test-seven-world.sh`, `run-test-ground-zoom-lod.sh`, `run-test-lod-zoom-consistency.sh`, `run-test-chunk-hierarchy.sh`, and `make test-fast`.
 5. **Parallel Shader Compilation Fix & Progressive Pipeline Activation**:
    - Fix [`external/liblamina/htdocs/webgl-bridge.js`](file:///home/quirinpa/site/external/liblamina/htdocs/webgl-bridge.js) to compile all shaders in parallel directly on the main context when `KHR_parallel_shader_compile` is present without double-compiling via dummy workers, and activate terrain progressively while water/clouds link.
 6. **POSIX Multi-Threading Standard (`<ttypt/wq.h>` + `pthread-cap.js`)**:
