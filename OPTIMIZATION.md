@@ -120,7 +120,10 @@ Previously, while [`nd/field.h`](file:///home/quirinpa/site/external/nd-world/in
 1. **Zero Floating-Point `floorf()` or Divisions**: Meadow spatial cell lookups operate purely on integer coordinates `int16_t p[2] = { wx, wy }` with bitwise mask shifts (`s = p & COORDMASK_LSHIFT(shift)`).
 2. **Scanline Lattice Corner Memoization**: Horizontal scanline stepping across the $81 \times 65$ warp grid traverses multiple nodes within the same macro-cell (shift 10 = 1024 units, shift 9 = 512 units, shift 8 = 256 units), hashing corners once upon cell entry and performing pure multiply-accumulate updates across subsequent nodes.
 3. **Bit-Exact Cross-Platform Determinism**: All noise evaluations now share the canonical `TTYPT_NOISE_HASH` (`XXH32`) and multiply-then-shift fixed-point linear interpolation (`noise_wstep`), ensuring identical terrain features across native servers, WebAssembly, and unit test harnesses.
-4. **Full Test Suite Parity**: Verified with zero regressions across `run-test-seven-render.sh` (Living Meadow atlas, variety, wake decay), `run-test-seven-world.sh` (all 41 tile and border warp tests), `run-test-ground-zoom-lod.sh`, `run-test-lod-zoom-consistency.sh`, and `make test-fast`.
+4. **Full Test Suite Parity**: Verified with zero regressions across `run-test-seven-render.sh` (Living Meadow atlas, variety, wake decay), `run-test-seven-world.sh` (all 41 tile and border warp tests), `run-test-ground-zoom-lod.sh`, `run-test-lod-zoom-consistency.sh`, `run-test-chunk-hierarchy.sh`, `run-test-map-noise.sh` (inertial ephemeris alignment & toroidal wrap continuity), `run-test-map-render.sh` (synchronized with canonical `ar_probe_view` and `nd_seven_gl.c`), and `make test-fast`.
+5. **Consistency Invariants**:
+   - *Coordinate Space Continuity*: All border warp octave shifts $s \in \{10, 9, 8, 7, 5\}$ cleanly divide the 16-bit toroidal coordinate span ($65,536$), guaranteeing zero seams or popping across signed boundaries ($32767 \to -32768$).
+   - *Lattice Hash Preservation*: Replaced ad-hoc `ndw_lattice` with canonical `noise_r()`, ensuring bit-identical hash values across native C and WASM builds.
 
 ---
 
@@ -356,4 +359,3 @@ NeverDark currently performs semantic search and dialogue generation on the serv
    - Utilize 128-bit WASM SIMD (`i8x16`, `i16x8`) for dot-product evaluation, searching over 50,000 knowledge nodes in under 2 milliseconds.
 3. **Procedural Autonomous NPC Life Cycles**:
    - NPC schedule evaluation, situational awareness, contextual dialogue trees, and local goal-seeking run continuously on `wq_ai` worker threads, sending only delta actions to the server.
-
