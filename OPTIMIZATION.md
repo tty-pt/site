@@ -91,6 +91,10 @@ Currently, [`nd_seven.c`](file:///home/quirinpa/site/mods/nd/ux/nd_seven.c) only
    - In `seven_node_occluded_by_horizon()`, each node's 8 bounding box corners (including a 64m margin for scenery flora) are projected via `flat_mvp` to NDC. If across all covered screen bins its maximum projected screen elevation is strictly below the recorded foreground horizon (`max_ndc_y < s_horizon_y[b] - 0.02f`), the chunk is flagged as fully occluded.
    - Fully occluded chunks skip `nd_seven_gl_flush_terrain_chunk` (0 WebGL draw calls, 0 texture binds) and are pruned from `s_visible_leaves`, automatically skipping CPU billboard generation and room block queries in the downstream scenery pass.
    - Visible chunks conservatively update the horizon buffer via `seven_horizon_update()`, rasterizing their far edge at minimum elevation ($z_{\min}$) across the covered horizontal bins.
+   - **Mathematical Verification & Fail-Safe Properties**:
+     - *Alpha Blending Safety*: Downstream scenery at line 2450 specifically sorts `s_visible_leaves` back-to-front (North-to-South, $o_y$ ascending), preserving painter's order for alpha billboards without disturbance from the terrain's front-to-back sorting.
+     - *Near-Plane Guard*: `seven_project_point()` guards against $w \le 0.1$, preventing false culling of chunks straddling the near clipping plane.
+     - *Conservative Invariant*: The $+64\text{m}$ flora margin on $z_{\max}$ and $-0.02$ NDC safety buffer guarantee that peaks with tall trees or player silhouettes are never prematurely culled.
 
 ---
 
