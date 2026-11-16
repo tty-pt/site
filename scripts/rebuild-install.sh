@@ -49,7 +49,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # at boot from inside the jail. Anything not listed here is never deleted and
 # never installed by this script.
 CHAIN_LIBS="libstele libcorm libxylem liblemma libjoint libislet libsepal \
-	libhyle libtransp libbud libhyle-bud libhyle-source \
+	libhyle libpitch libbud libhyle-bud libhyle-source \
 	axil axil-auth axil-hyle axil-tty axil-nd"
 ENGINE_MODS=""
 for d in external/nd-*/; do

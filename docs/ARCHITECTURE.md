@@ -43,7 +43,7 @@ Rules derived from the model:
    component layer decides.
 4. **The SSR markup is the contract.** A React consumer must be able to
    implement components against the same server contract (hyle query API +
-   schema + the documented `data-*` DOM hooks). See `docs/SSR-CONTRACT.md`.
+   schema + the documented `data-*` DOM hooks). See `docs/DESIGN.md` and `docs/WEB_HAL_SPECIFICATION.md`.
 5. **Client-side enhancement is optional and framework-paired.** No-JS must
    always work. bud's WASM bridge is *bud's* client layer, purely additive,
    never required by the contract.
@@ -177,13 +177,13 @@ modding. The jail is seeded and gated by `scripts/seed-jail.sh` /
   C compiled into `mods/*/*.so`.
 - **No Rust/Dioxus SSR and no Deno/Fresh in the request path.** The only WASM is
   C compiled to wasm32-wasi (reactor model) for browser-side enhancement
-  (`bud-client.js` loads `/{module}.wasm` per `body[data-modules]`). Ignore any
+  (`stele-client.js` loads `/{module}.wasm` per `body[data-modules]`). Ignore any
   stale doc claiming a Rust SSR path (`mods/ssr`, `ssr.so`, wasm-bindgen).
 - The site self-serves from the repo root as a chroot; required data dirs:
   `var/poem`, `var/song`, `var/gig`,
   `var/grp`.
 - `htdocs/` is the static web root (`styles.css`, `hyle.css`, `*.wasm`,
-  `bud-client.js`). `site_ui_page()` only emits `bud-client.js` +
+  `stele-client.js`). `site_ui_page()` only emits `stele-client.js` +
   `data-modules` when given a non-empty module name — plain list pages stay
   pure SSR until they opt into a wasm bundle.
 
@@ -244,16 +244,16 @@ restarting the server.
   caught silently — poem/grp intentionally have none).
 - **The list pages now ship `data-modules="list"`** → `htdocs/list.wasm`
   (from `mods/index/ux/list.c`); poem/grp load it too and the enhancement
-  no-ops (no widget nodes). See `docs/C-ISOMORPHIC-BUD.md`.
+  no-ops (no widget nodes). See `docs/WEB_HAL_SPECIFICATION.md`.
 - `.wasm` assets are dual-compiled from the same sources as the `.so` (see
-  `docs/C-ISOMORPHIC-BUD.md`); `make` probes for a WASI clang and skips if
+  `docs/WEB_HAL_SPECIFICATION.md`); `make` probes for a WASI clang and skips if
   absent.
 - Precedent for framework-agnostic enhancement: `data-detail-viewer-*`
   (`site_ui_viewer_controls`, plain JS) and `data-menu-toggle`
   (`site_ui_layout`).
 
 ### 7.1 The Two-Header Rule for Isomorphic C & WASM
-- **`<ttypt/iso.h>`**: Compiler export/import attributes (`ISO_EXPORT`, `ISO_EXPORT_AS`, `ISO_IMPORT`). Zero runtime dependencies. Standalone libraries (`libbud`, `libtransp`, etc.) include only `iso.h`.
+- **`<ttypt/iso.h>`**: Compiler export/import attributes (`ISO_EXPORT`, `ISO_EXPORT_AS`, `ISO_IMPORT`). Zero runtime dependencies. Standalone libraries (`libbud`, `libpitch`, etc.) include only `iso.h`.
 - **`<ttypt/stele_wasm.h>`**: Single-instantiation WASM reactor substrate, UI slots (`STL_SLOT_PAGE`, `STL_SLOT_CHROME`), module registration (`STL_WASM_MODULE`), and Web HAL host imports. Transitively includes `<ttypt/iso.h>`. Interactive UX modules (`mods/*/ux/*.c`) include only `stele_wasm.h`.
 
 ### 7.2 Zero-Copy Shared Memory Chaining Across Packages
@@ -279,14 +279,12 @@ See `docs/BUILD.md` and `docs/TESTING.md` for commands.
 Logs: `debug/builds/`, `debug/runtime/axil.log`, `debug/tests/`.
 
 Gig unit-test step 6 (`data.txt` seeding) passes after the 2026-08-21 source
-data migration (`AUDIT` E9).
+data migration.
 
 ## 9. Related docs
 
-- `docs/C-ISOMORPHIC-BUD.md` — writing one renderer for SSR + wasm.
-- `docs/SSR-CONTRACT.md` — the framework-neutral component contract.
+- `docs/WEB_HAL_SPECIFICATION.md` — isomorphic SSR + WASM substrate and Web HAL bridge contract.
 - `docs/FILTERS.md` — multi-ref / filter semantics.
-- `docs/WASM-BRIDGE.md` — bud-client.js / bud-hydrate.js / bud_wasm_app.c.
 - `docs/SCHEMA.md` — schema metadata strings and hints.
 - `docs/DESIGN.md` — encapsulation/abstraction philosophy and the
   "evoke, don't reimplement" patterns.

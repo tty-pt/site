@@ -122,25 +122,41 @@ if (crit.project && env.context?.project === crit.project) score *= 1.05;
 if (crit.subsystem && env.context?.subsystem === crit.subsystem) score *= 1.05;
 ```
 
-#### 5. Conversational Noise Pruning
-When answering natural-language conversational queries (e.g., *"Do you remember what my grandfather said?"*), code artifacts and raw C function docstrings matching incidental terms receive an $80\%$ penalty:
+#### 5. Conversational Noise Pruning and Structured Episode Exemption
+When answering natural-language conversational queries (e.g., *"Do you remember what my grandfather said?"*), raw code snippets, grep matches, and C function docstrings matching incidental terms receive an $80\%$ penalty. Crucially, structured technical episodes (`envelope.type === "episode"` or `envelope.episode`) and explicitly requested L0 task memories (`includeL0`) are exempted from this penalty, ensuring past bugfixes, root causes, and verification steps remain fully discoverable:
 ```ts
-if (crit.mipmap !== "L0" && isCodeOrDocArtifact(cand, env)) {
+if (crit.mipmap !== "L0" && !crit.includeL0 && isCodeOrDocArtifact(cand, env)) {
   score *= 0.2;
 }
 ```
 
 ---
 
-## 4. Summary Matrix
+## 4. Consolidation Lifecycle Pipeline & Queue Mechanics
+
+Raw turn observations (L0) transition through multi-resolution abstraction tiers:
+- **L0 (Tool Echoes / Raw Turns)** $\rightarrow$ **L1 (Task Episodes / Investigations)**: Incremental turn settlement groups L0 events by run/subsystem and synthesizes coherent L1 episodes.
+  - **Queue Ordering (`orderPendingL0Refs`)**: Fresh references captured in the current turn are consolidated first, ensuring immediate availability of active work; the remaining backlog is ordered newest-first.
+  - **Terminal Reference Disposal**: Missing, non-L0, or superseded references are pruned immediately (`disposedL0Refs`) so invalid entries cannot wedge the head of the consolidation queue.
+  - **Idle Backlog Draining (`drainL0Backlog`)**: When idle, consolidation incrementally drains remaining L0 entries in bounded batches (`consolidateBatchLimit`, default 20) within a strict wall-clock budget (`consolidateDrainMs`, default 250ms).
+- **L1 $\rightarrow$ L2 (Project Invariants)**: Formed when related L1 episodes accumulate in dirty scopes, evaluated using LLM synthesis.
+  - **Zero-Config Local Synthesis**: When `axil-auren` is active, L2/L3 synthesis automatically routes to its OpenAI-compatible chat endpoint (`/v1/chat/completions`) using `smollm`, preventing stalled consolidation queues without manual configuration.
+- **L2 $\rightarrow$ L3 (System Principles)**: Cross-scope generalization across multiple project modules.
+
+---
+
+## 5. Summary Matrix
 
 | Capability | Component Responsible | Protocol / Seam |
 |---|---|---|
 | Vector Embedding Generation | `axil-auren` | `POST /v1/embeddings` |
 | Stateless Cosine Margin Scoring | `axil-auren` | `POST /v1/classify` |
+| Local Chat Synthesis (L2/L3) | `axil-auren` | `POST /v1/chat/completions` |
 | Lexical Inverted Index (BM25) | `libcorm` (`liblemma`) | CLI / `cormd` socket |
 | Vector Persistence & Indexing | `libcorm` (`libsepal`) | `.sepal` binary index |
 | Multi-Axis Coordinate Intersection | `libcorm` (`joint`) | `-X joint,lemma,sepal` |
 | Cross-Axis Fusion (RRF) | `pi-mm` | `fuseRankingsRRF()` |
 | Epistemic & Symbolic Re-Ranking | `pi-mm` | `computeRankingScore()` |
+| Consolidation & Backlog Draining | `pi-mm` | `src/tools/consolidate.ts` |
+| Pipeline Health Diagnostics | `pi-mm` | `/mm doctor` (`pipeline_status.ts`) |
 | Evidence Lineage Traversal | `pi-mm` | `src/tools/traverse.ts` |

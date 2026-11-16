@@ -301,4 +301,4 @@ chmod 644 auth.corm
 
 - [mods/common/README.md](../common/README.md) - Shared utility functions
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
-- [debug/README.md](../../debug/README.md) - Debug logging system
+- [docs/TESTING.md](../../docs/TESTING.md) - Testing & debug log guide

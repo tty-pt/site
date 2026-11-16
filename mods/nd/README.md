@@ -2,7 +2,7 @@
 
 Pure-C isomorphic user interface for NeverDark (`axil-nd`), dual-compiled:
 1. Native SSR renderer (`nd_ui_render`) called by `external/axil-nd/src/http.c` inside `site_ui_page_lang`.
-2. Browser WASM reactor (`htdocs/nd.wasm`) loaded via `bud-client.js` on pages with `data-modules="site_chrome nd"`.
+2. Browser WASM reactor (`htdocs/nd.wasm`) loaded via `stele-client.js` on pages with `data-modules="site_chrome nd"`.
 
 ## Architecture
 

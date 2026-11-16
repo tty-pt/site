@@ -2,7 +2,7 @@ all := libnd-view
 
 libnd-view-obj-y := src/view.o src/mods.o
 
-LDLIBS-libnd-view := -lxylem -lcorm -lislet -lstele -lnd-bus
+LDLIBS-libnd-view := -lxylem -lcorm -lislet -lstele -lnd-bus -lm
 
 FOLDER := nd
 

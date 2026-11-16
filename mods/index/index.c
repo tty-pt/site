@@ -178,16 +178,50 @@ XY_IMPL(int, list_respond_page,
 		return -1;
 	}
 
-	size_t json_budget =
-		        8192 +
-		        (size_t)state->nids * (size_t)(state->ncols * 512 + 128) +
-		        (size_t)state->nopts * 256;
-	json = malloc(json_budget);
-	if (!json)
-		goto render;
+	if (fd >= 0) {
+		char accept[256] = { 0 };
+		char qs[512] = { 0 };
+		axil_header_get(fd, "Accept", accept, sizeof(accept));
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
 
-	if (list_state_to_json(state, json, json_budget) != 0)
-		goto render;
+		/* Binary table stream (HYLT wire protocol) */
+		if (strstr(qs, "format=bin") != NULL ||
+		    (accept[0] && strstr(accept, "application/octet-stream") != NULL)) {
+			size_t bin_budget = 65536 +
+			        (size_t)state->nids * (size_t)(state->ncols * 512 + 128) +
+			        (size_t)state->nopts * 512;
+			if (bin_budget < 262144)
+				bin_budget = 262144;
+			void *bin_buf = malloc(bin_budget);
+			if (bin_buf) {
+				int bin_sz = list_state_to_bin(state, bin_buf, bin_budget);
+				if (bin_sz > 0) {
+					rc = respond_bin(fd, 200, bin_buf, (size_t)bin_sz);
+					free(bin_buf);
+					goto cleanup;
+				}
+				free(bin_buf);
+			}
+			respond_error(fd, 500, "Binary Serialization Error");
+			rc = -1;
+			goto cleanup;
+		}
+
+		if (strstr(qs, "format=json") != NULL ||
+		    (accept[0] && strstr(accept, "application/json") != NULL)) {
+			size_t json_budget =
+			        8192 +
+			        (size_t)state->nids * (size_t)(state->ncols * 512 + 128) +
+			        (size_t)state->nopts * 256;
+			json = malloc(json_budget);
+			if (json && list_state_to_json(state, json, json_budget) == 0) {
+				rc = respond_json(fd, 200, json);
+				goto cleanup;
+			}
+			free(json);
+			json = NULL;
+		}
+	}
 
 render:
 	layout = list_render(state);
@@ -204,12 +238,42 @@ render:
 	char path[256];
 	snprintf(path, sizeof(path), "/%s/", module);
 
-	rc = site_ui_respond_with_state(
+	char bin_src[512];
+	char qs[512] = { 0 };
+	if (fd >= 0)
+		axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+
+	if (qs[0]) {
+		char clean_qs[512] = { 0 };
+		const char *p = qs;
+		size_t cpos = 0;
+		while (*p) {
+			const char *amp = strchr(p, '&');
+			size_t seg = amp ? (size_t)(amp - p) : strlen(p);
+			if (seg > 0 && strncmp(p, "format=", 7) != 0) {
+				if (cpos > 0 && cpos + 1 < sizeof(clean_qs))
+					clean_qs[cpos++] = '&';
+				size_t cp = (cpos + seg < sizeof(clean_qs) - 1) ? seg : (sizeof(clean_qs) - 1 - cpos);
+				memcpy(clean_qs + cpos, p, cp);
+				cpos += cp;
+				clean_qs[cpos] = '\0';
+			}
+			p += seg;
+			if (*p == '&') p++;
+		}
+		if (clean_qs[0])
+			snprintf(bin_src, sizeof(bin_src), "/%s/?%s&format=bin", module, clean_qs);
+		else
+			snprintf(bin_src, sizeof(bin_src), "/%s/?format=bin", module);
+	} else {
+		snprintf(bin_src, sizeof(bin_src), "/%s/?format=bin", module);
+	}
+
+	rc = site_ui_respond_with_state_preload(
 		        fd, ui_t(title), path, site_ui_module_icon(module),
-		        username, json, "list", layout);
+		        username, bin_src, NULL, "list", layout);
 
 cleanup:
-	free(json);
 	list_fill_free(state);
 	return rc;
 }

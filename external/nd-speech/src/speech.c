@@ -25,6 +25,102 @@ nd_dowritef(unsigned player_ref, const char *fmt, va_list args)
 	nd_rwrite(player.location, player_ref, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
+XY_DECL(int, map_where, coord_t *, p, unsigned, thing);
+
+static const char *
+radial_dir_name(int dx, int dy)
+{
+	/* Speaker relative to listener: if speaker is at (sx, sy) and listener is at (lx, ly),
+	 * dx = sx - lx, dy = sy - ly. (+x = east, +y = north) */
+	if (dy > 0) {
+		if (dx > 0) return "northeast";
+		if (dx < 0) return "northwest";
+		return "north";
+	}
+	if (dy < 0) {
+		if (dx > 0) return "southeast";
+		if (dx < 0) return "southwest";
+		return "south";
+	}
+	if (dx > 0) return "east";
+	if (dx < 0) return "west";
+	return "nearby";
+}
+
+/* Dedicated radial chat propagation function (separate from room-local nd_dowritef).
+ * Always delivers `msg` to the speaker's immediate room via nd_rwrite(), and if the
+ * governing region prefix has chat_radius > 0 (and the room is outdoors / spatial),
+ * broadcasts to connected players in nearby rooms within chat_radius with a compass cue. */
+void
+nd_radial_rwrite(unsigned player_ref, const char *msg, size_t len)
+{
+	OBJ player, room;
+	coord_t spos[4];
+	uint64_t rid = 0;
+	uint8_t rplen = ST_PLEN_ROOT;
+
+	if (!msg || len == 0 || nd_get(HD_OBJ, &player, &player_ref) != 0)
+		return;
+
+	/* 1. Always deliver to the immediate room first */
+	nd_rwrite(player.location, player_ref, (char *)msg, len);
+
+	/* 2. Check if speaker is in a spatial room and if the region enables radial chat */
+	if (nd_get(HD_OBJ, &room, &player.location) != 0 || room.type != TYPE_ROOM)
+		return;
+	if (map_where(spos, player.location) != 0)
+		return;
+	if (st_region_of_player(player_ref, &rid, &rplen) != XY_OK)
+		return;
+
+	unsigned radius = st_region_get_chat_radius(rid, rplen);
+	if (radius == 0)
+		return;
+
+	unsigned fds_hd = nd_table_handle(HD_FD);
+	if (!fds_hd)
+		return;
+
+	int r2 = (int)radius * (int)radius;
+	unsigned c = corm_iter(fds_hd, NULL, 0);
+	const void *kp, *vp;
+
+	while (corm_next(&kp, &vp, c)) {
+		unsigned listener_ref = *(const unsigned *)kp;
+		if (listener_ref == player_ref)
+			continue;
+
+		OBJ listener;
+		if (nd_get(HD_OBJ, &listener, &listener_ref) != 0)
+			continue;
+		/* Same room already received direct nd_rwrite above */
+		if (listener.location == player.location)
+			continue;
+
+		coord_t lpos[4];
+		if (map_where(lpos, listener.location) != 0)
+			continue;
+		/* Must be on the same world and vertical Z layer */
+		if (lpos[3] != spos[3] || lpos[2] != spos[2])
+			continue;
+
+		int dx = (int)spos[0] - (int)lpos[0];
+		int dy = (int)spos[1] - (int)lpos[1];
+		if (dx * dx + dy * dy > r2)
+			continue;
+
+		char rbuf[1152];
+		int rn = snprintf(rbuf, sizeof(rbuf), "[from the %s] %.*s",
+			radial_dir_name(dx, dy), (int)len, msg);
+		if (rn > 0) {
+			nd_write(listener_ref, rbuf,
+				(size_t)rn < sizeof(rbuf) ? (size_t)rn : sizeof(rbuf) - 1);
+			eng_nd_flush(listener_ref);
+		}
+	}
+	corm_fin(c);
+}
+
 /* Commands which involve speaking */
 static char *
 wall_message(int argc, char *argv[], int start)
@@ -75,7 +171,7 @@ do_say(int fd, int argc, char *argv[])
 	char out[1024];
 	int n = snprintf(out, sizeof(out), "%s says:%s\n", player.name, message);
 	if (n > 0)
-		nd_rwrite(player.location, player_ref, out, (size_t)n < sizeof(out) ? (size_t)n : sizeof(out) - 1);
+		nd_radial_rwrite(player_ref, out, (size_t)n < sizeof(out) ? (size_t)n : sizeof(out) - 1);
 	eng_nd_flush(player_ref);
 }
 
@@ -91,7 +187,7 @@ do_pose(int fd, int argc, char *argv[])
 	char out[1024];
 	int n = snprintf(out, sizeof(out), "%s%s\n", player.name, message);
 	if (n > 0)
-		nd_rwrite(player.location, player_ref, out, (size_t)n < sizeof(out) ? (size_t)n : sizeof(out) - 1);
+		nd_radial_rwrite(player_ref, out, (size_t)n < sizeof(out) ? (size_t)n : sizeof(out) - 1);
 	eng_nd_flush(player_ref);
 }
 

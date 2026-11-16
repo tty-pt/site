@@ -50,4 +50,4 @@ Serializes dataset query results and URL query parameters into a framework-neutr
 
 - `docs/ARCHITECTURE.md` — Generic routing and module lifecycle.
 - `docs/PICKERS.md` — Omni-dropdown picker options endpoint.
-- `docs/C-ISOMORPHIC-BUD.md` — Isomorphic list view rendering (`htdocs/list.wasm`).
+- `docs/WEB_HAL_SPECIFICATION.md` — Isomorphic list view rendering (`htdocs/list.wasm`).

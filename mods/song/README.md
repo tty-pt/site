@@ -16,7 +16,7 @@ The song module provides functionality for:
 - **SSR & Forms:** Server-side HTML built with bud and `site_ui_form_from_desc` (via `mods/index` + common layout)
 - **Dataset & Storage:** `libhyle-source` filesystem driver (`store_fs`) storing `var/song/{id}/`
 - **Schema:** Defined in `fields.h` using canonical `<hyle/schema.h>` descriptors (`hyle_schema_desc_t`)
-- **Transposition:** C library (`lib/transp/`) for chord transposition
+- **Transposition:** C library (`external/libpitch/`) for chord transposition
 - **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`) hydrated with `hyle_bud_state_apply_len`
 
 ### SSR Route Pattern
@@ -220,7 +220,7 @@ make test-single-capture TEST=song-edit.test.ts
 make test-single-capture TEST=song-detail-transpose.test.ts
 ```
 
-For debugging test failures, see [debug/README.md](../../debug/README.md).
+For debugging test failures, see [docs/TESTING.md](../../docs/TESTING.md).
 
 ## Dependencies
 
@@ -276,6 +276,6 @@ cat var/song/{song_id}/data.txt
 ## See Also
 
 - [AGENTS.md](../../AGENTS.md) - Development guidelines
-- [debug/README.md](../../debug/README.md) - Debug logging system
+- [docs/TESTING.md](../../docs/TESTING.md) - Testing & debug log guide
 - [mods/common/README.md](../common/README.md) - Dataset system documentation
-- [mods/song/lib/transp/README.md](lib/transp/README.md) - Transposition library
+- [external/libpitch/README.md](../../external/libpitch/README.md) - Transposition library

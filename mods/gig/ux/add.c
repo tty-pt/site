@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 
 static bud_node *sb_render_add_form(
         const char *csrf_token, const char **vals, const pick_view_t *pv)

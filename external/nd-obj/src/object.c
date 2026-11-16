@@ -4,11 +4,13 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <ttypt/corm.h>
 #include <nd/xy.h>
 #include <nd/world-events.h>
+#include <nd/core.h>
 
 #define NUMBER_TOKEN '#'
 #define ESCAPE_CHAR 27
@@ -243,6 +245,9 @@ eng_object_art(unsigned thing_ref)
 
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0)
 		return void_art;
+	art[0] = '\0';
+	if (core_art_resolve(thing_ref, thing.type, art, sizeof(art)) && art[0])
+		return art;
 	switch (thing.type) {
 	case TYPE_ENTITY:
 		type = "entity";
@@ -434,6 +439,7 @@ eng_object_move(unsigned what_ref, unsigned where_ref)
 			    r_obj.type == TYPE_ROOM) {
 				ROO *r = (ROO *)&r_obj.data;
 				r->flags |= RF_MODIFIED;
+				r->last_mod = (uint32_t)time(NULL);
 				corm_put(obj_hd, &last_loc, &r_obj);
 			}
 		}
@@ -446,12 +452,14 @@ eng_object_move(unsigned what_ref, unsigned where_ref)
 	corm_put(obj_hd, &what_ref, &what);
 
 	if (what.type != TYPE_ENTITY) {
+		uint32_t now_ts = (uint32_t)time(NULL);
 		if (last_loc != NOTHING) {
 			OBJ r_obj;
 			if (corm_read(obj_hd, &last_loc, &r_obj, sizeof(r_obj)) == 0 &&
 			    r_obj.type == TYPE_ROOM) {
 				ROO *r = (ROO *)&r_obj.data;
 				r->flags |= RF_MODIFIED;
+				r->last_mod = now_ts;
 				corm_put(obj_hd, &last_loc, &r_obj);
 			}
 		}
@@ -461,6 +469,7 @@ eng_object_move(unsigned what_ref, unsigned where_ref)
 			    r_obj.type == TYPE_ROOM) {
 				ROO *r = (ROO *)&r_obj.data;
 				r->flags |= RF_MODIFIED;
+				r->last_mod = now_ts;
 				corm_put(obj_hd, &where_ref, &r_obj);
 			}
 		}

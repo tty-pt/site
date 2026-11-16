@@ -46,14 +46,18 @@ make -C /home/quirinpa/axil-auren/tests run
 echo "=== Tooling: pi-quest (workspace) ==="
 ( cd "$ROOT_DIR/.pi/extensions/pi-quest" && npm test )
 
-echo "=== Tooling: pi-quest (standalone) ==="
-( cd /home/quirinpa/pi-quest && npm test )
+if [ -d /home/quirinpa/pi-quest ]; then
+	echo "=== Tooling: pi-quest (standalone) ==="
+	( cd /home/quirinpa/pi-quest && npm test )
+fi
 
 echo "=== Tooling: pi-mm (workspace) ==="
 ( cd "$ROOT_DIR/.pi/extensions/pi-mm" && npm test )
 
-echo "=== Tooling: pi-mm (standalone) ==="
-( cd /home/quirinpa/pi-mm && npm test )
+if [ -d /home/quirinpa/pi-mm ]; then
+	echo "=== Tooling: pi-mm (standalone) ==="
+	( cd /home/quirinpa/pi-mm && npm test )
+fi
 
 echo "========================================================"
 echo "    ALL CORE LIBRARIES AND EXTENSIONS PASSED CLEANLY!    "

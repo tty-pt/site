@@ -2,7 +2,7 @@ CFLAGS += -fPIC
 all := libnd-seven
 
 
-LDLIBS-libnd-seven := -lxylem
+LDLIBS-libnd-seven := -lxylem -lm
 
 FOLDER := nd
 

@@ -16,13 +16,12 @@
 #include "../i18n/i18n.h"
 #include "../source/source.h"
 #include "../auth/auth.h"
-#include <transp/transp.h>
-#include <transp/parse.h>
+#include <ttypt/pitch.h>
 #include "song-types.h"
 #include "fields.h"
 #include "dict.h"
 
-static transp_ctx_t *g_transp_ctx = NULL;
+static pitch_ctx_t *g_pitch_ctx = NULL;
 static char g_doc_root[256] = ".";
 
 static const source_list_field_t song_list_fields[] = {
@@ -61,9 +60,9 @@ XY_IMPL(int, song_transpose_root,
 	char *c = slurp_file(dp);
 	if (!c)
 		return -1;
-	transp_reset_key(g_transp_ctx);
-	*out = transp_buffer(g_transp_ctx, c, semi, fl);
-	int k = transp_get_key(g_transp_ctx);
+	pitch_reset_key(g_pitch_ctx);
+	*out = pitch_buffer(g_pitch_ctx, c, semi, fl);
+	int k = pitch_get_key(g_pitch_ctx);
 	if (key)
 		*key = k < 0 ? 0 : k;
 	free(c);
@@ -100,7 +99,7 @@ XY_IMPL(int, song_parse_viewer_prefs,
 		return -1;
 	char qs[1024] = { 0 };
 	out->transpose = 0;
-	out->flags = TRANSP_HTML;
+	out->flags = PITCH_HTML;
 	out->show_media = 0;
 	out->zoom = song_get_viewer_zoom(username);
 
@@ -109,7 +108,7 @@ XY_IMPL(int, song_parse_viewer_prefs,
 		if (user_pref_read(
 		            username, "chords-latin", buf, sizeof(buf)) == 0 &&
 		    atoi(buf))
-			out->flags |= TRANSP_LATIN;
+			out->flags |= PITCH_LATIN;
 		if (user_pref_read(
 		            username, "chords-media", buf, sizeof(buf)) == 0 &&
 		    atoi(buf))
@@ -120,11 +119,11 @@ XY_IMPL(int, song_parse_viewer_prefs,
 	if (axil_param(fd, "t", buf, sizeof(buf)) > 0)
 		out->transpose = axil_param_int(fd, "t", 0);
 	if (axil_param_bool(fd, "b", 0))
-		out->flags |= TRANSP_BEMOL;
+		out->flags |= PITCH_BEMOL;
 	if (axil_param_bool(fd, "l", 0))
-		out->flags |= TRANSP_LATIN;
+		out->flags |= PITCH_LATIN;
 	if (axil_param_bool(fd, "h", 0))
-		out->flags |= TRANSP_HTML;
+		out->flags |= PITCH_HTML;
 	if (axil_param_bool(fd, "m", 0))
 		out->show_media = 1;
 
@@ -142,7 +141,7 @@ XY_IMPL(int, song_parse_viewer_prefs,
 
 	if (username && username[0]) {
 		char pv[2];
-		pv[0] = (out->flags & TRANSP_LATIN) ? '1' : '0';
+		pv[0] = (out->flags & PITCH_LATIN) ? '1' : '0';
 		pv[1] = '\0';
 		user_pref_write(username, "chords-latin", pv);
 		pv[0] = out->show_media ? '1' : '0';
@@ -212,7 +211,7 @@ song_details_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	                       : 0;
 	tmp.transpose = prefs.transpose;
 	tmp.zoom = prefs.zoom;
-	tmp.use_latin = (prefs.flags & TRANSP_LATIN) != 0;
+	tmp.use_latin = (prefs.flags & PITCH_LATIN) != 0;
 	tmp.show_media = prefs.show_media;
 	tmp.original_key = k;
 
@@ -277,12 +276,12 @@ static const char *derive_song_lyrics(
 	}
 
 	buf[0] = '\0';
-	transp_song_t song = { 0 };
+	pitch_song_t song = { 0 };
 	int key = -1;
-	if (transp_song_parse(data, &song, &key) == 0) {
+	if (pitch_song_parse(data, &song, &key) == 0) {
 		size_t pos = 0;
 		for (size_t i = 0; i < song.nlines; i++) {
-			transp_pline_t *pl = &song.lines[i];
+			pitch_pline_t *pl = &song.lines[i];
 			if (!pl->is_chord_line && !pl->is_comment &&
 			    !pl->is_empty && pl->len > 0)
 			{
@@ -296,7 +295,7 @@ static const char *derive_song_lyrics(
 		if (pos > 0)
 			pos--;
 		buf[pos] = '\0';
-		transp_song_free(&song);
+		pitch_song_free(&song);
 	}
 	free(data);
 	return buf;
@@ -344,7 +343,7 @@ static void song_detail_populate_app_state(
 	        title);
 	snprintf(app_state.lang, sizeof(app_state.lang), "%s", lang);
 	app_state.transpose = prefs->transpose;
-	app_state.use_latin = (prefs->flags & TRANSP_LATIN) != 0;
+	app_state.use_latin = (prefs->flags & PITCH_LATIN) != 0;
 	app_state.show_media = prefs->show_media;
 	app_state.original_key = k;
 	app_state.is_owner = is_owner;
@@ -434,7 +433,7 @@ void xy_install(void)
 	srand((unsigned)time(NULL));
 	resolve_doc_root(0, dr, sizeof(dr));
 	strncpy(g_doc_root, dr, sizeof(g_doc_root) - 1);
-	g_transp_ctx = transp_init();
+	g_pitch_ctx = pitch_init();
 	xy_load("./mods/index/index");
 	xy_load("./mods/mpfd/mpfd");
 

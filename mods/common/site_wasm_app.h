@@ -2,6 +2,9 @@
 #define SITE_WASM_APP_H
 
 #include <bud/bud.h>
+#include <bud/bud_app.h>
+#include <bud/bud_state.h>
+#include <hyle/schema.h>
 #include <ttypt/stele_wasm.h>
 
 #if defined(__wasm__)
@@ -14,6 +17,15 @@ static inline int bud_slot_mount(int slot, bud_node *(*render_fn)(void)) { (void
 static inline int bud_slot_update(int slot, bud_node *(*render_fn)(void)) { (void)slot; (void)render_fn; return 0; }
 static inline int bud_slot_dispatch_event(int slot, unsigned int node_id, const char *event_name, int bubbles, void *event_data) { (void)slot; (void)node_id; (void)event_name; (void)bubbles; (void)event_data; return 0; }
 static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_name, int bubbles, void *event_data) { (void)node_id; (void)event_name; (void)bubbles; (void)event_data; return 0; }
+#endif
+
+#if defined(__wasm__)
+#define _BUD_WASM_MOD_REGISTER(mod_name) \
+    __attribute__((constructor)) static void _bud_mod_##mod_name##_register(void) { \
+        stl_kernel_register_module(&stl_mod_##mod_name); \
+    }
+#else
+#define _BUD_WASM_MOD_REGISTER(mod_name)
 #endif
 
 #define BUD_WASM_MODULE(mod_name, init_fn, render_fn, action_fn) \
@@ -49,7 +61,39 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
         .cleanup = NULL, \
         .fetch_callback = NULL, \
         .render = (void *(*)(void))(render_fn) \
+    }; \
+    _BUD_WASM_MOD_REGISTER(mod_name)
+
+#if defined(__wasm__)
+#define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
+    _BUD_WASM_MOD_REGISTER(mod_name) \
+    __attribute__((weak)) ISO_EXPORT(bud_node *, bud_app_render, void) { \
+        bud_node *(*_rnd_fn)(void) = (bud_node *(*)(void))(render_fn); \
+        return _rnd_fn ? _rnd_fn() : NULL; \
+    } \
+    __attribute__((weak)) ISO_EXPORT(int, wasm_init, const char *json, int len) { \
+        stl_kernel_register_module(&stl_mod_##mod_name); \
+        return stl_kernel_mount(1, #mod_name, json, len); \
+    } \
+    __attribute__((weak)) ISO_EXPORT(int, wasm_init_bin, const void *bin, int len) { \
+        stl_kernel_register_module(&stl_mod_##mod_name); \
+        return stl_kernel_mount_bin(1, #mod_name, bin, (size_t)len); \
+    } \
+    __attribute__((weak)) ISO_EXPORT(void, wasm_action, int action_id, const char *data) { \
+        void (*_act_fn)(int, const char *) = (void (*)(int, const char *))(action_fn); \
+        if (_act_fn) _act_fn(action_id, data); \
+    } \
+    __attribute__((weak)) ISO_EXPORT(void, wasm_fetch_callback, int req_id, const char *data, int len) { \
+        void (*_f_fn)(int, const char *, int) = (void (*)(int, const char *, int))(fetch_fn); \
+        if (_f_fn) _f_fn(req_id, data, len); \
     }
+#else
+#define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
+    __attribute__((weak)) int wasm_init(const char *json, int len) { \
+        int (*_init_fn)(const char *, int) = (int (*)(const char *, int))(init_fn); \
+        return _init_fn ? _init_fn(json, len) : 0; \
+    }
+#endif
 
 #define BUD_WASM_MODULE_EXT(mod_name, init_fn, render_fn, action_fn, tick_fn, cleanup_fn, fetch_fn) \
     static int _bud_mod_##mod_name##_mount(int slot) { \
@@ -84,6 +128,41 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
         .cleanup = cleanup_fn, \
         .fetch_callback = fetch_fn, \
         .render = (void *(*)(void))(render_fn) \
-    }
+    }; \
+    _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn)
+
+typedef struct {
+    const hyle_schema_desc_t *schema;
+    const bud_field_desc_t *bud_fields;
+    void *state;
+    bud_node *(*render)(void);
+    void (*on_action)(int id, const char *data);
+    void (*on_cleanup)(void);
+} site_wasm_app_desc_t;
+
+#define SITE_WASM_MODULE(mod_name, ...) \
+    static const site_wasm_app_desc_t _site_wasm_app_##mod_name = __VA_ARGS__; \
+    static int _site_wasm_##mod_name##_init(const char *json, int len) { \
+        size_t jlen = len >= 0 ? (size_t)len : 0; \
+        if (_site_wasm_app_##mod_name.bud_fields && _site_wasm_app_##mod_name.state) { \
+            wasm_state_init(json, len, _site_wasm_app_##mod_name.bud_fields, _site_wasm_app_##mod_name.state); \
+        } \
+        if (_site_wasm_app_##mod_name.schema && _site_wasm_app_##mod_name.state) { \
+            hyle_bud_state_apply_len(_site_wasm_app_##mod_name.state, _site_wasm_app_##mod_name.schema, json, jlen); \
+        } \
+        return 0; \
+    } \
+    static void _site_wasm_##mod_name##_fetch(int req_id, const char *data, int len) { \
+        (void)req_id; \
+        if (_site_wasm_app_##mod_name.schema && _site_wasm_app_##mod_name.state) { \
+            hyle_bud_state_apply_len(_site_wasm_app_##mod_name.state, _site_wasm_app_##mod_name.schema, data, (size_t)len); \
+        } \
+        if (_site_wasm_app_##mod_name.bud_fields && _site_wasm_app_##mod_name.state) { \
+            bud_state_apply_len(_site_wasm_app_##mod_name.state, _site_wasm_app_##mod_name.bud_fields, data, (size_t)len); \
+        } \
+        bud_app_set_state(); \
+    } \
+    BUD_WASM_MODULE_EXT(mod_name, _site_wasm_##mod_name##_init, _site_wasm_app_##mod_name.render, \
+                        _site_wasm_app_##mod_name.on_action, NULL, _site_wasm_app_##mod_name.on_cleanup, _site_wasm_##mod_name##_fetch)
 
 #endif /* SITE_WASM_APP_H */

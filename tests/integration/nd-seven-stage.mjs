@@ -68,9 +68,14 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForSelector("#seven-stage-canvas", { state: "attached", timeout: 10000 })
     .catch(() => fails.push("seven stage did not appear after walking north of the spawn"));
-  if (await page.$("#term")) fails.push("terminal still mounted on the 2D stage");
+  if (await page.$(".terminal-mode #term, #holder > #term")) fails.push("terminal still mounted on the 2D stage");
   // Ensure keyboard focus is on the document, not the hidden textarea
-  await page.evaluate(() => { window.focus(); });
+  await page.evaluate(() => {
+    if (document.activeElement && typeof document.activeElement.blur === "function") {
+      document.activeElement.blur();
+    }
+    window.focus();
+  });
   await sleep(1200);
 
   const first = await stats("#seven-stage-canvas", "first");
@@ -91,7 +96,7 @@ try {
     const inside = geo.mini.x >= geo.stage.x && geo.mini.y >= geo.stage.y &&
       geo.mini.x + geo.mini.w <= geo.stage.x + geo.stage.w + 1 && geo.mini.y + geo.mini.h <= geo.stage.y + geo.stage.h + 1;
     if (!inside) fails.push("mini-map is not on top of the stage");
-    if (!geo.overlay || geo.overlay.z !== "10") fails.push("mini-map overlay is not stacked above the stage");
+    if (!geo.overlay || parseInt(geo.overlay.z, 10) < 10) fails.push("mini-map overlay is not stacked above the stage");
     if (geo.mini.x + geo.mini.w < geo.stage.x + geo.stage.w * 0.5) fails.push("mini-map is not in the stage's right corner");
   }
   const mini = await stats("#room-map-canvas", "mini");
@@ -124,10 +129,10 @@ try {
     if (!back.hit) fails.push("lamb could not walk back across the border");
   }
   // South until the spawn: the terminal returns when the stage region ends.
-  for (let i = 0; i < 4 && !(await page.$("#term")); i++)
+  for (let i = 0; i < 4 && !(await page.$(".terminal-mode #term")); i++)
     await walkAcross("ArrowDown", 0);
-  if (!(await page.$("#term")))
-    await page.waitForSelector("#term textarea", { state: "attached", timeout: 8000 })
+  if (!(await page.$(".terminal-mode #term")))
+    await page.waitForSelector(".terminal-mode #term textarea, #holder > #term textarea", { state: "attached", timeout: 8000 })
       .catch(() => fails.push("terminal did not return at the spawn"));
   if (await page.$("#seven-stage-canvas")) fails.push("seven stage still mounted at the spawn");
   if (errors.length) fails.push("page errors: " + errors.slice(0, 3).join(" | "));

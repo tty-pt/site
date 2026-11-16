@@ -66,8 +66,13 @@ typedef struct {
 	uint8_t flip;             /* flip sprite horizontal */
 	uint8_t sprite_id;        /* mineral sprite id (1..8) */
 	uint8_t harvested;        /* 1 if picked/harvested */
+	uint8_t plant_id;         /* packed flora species/stage/variant */
+	uint8_t col_mask;         /* programmer-defined collision footprint */
+	uint8_t hw, hh;           /* collision half-extents */
+	uint8_t anchor_y;         /* downward screen-Y anchor offset from bottom of sprite */
 	uint32_t entity_ref;      /* Corm DB entity ref if known */
 	char name[32];            /* display name */
+	char art[64];             /* staged art path if known */
 } nd_spatial_obj_t;
 
 #define ND_SPATIAL_MAX_OBJS (NDW_MAX_OBJ + 16)
@@ -101,6 +106,9 @@ void nd_seven_cache_room_entities(uint32_t room_ref, const int16_t pos[4],
                                   const nd_entity_desc_t *entities, size_t count);
 const nd_entity_desc_t *nd_seven_get_cached_entities(const int16_t pos[4], size_t *out_count, uint32_t *out_room_ref);
 int nd_seven_is_tile_obj_picked(const int16_t pos[4], uint8_t slot_id);
+int nd_seven_any_picked_in_rect(int16_t world, int16_t rz,
+                                int16_t px_min, int16_t px_max,
+                                int16_t py_min, int16_t py_max);
 void nd_seven_mark_tile_slot_harvested(const int16_t pos[4], uint8_t slot_id);
 
 void nd_seven_mark_picked(uint32_t entity_ref);
@@ -116,8 +124,5 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz);
 int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 void nd_seven_action_cooldown_reset(void);
-
-void draw_object_name(uint32_t *fb, int w, int h, int cx, int top_y, const char *name);
-void draw_thinking_balloon(uint32_t *fb, int w, int h, int hx, int hy, const char *action);
 
 #endif /* ND_SEVEN_OBJECTS_H */

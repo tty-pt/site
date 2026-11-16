@@ -76,7 +76,6 @@ test('SteleWasmClient instantiates and decodes strings', () => {
 	const client = new SteleWasmClient();
 	assert.ok(client);
 	assert.equal(typeof client.boot, 'function');
-	assert.equal(typeof client.navigate, 'function');
 
 	const memory = new WebAssembly.Memory({ initial: 1 });
 	const encoded = new TextEncoder().encode('hello stele');
@@ -116,62 +115,78 @@ test('SteleWasmClient slot bridge dispatches single-stream VDOM patches', () => 
 	});
 });
 
-test('SteleWasmClient zero-reload SPA navigate handles internal page transitions', async () => {
+test('SteleWasmClient preserves native link navigation while delegating in-place WASM actions', () => {
 	const client = new SteleWasmClient();
-	client.slotBridges.set(0, window.__wasm_slot_bridge_factory(chromeRoot));
-	client.slotBridges.set(1, window.__wasm_slot_bridge_factory(budRoot));
+	let capturedActionId = null;
+	let capturedActionPayload = null;
 
-	// Mock fetch returning new page HTML
-	globalThis.fetch = async (url) => {
-		return {
-			ok: true,
-			text: async () => `
-				<!DOCTYPE html>
-				<html>
-				<head><title>Gig Detail - Live</title></head>
-				<body data-modules="site_chrome gig_detail">
-					<script type="application/json" id="chrome-state">{"title":"Gigs","path":"/gigs"}</script>
-					<div id="chrome-root" data-slot="0"><nav>Updated Nav</nav></div>
-					<div id="bud-root" data-slot="1" data-module="gig_detail"><main>Gig Details</main></div>
-					<script type="application/json" id="bud-state">{"id":456,"venue":"Concert Hall"} </script>
-				</body>
-				</html>
-			`,
-			arrayBuffer: async () => new ArrayBuffer(0),
-			clone() { return this; }
-		};
-	};
-
-	globalThis.DOMParser = class {
-		parseFromString(html) {
-			const gigDocRoot = makeElement('div', 'bud-root', { 'data-slot': '1', 'data-module': 'gig_detail' });
-			gigDocRoot.innerHTML = '<main>Gig Details</main>';
-			const gigState = makeElement('script', 'bud-state');
-			gigState.textContent = '{"id":456,"venue":"Concert Hall"}';
-			const gigChromeState = makeElement('script', 'chrome-state');
-			gigChromeState.textContent = '{"title":"Gigs","path":"/gigs"}';
-
-			return {
-				title: 'Gig Detail - Live',
-				body: makeElement('body', '', { 'data-modules': 'site_chrome gig_detail' }),
-				getElementById(id) {
-					if (id === 'chrome-state') return gigChromeState;
-					if (id === 'bud-state') return gigState;
-					return null;
-				},
-				querySelector(sel) {
-					if (sel.includes('#bud-root') || sel.includes('[data-slot="1"]')) return gigDocRoot;
-					if (sel.includes('#bud-state') || sel.includes('#page-state')) return gigState;
-					return null;
-				}
-			};
+	// Mock component instance with wasm_action
+	const mockInstance = {
+		exports: {
+			wasm_action(id, ptr) {
+				capturedActionId = id;
+			},
+			free() {}
 		}
 	};
+	client.slotInstances.set(1, { instance: mockInstance, memory: new WebAssembly.Memory({ initial: 1 }) });
 
-	await client.navigate('/gig/456');
+	const clickListeners = [];
+	const mockDocument = {
+		addEventListener(type, fn) {
+			if (type === 'click') clickListeners.push(fn);
+		}
+	};
+	globalThis.document.addEventListener = mockDocument.addEventListener;
 
-	assert.equal(globalThis.document.title, 'Gig Detail - Live');
-	assert.equal(budRoot.innerHTML, '<main>Gig Details</main>');
-	assert.equal(budRoot.getAttribute('data-module'), 'gig_detail');
-	assert.equal(window.location.pathname, '/gig/456');
+	client.attachEventDelegation();
+	assert.ok(clickListeners.length > 0, 'Click listeners should be registered');
+	const dispatchClick = (evt) => {
+		for (const fn of clickListeners) fn(evt);
+	};
+
+	// 1. Regular internal link must NOT be intercepted (native navigation preserved)
+	let linkPrevented = false;
+	const linkTarget = {
+		closest(sel) {
+			if (sel.includes('button[data-action]') || sel.includes('a[data-action]')) return null;
+			if (sel.includes('a[href]')) return {
+				getAttribute(attr) { return attr === 'href' ? '/song/123' : null; },
+				hasAttribute() { return false; },
+				target: '_self'
+			};
+			return null;
+		}
+	};
+	dispatchClick({
+		target: linkTarget,
+		button: 0,
+		defaultPrevented: false,
+		preventDefault() { linkPrevented = true; }
+	});
+	assert.equal(linkPrevented, false, 'Regular links must NOT preventDefault; native navigation preserved');
+
+	// 2. Interactive action (e.g. table sort data-action="1") MUST be intercepted
+	let actionPrevented = false;
+	const actionTarget = {
+		closest(sel) {
+			if (sel.includes('button[data-action]') || sel.includes('a[data-action]')) return {
+				getAttribute(attr) {
+					if (attr === 'data-action') return '1';
+					if (attr === 'data-action-payload') return 'title:asc';
+					return null;
+				},
+				closest() { return budRoot; }
+			};
+			return null;
+		}
+	};
+	dispatchClick({
+		target: actionTarget,
+		button: 0,
+		defaultPrevented: false,
+		preventDefault() { actionPrevented = true; }
+	});
+	assert.equal(actionPrevented, true, 'Interactive data-actions must preventDefault');
+	assert.equal(capturedActionId, 1, 'Action ID 1 must be dispatched to wasm_action');
 });

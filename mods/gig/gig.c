@@ -18,8 +18,8 @@
 #include "../auth/auth.h"
 #include "../mpfd/mpfd.h"
 #include "../song/song.h"
-#include <transp/transp_flags.h>
-#include <transp/music.h>
+#include <pitch/pitch_flags.h>
+#include <pitch/music.h>
 #include "../grp/grp.h"
 #include "fields.h"
 #include "dict.h"

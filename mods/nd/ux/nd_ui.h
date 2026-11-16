@@ -33,9 +33,41 @@ void nd_ui_init_defaults(void);
 const nd_client_state_t *nd_ui_get_client_state(void);
 
 /*
+ * RPG Chat expand/collapse state query & mutation.
+ */
+int nd_ui_get_chat_expanded(void);
+void nd_ui_set_chat_expanded(int expanded);
+int nd_ui_get_chat_minimized(void);
+void nd_ui_set_chat_minimized(int minimized);
+int nd_ui_get_chat_width(void);
+int nd_ui_get_chat_height(void);
+void nd_ui_set_chat_size(int width, int height);
+
+/*
+ * Floating HUD Window Management (move, resize, minimize, reset, localStorage restore).
+ */
+typedef enum {
+	ND_WIN_CHAT = 0,
+	ND_WIN_TITLE = 1,
+	ND_WIN_MAP = 2,
+	ND_WIN_CONTENTS = 3,
+	ND_WIN_ACTIONS = 4,
+	ND_WIN_TARGET = 5,
+	ND_WIN_COUNT = 6
+} nd_hud_win_id_t;
+
+void nd_ui_set_win_rect(int win_id, int x, int y, int w, int h);
+void nd_ui_get_win_rect(int win_id, int *x, int *y, int *w, int *h);
+void nd_ui_set_win_minimized(int win_id, int minimized);
+int nd_ui_get_win_minimized(int win_id);
+void nd_ui_reset_win(int win_id);
+void nd_ui_restore_persist(const char *key, const char *val);
+
+/*
  * Client WASM entrypoint rehydrating JSON state from SSR.
  */
-void wasm_init(const char *json, int len);
+int nd_stl_init(const char *json, int len);
+int wasm_init(const char *json, int len);
 
 #ifdef __cplusplus
 }

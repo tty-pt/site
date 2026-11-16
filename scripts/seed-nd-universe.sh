@@ -31,6 +31,7 @@ if [ ! -d "$AXIL_ND_DIR" ]; then
 fi
 
 mkdir -p "$(dirname "$TARGET_DB")"
+rm -f "$TARGET_DB" "$TARGET_DB.seed-v5" "$TARGET_DB-corm" "$TARGET_DB-islet" 2>/dev/null || true
 cp "$REPO_ROOT"/external/nd-*/data/*.dsv "$(dirname "$TARGET_DB")"/ 2>/dev/null || true
 cp "$REPO_ROOT"/mods/nd/data/*.dsv "$(dirname "$TARGET_DB")"/ 2>/dev/null || true
 TARGET_DB="$(cd "$(dirname "$TARGET_DB")" 2>/dev/null && pwd)/$(basename "$TARGET_DB")"

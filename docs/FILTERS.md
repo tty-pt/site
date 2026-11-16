@@ -101,21 +101,21 @@ single-value unchanged, accent-sensitivity preserved.
 
 Per-field opt-in via the schema hint `"f":"dropdown"` (see `docs/SCHEMA.md`);
 when set, the full-width grid is replaced by a `<details>`-based dropdown
-(markup in `docs/SSR-CONTRACT.md`). Live for `song.type` today; the machinery
+(markup in `docs/PICKERS.md`). Live for `song.type` today; the machinery
 is generic (hint absent = grid).
 
 - Checkboxes are real form fields → they submit **repeated keys** natively
   (`type=a&type=b`); no-JS works. The backend union-within-field /
   intersect-across-fields semantics (§4) are implemented and tested.
-- Enhancement (bud WASM bundle, per `docs/C-ISOMORPHIC-BUD.md`) adds live
+- Enhancement (bud WASM bundle, per `docs/WEB_HAL_SPECIFICATION.md`) adds live
   option search (class-toggle only — never re-render option rows, it would
   kill the `data-bud-on` bindings) and summary label sync via
-  `bud_patch_text` **targeted at the text node** (see `docs/WASM-BRIDGE.md`
-  §6); the summary shows labels joined with `; ` (display only).
+  `bud_patch_text` **targeted at the text node** (see `docs/WEB_HAL_SPECIFICATION.md`);
+  the summary shows labels joined with `; ` (display only).
 - The `bud-state` JSON for the list page carries: cols (key/label/type/hint/
   current selection), options (id/label) per multi-ref col, rows (id + display
   values), pagination/sort/user, so the WASM tree reproduces the SSR tree
-  exactly (id alignment — see the C-isomorphic doc).
+  exactly (id alignment — see `docs/WEB_HAL_SPECIFICATION.md`).
 - The widget's field wrapper `.hyle-ms-field` mirrors `.hyle-filter-bar
   label` sizing so the trigger matches sibling inputs; its styles must
   out-specify the bar's generic `label`/`input` rules (see `docs/STYLING.md`).
@@ -135,6 +135,5 @@ is generic (hint absent = grid).
 ## 10. Related docs
 
 - `docs/SCHEMA.md` — the `"f"` hint and schema metadata.
-- `docs/SSR-CONTRACT.md` — the widget DOM contract.
-- `docs/PICKERS.md` — guidelines on the omnisearch picker component.
-- `docs/C-ISOMORPHIC-BUD.md` — how the enhancement ships as a wasm bundle.
+- `docs/PICKERS.md` — guidelines on the omnisearch picker component and widget DOM contract.
+- `docs/WEB_HAL_SPECIFICATION.md` — how the enhancement ships as a wasm bundle.

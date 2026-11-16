@@ -80,6 +80,43 @@ static char *render_view(void)
 	return out;
 }
 
+struct diff_stats {
+	int clear_count;
+	int replace_count;
+	int remove_count;
+	int tag_count;
+	int canvas_recreate_count;
+	int text_count;
+	int listener_count;
+};
+
+static int count_diff_ops(void *user, const char *op, const char *a, const char *b, const char *c)
+{
+	struct diff_stats *ds = (struct diff_stats *)user;
+	if (strcmp(op, "patch-clear") == 0)
+		ds->clear_count++;
+	else if (strcmp(op, "patch-replace") == 0)
+		ds->replace_count++;
+	else if (strcmp(op, "patch-remove") == 0)
+		ds->remove_count++;
+	else if (strcmp(op, "patch-tag") == 0 || strcmp(op, "patch-tag-at") == 0) {
+		ds->tag_count++;
+		if ((a && strcmp(a, "canvas") == 0) || (b && strcmp(b, "canvas") == 0))
+			ds->canvas_recreate_count++;
+	} else if (strcmp(op, "patch-attr") == 0) {
+		if (b && strcmp(b, "id") == 0 && c &&
+		    (strcmp(c, "seven-stage-canvas") == 0 ||
+		     strcmp(c, "room-map-canvas") == 0 ||
+		     strcmp(c, "game-stage") == 0 ||
+		     strcmp(c, "room-map") == 0))
+			ds->canvas_recreate_count++;
+	} else if (strcmp(op, "patch-text") == 0)
+		ds->text_count++;
+	else if (strcmp(op, "patch-listener") == 0)
+		ds->listener_count++;
+	return 0;
+}
+
 int main(void)
 {
 	memset(&st, 0, sizeof(st));
@@ -91,13 +128,61 @@ int main(void)
 	snprintf(name0, sizeof(name0), "%s", st.room.name);
 	char *view0 = render_view();
 	assert(strstr(view0, "!"));
+	bud_node *tree0 = nd_ui_render(&st);
+	char *html0 = bud_render_html(tree0);
+	assert(strstr(html0, "id=\"term\""));
+	assert(strstr(html0, "data-bud-key=\"term\""));
+	assert(strstr(html0, "data-bud-foreign=\"1\""));
+	assert(strstr(html0, "data-bud-terminal=\"1\""));
+	bud_free_string(html0);
+
+	snprintf(st.preferred_driver, sizeof(st.preferred_driver), "lamina-seven");
+	snprintf(st.preferred_map_driver, sizeof(st.preferred_map_driver), "lamina");
+	st.layout_mode = ND_LAYOUT_GAME_2D;
+	bud_node *seven_tree0 = nd_ui_render(&st);
+	char *seven_html0 = bud_render_html(seven_tree0);
+	assert(strstr(seven_html0, "id=\"term\""));
+	assert(strstr(seven_html0, "data-bud-key=\"term\""));
+	assert(strstr(seven_html0, "data-bud-foreign=\"1\""));
+	assert(strstr(seven_html0, "data-bud-terminal=\"1\""));
+	bud_free_string(seven_html0);
+	st.preferred_driver[0] = '\0';
+	st.preferred_map_driver[0] = '\0';
+	st.layout_mode = 0;
 
 	assert(replay("move-k") > 3);
 	uint32_t room1 = st.room.ref;
 	char *view1 = render_view();
 	assert(room1 != room0);
 	assert(strcmp(view0, view1) != 0);
-	printf("PASS: map and room header changed after moving north (#%u -> #%u)\n", room0, room1);
+	bud_node *tree1 = nd_ui_render(&st);
+
+	struct diff_stats ds = {0};
+	assert(bud_vdom_diff(tree0, tree1, count_diff_ops, &ds) == 0);
+	assert(ds.clear_count == 0);
+	assert(ds.replace_count == 0);
+	assert(ds.text_count >= 1);
+	bud_free(tree0);
+	bud_free(tree1);
+	printf("PASS: map and room header changed after moving north (#%u -> #%u) with surgical VDOM diff (0 clear, 0 replace)\n", room0, room1);
+
+	snprintf(st.preferred_driver, sizeof(st.preferred_driver), "lamina-seven");
+	snprintf(st.preferred_map_driver, sizeof(st.preferred_map_driver), "lamina");
+	st.layout_mode = ND_LAYOUT_GAME_2D;
+	bud_node *seven_tree1 = nd_ui_render(&st);
+	st.preferred_driver[0] = '\0';
+	st.preferred_map_driver[0] = '\0';
+	st.layout_mode = 0;
+
+	struct diff_stats seven_ds = {0};
+	assert(bud_vdom_diff(seven_tree0, seven_tree1, count_diff_ops, &seven_ds) == 0);
+	assert(seven_ds.clear_count == 0);
+	assert(seven_ds.replace_count == 0);
+	assert(seven_ds.canvas_recreate_count == 0);
+	assert(seven_ds.text_count >= 1);
+	bud_free(seven_tree0);
+	bud_free(seven_tree1);
+	printf("PASS: Seven mode room transition (#%u -> #%u) preserves stage & map canvases with 0 replace/canvas-recreate ops\n", room0, room1);
 
 	assert(replay("move-j") > 3);
 	char *view2 = render_view();
@@ -108,6 +193,8 @@ int main(void)
 	printf("PASS: moving back south restores the original room and refreshes the map (100%% identical to login map)\n");
 
 	/* Test item selection popup in contents */
+	st.layout_mode = ND_LAYOUT_GAME_2D;
+	snprintf(st.preferred_driver, sizeof(st.preferred_driver), "lamina-seven");
 	for (size_t i = 0; i < st.entity_count; i++) {
 		if (st.entities[i].ref != st.me && st.entities[i].location == st.room.ref) {
 			st.selected_item_ref = st.entities[i].ref;

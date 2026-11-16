@@ -160,6 +160,11 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 		st.layout_mode = ND_LAYOUT_STANDARD_HYBRID;
 	if (strstr(qs, "stage=tty"))
 		strncpy(st.preferred_driver, "tty", sizeof(st.preferred_driver) - 1);
+	if (strstr(qs, "stage=seven") || strstr(qs, "driver=seven") || strstr(qs, "stage=lamina-seven")) {
+		strncpy(st.preferred_driver, "lamina-seven", sizeof(st.preferred_driver) - 1);
+		strncpy(st.preferred_map_driver, "lamina", sizeof(st.preferred_map_driver) - 1);
+		st.layout_mode = ND_LAYOUT_GAME_2D;
+	}
 
 	size_t json_cap = 16384;
 	char *state_json = malloc(json_cap);
@@ -170,7 +175,7 @@ XY_IMPL(int, nd_ssr_respond, socket_t, fd)
 	char *extra_head = NULL;
 	if (asprintf(&extra_head,
 		"<link rel=\"stylesheet\" href=\"/nd.css\">\n"
-		"<script type=\"application/json\" id=\"bud-state\">%s</script>\n",
+		"<script type=\"application/json\" id=\"bud-state\" data-state=\"1\">%s</script>\n",
 		state_json) < 0 || !extra_head)
 	{
 		free(state_json);

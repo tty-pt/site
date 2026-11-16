@@ -20,6 +20,7 @@
 #define ND_REGION_DRIVER_INHERIT    0x00
 #define ND_REGION_ALLOW_CHOICE      0x01
 #define ND_REGION_LOCKED            0x02
+#define ND_REGION_UNIVERSE_OWNER    0x04
 
 #define ND_LAYOUT_STANDARD_HYBRID   0
 #define ND_LAYOUT_STAGE_EXPANDED    1
@@ -33,6 +34,9 @@ struct st_rec {
 	uint32_t flags;
 	uint32_t layout_mode;
 	uint32_t pres_flags;
+	uint32_t chat_radius;
+	uint32_t quota_rooms;
+	uint32_t used_rooms;
 	union {
 		char driver[16];
 		char stage_driver[16];

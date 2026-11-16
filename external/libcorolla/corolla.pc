@@ -1,0 +1,10 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libcorolla
+Description: Generic Parametric 2-Manifold Surface, Self-Occlusion, and Orbital Irradiance Library
+Version: 0.1.0
+Libs: -L${libdir} -lcorolla -lm
+Cflags: -I${includedir}

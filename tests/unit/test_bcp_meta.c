@@ -146,6 +146,50 @@ int main(void)
 	assert(strcmp(eq_out.name, "Excalibur") == 0);
 	printf("PASS: Tier 2 macro-generated schema pack & unpack (equip_slot)\n");
 
+	/* 7. Sparsity mask packet pack & unpack */
+	nd_bcp_sparsity_t sp_in = {
+		.sector_x = -12,
+		.sector_y = 34,
+		.world = 1,
+		.occupancy_mask = 0x0123456789ABCDEFULL
+	};
+	uint8_t spbuf[64];
+	int splen = nd_bcp_pack_sparsity(spbuf, sizeof(spbuf), &sp_in);
+	assert(splen > 0);
+
+	nd_bcp_sparsity_t sp_out;
+	memset(&sp_out, 0, sizeof(sp_out));
+	assert(nd_bcp_unpack_sparsity(spbuf, (size_t)splen, &sp_out) == 1);
+	assert(sp_out.sector_x == -12);
+	assert(sp_out.sector_y == 34);
+	assert(sp_out.world == 1);
+	assert(sp_out.occupancy_mask == 0x0123456789ABCDEFULL);
+	assert(nd_bcp_decode(spbuf, (size_t)splen, &st) == 1);
+	printf("PASS: ND_BCP_SPARSITY pack & unpack & decode\n");
+
+	/* 8. Macro view packet pack & unpack */
+	nd_bcp_macro_view_t mv_in = {
+		.count = 2,
+		.landmarks = {
+			{ .rx = 100, .ry = -200, .world = 1, .icon = 3, .name_id = 42 },
+			{ .rx = 350, .ry = -400, .world = 1, .icon = 5, .name_id = 99 }
+		}
+	};
+	uint8_t mvbuf[256];
+	int mvlen = nd_bcp_pack_macro_view(mvbuf, sizeof(mvbuf), &mv_in);
+	assert(mvlen > 0);
+
+	nd_bcp_macro_view_t mv_out;
+	memset(&mv_out, 0, sizeof(mv_out));
+	assert(nd_bcp_unpack_macro_view(mvbuf, (size_t)mvlen, &mv_out) == 1);
+	assert(mv_out.count == 2);
+	assert(mv_out.landmarks[0].rx == 100 && mv_out.landmarks[0].ry == -200);
+	assert(mv_out.landmarks[0].icon == 3 && mv_out.landmarks[0].name_id == 42);
+	assert(mv_out.landmarks[1].rx == 350 && mv_out.landmarks[1].ry == -400);
+	assert(mv_out.landmarks[1].icon == 5 && mv_out.landmarks[1].name_id == 99);
+	assert(nd_bcp_decode(mvbuf, (size_t)mvlen, &st) == 1);
+	printf("PASS: ND_BCP_MACRO_VIEW pack & unpack & decode\n");
+
 	printf("ALL BCP META TESTS PASSED\n");
 	return 0;
 }

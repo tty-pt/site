@@ -106,6 +106,46 @@ int main(void)
 		CHECK("list_respond_page NULL state/module returns -1", rc == -1);
 	}
 
+	/* 6. list_state_sort: sorts rows in-place ascending and descending */
+	{
+		list_state_t state;
+		memset(&state, 0, sizeof(state));
+		state.ncols = 2;
+		snprintf(state.cols[0].key, sizeof(state.cols[0].key), "title");
+		snprintf(state.cols[1].key, sizeof(state.cols[1].key), "author");
+		state.nids = 3;
+		state.ids[0] = "id1";
+		state.ids[1] = "id2";
+		state.ids[2] = "id3";
+		state.values[0] = "Zebra";
+		state.values[1] = "Author A";
+		state.values[2] = "Apple";
+		state.values[3] = "Author B";
+		state.values[4] = "Mango";
+		state.values[5] = "Author C";
+
+		/* Sort ascending by title */
+		int rc = list_state_sort(&state, "title");
+		CHECK("list_state_sort ascending returns 0", rc == 0);
+		CHECK("list_state_sort set sort_field='title'", strcmp(state.sort_field, "title") == 0);
+		CHECK("list_state_sort set sort_asc=1", state.sort_asc == 1);
+		CHECK("row 0 is Apple", strcmp(state.values[0], "Apple") == 0);
+		CHECK("row 0 id is id2", strcmp(state.ids[0], "id2") == 0);
+		CHECK("row 1 is Mango", strcmp(state.values[2], "Mango") == 0);
+		CHECK("row 1 id is id3", strcmp(state.ids[1], "id3") == 0);
+		CHECK("row 2 is Zebra", strcmp(state.values[4], "Zebra") == 0);
+		CHECK("row 2 id is id1", strcmp(state.ids[2], "id1") == 0);
+
+		/* Sort descending by clicking title again */
+		rc = list_state_sort(&state, "title");
+		CHECK("list_state_sort descending returns 0", rc == 0);
+		CHECK("list_state_sort set sort_asc=0", state.sort_asc == 0);
+		CHECK("descending row 0 is Zebra", strcmp(state.values[0], "Zebra") == 0);
+		CHECK("descending row 0 id is id1", strcmp(state.ids[0], "id1") == 0);
+		CHECK("descending row 2 is Apple", strcmp(state.values[4], "Apple") == 0);
+		CHECK("descending row 2 id is id2", strcmp(state.ids[2], "id2") == 0);
+	}
+
 	printf("\nTotal failures: %d\n", failures);
 	return failures > 0 ? 1 : 0;
 }

@@ -120,6 +120,22 @@ XY_IMPL(int, respond_json, int, fd, int, status, const char *, msg)
 	return 1;
 }
 
+XY_IMPL(int, respond_bin, int, fd, int, status, const void *, data, size_t, len)
+{
+	char len_buf[32];
+	snprintf(len_buf, sizeof(len_buf), "%zu", len);
+	axil_header_set(fd, "Content-Type", "application/octet-stream");
+	axil_header_set(fd, "Content-Length", len_buf);
+	axil_header_set(fd, "Cache-Control", "no-cache");
+	void *defer = axil_respond_defer(fd, status);
+	if (!defer)
+		return -1;
+	if (len > 0 && data)
+		axil_write(fd, (void *)data, len);
+	axil_respond_defer_done(defer);
+	return 0;
+}
+
 XY_IMPL(int, redirect_to_item,
 	int, fd,
 	const char *, module,
@@ -305,7 +321,7 @@ XY_IMPL(int, site_ui_respond_isomorphic,
 		snprintf(
 		        state_script, sizeof(state_script),
 		        "<script type=\"application/json\" "
-		        "id=\"bud-state\">%s</script>",
+		        "id=\"bud-state\" data-state=\"1\">%s</script>",
 		        state_json);
 	else
 		state_script[0] = '\0';

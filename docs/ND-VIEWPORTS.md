@@ -97,7 +97,7 @@ The user toggles viewports at runtime by clicking `[🎮 2D / 📺 TTY]` in `#g-
 ## 5. Decentralized Linker Allowlist Architecture
 
 Rather than maintaining a central allowlist of every symbol needed by every module:
-1. `scripts/wasm-allowed-imports.lst` contains only canonical `libbud` UI symbols:
+1. `scripts/check-wasm-imports.sh` validates canonical `libbud` and `libstele` UI symbols:
    ```
    env.bud_host_log
    env.bud_host_mark_dirty
@@ -121,9 +121,9 @@ Rather than maintaining a central allowlist of every symbol needed by every modu
 
 ---
 
-## 6. Composable Browser Runtime (`bud-client.js`)
+## 6. Composable Browser Runtime (`stele-client.js`)
 
-`htdocs/bud-client.js` acts as an open, generic capability orchestrator. It contains zero domain-specific code and dynamically loads declared capability bridges via `data-capabilities`:
+`htdocs/stele-client.js` acts as an open, generic capability orchestrator. It contains zero domain-specific code and dynamically loads declared capability bridges via `data-capabilities`:
 
 ```javascript
 import { createBudWasmBridge } from './bud-hydrate.js?v=2';

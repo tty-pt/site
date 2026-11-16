@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "../../common/ux/site_ui.c"
+#include "site_ui.h"
 #include "../fields.h"
 
 #include "detail.c"

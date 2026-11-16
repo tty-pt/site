@@ -109,4 +109,16 @@ XY_DECL(int, st_player_resolve_presentation, unsigned, player_ref,
 	uint8_t *, out_layout,
 	uint8_t *, out_flags);
 
+/* ----------------------------------------------------- chat & room quotas */
+
+/* Resolve effective radial chat radius (in rooms; 0 = room-local) for a cell
+ * by walking prefix ancestors from cosmos (0) down to plen. */
+XY_DECL(unsigned, st_region_get_chat_radius, uint64_t, id, uint8_t, plen);
+
+/* Check and adjust permanent room quota for the deepest governing region of
+ * cell (id, plen). delta = +1 on st_claim, -1 on uncarve.
+ * Returns XY_OK if allowed (and updates used_rooms), or XY_ERR_TOOBIG if the
+ * governing region's quota_rooms > 0 and used_rooms >= quota_rooms. */
+XY_DECL(int, st_region_claim_room, uint64_t, id, uint8_t, plen, int, delta);
+
 #endif /* ND_REGIONS_H */

@@ -19,15 +19,9 @@
 /mods/song/lib/transp/libtransp.a
 *.wasm
 
-# Exceptions for htdocs
-!/htdocs/bud-client.js
-!/htdocs/bud-hydrate.js
-!/htdocs/bud-fragments.js
-!/htdocs/qsys-client.js
-!/htdocs/stele-client.js
-!/htdocs/styles.css
-!/htdocs/hyle.css
-!/htdocs/chat.css
+# htdocs is a staged build output directory populated by `make stage-assets`
+/htdocs/*
+/dist/
 /external/*/bin
 /external/*/lib
 tests/unit/mpfd_contract_test
@@ -44,3 +38,5 @@ tests/unit/mpfd_contract_test
 /compile_commands.json
 .worktrees
 /tmp
+.lease.json
+*.lease.json

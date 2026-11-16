@@ -934,9 +934,10 @@ void
 nd_update(unsigned long long dt)
 {
 	/* dt is microseconds, so fdt is real seconds and the gate below fires
-	 * once per second. mul is day ticks per update: 0.5 stretches the
-	 * 1 << DAYTICK_Y (1024) cycle to 2048 s, ~34 min, sunset at ~17 min. */
-	double mul = 0.5;
+	 * once per second. mul is day ticks per update: (1024.0 / 21600.0)
+	 * stretches the 1 << DAYTICK_Y (1024) cycle to 21600 s (6 real hours =
+	 * 1/4 of a real 86400 s day, 4x real-life speed), sunset at 3 hours. */
+	double mul = (double)(1ULL << DAYTICK_Y) / 21600.0;
 	double fdt = dt / 1000000.0;
 
 	tick += fdt;

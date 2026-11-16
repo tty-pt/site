@@ -15,10 +15,15 @@ gcc -g -O0 \
 	-I"$REPO_ROOT/external/nd-spell/include" \
 	-I"$REPO_ROOT/external/nd-fight/include" \
 	-I"$REPO_ROOT/external/nd-mortal/include" \
+	-I"$REPO_ROOT/external/libareole/include" \
 	-I"$REPO_ROOT/external/libxylem/include" \
+	-I"$REPO_ROOT/external/libchaff/include" \
+	-I"$REPO_ROOT/external/nd-world/include" \
+	-I"$REPO_ROOT/mods/common/ux" \
 	-I"$REPO_ROOT/mods/nd/ux" \
 	-o tests/unit/test_ssr_hydration \
 	tests/unit/test_ssr_hydration.c \
+	mods/common/ux/site_ui.c \
 	mods/nd/ux/nd_ui.c \
 	mods/nd/ux/nd_map_ui.c \
 	mods/nd/ux/nd_dock_ui.c \
@@ -26,6 +31,7 @@ gcc -g -O0 \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
 	mods/nd/ux/nd_seven.c \
+	external/libareole/src/areole.c external/liblamina/src/particle.c \
 	mods/nd/ux/nd_seven_atlas_draw.c \
 	mods/nd/ux/nd_seven_ground.c \
 	mods/nd/ux/nd_seven_motion.c \
@@ -37,7 +43,7 @@ gcc -g -O0 \
 	mods/nd/ux/glue/mortal_ui.c \
 	-L"$REPO_ROOT/external/axil/lib" \
 	-L"$REPO_ROOT/external/libstele/lib" \
-	-lbud -laxil -lxylem -lhyle-bud -lstele -lm
+	-lbud -laxil -lxylem -lhyle-bud -lstele -lxxhash -lm
 
 LD_LIBRARY_PATH="$REPO_ROOT/external/axil/lib:$REPO_ROOT/external/libstele/lib:${LD_LIBRARY_PATH:-}" ./tests/unit/test_ssr_hydration
 rm -f tests/unit/test_ssr_hydration

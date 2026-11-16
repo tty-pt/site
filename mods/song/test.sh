@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-# Run transp unit tests first
-make -C ../../external/libtransp test
+# Run pitch unit tests first
+make -C ../../external/libpitch test
 
 BASE="http://localhost:8080"
 REPO_ROOT="$(cd ../.. && pwd)"

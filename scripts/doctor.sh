@@ -130,7 +130,7 @@ fi
 
 # 8. Deploy assets (gitignored, required for version.gen.h / common.so)
 echo -e "\n${BOLD}8. Deploy Assets (htdocs)${RESET}"
-DEPLOY_ASSETS=("hyle.css" "hyle-fragments.js" "styles.css" "bud-client.js" "bud-hydrate.js")
+DEPLOY_ASSETS=("hyle.css" "hyle-cap.js" "styles.css" "stele-client.js" "bud-cap.js")
 ASSETS_OK=1
 for a in "${DEPLOY_ASSETS[@]}"; do
   if [ ! -f "htdocs/$a" ]; then

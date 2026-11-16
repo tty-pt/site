@@ -25,7 +25,7 @@ static inline const char *ui_t(const char *msgid)
 #define SITE_FRAGMENTS_V "?v=1"
 #endif
 #define SITE_UI_FRAGMENTS_SCRIPT                                               \
-	"<script defer src=\"/hyle-fragments.js" SITE_FRAGMENTS_V "\"></"      \
+	"<script defer src=\"/hyle-cap.js" SITE_FRAGMENTS_V "\"></"            \
 	"script>"
 
 char *site_ui_page(
@@ -182,10 +182,25 @@ char *site_ui_sanitize_html(const char *raw);
 
 /* ── WASM state helpers (D01) ─────────────────────────────────── */
 char *site_ui_state_head(const char *json);
+char *site_ui_state_head_bin(const void *bin, size_t len);
+char *site_ui_state_head_src(const char *src_url);
+char *site_ui_state_head_preload(const char *src_url, const char *fallback_json);
 int site_ui_respond_with_state(
         int fd, const char *title, const char *path, const char *icon,
         const char *user, const char *state_json, const char *module,
         bud_node *body);
+int site_ui_respond_with_state_bin(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const void *bin, size_t len, const char *module,
+        bud_node *body);
+int site_ui_respond_with_state_src(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *src_url, const char *module,
+        bud_node *body);
+int site_ui_respond_with_state_preload(
+        int fd, const char *title, const char *path, const char *icon,
+        const char *user, const char *src_url, const char *fallback_json,
+        const char *module, bud_node *body);
 
 /* ── WASM detail init helpers ───────────────────────────────────── */
 void wasm_state_init(const char *json, int len, const bud_field_desc_t *fields, void *state);

@@ -1,8 +1,8 @@
 HYLE_DIR = $(REPO_ROOT)/external/libhyle
 HYLE_BUD_DIR = $(REPO_ROOT)/external/libhyle-bud
-TRANSP_DIR = $(REPO_ROOT)/external/libtransp
-EXTRA_CFLAGS += -I../common -I$(TRANSP_DIR)/include -I$(HYLE_BUD_DIR)/include -I$(REPO_ROOT)/external/axil-hyle/include
-EXTRA_LDLIBS += -lbud -ltransp
+PITCH_DIR = $(REPO_ROOT)/external/libpitch
+EXTRA_CFLAGS += -I../common -I$(PITCH_DIR)/include -I$(HYLE_BUD_DIR)/include -I$(REPO_ROOT)/external/axil-hyle/include
+EXTRA_LDLIBS += -lbud -lpitch
 EXTRA_LDLIBS += -lhyle
 EXTRA_LDLIBS += -lhyle-bud
 EXTRA_LDLIBS += -laxil-hyle

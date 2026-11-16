@@ -126,7 +126,7 @@ bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 	                state ? state->title : "", menu_label, icon);
 
 	return bud_tpl(
-	        "<div id='chrome-root'>"
+	        "<div id='chrome-root' data-slot='0' data-module='site_chrome'>"
 	        "  <input id='menu-functions' name='functions' type='checkbox' "
 	        "class='menu-control' aria-label='%s'/>"
 	        "  <label for='menu-functions' class='menu-overlay' "

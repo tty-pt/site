@@ -535,6 +535,32 @@ var existing = rows.querySelector('input[value="' + newId + '"]');
 		}
 	});
 
+	/* Singleselect click-to-deselect delegation */
+	document.addEventListener('pointerdown', function (e) {
+		var label = e.target.closest && e.target.closest('.hyle-ss-option');
+		var radio = label ? label.querySelector('input[type="radio"]') : (e.target.matches && e.target.matches('.hyle-ss-option input[type="radio"]') ? e.target : null);
+		if (radio && radio.value !== '') {
+			radio.__wasChecked = radio.checked;
+		}
+	}, true);
+
+	document.addEventListener('click', function (e) {
+		var label = e.target.closest && e.target.closest('.hyle-ss-option');
+		var radio = label ? label.querySelector('input[type="radio"]') : (e.target.matches && e.target.matches('.hyle-ss-option input[type="radio"]') ? e.target : null);
+		if (radio && radio.value !== '' && radio.__wasChecked) {
+			radio.__wasChecked = false;
+			setTimeout(function () {
+				radio.checked = false;
+				var optionsBox = radio.closest && radio.closest('.hyle-ss-options');
+				var defaultRadio = optionsBox ? optionsBox.querySelector('input[type="radio"][value=""]') : null;
+				if (defaultRadio) {
+					defaultRadio.checked = true;
+					defaultRadio.dispatchEvent(new Event('change', { bubbles: true }));
+				}
+			}, 0);
+		}
+	});
+
 	document.addEventListener('click', function (e) {
 		var addBtn = e.target.closest &&
 			e.target.closest('[data-hyle-picker-add]');
@@ -636,4 +662,27 @@ var existing = rows.querySelector('input[value="' + newId + '"]');
 	var nodes = document.querySelectorAll('[data-hyle-frag-url]');
 	for (var i = 0; i < nodes.length; i++)
 		adopt(nodes[i]);
+
+	var hyleCapFactory = function (root) {
+		return {
+			mount: function () {
+				var scope = (root && root.querySelectorAll) ? root : document;
+				var list = scope.querySelectorAll('[data-hyle-frag-url]');
+				for (var j = 0; j < list.length; j++)
+					adopt(list[j]);
+			},
+			destroy: function () {},
+			makeImports: function () { return {}; }
+		};
+	};
+	window.__wasm_capability_registry = window.__wasm_capability_registry || {};
+	window.__wasm_capability_registry.hyle = hyleCapFactory;
+	if (typeof window.registerWasmCapability === 'function') {
+		window.registerWasmCapability('hyle', hyleCapFactory);
+	}
+	if (window.steleClient && typeof window.steleClient.on === 'function' && typeof window.steleClient.emit === 'function') {
+		window.steleClient.on('stl:mutate', function (_t, payload) { window.steleClient.emit('hyle:mutate', payload); });
+		window.steleClient.on('stl:saved', function (_t, payload) { window.steleClient.emit('hyle:saved', payload); });
+		window.steleClient.on('stl:rollback', function (_t, payload) { window.steleClient.emit('hyle:rollback', payload); });
+	}
 })();

@@ -151,7 +151,8 @@ Deno.test("song content lookup: dedicated box filters by lyrics", async () => {
       .locator('input[name="lyrics"].filter-lookup')
       .fill("xylofreniação");
     await page.locator('.hyle-filter-actions button[type="submit"]').click();
-    await page.waitForURL(/xylofren/, { timeout: 10000 });
+    await page.waitForURL(/xylofren.*[ã%]/, { timeout: 10000 });
+    await page.waitForSelector("tr.hyle-row-clickable", { timeout: 10000 });
     if ((await page.locator("tr.hyle-row-clickable").count()) < 1) {
       throw new Error(
         `Expected rows for accented "xylofreniação" (prefix of "xylofreniação"), got 0`,

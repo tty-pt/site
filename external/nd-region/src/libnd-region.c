@@ -70,6 +70,15 @@ st_rec_init(void)
 			{ .name = "pres_flags", .type = CM_U32,
 			  .offset = offsetof(struct st_rec, pres_flags),
 			  .max_size = sizeof(uint32_t) },
+			{ .name = "chat_radius", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, chat_radius),
+			  .max_size = sizeof(uint32_t) },
+			{ .name = "quota_rooms", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, quota_rooms),
+			  .max_size = sizeof(uint32_t) },
+			{ .name = "used_rooms", .type = CM_U32,
+			  .offset = offsetof(struct st_rec, used_rooms),
+			  .max_size = sizeof(uint32_t) },
 			{ .name = "driver", .type = CM_STR,
 			  .offset = offsetof(struct st_rec, driver),
 			  .max_size = sizeof(((struct st_rec *)0)->driver) },
@@ -79,7 +88,7 @@ st_rec_init(void)
 			{ .name = "mods", .type = CM_STR,
 			  .offset = offsetof(struct st_rec, mods),
 			  .max_size = sizeof(((struct st_rec *)0)->mods) },
-		}, 9);
+		}, 12);
 	if (rec == CM_MISS)
 		WARN("st_rec_register: corm_record_register failed\n");
 	return rec;
@@ -643,7 +652,9 @@ XY_IMPL(int, st_resolve_presentation_policy, uint64_t, id, uint8_t, plen,
 	if (out_stage && stage_len > 0)
 		snprintf(out_stage, stage_len, "%s", res_stage[0] ? res_stage : "tty");
 	if (out_map && map_len > 0)
-		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "lamina");
+		/* No region opted in to a canvas map: plain ASCII. Lamina (and its
+		 * terrain chunk work on the client) must be enabled explicitly. */
+		snprintf(out_map, map_len, "%s", res_map[0] ? res_map : "ascii-bud");
 	if (out_layout)
 		*out_layout = res_layout;
 	if (out_flags)
@@ -660,19 +671,30 @@ XY_IMPL(int, st_player_resolve_presentation, unsigned, player_ref,
 {
 	uint64_t id;
 	uint8_t plen;
+	int rc;
 	if (st_region_of_player(player_ref, &id, &plen) != XY_OK) {
 		if (out_stage && stage_len > 0)
 			snprintf(out_stage, stage_len, "tty");
 		if (out_map && map_len > 0)
-			snprintf(out_map, map_len, "lamina");
+			snprintf(out_map, map_len, "ascii-bud");
 		if (out_layout)
 			*out_layout = ND_LAYOUT_STANDARD_HYBRID;
-		if (out_flags)
-			*out_flags = ND_REGION_ALLOW_CHOICE;
+		if (out_flags) {
+			uint8_t f = ND_REGION_ALLOW_CHOICE;
+			if (st_can_region(player_ref, 0, ST_PLEN_ROOT))
+				f |= ND_REGION_UNIVERSE_OWNER;
+			*out_flags = f;
+		}
 		return XY_OK;
 	}
-	return st_resolve_presentation_policy(id, plen, out_stage, stage_len,
+	rc = st_resolve_presentation_policy(id, plen, out_stage, stage_len,
 		out_map, map_len, out_layout, out_flags);
+	if (rc == XY_OK && out_flags) {
+		if (st_can_region(player_ref, 0, ST_PLEN_ROOT) ||
+		    st_can_region(player_ref, id, plen))
+			*out_flags |= ND_REGION_UNIVERSE_OWNER;
+	}
+	return rc;
 }
 
 XY_IMPL(int, st_region_get_driver, uint64_t, id, uint8_t, plen, char *, out_driver, size_t, maxlen)
@@ -706,6 +728,70 @@ XY_IMPL(int, st_player_get_driver, unsigned, player_ref, char *, out_driver, siz
 	if (!out_driver || maxlen == 0)
 		return XY_ERR_INVALID;
 	return st_player_resolve_presentation(player_ref, out_driver, maxlen, NULL, 0, NULL, NULL);
+}
+
+XY_IMPL(unsigned, st_region_get_chat_radius, uint64_t, id, uint8_t, plen)
+{
+	uint64_t mask;
+	unsigned w;
+	/* Default outdoor radial chat radius on World 0 is 3 rooms (can be overridden
+	 * or set to 0 for room-local chat by any governing region prefix). */
+	unsigned radius = (st_world_of(id) == 0) ? 3u : 0u;
+	int locked = 0;
+
+	if (plen > ST_PLEN_CELL)
+		plen = ST_PLEN_CELL;
+
+	for (w = 0; w <= plen; w++) {
+		struct st_rec rec;
+		mask = w ? (~0ULL << (64 - w)) : 0ULL;
+		if (!st_row_get(id & mask, (uint8_t)w, &rec))
+			continue;
+		if (!locked && rec.chat_radius != 0) {
+			/* Encode explicit 0 override via 0xFFFFFFFFu sentinel if needed,
+			 * otherwise positive value sets radius in rooms */
+			radius = (rec.chat_radius == 0xFFFFFFFFu) ? 0u : rec.chat_radius;
+			if ((rec.pres_flags | rec.flags) & ND_REGION_LOCKED)
+				locked = 1;
+		}
+	}
+	return radius;
+}
+
+XY_IMPL(int, st_region_claim_room, uint64_t, id, uint8_t, plen, int, delta)
+{
+	uint64_t mask, gov_id = 0;
+	uint8_t gov_plen = ST_PLEN_ROOT;
+	struct st_rec rec;
+	int found = 0;
+	unsigned w;
+
+	if (plen > ST_PLEN_CELL)
+		plen = ST_PLEN_CELL;
+
+	/* Find deepest governing region row covering (id, plen) */
+	for (w = (unsigned)plen + 1; w-- > 0; ) {
+		mask = w ? (~0ULL << (64 - w)) : 0ULL;
+		if (st_row_get(id & mask, (uint8_t)w, &rec)) {
+			gov_id = id & mask;
+			gov_plen = (uint8_t)w;
+			found = 1;
+			break;
+		}
+	}
+	if (!found)
+		return XY_OK;
+
+	if (delta > 0) {
+		if (rec.quota_rooms > 0 && rec.used_rooms + (uint32_t)delta > rec.quota_rooms)
+			return XY_ERR_TOOBIG;
+		rec.used_rooms += (uint32_t)delta;
+	} else if (delta < 0) {
+		uint32_t dec = (uint32_t)(-delta);
+		rec.used_rooms = (rec.used_rooms > dec) ? (rec.used_rooms - dec) : 0u;
+	}
+	st_row_put(gov_id, gov_plen, &rec);
+	return XY_OK;
 }
 
 /* --- Bans ---------------------------------------------------------------- */

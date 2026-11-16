@@ -12,7 +12,11 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-I"$repo/external/libcorm/include" \
 	-I"$repo/external/liblemma/include" \
 	-L"$repo/external/liblemma/lib" \
+	-L"$repo/external/libhyle/lib" \
+	-L"$repo/external/libhyle-source/lib" \
 	-Wl,-rpath,"$repo/external/liblemma/lib" \
+	-Wl,-rpath,"$repo/external/libhyle/lib" \
+	-Wl,-rpath,"$repo/external/libhyle-source/lib" \
 	-o "$bin" \
 	"$repo/tests/unit/source_options_test.c" \
 	-lhyle-source \

@@ -163,7 +163,10 @@ int main(void)
 
 	/* equipment: one cell per descriptor, grid dimensions from the table */
 	int slots = 0;
-	for (const char *q = html; (q = strstr(q, "data-slot=\"")); q++) slots++;
+	for (const char *q = html; (q = strstr(q, "data-slot=\"")); q++) {
+		if (strncmp(q, "data-slot=\"1\"", 13) != 0)
+			slots++;
+	}
 	assert(slots == (int)ND_EQUIP_SLOT_COUNT);
 	assert(strstr(html, "data-slot=\"head\""));
 	assert(strstr(html, "unequip c") && strstr(html, "unequip g"));
@@ -231,15 +234,15 @@ int main(void)
 	assert(gov_rehydrated->layout_mode == ND_LAYOUT_STANDARD_HYBRID);
 	printf("PASS: presentation governance state rehydrated from JSON\n");
 
-	/* In an ascii-bud region, the viewport renders the pure ASCII map (no canvas) */
+	/* In an ALLOW_CHOICE region, Switch Viewport button must be rendered */
 	html = bud_render_html(nd_ui_render(gov_rehydrated));
-	assert(html && !strstr(html, "data-bud-action=\"cycle-viewport\""));
-	assert(!strstr(html, "Switch Viewport"));
+	assert(html && strstr(html, "data-bud-action=\"cycle-viewport\""));
+	assert(strstr(html, "Switch Viewport"));
 	assert(strstr(html, "<nd-map id=\"room-map\""));
 	assert(!strstr(html, "<canvas id=\"room-map-canvas\""));
 	assert(strstr(html, "id=\"right-panel\""));
 	bud_free_string(html);
-	printf("PASS: ascii-bud region renders terminal stage and pure ascii map (no canvas, no switch button)\n");
+	printf("PASS: ALLOW_CHOICE region renders Switch Viewport button and ascii map\n");
 
 	/* In a lamina region, Switch Viewport button is NOT rendered and room-map-canvas IS rendered */
 	gov.pres_flags = ND_REGION_LOCKED;

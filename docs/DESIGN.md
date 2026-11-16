@@ -113,7 +113,7 @@ Adding a field = adding a row to the table. No per-field boilerplate anywhere.
 One renderer + one state struct, used by both native SSR and the WASM bundle
 (`list_render(list_state_t*)`, `bud_app_render()`/`app_state_t`). The data path
 differs (corm vs JSON); the render code does not. See
-`docs/C-ISOMORPHIC-BUD.md` — and note the id-alignment trap this pattern exists
+`docs/WEB_HAL_SPECIFICATION.md` — and note the id-alignment trap this pattern exists
 to satisfy.
 
 ### 4.6 Centralized response/page helpers
@@ -162,7 +162,7 @@ keeps search live.
 - hyle stays framework-neutral; hints ride schema strings **opaquely**
   (`docs/SCHEMA.md`) and the component layer interprets them.
 - SSR is plain HTML + `data-*` hooks; bud's `data-bud-*`/patch stream is
-  bud-stack-internal and additive (`docs/SSR-CONTRACT.md`).
+  bud-stack-internal and additive (`docs/ARCHITECTURE.md`).
 - Frameworks are pairs (bud↔WASM, React↔React); mixed stacks are outliers and
   get no shared bridge (`docs/ARCHITECTURE.md`).
 - No-JS must always work.

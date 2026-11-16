@@ -9,7 +9,7 @@ echo "=== Pkg-config Version Parity Check ==="
 
 errors=0
 
-for dir in "$root"/external/lib*; do
+for dir in "$root"/external/lib* "$root"/external/axil*; do
     [ -d "$dir" ] || continue
     name=$(basename "$dir" | sed 's/^lib//')
 

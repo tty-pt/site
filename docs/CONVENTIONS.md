@@ -183,11 +183,10 @@ or `var/` literals. Per-module WASM that needs `hyle-bud` declares
 
 - Check: `grep -E 'corm_|source_|axil_|hyle_source|XY_' mods/*/ux/*.c` must be
   empty (native-only `site_page.c` behind `site_ui.c:#ifndef __wasm__` is not a
-  WASM TU and is excluded); `sh scripts/check-wasm-imports.sh` must pass
-  (`wasm-allowed-imports.lst` allowlists only `env.bud_host_*`).
+  WASM TU and is excluded); `sh scripts/check-wasm-imports.sh` must pass.
 
 ### The Two-Header Rule for Isomorphic C
-1. **Standalone Libraries (`libbud`, `libtransp`, etc.)**:
+1. **Standalone Libraries (`libbud`, `libpitch`, etc.)**:
    Include **only `<ttypt/iso.h>`**.
    Provides `ISO_EXPORT`, `ISO_EXPORT_AS`, and `ISO_IMPORT`. Zero runtime dependencies, no UI substrate concepts.
 2. **Interactive UX Modules (`mods/*/ux/*.c`)**:
@@ -201,7 +200,7 @@ No `#if`/`#ifdef` for node branching in UX renderers. Branch on runtime
 file outside `ux/` (`GOALS.md:§3`). Allowed only: `#ifndef *_C` include guards,
 `__attribute__((import_module("env")…))` host imports,
 `site_ui.c:#ifndef __wasm__` aggregator, and
-`site_page.c:#if __has_include` fallback (`C-ISOMORPHIC-BUD §3` id-drift).
+`site_page.c:#if __has_include` fallback (`docs/WEB_HAL_SPECIFICATION.md` id-drift).
 
 ## Data-layer invariants (write path)
 
@@ -223,7 +222,7 @@ include the inline `<script id="bud-state">` hash for the current page.
 ## No Site-Specific JavaScript
 
 The site is pure C with progressive WASM enhancement. **No site-specific JavaScript is permitted.**
-- All client-side JavaScript files in `htdocs/*.js` (`hyle-fragments.js`, `bud-client.js`, `bud-hydrate.js`) are strictly generic, framework-level library transports.
+- All client-side JavaScript files in `htdocs/*.js` (`hyle-fragments.js`, `stele-client.js`, `bud-hydrate.js`) are strictly generic, framework-level library transports.
 - JavaScript files must NEVER contain application-specific class names (e.g. `.gig-*`, `.song-*`, `#sb-*`), module names (`poem`, `song`, `gig`, `grp`), domain endpoints, or business logic.
 - Generic transports are driven exclusively by neutral data attributes (e.g. `[data-hyle-frag-url]`, `[data-hyle-auto-submit]`, `[data-hyle-slot]`).
 - All interactive application features, reactive state transitions, and custom client logic must be implemented in pure C (`mods/*/ux/*.c`) and compiled to WASM.
@@ -234,8 +233,8 @@ The site is pure C with progressive WASM enhancement. **No site-specific JavaScr
 
 - Do not commit `*.so`, `*.o`, `*.wasm`, swap files, or Rust `target/`.
 - Include-source reuse is sanctioned for C-isomorphic units (see
-  `docs/C-ISOMORPHIC-BUD.md`): only `site_ui.c|list.c`.
-- `bud_patch_text` must target a TEXT node, not an element (`WASM-BRIDGE.md:§6`).
+  `docs/WEB_HAL_SPECIFICATION.md`): only `site_ui.c|list.c`.
+- `bud_patch_text` must target a TEXT node, not an element (`docs/WEB_HAL_SPECIFICATION.md`).
 
 ## Database Retrieval Patterns (`libcorm`)
 

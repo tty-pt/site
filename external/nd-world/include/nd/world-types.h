@@ -146,6 +146,7 @@ enum room_flags {
 	RF_TEMP = 1,
 	RF_HAVEN = 2,
 	RF_MODIFIED = 4,
+	RF_WATER = 8,
 };
 
 enum exit {
@@ -164,6 +165,7 @@ typedef struct {
 	unsigned char exits;
 	unsigned char doors;
 	unsigned char floor;
+	uint32_t last_mod;
 } ROO;
 
 enum entity_flags {
@@ -233,14 +235,22 @@ struct bio {
 	coord_t tmp;
 	ucoord_t rn;
 	uint32_t ty;
-	unsigned bio_idx;
+	uint8_t bio_idx;
+	uint8_t is_water;
+	coord_t elevation;
+	coord_t water_level;
+	coord_t water_depth;
 	unsigned raw[16];
 };
 
 typedef struct view_tile {
-	unsigned bio_idx;
+	uint8_t bio_idx;
+	uint8_t is_water;
 	unsigned room;
 	ucoord_t flags, exits, doors;
+	coord_t elevation;
+	coord_t water_level;
+	coord_t water_depth;
 	unsigned raw[16];
 } view_tile_t;
 

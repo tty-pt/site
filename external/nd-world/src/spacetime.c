@@ -23,6 +23,7 @@
 
 #include <nd/config.h>
 #include <nd/noise.h>
+#include <nd/field.h>
 #include <nd/params.h>
 #include <nd/player.h>
 #include <nd/view.h>
@@ -142,6 +143,7 @@ exit_t exit_map[] = {
 };
 
 unsigned long long day_tick = 0;
+unsigned long long year_tick = 0;
 /* sub-tick remainder: nd_update() runs the world at 0.5 ticks per second, and
  * day_tick is an integer, so the halves have to be carried or day_tick would
  * truncate to 0 forever. Private, and not persisted. */
@@ -245,12 +247,10 @@ int
 e_ground(unsigned room, enum exit e)
 {
 	pos_t pos;
-
-	if (e & (E_UP | E_DOWN))
-		return 0;
+	(void) e;
 
 	eng_map_where(pos, room);
-	return pos[2] == 0;
+	return 1;
 }
 
 enum exit
@@ -296,6 +296,9 @@ st_update(double dt)
 	day_tick += whole;
 	if (day_tick > (1ULL << DAYTICK_Y))
 		day_tick = 0;
+	year_tick = (year_tick + whole) & ((1ULL << ND_FIELD_YEARTICK_BITS) - 1ULL);
+	nd_field_set_sun_azimuth(nd_field_sun_azimuth_from_day_tick(day_tick));
+	nd_field_set_season_turn(nd_field_season_turn_from_day_tick(year_tick));
 
 	if (day_tick >= (1ULL << (DAYTICK_Y - 1))) {
 		if (day_n)
@@ -371,8 +374,18 @@ st_claim(unsigned player_ref, OBJ *room) {
 	OBJ player;
 	if (corm_read(obj_hd, &player_ref, &(player), sizeof(player)) != 0)
 		return 1;
-	if (fee_fail(player_ref, &player, "claim a room", "", ROOM_COST))
+
+	pos_t rpos;
+	eng_map_where(rpos, player.location);
+	if (st_region_claim_room(pos_morton(rpos), ST_PLEN_CELL, 1) != XY_OK) {
+		nd_writef(player_ref, "Region permanent room quota exceeded.\n");
 		return 1;
+	}
+
+	if (fee_fail(player_ref, &player, "claim a room", "", ROOM_COST)) {
+		st_region_claim_room(pos_morton(rpos), ST_PLEN_CELL, -1);
+		return 1;
+	}
 
 	corm_put(obj_hd, &player_ref, &player);
 	rroom->flags ^= RF_TEMP;
@@ -462,11 +475,6 @@ st_room_at(unsigned player_ref, pos_t pos)
 	exits_infer(there_ref, rthere);
 
 	fprintf(stderr, "st_room_at %u\n", player_ref);
-
-	if (pos[2] != 0) {
-		corm_put(obj_hd, &there_ref, &there);
-		return there_ref;
-	}
 
 	rthere->floor = bio.bio_idx;
 	corm_put(obj_hd, &there_ref, &there);
@@ -643,10 +651,18 @@ check_deterministic_recovery(unsigned here_ref, OBJ *here, ROO *rhere)
 			has_foreign_items = 1;
 		}
 	}
+	corm_fin(c);
 
-	if (!has_foreign_items && actual_stones >= expected_stones && actual_trees >= expected_trees) {
-		/* Recovered initial deterministic state! */
+	uint32_t now_ts = (uint32_t)time(NULL);
+	int cooldown_elapsed = (rhere->last_mod > 0 && now_ts >= rhere->last_mod &&
+	                        (now_ts - rhere->last_mod) >= 900u);
+
+	if (!has_foreign_items &&
+	    ((actual_stones >= expected_stones && actual_trees >= expected_trees) ||
+	     cooldown_elapsed)) {
+		/* Recovered initial deterministic state (or regrow cooldown elapsed)! */
 		rhere->flags &= ~RF_MODIFIED;
+		rhere->last_mod = 0;
 		corm_put(obj_hd, &here_ref, here);
 		return 1;
 	}
@@ -798,6 +814,10 @@ uncarve(unsigned player_ref, enum exit e)
 		nd_writef(player_ref, "You don't own th%s room.\n", s0);
 		return;
 	}
+
+	pos_t tpos;
+	eng_map_where(tpos, there_ref);
+	st_region_claim_room(pos_morton(tpos), ST_PLEN_CELL, -1);
 
 	rthere->flags ^= RF_TEMP;
 	exits_infer(there_ref, rthere);

@@ -62,7 +62,7 @@ int main(void)
 	static const struct { const char *m, *t; int rows; size_t cols; } shipped[] = {
 		{ "nd-spell", "spells", 11, 6 }, { "nd-class", "classes", 4, 2 },
 		{ "nd-race", "races", 5, 8 }, { "nd-biome", "biomes", 19, 2 },
-		{ "nd-mob", "mobs", 14, 9 }, { "nd-plant", "plants", 10, 12 },
+		{ "nd-mob", "mobs", 14, 9 }, { "nd-plant", "plants", 16, 16 },
 		{ "nd-stone", "stones", 1, 3 }, { "nd-wts", "wts", 12, 1 },
 	};
 	for (size_t i = 0; i < sizeof(shipped) / sizeof(shipped[0]); i++) {
