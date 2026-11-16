@@ -385,7 +385,9 @@ int main(void)
 		double dz = p_moon.center[2] - p_obs.center[2];
 		double dlen = sqrt(dx * dx + dy * dy + dz * dz);
 		assert(dlen > 15000000.0);
-		double dot_align = (dx * moon_dir[0] + dy * moon_dir[1] + dz * moon_dir[2]) / dlen;
+		double moon_dir_inert[3];
+		corolla_pose_vec_to_inertial(&p_obs, moon_dir, moon_dir_inert);
+		double dot_align = (dx * moon_dir_inert[0] + dy * moon_dir_inert[1] + dz * moon_dir_inert[2]) / dlen;
 		assert(fabs(dot_align - 1.0) < 1e-9);
 		printf("PASS: nd_field_world_body & nd_field_eval_celestial_ephemeris verified (moon dist=%.0f, align=%.6f)\n",
 		       dlen, dot_align);

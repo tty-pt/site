@@ -368,35 +368,28 @@ int main(void)
 		int tx = 1, ty = 1;
 		int32_t ox = (int32_t)(tx - 3) * 160;
 		int32_t oy = -(int32_t)(3 - ty) * 128;
-		const nd_field_chunk_t *fch = nd_seven_field_chunk_get(1, ox, oy);
-		assert(fch != NULL);
-		assert(fch->depth != NULL);
-		uint32_t blk = (TILE >= 24) ? 4 : (TILE >= 16 ? 2 : 1);
-		for (uint32_t by = 0; by < TILE; by += blk) {
-			uint32_t bh = (by + blk <= TILE) ? blk : (TILE - by);
-			int sc_y = ((int)(by + bh / 2) * 8) / TILE;
-			if (sc_y > 7) sc_y = 7;
-			for (uint32_t bx = 0; bx < TILE; bx += blk) {
-				uint32_t bw = (bx + blk <= TILE) ? blk : (TILE - bx);
-				int sc_x = ((int)(bx + bw / 2) * 10) / TILE;
-				if (sc_x > 9) sc_x = 9;
-				uint8_t d = fch->depth[sc_y * 10 + sc_x];
-				for (uint32_t dy = 0; dy < bh; dy++) {
-					for (uint32_t dx = 0; dx < bw; dx++) {
-						uint32_t pix = fb[(TY(ty) + by + dy) * W + TX(tx) + bx + dx];
-						assert(pix != 0);
-						assert((pix & 0xFF000000) != 0);
-						if (d > 0) {
-							uint32_t exp_water = water_color_at_depth(d > 28 ? 28 : d, 128, 128, 128);
-							assert(pix == exp_water);
-							water_matches++;
-						} else {
-							assert(pix != 0xFF08090C); /* land pixel is not void */
-							land_matches++;
-						}
-						total_checked++;
-					}
+		ar_system_t *cs = nd_seven_get_chunk_sys();
+		assert(cs != NULL);
+		for (uint32_t py = 0; py < TILE; py++) {
+			int32_t wy = oy + ((int32_t)py * 128) / (int32_t)TILE;
+			for (uint32_t px = 0; px < TILE; px++) {
+				int32_t wx = ox + ((int32_t)px * 160) / (int32_t)TILE;
+				ar_sample_t s;
+				int probed = ar_probe_view(cs, 1, 1, wx, wy, &s);
+				assert(probed != 0);
+				uint8_t d = s.attr[3];
+				uint32_t pix = fb[(TY(ty) + py) * W + TX(tx) + px];
+				assert(pix != 0);
+				assert((pix & 0xFF000000) != 0);
+				if (d > 0) {
+					uint32_t exp_water = water_color_at_depth(d > 28 ? 28 : d, 128, 128, 128);
+					assert(pix == exp_water);
+					water_matches++;
+				} else {
+					assert(pix != 0xFF08090C); /* land pixel is not void */
+					land_matches++;
 				}
+				total_checked++;
 			}
 		}
 		assert(water_matches > 0);
