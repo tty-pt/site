@@ -35,6 +35,22 @@ float nd_seven_get_zoom(void);
 void nd_seven_zoom_in(void);
 void nd_seven_zoom_out(void);
 
+/* User-adjustable billboard detail / draw distance scale (0.20f .. 2.50f, default 1.0f) */
+void nd_seven_set_detail_scale(float scale);
+float nd_seven_get_detail_scale(void);
+void nd_seven_detail_in(void);
+void nd_seven_detail_out(void);
+
+#ifndef ND_SEVEN_DETAIL_MIN
+#define ND_SEVEN_DETAIL_MIN         0.20f
+#endif
+#ifndef ND_SEVEN_DETAIL_MAX
+#define ND_SEVEN_DETAIL_MAX         2.50f
+#endif
+#ifndef ND_SEVEN_DETAIL_STEP
+#define ND_SEVEN_DETAIL_STEP        1.25f
+#endif
+
 #ifndef ND_SEVEN_ZOOM_MIN
 #define ND_SEVEN_ZOOM_MIN           0.00001f
 #endif

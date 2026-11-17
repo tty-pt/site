@@ -13,6 +13,8 @@ int on_dock_action(bud_event *ev)
 		nd_ui_toggle_modal("equip");
 	} else if (!strcmp(action, "spells") || !strcmp(action, "spell")) {
 		nd_ui_toggle_modal("spell");
+	} else if (!strcmp(action, "settings")) {
+		nd_ui_toggle_modal("settings");
 	} else {
 		char cmd[64];
 		snprintf(cmd, sizeof(cmd), "%s\n", action);
@@ -33,6 +35,7 @@ static int on_action_equip(bud_event *e) { (void)e; nd_ui_toggle_modal("equip");
 static int on_action_spells(bud_event *e) { (void)e; nd_ui_toggle_modal("spell"); return 0; }
 static int on_action_inv(bud_event *e) { (void)e; ws_send("inventory\n", 10); return 0; }
 static int on_action_look(bud_event *e) { (void)e; ws_send("look\n", 5); return 0; }
+static int on_action_settings(bud_event *e) { (void)e; nd_ui_toggle_modal("settings"); return 0; }
 
 
 int on_cycle_viewport(bud_event *e)
@@ -99,6 +102,7 @@ bud_node *render_action_bar(const nd_client_state_t *st)
 
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
 	bud_append(dock, make_btn("👁️", "Look", on_action_look));
+	bud_append(dock, make_btn("⚙️", "Settings", on_action_settings));
 
 	return dock;
 }

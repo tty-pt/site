@@ -2223,6 +2223,8 @@ int main(void)
 		nd_seven_render(fb, 1280, 720, &st);
 		uint32_t cnt_mid_zoom = nd_seven_last_mid_billboard_count();
 		int ring_4_12_mid_zoom = 0;
+		int ring_4_12_large_mid_zoom = 0;
+		int small_mid_zoom = 0;
 		for (uint32_t i = 0; i < cnt_mid_zoom; i++) {
 			float bx = 0, by = 0, bz = 0, bw = 0, bh = 0;
 			if (nd_seven_last_mid_billboard(i, &bx, &by, &bz, &bw, &bh)) {
@@ -2231,14 +2233,22 @@ int main(void)
 				int arx = rx < 0 ? -rx : rx;
 				int ary = ry < 0 ? -ry : ry;
 				int cheb = arx > ary ? arx : ary;
-				if (cheb >= 4 && cheb <= 12)
+				float sz = bw > bh ? bw : bh;
+				if (cheb >= 4 && cheb <= 12) {
 					ring_4_12_mid_zoom++;
+					if (sz >= 34.0f)
+						ring_4_12_large_mid_zoom++;
+				}
+				if (sz <= 24.0f)
+					small_mid_zoom++;
 			}
 		}
 		assert(ring_4_12_mid_zoom > 100);
+		assert(ring_4_12_large_mid_zoom > 50);
+		assert(small_mid_zoom > 0);
 
-		/* Now zoom all the way out to -22x (0.00738f): ring [4..12] must NOT thin out,
-		 * and scenery must be emitted homogeneously across visible rooms! */
+		/* Now zoom all the way out to -22x (0.00738f): large trees in ring [4..12] must NOT thin out,
+		 * while small plants (sz <= 24) have already faded/culled out by size/distance! */
 		nd_seven_set_zoom(0.00738f);
 		nd_seven_render(fb, 1280, 720, &st);
 
@@ -2246,6 +2256,8 @@ int main(void)
 		assert(mid_cnt > 800);
 
 		int ring_4_12_far_zoom = 0;
+		int ring_4_12_large_far_zoom = 0;
+		int small_far_zoom = 0;
 		int far_horizon_cnt = 0;
 		int deep_horizon_30_cnt = 0;
 		int max_cheb_seen = 0;
@@ -2258,10 +2270,16 @@ int main(void)
 				int arx = rx < 0 ? -rx : rx;
 				int ary = ry < 0 ? -ry : ry;
 				int cheb = arx > ary ? arx : ary;
+				float sz = bw > bh ? bw : bh;
 				if (cheb > max_cheb_seen)
 					max_cheb_seen = cheb;
-				if (cheb >= 4 && cheb <= 12)
+				if (cheb >= 4 && cheb <= 12) {
 					ring_4_12_far_zoom++;
+					if (sz >= 34.0f)
+						ring_4_12_large_far_zoom++;
+				}
+				if (sz <= 24.0f)
+					small_far_zoom++;
 				if (cheb > 14)
 					far_horizon_cnt++;
 				if (cheb > 30)
@@ -2270,9 +2288,10 @@ int main(void)
 				unscaled_cnt++;
 			}
 		}
-		assert(ring_4_12_far_zoom >= ring_4_12_mid_zoom);
-		assert(far_horizon_cnt > 500);
-		assert(deep_horizon_30_cnt > 500);
+		assert(ring_4_12_large_far_zoom >= ring_4_12_large_mid_zoom);
+		assert(small_far_zoom == 0);
+		assert(far_horizon_cnt > 250);
+		assert(deep_horizon_30_cnt > 250);
 		assert(max_cheb_seen > 100 && max_cheb_seen <= 255);
 		assert(unscaled_cnt > 800 && unscaled_cnt == (int)(mid_cnt < 262144 ? mid_cnt : 262144));
 
@@ -3703,7 +3722,42 @@ int main(void)
 
 			nd_seven_set_zoom(1.0f);
 			nd_seven_reset_input();
-			printf("PASS: Universe Owner zoom-proportional Shift walk-teleport verified (last_cmd=%s)", tp_cmd);
+			printf("PASS: Universe Owner zoom-proportional Shift walk-teleport verified (last_cmd=%s)\n", tp_cmd);
+		}
+
+		/* 12. User-Adjustable Detail Scale (nd_seven_set_detail_scale / nd_seven_detail_in / nd_seven_detail_out) */
+		{
+			assert(fabsf(nd_seven_get_detail_scale() - 1.0f) < 1e-5f);
+			nd_seven_detail_out();
+			assert(nd_seven_get_detail_scale() < 1.0f && nd_seven_get_detail_scale() >= ND_SEVEN_DETAIL_MIN);
+			nd_seven_detail_in();
+			assert(fabsf(nd_seven_get_detail_scale() - 1.0f) < 1e-4f);
+
+			/* Lowering detail scale culls distant billboards earlier at zoom = 0.012f (cam_dist = 23,333 wu) */
+			set_map(10, 10, 12, 0x1B, 0, 'X', 'o', 'T');
+			nd_seven_set_zoom(0.012f);
+
+			/* At detail = 0.50f (max_cull = 21,999 < 23,333), all billboards cull */
+			nd_seven_set_detail_scale(0.50f);
+			nd_seven_render(fb, 1280, 720, &st);
+			assert(nd_seven_last_mid_billboard_count() == 0);
+
+			/* At detail = 0.55f (max_cull = 24,199 > 23,333), only near-focal trees within ~116 rooms are emitted */
+			nd_seven_set_detail_scale(0.55f);
+			nd_seven_render(fb, 1280, 720, &st);
+			uint32_t cnt_mid_detail = nd_seven_last_mid_billboard_count();
+			assert(cnt_mid_detail > 0);
+
+			/* At detail = 1.0f (max_cull = 43,999), trees across the full frustum out to 250 rooms are emitted */
+			nd_seven_set_detail_scale(1.0f);
+			nd_seven_render(fb, 1280, 720, &st);
+			uint32_t cnt_full_detail = nd_seven_last_mid_billboard_count();
+			assert(cnt_full_detail > cnt_mid_detail);
+
+			nd_seven_set_detail_scale(1.0f);
+			nd_seven_set_zoom(1.0f);
+			printf("PASS: User-adjustable detail scale verified (1.0x=%u, 0.55x=%u, 0.50x=0 billboards at 0.012x zoom)\n",
+			       cnt_full_detail, cnt_mid_detail);
 		}
 	}
 

@@ -3964,11 +3964,46 @@ const char *nd_seven_gl_fs_cloud(void) { return s_fs_cloud; }
 static float s_grass_lamb_wx = 0.0f;
 static float s_grass_lamb_wy = 0.0f;
 static float s_grass_anim_time = 0.0f;
+static float s_view_wind_sx = 0.0f;
+static float s_view_wind_sy = 0.0f;
+static float s_view_wind_dz = 0.0f;
+static float s_view_wind_rustle = 0.0f;
+static float s_view_tree_sx = 0.0f;
+static float s_view_tree_sy = 0.0f;
+static float s_view_tree_rustle = 0.0f;
+static int   s_view_wind_ready = 0;
 
 static inline uint32_t gl_chaff_hash3(int32_t px, int32_t py, int32_t pz, uint32_t seed);
 static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
                                           float *out_dir_x, float *out_dir_y,
                                           float *out_gust, float *out_catspaw);
+
+static void gl_update_view_wind(float wx, float wy, float anim_time)
+{
+	float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
+	gl_eval_recursive_wind(wx, wy, anim_time, &wDirX, &wDirY, &gust, &catspaw);
+
+	float slow_sway = sinf(anim_time * ND_TREE_TRUNK_SWAY_FREQ_RAD) * (0.10f + 0.12f * gust);
+	float bough_nod = sinf(anim_time * ND_TREE_BOUGH_NOD_FREQ_RAD) * (0.04f + 0.06f * catspaw);
+	float tree_mag = ND_TREE_WIND_BASE_LEAN + ND_TREE_WIND_GUST_SCALE * gust + ND_TREE_WIND_CATSPAW_SCALE * catspaw + slow_sway + bough_nod;
+	s_view_tree_sx = wDirX * tree_mag + (-wDirY) * (bough_nod * 0.10f);
+	s_view_tree_sy = wDirY * tree_mag + ( wDirX) * (bough_nod * 0.10f);
+	s_view_tree_rustle = 0.04f * catspaw;
+
+	float wave_arg = anim_time * ND_GRASS_WAVE_FREQ_RAD;
+	float primary_wave = sinf(wave_arg) + 0.28f * sinf(wave_arg * 2.0f - 0.65f);
+	float gust_env = fmaxf(0.0f, gust - 0.35f);
+	float gust_wave = primary_wave * (ND_GRASS_WAVE_AMP * (0.45f + 0.65f * gust));
+	float flutter = sinf(anim_time * ND_GRASS_FLUTTER_FREQ_RAD) * (ND_GRASS_FLUTTER_AMP * (0.40f + 0.60f * catspaw));
+	float cross_sway = cosf(wave_arg * 0.85f) * (0.16f + 0.22f * catspaw) + flutter * 0.30f;
+	float wind_mag = ND_GRASS_WIND_BASE_LEAN + ND_GRASS_WIND_GUST_SCALE * gust_env + ND_GRASS_WIND_CATSPAW_SCALE * catspaw + gust_wave + flutter;
+	if (wind_mag < -0.18f) wind_mag = -0.18f;
+	s_view_wind_sx = wDirX * wind_mag + (-wDirY) * cross_sway;
+	s_view_wind_sy = wDirY * wind_mag + ( wDirX) * cross_sway;
+	s_view_wind_dz = (s_view_wind_sx * s_view_wind_sx + s_view_wind_sy * s_view_wind_sy) * 0.075f;
+	s_view_wind_rustle = 0.08f * catspaw + 0.14f * fmaxf(0.0f, primary_wave) * gust_env;
+	s_view_wind_ready = 1;
+}
 
 static void torus_frame_double(double wx, double wy, double wz,
                                const nd_planet_def_t *pdef,
@@ -4309,28 +4344,83 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 	}
 
 	if (out->flora_sway_scale > 0.0f) {
+		if (!s_view_wind_ready)
+			gl_update_view_wind(0.0f, 0.0f, s_grass_anim_time);
 		if (is_woody_tree) {
-			float wDirX = 0.7071f, wDirY = -0.7071f, gust = 1.0f, catspaw = 0.5f;
-			gl_eval_recursive_wind(b->x, b->y, s_grass_anim_time, &wDirX, &wDirY, &gust, &catspaw);
-			uint32_t th = gl_chaff_hash3((int32_t)floorf(b->x), (int32_t)floorf(b->y), 0, 0x54524545u);
-			float phase = (float)(th & 0xFFFFu) * (TWO_PI_F / 65536.0f);
-			float stiff = 0.92f + 0.16f * ((float)((th >> 16u) & 0xFFu) / 255.0f);
-			float wind_proj = b->x * wDirX + b->y * wDirY;
-			float slow_sway = sinf(s_grass_anim_time * ND_TREE_TRUNK_SWAY_FREQ_RAD - wind_proj * 0.024f + phase * 0.25f) * (0.10f + 0.12f * gust);
-			float bough_nod = sinf(s_grass_anim_time * ND_TREE_BOUGH_NOD_FREQ_RAD - wind_proj * 0.038f + phase * 0.20f) * (0.04f + 0.06f * catspaw);
-			float wind_mag = (ND_TREE_WIND_BASE_LEAN + ND_TREE_WIND_GUST_SCALE * gust + ND_TREE_WIND_CATSPAW_SCALE * catspaw + slow_sway + bough_nod) * stiff * out->flora_sway_scale;
-			out->grass_sx = wDirX * wind_mag + (-wDirY) * (bough_nod * 0.10f * out->flora_sway_scale);
-			out->grass_sy = wDirY * wind_mag + ( wDirX) * (bough_nod * 0.10f * out->flora_sway_scale);
+			out->grass_sx = s_view_tree_sx * out->flora_sway_scale;
+			out->grass_sy = s_view_tree_sy * out->flora_sway_scale;
 			out->grass_dz = 0.0f;
-			out->grass_rustle = 0.04f * catspaw;
+			out->grass_rustle = s_view_tree_rustle;
 		} else {
-			nd_seven_gl_eval_grass_displacement(b->x, b->y, s_grass_anim_time,
-			                                    s_grass_lamb_wx, s_grass_lamb_wy,
-			                                    &out->grass_sx, &out->grass_sy, &out->grass_dz, &out->grass_rustle);
-			out->grass_sx *= out->flora_sway_scale;
-			out->grass_sy *= out->flora_sway_scale;
-			out->grass_dz *= (b->style == ND_BB_STYLE_GRASS) ? out->flora_sway_scale : (out->flora_sway_scale * 0.45f);
-			out->grass_rustle *= fminf(1.0f, out->flora_sway_scale);
+			float sx = s_view_wind_sx;
+			float sy = s_view_wind_sy;
+			float dz = s_view_wind_dz;
+			float rustle = s_view_wind_rustle;
+
+			float dx = b->x - s_grass_lamb_wx;
+			float dy = b->y - s_grass_lamb_wy;
+			float d2 = dx * dx + dy * dy;
+			const float R_touch = 11.0f;
+			if (d2 < R_touch * R_touch) {
+				float dist = sqrtf(d2);
+				float t = 1.0f - (dist / R_touch);
+				float weight = t * t * (3.0f - 2.0f * t);
+				float rx = (dist > 0.25f) ? (dx / dist) : ((((int32_t)b->x & 1) != 0) ? 1.0f : -1.0f);
+				float ry = (dist > 0.25f) ? (dy / dist) : -0.25f;
+				sx += rx * (2.55f * weight);
+				sy += ry * (0.85f * weight);
+				dz += 2.25f * weight;
+				rustle += 0.50f * weight;
+				if (dy < 0.5f && sy > 0.35f)
+					sy = 0.35f;
+			}
+			if (d2 < 64.0f * 64.0f) {
+				int wake_n = 0;
+				const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
+				if (wake && wake_n > 0) {
+					const float R_wake = 11.5f;
+					const float tau_max = 1.40f;
+					for (int i = 0; i < wake_n; i++) {
+						if (!wake[i].valid)
+							continue;
+						float tau = s_grass_anim_time - wake[i].t_sec;
+						if (tau < 0.0f || tau > tau_max)
+							continue;
+						float wdx = b->x - wake[i].wx;
+						float wdy = b->y - wake[i].wy;
+						float wd2 = wdx * wdx + wdy * wdy;
+						if (wd2 >= R_wake * R_wake)
+							continue;
+						float wdist = sqrtf(wd2);
+						float wt = 1.0f - (wdist / R_wake);
+						float w_spatial = wt * wt * (3.0f - 2.0f * wt);
+						float decay = expf(-2.2f * tau) * (1.0f - (tau / tau_max));
+						float rebound = expf(-1.6f * tau);
+						float wrx = (wdist > 0.25f) ? (wdx / wdist) : 1.0f;
+						float wry = (wdist > 0.25f) ? (wdy / wdist) : 0.0f;
+						float vlen = sqrtf(wake[i].vx * wake[i].vx + wake[i].vy * wake[i].vy);
+						float vnx = (vlen > 1.0f) ? (wake[i].vx / vlen) : 0.0f;
+						float vny = (vlen > 1.0f) ? (wake[i].vy / vlen) : 0.0f;
+						float env = w_spatial * decay;
+						sx += (wrx * 1.45f + vnx * 0.65f * rebound) * env;
+						sy += (wry * 0.85f + vny * 0.45f * rebound) * env;
+						dz += 1.85f * env;
+						rustle += 0.40f * env;
+					}
+				}
+			}
+			if (sx < -4.2f) sx = -4.2f;
+			if (sx >  4.2f) sx =  4.2f;
+			if (sy < -3.2f) sy = -3.2f;
+			if (sy >  3.2f) sy =  3.2f;
+			if (dz <  0.0f) dz =  0.0f;
+			if (dz >  3.4f) dz =  3.4f;
+			if (rustle > 1.0f) rustle = 1.0f;
+
+			out->grass_sx = sx * out->flora_sway_scale;
+			out->grass_sy = sy * out->flora_sway_scale;
+			out->grass_dz = dz * ((b->style == ND_BB_STYLE_GRASS) ? out->flora_sway_scale : (out->flora_sway_scale * 0.45f));
+			out->grass_rustle = rustle * fminf(1.0f, out->flora_sway_scale);
 		}
 	}
 }
@@ -5675,6 +5765,8 @@ void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
 	s_lamb_shadow_light[3] = cl_int;
 	s_grass_lamb_wx = wx;
 	s_grass_lamb_wy = wy;
+	if (!s_view_wind_ready)
+		gl_update_view_wind(0.0f, 0.0f, s_grass_anim_time);
 }
 
 float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
@@ -5953,6 +6045,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_grass_anim_time = anim_time;
 	s_grass_lamb_wx = tx;
 	s_grass_lamb_wy = ty;
+	gl_update_view_wind(tx, ty, anim_time);
 
 	/* Evaluate double-precision reference origin at (tx, ty, 0) to eliminate 32-bit float cancellation */
 	float E[3], S[3], N[3];
@@ -6620,9 +6713,10 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		s_gl.atlas_ver = cur_ver;
 	}
 
-	bool emit_shadows = (s_gl.cur_dist < 5000.0f);
-	bool emit_grass_shadows = (s_gl.cur_dist < 1800.0f);
-	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3200.0f);
+	float det_scale = nd_seven_get_detail_scale();
+	bool emit_shadows = (s_gl.cur_dist < 5000.0f * det_scale);
+	bool emit_grass_shadows = (s_gl.cur_dist < 1800.0f * det_scale);
+	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3200.0f * det_scale);
 	float pitch_rad = s_gl.cur_pitch_deg * (PI_F / 180.0f);
 	float cos_p = cosf(pitch_rad);
 	float sin_p = sinf(pitch_rad);
@@ -6681,7 +6775,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		if (!last) {
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
-			if (!is_other) {
+			if (!is_other && (batch[i].tint_rgba & 0xFFu) >= 90u) {
 				if (is_grass)
 					want_shadow = emit_grass_shadows && (batch[i].width >= 4.0f && batch[i].height >= 4.0f);
 				else

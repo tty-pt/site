@@ -494,21 +494,49 @@ static inline int seven_test_frustum_xy_state(float min_x, float min_y, float ma
 	return all_inside ? 2 : 1;
 }
 
-/* Uniform altitude fade: all scenery fades out slowly and steadily across the
- * zoom-out progression starting around -15x (8,000), remaining visible at -22x
- * (~37,947), and fully dissolving before -23x (44,000) with zero radial rings. */
-#define SCENERY_ALT_FADE_START 8000.0f
-#define SCENERY_ALT_FADE_END   44000.0f
-#define SCENERY_RAD_MAX_ROOMS   250
+/* Universal size/distance billboard fade & culling:
+ * Every billboard's cull distance and opacity depend solely on its physical
+ * dimensions (bw, bh) and 3D camera distance d = sqrt(cam_dist^2 + dx^2 + dy^2 + dz^2),
+ * scaled by the user-adjustable detail multiplier s_frame_detail_scale. */
+#define SCENERY_RAD_MAX_ROOMS        250
+#define SEVEN_BB_MAX_EFF_SIZE        34.0f
+#define SEVEN_BB_DIST_PER_SIZE_CB    1.1195f
+#define SEVEN_BB_FADE_START_RATIO    0.45f
 
-static inline float seven_smooth_fade(float val, float start, float end)
+static float s_cam_focal_x = 0.0f;
+static float s_cam_focal_y = 0.0f;
+static float s_cam_focal_z = 0.0f;
+static float s_cam_dist = ND_SEVEN_CAM_DIST;
+static float s_frame_detail_scale = 1.0f;
+
+static inline float seven_billboard_cull_dist(float bw, float bh)
 {
-	if (val <= start)
-		return 1.0f;
-	if (val >= end)
+	float sz = (bw > bh) ? bw : bh;
+	if (sz < 1.0f)
+		sz = 1.0f;
+	if (sz > SEVEN_BB_MAX_EFF_SIZE)
+		sz = SEVEN_BB_MAX_EFF_SIZE;
+	return SEVEN_BB_DIST_PER_SIZE_CB * s_frame_detail_scale * sz * sz * sz;
+}
+
+static inline float seven_eval_billboard_alpha(float wx, float wy, float wz,
+                                               float bw, float bh)
+{
+	float cull_d = seven_billboard_cull_dist(bw, bh);
+	if (cull_d <= 1.0f)
 		return 0.0f;
-	float t = (val - start) / (end - start);
-	return 1.0f - t;
+	float dx = wx - s_cam_focal_x;
+	float dy = wy - s_cam_focal_y;
+	float dz = wz - s_cam_focal_z;
+	float d2 = s_cam_dist * s_cam_dist + 0.12f * (dx * dx + dy * dy + dz * dz);
+	if (d2 >= cull_d * cull_d)
+		return 0.0f;
+	float start_d = cull_d * SEVEN_BB_FADE_START_RATIO;
+	if (d2 <= start_d * start_d)
+		return 1.0f;
+	float d = sqrtf(d2);
+	float t = (d - start_d) / (cull_d - start_d);
+	return 1.0f - t * t * (3.0f - 2.0f * t);
 }
 
 static inline uint32_t seven_pack_white_alpha(float alpha)
@@ -785,6 +813,12 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	/* Re-evaluate focal elevation on the newly active View 0 leaves */
 	float lwz = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
 	float lamb_light_z = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
+
+	s_cam_focal_x = (float)lwx;
+	s_cam_focal_y = (float)lwy;
+	s_cam_focal_z = lwz;
+	s_cam_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
+	s_frame_detail_scale = nd_seven_get_detail_scale();
 
 	/* Begin 3D WebGL frame in pure C */
 	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z,
@@ -1293,6 +1327,26 @@ static block_bb_cache_slot_t s_block_bb_cache[BLOCK_BB_CACHE_SLOTS];
 static lam_billboard_gpu_t   s_block_bb_arena[BLOCK_BB_ARENA_CAP];
 static uint64_t              s_block_bb_arena_cursor = 1;
 
+static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb)
+{
+	float alpha = seven_eval_billboard_alpha(src_bb->x, src_bb->y, src_bb->z,
+	                                         src_bb->width, src_bb->height);
+	uint32_t alpha_pack = seven_pack_white_alpha(alpha);
+	if (alpha_pack == 0)
+		return 0;
+	if (s_mid_batch_len == MID_STREAM_CHUNK) {
+		nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+		s_mid_batch_len = 0;
+	}
+	lam_billboard_gpu_t bb = *src_bb;
+	bb.tint_rgba = (src_bb->tint_rgba & 0xFFFFFF00u) | (alpha_pack & 0xFFu);
+	s_mid_stream_batch[s_mid_batch_len++] = bb;
+	if (s_last_mid_gpu_count < MID_MAX_DRAW)
+		s_mid_gpu_batch[s_last_mid_gpu_count] = bb;
+	s_last_mid_gpu_count++;
+	return 1;
+}
+
 static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_node_t *node,
                                          const int16_t pos[4], int16_t w_level,
                                          uint32_t tint, bool pure_virgin,
@@ -1338,17 +1392,17 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 
 		float z_f = (float)elev_q / 16.0f;
 
-		if (s_mid_batch_len == MID_STREAM_CHUNK) {
-			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
-			s_mid_batch_len = 0;
-		}
-
 		int flip = (raw_objs[k].variant >> 2) & 1;
 		lam_billboard_gpu_t bb;
 		bb.x = (float)wx;
 		bb.y = (float)wy;
 		bb.z = z_f;
 		seven_calc_obj_billboard_dims(&raw_objs[k], sr, &bb.width, &bb.height, &bb.anchor_y);
+		if (!arena_dst) {
+			float test_alpha = seven_eval_billboard_alpha(bb.x, bb.y, bb.z, bb.width, bb.height);
+			if (test_alpha <= (0.5f / 255.0f))
+				continue;
+		}
 		bb.water_z_off = bb.anchor_y;
 		if (flip) {
 			bb.u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
@@ -1359,16 +1413,12 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		}
 		bb.v0 = (float)sr->y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-		seven_apply_obj_billboard_style(&raw_objs[k], sr, tint, &bb);
+		seven_apply_obj_billboard_style(&raw_objs[k], sr, 0xFFFFFFFFu, &bb);
 
 		if (arena_dst && inout_arena_cnt && *inout_arena_cnt < BLOCK_BB_MAX_PER_BLK)
 			arena_dst[(*inout_arena_cnt)++] = bb;
 
-		s_mid_stream_batch[s_mid_batch_len++] = bb;
-		if (s_last_mid_gpu_count < MID_MAX_DRAW)
-			s_mid_gpu_batch[s_last_mid_gpu_count] = bb;
-		s_last_mid_gpu_count++;
-		emitted++;
+		emitted += seven_stream_faded_billboard(&bb);
 	}
 	return emitted;
 }
@@ -1979,11 +2029,12 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (eff_lamb_row > obj_j1) eff_lamb_row = obj_j1;
 
 	uint32_t all_gpu_count = 0;
+	float max_scenery_cull = seven_billboard_cull_dist(SEVEN_BB_MAX_EFF_SIZE, SEVEN_BB_MAX_EFF_SIZE);
 
 	for (int tj = obj_j0; tj <= obj_j1; tj++) {
 		int n = 0;
 
-		if (eff_cam_dist < SCENERY_ALT_FADE_END) {
+		if (s_cam_dist < max_scenery_cull) {
 			for (int ti = obj_i0; ti <= obj_i1 && n < MAX_DRAW - NDW_MAX_OBJ; ti++) {
 				nd_spatial_tile_t sp;
 				if (!nd_spatial_tile_resolve(st, ti, tj, &sp))
@@ -2139,8 +2190,9 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			}
 
 			if (has_sprite) {
-				float dist_b = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
-				float alt_fade_b = (dr[a].what == D_LAMB) ? 1.0f : seven_smooth_fade(dist_b, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
+				float alt_fade_b = (dr[a].what == D_LAMB)
+					? 1.0f
+					: seven_eval_billboard_alpha((float)dr[a].wx, (float)dr[a].wy, dr[a].z_f, bw, bh);
 				uint32_t tint_b = seven_pack_white_alpha(alt_fade_b);
 				if (tint_b == 0)
 					continue;
@@ -2191,10 +2243,9 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 	/* Emit deterministic Living Meadow areas, shoreline reed beds, and wildflower glades:
 	 * Spread out on a 26-unit lattice with natural jitter so tufts are less frequent and never cluttered,
-	 * filling the entire viewport out to far distance and fading out only when zoomed out far. */
-	float dist_meadow = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
-	float meadow_fade = seven_smooth_fade(dist_meadow, 1800.0f, 3400.0f);
-	if (meadow_fade > 0.02f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
+	 * evaluated by the universal size/distance billboard fade & cull law with zero special cases. */
+	float max_meadow_cull = seven_billboard_cull_dist(18.0f, 18.0f);
+	if (s_cam_dist < max_meadow_cull && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
 		uint16_t m_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t base_wl = nd_field_water_level(m_world);
 		int64_t lwx64 = 0, lwy64 = 0;
@@ -2204,13 +2255,11 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float lwx_f = (float)lwx;
 		float lwy_f = (float)lwy;
 
-		/* Sample a spread-out 26-unit world-locked lattice using ndw_fdiv so grid coordinates
-		 * are 100% invariant across negative/positive world axes and room transitions.
-		 * Dynamic view-filling radius scales with camera distance (624..1404 wu) so grass fills
-		 * the entire visible viewport and only fades out when zoomed out far. */
 		const int32_t step = 26;
-		int32_t dyn_rad = (int32_t)(dist_meadow * 1.65f);
+		float max_meadow_horiz = 2.88f * sqrtf(max_meadow_cull * max_meadow_cull - s_cam_dist * s_cam_dist);
+		int32_t dyn_rad = (int32_t)(s_cam_dist * 1.65f);
 		if (dyn_rad < 624) dyn_rad = 624;
+		if (dyn_rad > (int32_t)max_meadow_horiz) dyn_rad = (int32_t)max_meadow_horiz;
 		if (dyn_rad > 1404) dyn_rad = 1404;
 		const int32_t rad = (dyn_rad / step) * step;
 		int32_t cx0 = ndw_fdiv(lwx - rad, step) * step;
@@ -2303,25 +2352,27 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				if (!meadow_lookup_rect(zone, bio, jh >> 8u, &sr))
 					continue;
 
-				float r_norm = sqrtf(r2) / (float)rad;
-				float radial_fade = (r_norm <= 0.78f) ? 1.0f : ((1.0f - r_norm) * (1.0f / 0.22f));
-				if (radial_fade < 0.0f) radial_fade = 0.0f;
-				float eff_alpha = meadow_fade * (0.25f + 0.75f * radial_fade);
+				float sort_y1 = (float)wy;
+				float sc1 = scale_m;
+				if (!nd_seven_eval_meadow_lamb_occlusion((float)wx, (float)wy, lwx_f, lwy_f, &sort_y1, &sc1))
+					continue;
+
+				float bw_m = (float)sr.w * sc1;
+				float bh_m = (float)sr.h * sc1;
+				float eff_alpha = seven_eval_billboard_alpha((float)wx, (float)wy, z_f, bw_m, bh_m);
 				uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
 				if (base_alpha_pack == 0)
 					continue;
 				uint8_t alpha_u8 = (uint8_t)(base_alpha_pack & 0xFFu);
 				uint32_t tint_m = meadow_biome_tint(bio, zone, jh >> 12u, alpha_u8);
 
-				float sort_y1 = (float)wy;
-				float sc1 = scale_m;
-				if (nd_seven_eval_meadow_lamb_occlusion((float)wx, (float)wy, lwx_f, lwy_f, &sort_y1, &sc1)) {
+				{
 					lam_billboard_gpu_t *bb = &s_all_gpu_batch[all_gpu_count++];
 					bb->x = (float)wx;
 					bb->y = sort_y1;
 					bb->z = z_f;
-					bb->width = (float)sr.w * sc1;
-					bb->height = (float)sr.h * sc1;
+					bb->width = bw_m;
+					bb->height = bh_m;
 					bb->anchor_y = 1.6f * sc1;
 					bb->water_z_off = 1.6f * sc1;
 					if (flip) {
@@ -2425,9 +2476,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	s_mid_batch_len = 0;
 	s_last_mid_gpu_count = 0;
 	int near_flushed = 0;
-	float dist_scenery = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
-	float alt_fade = seven_smooth_fade(dist_scenery, SCENERY_ALT_FADE_START, SCENERY_ALT_FADE_END);
-	uint32_t tint_scenery = seven_pack_white_alpha(alt_fade);
+	uint32_t tint_scenery = (s_cam_dist < max_scenery_cull) ? 0xFFFFFFFFu : 0u;
 	if (tint_scenery != 0) {
 		nd_seven_set_scenery_synth_budget(512);
 		uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
@@ -2458,10 +2507,16 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			s_visible_leaves[b] = key_node;
 		}
 
-		int32_t full_x0 = (int32_t)base_rx - SCENERY_RAD_MAX_ROOMS;
-		int32_t full_x1 = (int32_t)base_rx + SCENERY_RAD_MAX_ROOMS;
-		int32_t full_y0 = center_ry_grid - SCENERY_RAD_MAX_ROOMS;
-		int32_t full_y1 = center_ry_grid + SCENERY_RAD_MAX_ROOMS;
+		float max_horiz = 2.88f * sqrtf(max_scenery_cull * max_scenery_cull - s_cam_dist * s_cam_dist);
+		int32_t rad_rx = (int32_t)(max_horiz / (float)NDW_TILE_W) + 2;
+		int32_t rad_ry = (int32_t)(max_horiz / (float)NDW_TILE_H) + 2;
+		if (rad_rx > SCENERY_RAD_MAX_ROOMS) rad_rx = SCENERY_RAD_MAX_ROOMS;
+		if (rad_ry > SCENERY_RAD_MAX_ROOMS) rad_ry = SCENERY_RAD_MAX_ROOMS;
+
+		int32_t full_x0 = (int32_t)base_rx - rad_rx;
+		int32_t full_x1 = (int32_t)base_rx + rad_rx;
+		int32_t full_y0 = center_ry_grid - rad_ry;
+		int32_t full_y1 = center_ry_grid + rad_ry;
 
 		for (size_t m = 0; m < s_visible_leaf_count; m++) {
 			const ar_node_t *node = s_visible_leaves[m];
@@ -2555,16 +2610,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 							const lam_billboard_gpu_t *cached = &s_block_bb_arena[slot->arena_off];
 							uint16_t cnt = slot->count;
 							for (uint16_t ci = 0; ci < cnt; ci++) {
-								if (s_mid_batch_len == MID_STREAM_CHUNK) {
-									nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
-									s_mid_batch_len = 0;
-								}
-								lam_billboard_gpu_t bb = cached[ci];
-								bb.tint_rgba = tint_scenery;
-								s_mid_stream_batch[s_mid_batch_len++] = bb;
-								if (s_last_mid_gpu_count < MID_MAX_DRAW)
-									s_mid_gpu_batch[s_last_mid_gpu_count] = bb;
-								s_last_mid_gpu_count++;
+								seven_stream_faded_billboard(&cached[ci]);
 							}
 							continue;
 						}

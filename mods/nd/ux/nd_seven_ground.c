@@ -197,6 +197,30 @@ void nd_seven_zoom_out(void)
 	nd_seven_set_zoom(s_camera_zoom / 1.15f);
 }
 
+static float s_detail_scale = 1.0f;
+
+void nd_seven_set_detail_scale(float scale)
+{
+	if (scale < ND_SEVEN_DETAIL_MIN) scale = ND_SEVEN_DETAIL_MIN;
+	if (scale > ND_SEVEN_DETAIL_MAX) scale = ND_SEVEN_DETAIL_MAX;
+	s_detail_scale = scale;
+}
+
+float nd_seven_get_detail_scale(void)
+{
+	return s_detail_scale;
+}
+
+void nd_seven_detail_in(void)
+{
+	nd_seven_set_detail_scale(s_detail_scale * ND_SEVEN_DETAIL_STEP);
+}
+
+void nd_seven_detail_out(void)
+{
+	nd_seven_set_detail_scale(s_detail_scale / ND_SEVEN_DETAIL_STEP);
+}
+
 void nd_seven_ground_cache_forget(void)
 {
 	memset(s_border, 0, sizeof(s_border));
