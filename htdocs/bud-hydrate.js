@@ -728,6 +728,12 @@ class BudHostBase {
 					if (node.getAttribute(attrName) !== attrVal) {
 						node.setAttribute(attrName, attrVal);
 					}
+					if (attrName === 'value' && 'value' in node) {
+						const doc = getDocumentForNode(node);
+						if ((!doc || doc.activeElement !== node) && node.value !== attrVal) {
+							try { node.value = attrVal; } catch (_) {}
+						}
+					}
 					if (attrName === 'style' || attrName === 'class') {
 						persistNodeState(node);
 					}
