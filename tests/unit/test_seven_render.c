@@ -3319,9 +3319,9 @@ int main(void)
 		assert(strstr(fs_c, "eval_synoptic_carrier") != NULL);
 		assert(strstr(fs_c, "eval_synoptic_macro_cloud_from_carrier") != NULL);
 		assert(strstr(fs_c, "nd_csm_density") != NULL);
-		assert(strstr(fs_c, "nd_csm_weather") != NULL);
-		assert(strstr(fs_c, "uSceneDepth") != NULL);
-		assert(strstr(fs_c, "tScene") != NULL);
+		assert(strstr(fs_c, "wBand4") != NULL);
+		assert(strstr(fs_c, "worldClimate") != NULL);
+		assert(strstr(fs_c, "borderFade") == NULL);
 		assert(strstr(fs_c, "maxHorizShift") != NULL);
 		assert(strstr(fs_c, "hgPhase") != NULL);
 		assert(strstr(fs_c, "sEnter") != NULL);

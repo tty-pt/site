@@ -55,12 +55,8 @@
 	"    return clamp(smoothstep(0.05, 0.66, synCloud.x * sliceFade), 0.0, 0.95);\n" \
 	"}\n"
 
-/* Cloud-shadow & multi-deck weather map (RGBA8, one frame-wide evaluation of the synoptic field on the cloud slice):
- *   .r = wind-sheared Deck 1 shadow slice density (zk = 920)
- *   .g = un-sheared local column macroCoverage
- *   .b = high-troposphere jet-stream cirrus coverage (highCirrus)
- *   .a = baroclinic synoptic front carrier (synFront)
- * Indexed by world/projected slice position, so terrain, water, sprites, and volumetric clouds each do ONE texture fetch.
+/* Cloud-shadow map (R8, one frame-wide evaluation of the synoptic field on the cloud slice zk = 920):
+ * Indexed by world/projected slice position, so terrain, water, sprites, and volumetric cloud sun-shadow probes each do ONE texture fetch.
  * uCsm = (window centre x, window centre y, window half-extent); half <= 0 means "no map bound". */
 #define ND_GLSL_CSM_LOOKUP_FN \
 	"uniform sampler2D uCloudShadowMap;\n" \
@@ -70,10 +66,6 @@
 	"    vec2 e = min(uv, 1.0 - uv);\n" \
 	"    float edge = smoothstep(0.0, 0.04, min(e.x, e.y));\n" \
 	"    return texture(uCloudShadowMap, uv).r * edge;\n" \
-	"}\n" \
-	"vec4 nd_csm_weather(vec2 worldXY) {\n" \
-	"    vec2 uv = (worldXY - uCsm.xy) / (2.0 * uCsm.z) + 0.5;\n" \
-	"    return texture(uCloudShadowMap, uv);\n" \
 	"}\n" \
 	"float nd_cloud_shadow_map(vec2 fragXY, float fragZ, float dist) {\n" \
 	"    const float zk = 920.0;\n" \
@@ -3452,14 +3444,11 @@ static const char *s_fs_csm =
 	"    float midLatWet = smoothstep(18.0, 0.0, abs(latDeg - 38.0)) * 0.12;\n"
 	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
 	"    float humidity = clamp(0.50 + 0.28 * (worldClimate.x - 0.5) + 0.10 * uSeaWet - eqEvapDry + midLatWet + subpolarWet, 0.08, 0.90);\n"
-	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(0.0);\n"
+	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(21.8, -19.8);\n"
 	"    float atmoGust = 0.65, updraft = 0.50;\n"
-	"    chaff_eval_wind_3d(vec3(projXY, 920.0), 420.0, 2820.0, uAnimTime, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
-	"    vec2 dummyGrad = vec2(0.0);\n"
-	"    float highCirrus = 0.0;\n"
-	"    vec4 syn = eval_synoptic_macro_cloud_core(projXY - shearDisp, uAnimTime, humidity, fw, true, dummyGrad, highCirrus);\n"
-	"    vec4 synLocal = eval_synoptic_macro_cloud_fw(projXY, uAnimTime, humidity, fw);\n"
-	"    FragColor = vec4(clamp(syn.x, 0.0, 1.0), clamp(synLocal.x, 0.0, 1.0), clamp(highCirrus, 0.0, 1.0), clamp(synLocal.y, 0.0, 1.0));\n"
+	"    if (fw < 200.0) chaff_eval_wind_3d(vec3(projXY, 920.0), 420.0, 2820.0, uAnimTime, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
+	"    vec4 syn = eval_synoptic_macro_cloud_fw(projXY - shearDisp, uAnimTime, humidity, fw);\n"
+	"    FragColor = vec4(clamp(syn.x, 0.0, 1.0), 0.0, 0.0, 1.0);\n"
 	"}\n";
 
 static const char *s_vs_cloud =
@@ -3638,7 +3627,7 @@ static const char *s_fs_cloud =
 	" *   Deck 3 (Anvil / Cirrus, h in [0.72, 1.00])   : downwind anvil plumes (coarse macro sampled 38 km upwind) + jet-stream cirrus\n"
 	" * Returns vec4(density, gradX, gradY, gradZ). */\n"
 	"vec4 eval_zoom_cloud_density_grad(vec3 worldPos, float anim_time, float humidity, float dist, float fw, vec4 synFlow, vec4 sfcFlow,\n"
-	"                                  vec4 synCarrier, vec2 pZonalBase, vec2 baseMacroGrad) {\n"
+	"                                  vec4 synCarrier, vec2 pZonalBase, vec2 baseMacroGrad, vec4 wBand4) {\n"
 	"    float z = worldPos.z;\n"
 	"    const float zBase = 420.0;\n"
 	"    const float zTop  = 2820.0;\n"
@@ -3648,7 +3637,7 @@ static const char *s_fs_cloud =
 	"    vec2 atmoWindDir; vec2 shearDisp; float atmoGust; float updraft;\n"
 	"    nd_cloud_wind_at_height(synFlow, sfcFlow, hNorm, atmoWindDir, shearDisp, atmoGust, updraft);\n"
 	"    vec2 windPerp = vec2(-atmoWindDir.y, atmoWindDir.x);\n"
-	"    /* Per-deck horizontal coordinate & single synoptic macro evaluation per step (zero 4D noise on clear sky):\n"
+	"    /* Per-deck horizontal coordinate & synoptic macro evaluation:\n"
 	"     *   Deck 1 (hNorm < 0.31): wind-sheared cumulus field\n"
 	"     *   Deck 2 (0.31..0.68)  : cross-wind & along-wind displaced baroclinic altocumulus + deep convective towers\n"
 	"     *   Deck 3 (hNorm >= 0.68): 38 km upwind anvil outflow source + high-troposphere jet-stream cirrus */\n"
@@ -3660,20 +3649,9 @@ static const char *s_fs_cloud =
 	"    float synFw = upperDeck ? max(fw, 4000.0) : fw;\n"
 	"    vec2 macroGrad = baseMacroGrad;\n"
 	"    float highCirrus = 0.0;\n"
-	"    vec4 synCloud;\n"
-	"    /* Fast RGBA8 weather-map path: when synQueryXY is inside the 1024x1024 CSM cache window,\n"
-	"     * fetch pre-baked macroCoverage (.g), highCirrus (.b), and synFront (.a) in ONE bilinear tap\n"
-	"     * instead of evaluating up to 7 procedural 2D gradient noises per raymarch step! */\n"
-	"    vec2 csmRel = (uCsm.z > 0.0) ? (abs(synQueryXY - uCsm.xy) / uCsm.z) : vec2(2.0);\n"
-	"    if (max(csmRel.x, csmRel.y) < 0.88 && dist < 140000.0) {\n"
-	"        vec4 cw = nd_csm_weather(synQueryXY);\n"
-	"        highCirrus = cw.b;\n"
-	"        synCloud = vec4(cw.g, cw.a, synCarrier.zw);\n"
-	"    } else {\n"
-	"        synCloud = (upperDeck && dist < 80000.0)\n"
-	"            ? eval_synoptic_macro_cloud_core(synQueryXY, anim_time, humidity, synFw, true, macroGrad, highCirrus)\n"
-	"            : eval_synoptic_macro_cloud_from_carrier(synQueryXY, anim_time, humidity, synFw, upperDeck, synCarrier, pZonalBase, baseMacroGrad, macroGrad, highCirrus);\n"
-	"    }\n"
+	"    vec4 synCloud = (upperDeck && dist < 80000.0)\n"
+	"        ? eval_synoptic_macro_cloud_core(synQueryXY, anim_time, humidity, synFw, true, macroGrad, highCirrus)\n"
+	"        : eval_synoptic_macro_cloud_from_carrier(synQueryXY, anim_time, humidity, synFw, upperDeck, synCarrier, pZonalBase, baseMacroGrad, macroGrad, highCirrus);\n"
 	"    float macroCoverage = synCloud.x;\n"
 	"    if (macroCoverage <= 0.008 && (!upperDeck || highCirrus <= 0.015)) return vec4(0.0);\n"
 	"    float coreStrength = smoothstep(0.06, 0.75, macroCoverage);\n"
@@ -3710,24 +3688,16 @@ static const char *s_fs_cloud =
 	"    float baseCloud = clamp(cloud_remap(multiDeck, 0.06 * (1.0 - 0.50 * coreStrength), 0.78, 0.0, 1.0), 0.0, 1.0);\n"
 	"    if (baseCloud <= 0.001) return vec4(0.0);\n"
 	"    /* 4-Octave Geometric 4D Spatiotemporal Cascade (lambda = 3,846 down to 17.2 units) with Sliding 2-Octave Band-Pass:\n"
-	"     * When fine octaves j+2 reach full weight at close zoom, coarse octaves j fade out via (1.0 - wRaw[j+2]),\n"
-	"     * so at most 2 octaves execute at close zoom and at orbital zoom while preserving full close-up cumulus detail! */\n"
+	"     * Precomputed wBand4 is hoisted out of the raymarch loop! */\n"
 	"    const float freqs[4] = float[4](0.00026000, 0.00160000, 0.00960000, 0.05800000);\n"
 	"    const float spds[4]  = float[4](0.045, 0.095, 0.195, 0.360);\n"
 	"    const uint  seeds[4] = uint[4](0x434C4434u, 0x434C4435u, 0x434C4437u, 0x434C4438u);\n"
 	"    const float zScales[4] = float[4](1.00, 1.55, 2.40, 3.70);\n"
 	"    const float wScales[4] = float[4](1.00, 1.50, 2.25, 3.40);\n"
 	"    const float amps[4]    = float[4](0.38, 0.30, 0.24, 0.18);\n"
-	"    const float dFar[4]    = float[4](650000.0, 95000.0, 14000.0, 2200.0);\n"
-	"    const float dNear[4]   = float[4](150000.0, 18000.0,  2600.0,  380.0);\n"
 	"    const float wDispScale[4] = float[4](1.00, 0.50, 0.22, 0.08);\n"
 	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
 	"    const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
-	"    float wRaw[4];\n"
-	"    for (int j = 0; j < 4; j++) {\n"
-	"        float wDist = clamp((dFar[j] - dist) / max(1.0, dFar[j] - dNear[j]), 0.0, 1.0);\n"
-	"        wRaw[j] = wDist * nd_octave_weight(1.0 / freqs[j], fw);\n"
-	"    }\n"
 	"    float wBoil = mod(anim_time * (0.055 * atmoGust * updraft), 512.0);\n"
 	"    /* Calibrated 4D slice separation: intra-deck slices advance ~3.0 lattice cells in (z, w) so turret crowns\n"
 	"     * evolve out of their bases with distinct 3D contours, while decks are offset by 23.0 / 15.7 cells. */\n"
@@ -3745,8 +3715,7 @@ static const char *s_fs_cloud =
 	"    vec2 pRot = synQueryXY;\n"
 	"    mat2 cur_rot = mat2(1.0, 0.0, 0.0, 1.0);\n"
 	"    for (int j = 0; j < 4; j++) {\n"
-	"        float wBand = (j < 2) ? (1.0 - wRaw[j + 2]) : 1.0;\n"
-	"        float w     = wRaw[j] * wBand;\n"
+	"        float w = wBand4[j];\n"
 	"        if (w > 0.002) {\n"
 	"            float phase = mod(anim_time * spds[j], 1024.0);\n"
 	"            vec2 q = (pRot + shearDisp * wDispScale[j]) * freqs[j] - atmoWindDir * phase;\n"
@@ -3817,27 +3786,6 @@ static const char *s_fs_cloud =
 	"    float sEnter = -u1;\n"
 	"    float sExit  = -u0;\n"
 	"    if (sExit <= sEnter + 1.0) discard;\n"
-	"    /* Exact 2x2 half-res footprint depth occlusion against uSceneDepth:\n"
-	"     * Samples the farthest full-res depth in the 2x2 quad and reconstructs the linear ray distance tScene.\n"
-	"     * Rejects cloud fragments occluded behind the solid front torus ring or foreground mountain ridges\n"
-	"     * BEFORE any noise, while preventing half-res depth slope or coarse macro-grid sagitta from falsely\n"
-	"     * clipping the planet surface directly underneath the cloud deck! */\n"
-	"    if (uViewport.x > 0.0) {\n"
-	"        ivec2 depthSize = textureSize(uSceneDepth, 0);\n"
-	"        ivec2 p2 = clamp(ivec2(gl_FragCoord.xy) * 2, ivec2(0), max(ivec2(0), depthSize - ivec2(2)));\n"
-	"        float d00 = texelFetch(uSceneDepth, p2, 0).r;\n"
-	"        float d10 = texelFetch(uSceneDepth, p2 + ivec2(1, 0), 0).r;\n"
-	"        float d01 = texelFetch(uSceneDepth, p2 + ivec2(0, 1), 0).r;\n"
-	"        float d11 = texelFetch(uSceneDepth, p2 + ivec2(1, 1), 0).r;\n"
-	"        float sceneZ = max(max(d00, d10), max(d01, d11));\n"
-	"        if (sceneZ < 0.99999) {\n"
-	"            float nearZ = max(2.0, uCamDist * 0.005);\n"
-	"            float farZ  = max(80000000.0, uCamDist * 20.0);\n"
-	"            float kf    = (farZ - nearZ) / farZ;\n"
-	"            float tScene = fragDist * (1.0 - kf * gl_FragCoord.z) / max(1e-7, 1.0 - kf * sceneZ);\n"
-	"            if (tScene < fragDist + sEnter - max(3500.0, fragDist * 0.06)) discard;\n"
-	"        }\n"
-	"    }\n"
 	"    /* Evaluate true screen-space Nyquist filter width at the cloud slab midpoint,\n"
 	"     * clamping oblique horizontal ray shift at orbital altitude so planetary limb rays\n"
 	"     * never distort entryWorldPos or explode dFdx/dFdy! */\n"
@@ -3847,26 +3795,11 @@ static const char *s_fs_cloud =
 	"    float rawFw = max(1e-4, max(length(dFdx(entryWorldPos)), length(dFdy(entryWorldPos))));\n"
 	"    float anaFw = max(0.18, fragDist * 0.0014 / max(0.28, vn));\n"
 	"    float fw = clamp(mix(rawFw, max(rawFw, anaFw), smoothstep(2500.0, 10000.0, uCamDist)), 0.05, 250000.0);\n"
-	"    /* Instant 1-tap RGBA8 weather-map clear-sky early-out:\n"
-	"     * When inside the CSM window, bails out in ONE texture fetch and ZERO procedural noises\n"
-	"     * over clear-sky regions before evaluating substrate biome, Rossby carrier, or 3D wind! */\n"
-	"    if (uCsm.z > 0.0 && uCamDist < 140000.0) {\n"
-	"        vec2 csmEntryRel = abs(entryWorldPos - uCsm.xy) / uCsm.z;\n"
-	"        if (max(csmEntryRel.x, csmEntryRel.y) < 0.84) {\n"
-	"            vec4 cw0 = nd_csm_weather(entryWorldPos);\n"
-	"            if (max(cw0.r, max(cw0.g, cw0.b)) <= 0.004 && cw0.a <= 0.42) discard;\n"
-	"        }\n"
-	"    }\n"
-	"    vec2 invChunkSpan = 1.0 / max(uChunkSpan, vec2(160.0));\n"
-	"    vec3 rawBiome = sampleSubstrateSmooth(vUV).rgb;\n"
-	"    float maxBio = max(rawBiome.r, max(rawBiome.g, rawBiome.b));\n"
-	"    float minBio = min(rawBiome.r, min(rawBiome.g, rawBiome.b));\n"
-	"    float wVolcanic = smoothstep(0.32, 0.14, maxBio);\n"
-	"    float wPolar = smoothstep(0.52, 0.72, minBio) * smoothstep(0.18, 0.04, max(rawBiome.r, rawBiome.g) - rawBiome.b);\n"
-	"    float wDesert = smoothstep(0.65, 0.85, rawBiome.r) * smoothstep(0.50, 0.70, rawBiome.g) * smoothstep(0.65, 0.45, rawBiome.b) * (1.0 - wPolar);\n"
-	"    float wTropical = smoothstep(0.40, 0.65, rawBiome.g) * smoothstep(0.04, 0.35, rawBiome.g - rawBiome.r) * (1.0 - wPolar) * (1.0 - wDesert);\n"
-	"    float wTemperate = clamp(1.0 - (wVolcanic + wPolar + wTropical + wDesert), 0.0, 1.0);\n"
-	"    float texBioHumidity = clamp(0.52 * wTemperate + 0.80 * wTropical + 0.45 * wPolar + 0.15 * wVolcanic + 0.10 * wDesert + ((uSeaLevel > -900.0) ? 0.10 : 0.0), 0.08, 0.95);\n"
+	"    /* Evaluate humidity from continuous world-space climate noise at entryWorldPos (identical to s_fs_csm)\n"
+	"     * so cloud coverage is 100% seamless across chunk borders and LOD transitions with zero square seams! */\n"
+	"    vec3 worldClimate = chaff_grad_noise2d(entryWorldPos * 0.000045, 0x434C494Du);\n"
+	"    float seaWet = (uSeaLevel > -900.0) ? 1.0 : 0.0;\n"
+	"    float texBioHumidity = clamp(0.50 + 0.28 * (worldClimate.x - 0.5) + 0.10 * seaWet, 0.08, 0.95);\n"
 	"    float latPhi = 6.28318530718 * ((64.0 - entryWorldPos.y) / 8388608.0);\n"
 	"    float latDeg = asin(clamp(abs(sin(latPhi)), 0.0, 1.0)) * 57.2957795;\n"
 	"    float innerHole = max(0.0, -cos(latPhi));\n"
@@ -3895,6 +3828,16 @@ static const char *s_fs_cloud =
 	"    float cloudTwilight = smoothstep(0.32, -0.06, effSun) * smoothstep(-0.16, 0.12, effSun);\n"
 	"    vec3 cloudSunCol = mix(vec3(1.06, 1.00, 0.91), vec3(1.14, 0.62, 0.32), cloudTwilight);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
+	"    /* Hoist 4-octave band-pass weights out of the 4-step raymarch loop (depends only on uCamDist and fw) */\n"
+	"    const float bFreqs[4] = float[4](0.00026000, 0.00160000, 0.00960000, 0.05800000);\n"
+	"    const float bFar[4]   = float[4](650000.0, 95000.0, 14000.0, 2200.0);\n"
+	"    const float bNear[4]  = float[4](150000.0, 18000.0,  2600.0,  380.0);\n"
+	"    float wRaw[4];\n"
+	"    for (int j = 0; j < 4; j++) {\n"
+	"        float wDist = clamp((bFar[j] - uCamDist) / max(1.0, bFar[j] - bNear[j]), 0.0, 1.0);\n"
+	"        wRaw[j] = wDist * nd_octave_weight(1.0 / bFreqs[j], fw);\n"
+	"    }\n"
+	"    vec4 wBand4 = vec4(wRaw[0] * (1.0 - wRaw[2]), wRaw[1] * (1.0 - wRaw[3]), wRaw[2], wRaw[3]);\n"
 	"    /* 4-Step Asymmetric Deck-Stratified 3D Raymarching (1 step in Deck 3, 1 step in Deck 2, 2 steps in Deck 1):\n"
 	"     * Gives the primary lower cumulus deck (Deck 1) a true 2-slice 3D base + eroded turret crown volume while\n"
 	"     * keeping total steps at 4 (3x fewer than 12). Optical path stepLen is weighted by 0.5 on each Deck 1 half-step\n"
@@ -3939,16 +3882,13 @@ static const char *s_fs_cloud =
 	"        float uRay  = dRP / max(1.0, sqrt(max(1.0, B_shell * B_shell + dRP)) + B_shell);\n"
 	"        float sStep = clamp(-uRay, -maxHorizShift, maxHorizShift);\n"
 	"        vec2 sampleXY = vWorldPos + dxy * sStep;\n"
-	"        /* Smooth per-pixel analytical mountain-cloud intersection using the 49x49 C2 Hermite heightfield:\n"
-	"         * Eliminates all coarse LOD triangle polygon cutouts while allowing high alpine summits (up to 1,981 wu)\n"
-	"         * to emerge smoothly through Deck 1 & Deck 2 and occlude lower clouds behind the ridge! */\n"
-	"        vec2 stepUV = clamp(vUV + (dxy * sStep) * invChunkSpan, 0.0, 1.0);\n"
-	"        float terrZ = (baseTerrZ > 160.0 && uCamDist < 28000.0) ? sampleHeightCloud(stepUV) : baseTerrZ;\n"
-	"        float stepClear = smoothstep(terrZ - 24.0, terrZ + 110.0, z);\n"
-	"        rayGroundVis *= smoothstep(terrZ - 36.0, terrZ + 28.0, z);\n"
+	"        /* Smooth per-pixel analytical mountain-cloud intersection using the 49x49 C2 Hermite heightfield at vUV:\n"
+	"         * vUV is 100% continuous across shared chunk edges (unlike clamped stepUV), eliminating square chunk seams! */\n"
+	"        float stepClear = smoothstep(baseTerrZ - 24.0, baseTerrZ + 110.0, z);\n"
+	"        rayGroundVis *= smoothstep(baseTerrZ - 36.0, baseTerrZ + 28.0, z);\n"
 	"        if (stepClear * rayGroundVis <= 0.002) continue;\n"
 	"        vec4 cloudSample = eval_zoom_cloud_density_grad(vec3(sampleXY, z), uAnimTime, bioHumidity, uCamDist, fw, windSyn, windSfc,\n"
-	"                                                        synCarrier, pZonalBase, baseMacroGrad);\n"
+	"                                                        synCarrier, pZonalBase, baseMacroGrad, wBand4);\n"
 	"        float dens = cloudSample.x * camClearRamp * stepClear * rayGroundVis;\n"
 	"        if (dens > 0.002) {\n"
 	"            vec3 grad = cloudSample.yzw;\n"
@@ -4024,19 +3964,7 @@ static const char *s_fs_cloud =
 	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    vec3 finalCloudRgb = mix(cloudRgb, sky, fogFactor * uAtmoIntensity);\n"
-	"    FragColor = vec4((uViewport.x > 0.0) ? (finalCloudRgb * cloudAlpha) : finalCloudRgb, cloudAlpha);\n"
-	"}\n";
-
-static const char *s_fs_cloud_comp =
-	"#version 300 es\n"
-	"precision highp float;\n"
-	"in vec2 vUv;\n"
-	"uniform sampler2D uCloudTex;\n"
-	"out vec4 FragColor;\n"
-	"void main() {\n"
-	"    vec4 c = texture(uCloudTex, vUv);\n"
-	"    if (c.a <= 0.002) discard;\n"
-	"    FragColor = c;\n"
+	"    FragColor = vec4(finalCloudRgb, cloudAlpha);\n"
 	"}\n";
 
 const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
@@ -5344,15 +5272,8 @@ typedef struct {
 	GLint uSunDir;
 	GLint uCloudShadowMap;
 	GLint uCsm;
-	GLint uSceneDepth;
-	GLint uViewport;
 	GLint aGridUV;
 } gl_cloud_pipe_t;
-
-typedef struct {
-	GLuint prog;
-	GLint uCloudTex;
-} gl_cloud_comp_pipe_t;
 
 typedef struct {
 	GLuint prog;
@@ -5394,7 +5315,6 @@ static struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_cloud_pipe_t cloud_pipe;
-	gl_cloud_comp_pipe_t cloud_comp_pipe;
 	gl_csm_pipe_t csm_pipe;
 	GLuint csm_tex;
 	GLuint csm_fbo;
@@ -5415,10 +5335,6 @@ static struct {
 	GLuint res_fbo;
 	GLuint res_color_tex;
 	GLuint res_depth_tex;
-	GLuint cloud_fbo;
-	GLuint cloud_tex;
-	uint32_t cloud_w;
-	uint32_t cloud_h;
 	uint32_t scene_w;
 	uint32_t scene_h;
 	int scene_samples;
@@ -5578,7 +5494,6 @@ static void init_pipelines(void)
 	s_gl.water_pipe.prog      = create_program_async(s_vs_water, s_fs_water);
 	s_gl.bb_pipe.prog         = create_program_async(s_vs_billboard, s_fs_billboard);
 	s_gl.cloud_pipe.prog      = create_program_async(s_vs_cloud, s_fs_cloud);
-	s_gl.cloud_comp_pipe.prog = create_program_async(s_vs_csm, s_fs_cloud_comp);
 	s_gl.csm_pipe.prog        = create_program_async(s_vs_csm, s_fs_csm);
 	init_grid_buffers();
 	s_gl.initialized = true;
@@ -5599,8 +5514,6 @@ static bool check_pipelines_ready(void)
 	if (s_gl.bb_pipe.prog && !glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.cloud_pipe.prog && !glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
-	if (s_gl.cloud_comp_pipe.prog && !glGetProgramParameter(s_gl.cloud_comp_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.csm_pipe.prog && !glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
@@ -5755,20 +5668,7 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.cloud_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
 			s_gl.cloud_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.cloud_pipe.uSceneDepth     = glGetUniformLocation(p, "uSceneDepth", 11);
-			s_gl.cloud_pipe.uViewport       = glGetUniformLocation(p, "uViewport", 9);
 			s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
-		}
-	}
-
-	/* Cloud composite pipeline */
-	if (s_gl.cloud_comp_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.cloud_comp_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.cloud_comp_pipe.prog);
-			s_gl.cloud_comp_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.cloud_comp_pipe.prog;
-			s_gl.cloud_comp_pipe.uCloudTex = glGetUniformLocation(p, "uCloudTex", 9);
 		}
 	}
 
@@ -5860,16 +5760,13 @@ static void gl_free_scene_targets(void)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	if (s_gl.scene_fbo) glDeleteFramebuffer(s_gl.scene_fbo);
 	if (s_gl.res_fbo) glDeleteFramebuffer(s_gl.res_fbo);
-	if (s_gl.cloud_fbo) glDeleteFramebuffer(s_gl.cloud_fbo);
 	if (s_gl.scene_rb_color) glDeleteRenderbuffer(s_gl.scene_rb_color);
 	if (s_gl.scene_rb_depth) glDeleteRenderbuffer(s_gl.scene_rb_depth);
 	if (s_gl.res_color_tex) glDeleteTexture(s_gl.res_color_tex);
 	if (s_gl.res_depth_tex) glDeleteTexture(s_gl.res_depth_tex);
-	if (s_gl.cloud_tex) glDeleteTexture(s_gl.cloud_tex);
-	s_gl.scene_fbo = s_gl.res_fbo = s_gl.cloud_fbo = 0;
+	s_gl.scene_fbo = s_gl.res_fbo = 0;
 	s_gl.scene_rb_color = s_gl.scene_rb_depth = 0;
-	s_gl.res_color_tex = s_gl.res_depth_tex = s_gl.cloud_tex = 0;
-	s_gl.cloud_w = s_gl.cloud_h = 0;
+	s_gl.res_color_tex = s_gl.res_depth_tex = 0;
 	s_gl.scene_ok = false;
 }
 
@@ -5908,25 +5805,7 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.res_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.res_color_tex, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_gl.res_depth_tex, 0);
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
-
-	/* Half-resolution single-sampled cloud buffer (4x fewer cloud raymarch pixels + zero MSAA blend bandwidth) */
-	uint32_t cw = (w > 1) ? (w / 2) : 1;
-	uint32_t ch = (h > 1) ? (h / 2) : 1;
-	s_gl.cloud_tex = glCreateTexture();
-	glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)cw, (GLsizei)ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	s_gl.cloud_fbo = glCreateFramebuffer();
-	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.cloud_tex, 0);
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
-	s_gl.cloud_w = cw;
-	s_gl.cloud_h = ch;
-	return true;
+	return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
 /* (Re)create the scene targets for the stage size; falls back to single-sampled, then to the canvas itself. */
@@ -5998,7 +5877,7 @@ static bool gl_ensure_csm_target(void)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ND_CSM_RES, ND_CSM_RES, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, ND_CSM_RES, ND_CSM_RES, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
 	s_gl.csm_fbo = glCreateFramebuffer();
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.csm_tex, 0);
@@ -6296,9 +6175,9 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 	if (s_gl.cur_dist <= 480.0f)
 		return false;
 
-	/* Gate 2: Cloud-shell 3D frustum & planetary horizon limb test at eff_shell_z */
+	/* Gate 2: Cloud-shell 3D frustum & planetary horizon limb test at eff_shell_z (exact midpoint of [zBase, zTopProj]) */
 	float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
-	float target_shell_z = 2150.0f + eff_orbit_lift * 0.65f;
+	float target_shell_z = 1620.0f + eff_orbit_lift * 0.50f;
 	float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
 	float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
 
@@ -6369,12 +6248,12 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 
 	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks up to 262,144 wu */
 	if (span_w <= 262144 && span_h <= 262144) {
-		float pad = 2400.0f;
+		float pad = 6400.0f;
 		float x0 = (float)ox - pad;
 		float y0 = (float)oy - pad;
 		float w_pad = (float)span_w + 2.0f * pad;
 		float h_pad = (float)span_h + 2.0f * pad;
-		int steps = (span_w > 65536 || span_h > 65536) ? 3 : 2;
+		int steps = (span_w > 65536 || span_h > 65536) ? 4 : 3;
 		float inv_steps = 1.0f / (float)steps;
 		bool all_clear = true;
 		for (int gy = 0; gy <= steps && all_clear; gy++) {
@@ -6749,40 +6628,17 @@ void nd_seven_gl_flush_clouds(void)
 		return;
 	}
 
-	bool half_res = (s_gl.scene_ok && s_gl.cloud_fbo != 0 && s_gl.cloud_comp_pipe.prog != 0);
-	if (half_res) {
-		gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
-		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
-		glViewport(0, 0, (GLsizei)s_gl.cloud_w, (GLsizei)s_gl.cloud_h);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-		glClear(GL_COLOR_BUFFER_BIT);
-		glDisable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	} else {
-		/* Keep hardware depth test (GL_LEQUAL) enabled so the solid front ring of the torus
-		 * properly occludes cloud shells on the far side of the torus at orbital min-zoom! */
-		glEnable(GL_DEPTH_TEST);
-		glDepthFunc(GL_LEQUAL);
-		glDepthMask(GL_FALSE);
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-	}
+	/* Keep hardware depth test (GL_LEQUAL) enabled so the solid front ring of the torus
+	 * properly occludes cloud shells on the far side of the torus at orbital min-zoom! */
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_FALSE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 
 	glUseProgram(s_gl.cloud_pipe.prog);
 	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap, s_gl.cloud_pipe.uCsm);
-	if (half_res) {
-		glActiveTexture(GL_TEXTURE0 + 5);
-		glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
-		glUniform1i(s_gl.cloud_pipe.uSceneDepth, 5);
-		glActiveTexture(GL_TEXTURE0);
-		glUniform2f(s_gl.cloud_pipe.uViewport, (float)s_gl.cloud_w, (float)s_gl.cloud_h);
-	} else {
-		glUniform2f(s_gl.cloud_pipe.uViewport, 0.0f, 0.0f);
-	}
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
 	glUniformMatrix4fv(s_gl.cloud_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
@@ -6802,13 +6658,12 @@ void nd_seven_gl_flush_clouds(void)
 	glUniform1f(s_gl.cloud_pipe.uCamDist, s_gl.cur_dist);
 	glUniform3fv(s_gl.cloud_pipe.uSunDir, 1, s_gl.cur_sun_dir);
 	{
-		/* Place proxy shell above the highest mountain peaks (up to +1,981 wu, eff_shell_z = 2,150 wu)
-		 * and scale with orbital cloud lift so coarse macro proxy triangles never dip below the terrain
-		 * while keeping it strictly below 58% of the camera's altitude! */
+		/* Place proxy shell at the exact vertical midpoint of [zBase, zTopProj] (1,620 wu + 0.5 * eff_orbit_lift)
+		 * so sMidSlab = 0.5 * (sEnter + sExit) is identically 0 and entryWorldPos == vWorldPos! */
 		float deck_base = 420.0f;
 		float deck_span = 2400.0f;
 		float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
-		float target_shell_z = 2150.0f + eff_orbit_lift * 0.65f;
+		float target_shell_z = 1620.0f + eff_orbit_lift * 0.50f;
 		float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
 		float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
 		glUniform4f(s_gl.cloud_pipe.uCloudDeck, deck_base, deck_span, s_gl.cur_dist, eff_shell_z);
@@ -6819,6 +6674,7 @@ void nd_seven_gl_flush_clouds(void)
 	            0.70f * (1.0f - space_t) + 0.016f * space_t,
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.cloud_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+	glUniform1f(s_gl.cloud_pipe.uSeaLevel, s_gl.cur_base_sea_level);
 
 	/* Always bind the lightweight 16x16 macro grid (512 triangles) for the smooth concentric
 	 * screen-projection proxy shell — eliminates 81x redundant vertex shader & triangle setup overhead! */
@@ -6847,7 +6703,6 @@ void nd_seven_gl_flush_clouds(void)
 		            (float)((double)chk->ox - (double)s_gl.cur_tx),
 		            (float)((double)chk->oy - (double)s_gl.cur_ty));
 		glUniform2f(s_gl.cloud_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
-		glUniform1f(s_gl.cloud_pipe.uSeaLevel, chk->sea_level);
 
 		glDrawElements(GL_TRIANGLES, c_indices, GL_UNSIGNED_SHORT, 0);
 	}
@@ -6855,22 +6710,6 @@ void nd_seven_gl_flush_clouds(void)
 	glDisableVertexAttribArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-	if (half_res) {
-		gl_bind_scene_target();
-		glDisable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-		glUseProgram(s_gl.cloud_comp_pipe.prog);
-		glActiveTexture(GL_TEXTURE0 + 6);
-		glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
-		glUniform1i(s_gl.cloud_comp_pipe.uCloudTex, 6);
-		glActiveTexture(GL_TEXTURE0);
-		glDrawArrays(GL_TRIANGLES, 0, 3);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	}
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glEnable(GL_DEPTH_TEST);

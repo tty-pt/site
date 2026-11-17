@@ -962,37 +962,48 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	}
 
 	/* Sort s_visible_leaves strictly front-to-back relative to the 3D camera eye position
-	 * so foreground mountains render first into the hardware Z-buffer (maximizing GPU Early-Z rejection)
-	 * and populate the 1D CPU ridge-line horizon buffer before background valleys are tested. */
+	 * so foreground mountains & front torus surfaces render first into the hardware Z-buffer
+	 * (maximizing GPU Early-Z rejection) and populate the 1D CPU ridge-line horizon buffer. */
 	float cam_flat_x = (float)lwx;
 	float cam_flat_y = (float)lwy + dist * 0.5735764f; /* cos(55 deg) */
-	if (macro_count > 1 && !use_3d_primary) {
-		for (size_t a = 1; a < macro_count; a++) {
+	if (macro_count > 1) {
+		float leaf_d2[SEVEN_MAX_VISIBLE_LEAVES];
+		size_t sort_n = (macro_count <= SEVEN_MAX_VISIBLE_LEAVES) ? macro_count : SEVEN_MAX_VISIBLE_LEAVES;
+		for (size_t a = 0; a < sort_n; a++) {
+			const ar_node_t *nd = s_visible_leaves[a];
+			if (!nd) {
+				leaf_d2[a] = 1e30f;
+				continue;
+			}
+			if (use_3d_primary) {
+				float c3d[3];
+				seven_torus_bounds_3d_cb(&primary_bctx, (float)nd->ox, (float)nd->oy,
+				                         (float)nd->w, (float)nd->h, z_min_cull, z_max_cull,
+				                         NULL, NULL, c3d, NULL, NULL);
+				float dx = c3d[0] - eye_3d[0];
+				float dy = c3d[1] - eye_3d[1];
+				float dz = c3d[2] - eye_3d[2];
+				leaf_d2[a] = dx * dx + dy * dy + dz * dz;
+			} else {
+				float kdx = 0.0f, kdy = 0.0f;
+				if (cam_flat_x < (float)nd->ox) kdx = (float)nd->ox - cam_flat_x;
+				else if (cam_flat_x > (float)(nd->ox + nd->w)) kdx = cam_flat_x - (float)(nd->ox + nd->w);
+				if (cam_flat_y < (float)nd->oy) kdy = (float)nd->oy - cam_flat_y;
+				else if (cam_flat_y > (float)(nd->oy + nd->h)) kdy = cam_flat_y - (float)(nd->oy + nd->h);
+				leaf_d2[a] = kdx * kdx + kdy * kdy;
+			}
+		}
+		for (size_t a = 1; a < sort_n; a++) {
 			const ar_node_t *key_node = s_visible_leaves[a];
-			if (!key_node) continue;
-			float kdx = 0.0f, kdy = 0.0f;
-			if (cam_flat_x < (float)key_node->ox) kdx = (float)key_node->ox - cam_flat_x;
-			else if (cam_flat_x > (float)(key_node->ox + key_node->w)) kdx = cam_flat_x - (float)(key_node->ox + key_node->w);
-			if (cam_flat_y < (float)key_node->oy) kdy = (float)key_node->oy - cam_flat_y;
-			else if (cam_flat_y > (float)(key_node->oy + key_node->h)) kdy = cam_flat_y - (float)(key_node->oy + key_node->h);
-			float key_d2 = kdx * kdx + kdy * kdy;
-
+			float key_d2 = leaf_d2[a];
 			size_t b = a;
-			while (b > 0) {
-				const ar_node_t *prev = s_visible_leaves[b - 1];
-				if (!prev) break;
-				float pdx = 0.0f, pdy = 0.0f;
-				if (cam_flat_x < (float)prev->ox) pdx = (float)prev->ox - cam_flat_x;
-				else if (cam_flat_x > (float)(prev->ox + prev->w)) pdx = cam_flat_x - (float)(prev->ox + prev->w);
-				if (cam_flat_y < (float)prev->oy) pdy = (float)prev->oy - cam_flat_y;
-				else if (cam_flat_y > (float)(prev->oy + prev->h)) pdy = cam_flat_y - (float)(prev->oy + prev->h);
-				float prev_d2 = pdx * pdx + pdy * pdy;
-				if (prev_d2 <= key_d2)
-					break;
-				s_visible_leaves[b] = prev;
+			while (b > 0 && leaf_d2[b - 1] > key_d2) {
+				s_visible_leaves[b] = s_visible_leaves[b - 1];
+				leaf_d2[b] = leaf_d2[b - 1];
 				b--;
 			}
 			s_visible_leaves[b] = key_node;
+			leaf_d2[b] = key_d2;
 		}
 	}
 
@@ -1012,6 +1023,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		if (!node) continue;
 
 		/* Test if this chunk (and its tallest trees/billboards) is 100% hidden behind a foreground mountain ridge */
+		bool terrain_ridge_occluded = false;
 		if (use_ridge_occlusion && node->oy + node->h < cam_flat_y - 64.0f) {
 			float x0 = (float)node->ox, x1 = (float)(node->ox + node->w);
 			float y0 = (float)node->oy, y1 = (float)(node->oy + node->h);
@@ -1046,13 +1058,17 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 							break;
 						}
 					}
-					if (occluded)
-						continue; /* 100% hidden behind foreground mountain ridge! Skip terrain, water, clouds, & billboards */
+					if (occluded) {
+						terrain_ridge_occluded = true;
+						if (dist <= 480.0f)
+							continue; /* Clouds inactive at dist <= 480: skip chunk completely */
+					}
 				}
 			}
 		}
 
-		s_visible_leaves[kept_count++] = node;
+		if (!terrain_ridge_occluded)
+			s_visible_leaves[kept_count++] = node;
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
