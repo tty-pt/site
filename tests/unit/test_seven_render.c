@@ -3762,6 +3762,142 @@ int main(void)
 			printf("PASS: User-adjustable detail scale verified (1.25x=%u, 0.85x=%u, 0.35x=0 billboards at 0.08x zoom)\n",
 			       cnt_full_detail, cnt_mid_detail);
 		}
+
+		/* 13. Multi-Stage 3D Occlusion & Culling Verification (Planetary Horizon, Cloud Shell, Alt-Planet Eclipse, Front-to-Back Sort) */
+		{
+			const nd_planet_def_t *p1 = nd_seven_get_planet(1);
+			assert(p1 != NULL);
+
+			/* 13a. Planetary Normal-Cone Horizon Culling at Orbital Zoom (zoom = 0.0005f, dist = 560,000 wu) */
+			set_map(0, 0, 10, 0x1B, 0, 0, 0, 0);
+			nd_seven_sync_origin(&st);
+			nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+			nd_seven_set_zoom(0.0005f);
+			nd_seven_render(fb, 1280, 720, &st);
+			uint32_t orb_leaves = nd_seven_last_visible_leaf_count();
+			assert(orb_leaves > 0);
+
+			float mvp_orb[16], eye_orb[3];
+			nd_seven_gl_compute_mvp(1280, 720, 80.0f, -64.0f, 0.0f,
+			                        ND_SEVEN_CAM_DIST / 0.0005f, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
+			                        p1, mvp_orb, eye_orb, NULL, NULL);
+			int back_hemisphere_leaves = 0;
+			for (uint32_t li = 0; li < orb_leaves; li++) {
+				int32_t lox = 0, loy = 0, lw = 0, lh = 0;
+				assert(nd_seven_last_visible_leaf_bounds(li, &lox, &loy, &lw, &lh) == 1);
+				float cx = (float)lox + 0.5f * (float)lw;
+				float cy = (float)loy + 0.5f * (float)lh;
+				float p_c[3], n_c[3];
+				nd_seven_gl_torus_frame(cx, cy, 0.0f, p1, p_c, NULL, NULL, n_c);
+				float vx = eye_orb[0] - p_c[0], vy = eye_orb[1] - p_c[1], vz = eye_orb[2] - p_c[2];
+				float vlen = sqrtf(vx * vx + vy * vy + vz * vz);
+				float dot_vn = (vx * n_c[0] + vy * n_c[1] + vz * n_c[2]) / fmaxf(1.0f, vlen);
+				float du = (float)lw / (float)ND_SEVEN_WORLD_DIM_W;
+				float dv = (float)lh / (float)ND_SEVEN_WORLD_DIM_H;
+				float alpha = 3.14159265f * sqrtf(du * du + dv * dv);
+				if (alpha < 1.15f && alpha + 0.10f < 1.55f && dot_vn < -sinf(alpha + 0.10f) - 1e-3f)
+					back_hemisphere_leaves++;
+			}
+			assert(back_hemisphere_leaves == 0);
+
+			/* 13b. Dedicated Cloud-Shell Culling (Close-Zoom Gate, Back-of-Planet Limb Gate, Synoptic Clear-Sky Gate) */
+			nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 280.0f,
+			                        ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, 100.0f, p1);
+			assert(!nd_seven_gl_should_queue_cloud_chunk(0, -512, 512, 512, p1));
+
+			/* At orbital distance (600,000 wu), back-of-planet chunks around the far torus half must be 100% rejected */
+			nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 600000.0f,
+			                        ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, 100.0f, p1);
+			int back_clouds_queued = 0;
+			int front_clouds_queued = 0;
+			int32_t step_w = (int32_t)(ND_SEVEN_WORLD_DIM_W / 32.0f);
+			int32_t step_h = (int32_t)(ND_SEVEN_WORLD_DIM_H / 16.0f);
+			for (int iu = 0; iu < 32; iu++) {
+				int32_t ox = iu * step_w;
+				int32_t oy = -step_h / 2;
+				bool queued = nd_seven_gl_should_queue_cloud_chunk(ox, oy, step_w, step_h, p1);
+				/* iu in [13..19] is on the opposite side of the major ring (u ~ 0.5 away from focal x=80) */
+				if (iu >= 13 && iu <= 19) {
+					if (queued) back_clouds_queued++;
+				} else {
+					if (queued) front_clouds_queued++;
+				}
+			}
+			assert(back_clouds_queued == 0);
+			assert(front_clouds_queued > 0);
+
+			/* Synoptic clear-sky pre-cull on regional chunks (span = 16,384 wu) inside the visible frustum */
+			nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 180000.0f,
+			                        ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, 100.0f, p1);
+			int syn_clear_culled = 0, syn_cloudy_kept = 0;
+			for (int gy = -8; gy <= 4; gy++) {
+				for (int gx = -8; gx <= 8; gx++) {
+					int32_t rx = gx * 16384;
+					int32_t ry = gy * 16384;
+					/* Test at different synoptic weather epochs to sample both anticyclones and cyclones */
+					for (int ti = 0; ti < 8; ti++) {
+						nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 180000.0f,
+						                        ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
+						                        (float)(ti * 18000), p1);
+						if (nd_seven_gl_should_queue_cloud_chunk(rx, ry, 16384, 16384, p1))
+							syn_cloudy_kept++;
+						else
+							syn_clear_culled++;
+					}
+				}
+			}
+			assert(syn_clear_culled > 50);
+			assert(syn_cloudy_kept > 50);
+
+			/* 13c. Companion Planet (alt_world) Ground Horizon & Solid-Body Torus Eclipse Occlusion */
+			nd_seven_set_zoom(1.0f);
+			nd_seven_render(fb, 1280, 720, &st);
+			assert(nd_seven_last_alt_planet_chunk_count() == 0);
+
+			/* Place alt_world directly behind the primary planet's solid torus rim at (2,000,000, 0, 0):
+			 * Eye at (+4,000,000, 0, 0) looking through the solid tube at (+3,335,000 .. +665,000) toward alt at (-10,000,000, 0, 0) */
+			nd_planet_def_t alt_eclipsed = *nd_seven_get_planet(2);
+			alt_eclipsed.center[0] = -10000000.0f;
+			alt_eclipsed.center[1] = 0.0f;
+			alt_eclipsed.center[2] = 0.0f;
+			float eye_eclipsed[3] = { 4000000.0f, 0.0f, 0.0f };
+			float alt_rad = alt_eclipsed.major_r + alt_eclipsed.minor_r + 8000.0f;
+			assert(nd_seven_is_alt_planet_occluded(eye_eclipsed, 665000.0f, 0.0f, 0.0f, 0.0f,
+			                                       p1, &alt_eclipsed, alt_rad) == 1);
+
+			/* When alt_world is high above the torus plane (unoccluded line of sight), it is NOT occluded */
+			nd_planet_def_t alt_visible_sky = alt_eclipsed;
+			alt_visible_sky.center[0] = 4000000.0f;
+			alt_visible_sky.center[2] = 12000000.0f;
+			assert(nd_seven_is_alt_planet_occluded(eye_eclipsed, 665000.0f, 0.0f, 0.0f, 0.0f,
+			                                       p1, &alt_visible_sky, alt_rad) == 0);
+
+			/* 13d. Front-to-Back 3D Camera-Eye Sorting Invariant (Terrain Pass at zoom = 0.02f) */
+			nd_seven_set_zoom(0.02f);
+			nd_seven_render(fb, 1280, 720, &st);
+			uint32_t mid_leaves = nd_seven_last_visible_leaf_count();
+			assert(mid_leaves > 4);
+			float cam_fx = 80.0f;
+			float cam_fy = -64.0f + (ND_SEVEN_CAM_DIST / 0.02f) * 0.5735764f;
+			float prev_d2 = -1.0f;
+			for (uint32_t li = 0; li < mid_leaves; li++) {
+				int32_t lox = 0, loy = 0, lw = 0, lh = 0;
+				assert(nd_seven_last_visible_leaf_bounds(li, &lox, &loy, &lw, &lh) == 1);
+				float dx = 0.0f, dy = 0.0f;
+				if (cam_fx < (float)lox) dx = (float)lox - cam_fx;
+				else if (cam_fx > (float)(lox + lw)) dx = cam_fx - (float)(lox + lw);
+				if (cam_fy < (float)loy) dy = (float)loy - cam_fy;
+				else if (cam_fy > (float)(loy + lh)) dy = cam_fy - (float)(loy + lh);
+				float d2 = dx * dx + dy * dy;
+				assert(d2 + 1e-2f >= prev_d2);
+				prev_d2 = d2;
+			}
+
+			nd_seven_set_zoom(1.0f);
+			printf("PASS: 3D occlusion & culling verified (orb_leaves=%u, back_leaves=%d, back_clouds=%d, front_clouds=%d, syn_culled=%d/%d, front_to_back=%u)\n",
+			       orb_leaves, back_hemisphere_leaves, back_clouds_queued, front_clouds_queued,
+			       syn_clear_culled, syn_clear_culled + syn_cloudy_kept, mid_leaves);
+		}
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

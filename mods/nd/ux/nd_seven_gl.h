@@ -197,6 +197,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 void nd_seven_gl_flush_water(void);
 
 void nd_seven_gl_flush_clouds(void);
+bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
+                                          int32_t span_w, int32_t span_h,
+                                          const nd_planet_def_t *eff_pdef);
 
 void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   uint32_t count,

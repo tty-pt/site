@@ -126,9 +126,18 @@ const nd_planet_def_t *nd_seven_get_planet(uint16_t world);
 void nd_seven_eval_planet_at_time(uint16_t world, uint16_t observer_world,
                                   float t_sec, nd_planet_def_t *out_pdef);
 
-/* Multi-scale scenery billboard batch diagnostics (for unit verification) */
+/* Multi-scale scenery billboard & 3D occlusion diagnostics (for unit verification) */
 uint32_t nd_seven_last_mid_billboard_count(void);
 int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, float *w, float *h);
+uint32_t nd_seven_last_visible_leaf_count(void);
+uint32_t nd_seven_last_ridge_culled_count(void);
+uint32_t nd_seven_last_alt_planet_chunk_count(void);
+int nd_seven_last_visible_leaf_bounds(uint32_t idx, int32_t *ox, int32_t *oy, int32_t *w, int32_t *h);
+int nd_seven_is_alt_planet_occluded(const float eye_3d[3], float dist,
+                                    float lwx, float lwy, float lwz,
+                                    const nd_planet_def_t *prim_pdef,
+                                    const nd_planet_def_t *alt_pdef,
+                                    float alt_body_rad);
 
 /* Botanical Micro-Ecology & Living Meadow Classifier:
  * Evaluates deterministic multi-octave noise + land-coupled botanical placement for (wx, wy).

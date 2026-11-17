@@ -5341,6 +5341,7 @@ static struct {
 	uint32_t cloud_count;
 
 	float cur_mvp[16];
+	ar_frustum_t cur_frustum;
 	float cur_eye[3];
 	float cur_target[3];
 	float cur_up[3];
@@ -6016,6 +6017,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.cur_tan_half = tanf(fov_rad * 0.5f);
 	s_gl.cur_aspect = aspect;
 	ar_mat4_multiply(s_gl.cur_mvp, proj, modelview);
+	ar_frustum_from_matrix(&s_gl.cur_frustum, s_gl.cur_mvp);
 
 	if (!s_gl.initialized) init_pipelines();
 	(void)check_pipelines_ready();
@@ -6074,6 +6076,163 @@ static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t s
 		*out_ibo = s_gl.grid_ibo_macro;
 		*out_indices = GL_TOTAL_INDICES_MACRO;
 	}
+}
+
+static inline void gl_chaff_grad_noise2d(float px, float py, uint32_t seed,
+                                         float *out_val, float *out_gx, float *out_gy);
+static inline float gl_smoothstep(float e0, float e1, float x);
+
+static bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time)
+{
+	const float prevDirX = 0.741f, prevDirY = -0.671f;
+	const float prevPerpX = 0.671f, prevPerpY = 0.741f;
+	float raw_tFlow = anim_time * 0.005f;
+	float tFlow = raw_tFlow - 1024.0f * floorf(raw_tFlow / 1024.0f);
+
+	float psi0_v = 0.5f, psi0_gx = 0.0f, psi0_gy = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.00000042f - prevDirX * (tFlow * 0.40f),
+	                      wy * 0.00000042f - prevDirY * (tFlow * 0.40f),
+	                      0x4359434Cu, &psi0_v, &psi0_gx, &psi0_gy);
+
+	float psi1_v = 0.5f, psi1_gx = 0.0f, psi1_gy = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.00000180f + (-psi0_gy) * 0.30f - prevDirX * tFlow,
+	                      wy * 0.00000180f + psi0_gx * 0.30f - prevDirY * tFlow,
+	                      0x5354524Du, &psi1_v, &psi1_gx, &psi1_gy);
+
+	float synWarpX = (-psi0_gy) * 260000.0f + (-psi1_gy) * 68000.0f;
+	float synWarpY = psi0_gx * 260000.0f + psi1_gx * 68000.0f;
+
+	float pDispX = wx + synWarpX;
+	float pDispY = wy + synWarpY;
+	float pAlong = pDispX * prevDirX + pDispY * prevDirY;
+	float pCross = pDispX * prevPerpX + pDispY * prevPerpY;
+	float pZonalX = prevDirX * (pAlong * 0.65f) + prevPerpX * (pCross * 1.55f);
+	float pZonalY = prevDirY * (pAlong * 0.65f) + prevPerpY * (pCross * 1.55f);
+
+	float raw_p0 = anim_time * 0.004f;
+	float phase0 = raw_p0 - 1024.0f * floorf(raw_p0 / 1024.0f);
+	float raw_p1 = anim_time * 0.008f;
+	float phase1 = raw_p1 - 1024.0f * floorf(raw_p1 / 1024.0f);
+
+	float oct0_v = 0.5f, oct0_gx = 0.0f, oct0_gy = 0.0f;
+	gl_chaff_grad_noise2d(pZonalX * 0.00000050f - prevDirX * phase0,
+	                      pZonalY * 0.00000050f - prevDirY * phase0,
+	                      0x434C4430u, &oct0_v, &oct0_gx, &oct0_gy);
+
+	float pRotX = 0.8f * pZonalX + 0.6f * pZonalY;
+	float pRotY = -0.6f * pZonalX + 0.8f * pZonalY;
+	float oct1_v = 0.5f, oct1_gx = 0.0f, oct1_gy = 0.0f;
+	gl_chaff_grad_noise2d(pRotX * 0.00000240f - prevDirX * phase1,
+	                      pRotY * 0.00000240f - prevDirY * phase1,
+	                      0x434C4431u, &oct1_v, &oct1_gx, &oct1_gy);
+
+	float r0 = 1.0f - 2.0f * fabsf(oct0_v - 0.5f);
+	float r1 = 1.0f - 2.0f * fabsf(oct1_v - 0.5f);
+	float front0 = oct0_v + (r0 - 0.68f) * 0.28f;
+	float front1 = oct1_v + (r1 - 0.68f) * 0.24f;
+
+	/* Conservative upper bound across wOct1 in [0, 1] and wReg2, wReg3 in [0, 1]
+	 * with max bioHumidity = 0.95 (threshold = 0.555 - 0.105*0.95 = 0.45525,
+	 * cirrus threshold = 0.56 - 0.08*0.95 = 0.484) plus parallax safety margin. */
+	float f1_pos = (front1 - 0.50f) > 0.0f ? (front1 - 0.50f) : 0.0f;
+	float synFrontMax = 0.50f + (front0 - 0.50f) * 0.72f + f1_pos * 0.54f + (psi0_v - 0.50f) * 0.34f;
+	float maxFront = synFrontMax + 0.116f + 0.070f + 0.055f;
+	return (maxFront <= 0.440f) && ((synFrontMax + 0.173f) <= 0.468f);
+}
+
+bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
+                                          int32_t span_w, int32_t span_h,
+                                          const nd_planet_def_t *pdef)
+{
+	const nd_planet_def_t *eff_pdef = pdef ? pdef : &s_gl.cur_pdef;
+
+	/* Gate 1: Cloud zoom ramp is 0.0 at camera distances <= 480.0f */
+	if (s_gl.cur_dist <= 480.0f)
+		return false;
+
+	/* Gate 2: Cloud-shell 3D frustum & planetary horizon limb test at eff_shell_z */
+	float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
+	float eff_shell_z = fminf(2150.0f, fmaxf(24.0f, max_safe_z));
+
+	static const float uv[5][2] = {
+		{ 0.0f, 0.0f },
+		{ 1.0f, 0.0f },
+		{ 0.0f, 1.0f },
+		{ 1.0f, 1.0f },
+		{ 0.5f, 0.5f }
+	};
+	float bmin[3] = {  1e30f,  1e30f,  1e30f };
+	float bmax[3] = { -1e30f, -1e30f, -1e30f };
+	float max_vn = -1.0f;
+
+	for (int i = 0; i < 5; i++) {
+		double wx = (double)ox + (double)uv[i][0] * (double)span_w;
+		double wy = (double)oy + (double)uv[i][1] * (double)span_h;
+		double pos_d[3];
+		float N[3];
+		torus_frame_double(wx, wy, (double)eff_shell_z, eff_pdef, pos_d, NULL, NULL, N);
+		float rel_p[3] = {
+			(float)(pos_d[0] - s_gl.cur_origin[0]),
+			(float)(pos_d[1] - s_gl.cur_origin[1]),
+			(float)(pos_d[2] - s_gl.cur_origin[2])
+		};
+		for (int k = 0; k < 3; k++) {
+			if (rel_p[k] < bmin[k]) bmin[k] = rel_p[k];
+			if (rel_p[k] > bmax[k]) bmax[k] = rel_p[k];
+		}
+		float vx = s_gl.cur_eye[0] - rel_p[0];
+		float vy = s_gl.cur_eye[1] - rel_p[1];
+		float vz = s_gl.cur_eye[2] - rel_p[2];
+		float vlen = sqrtf(vx * vx + vy * vy + vz * vz);
+		if (vlen > 1e-4f) {
+			float vn = (vx * N[0] + vy * N[1] + vz * N[2]) / vlen;
+			if (vn > max_vn) max_vn = vn;
+		} else {
+			max_vn = 1.0f;
+		}
+	}
+
+	float du = 0.5f * TWO_PI_F * ((float)span_w / (float)ND_SEVEN_WORLD_DIM_W);
+	float dv = 0.5f * TWO_PI_F * ((float)span_h / (float)ND_SEVEN_WORLD_DIM_H);
+	float alpha = sqrtf(du * du + dv * dv);
+	float sin_alpha = (alpha < 1.57f) ? sinf(alpha) : 1.0f;
+	/* s_fs_cloud discards when dot(torusN, viewDir) <= 0.018 */
+	if (max_vn + sin_alpha <= 0.015f)
+		return false;
+
+	float R = (eff_pdef && eff_pdef->major_r > 0.0f) ? eff_pdef->major_r : 2000000.0f;
+	float r0 = (eff_pdef && eff_pdef->minor_r > 0.0f) ? eff_pdef->minor_r : 1335000.0f;
+	float bulge = (R + r0) * 0.125f * (du * du + dv * dv) + 450.0f;
+	for (int k = 0; k < 3; k++) {
+		bmin[k] -= bulge;
+		bmax[k] += bulge;
+	}
+	if (!ar_frustum_test_box(&s_gl.cur_frustum, bmin[0], bmin[1], bmin[2], bmax[0], bmax[1], bmax[2]))
+		return false;
+
+	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks */
+	if (span_w <= 65536 && span_h <= 65536) {
+		float pad = 2400.0f;
+		float x0 = (float)ox - pad;
+		float y0 = (float)oy - pad;
+		float w_pad = (float)span_w + 2.0f * pad;
+		float h_pad = (float)span_h + 2.0f * pad;
+		bool all_clear = true;
+		for (int gy = 0; gy <= 2 && all_clear; gy++) {
+			float wy = y0 + (0.5f * (float)gy) * h_pad;
+			for (int gx = 0; gx <= 2; gx++) {
+				float wx = x0 + (0.5f * (float)gx) * w_pad;
+				if (!gl_eval_synoptic_is_clear_sky_cpu(wx, wy, s_gl.cur_anim_time)) {
+					all_clear = false;
+					break;
+				}
+			}
+		}
+		if (all_clear)
+			return false;
+	}
+
+	return true;
 }
 
 void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev,
@@ -6270,8 +6429,10 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, active_ibo);
 	glDrawElements(GL_TRIANGLES, active_indices, GL_UNSIGNED_SHORT, 0);
 
-	/* Queue volumetric cloud shell pass for this chunk */
-	if (s_gl.cloud_count < MAX_WATER_QUEUE) {
+	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
+	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
+	if (s_gl.cloud_count < MAX_WATER_QUEUE &&
+	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
 		gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
 		cq->ox = ox;
 		cq->oy = oy;
