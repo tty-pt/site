@@ -3319,7 +3319,10 @@ int main(void)
 		assert(strstr(fs_c, "eval_synoptic_carrier") != NULL);
 		assert(strstr(fs_c, "eval_synoptic_macro_cloud_from_carrier") != NULL);
 		assert(strstr(fs_c, "nd_csm_density") != NULL);
+		assert(strstr(fs_c, "nd_csm_weather") != NULL);
 		assert(strstr(fs_c, "uSceneDepth") != NULL);
+		assert(strstr(fs_c, "tScene") != NULL);
+		assert(strstr(fs_c, "maxHorizShift") != NULL);
 		assert(strstr(fs_c, "hgPhase") != NULL);
 		assert(strstr(fs_c, "sEnter") != NULL);
 		assert(strstr(fs_c, "sExit") != NULL);
@@ -3830,6 +3833,12 @@ int main(void)
 			}
 			assert(back_clouds_queued == 0);
 			assert(front_clouds_queued > 0);
+
+			/* At deep-orbit distance (2,800,000 wu, very low zoom), hemisphere-spanning macro chunks (span = 2,621,440 wu)
+			 * on the visible front hemisphere must be queued without false frustum or limb culling */
+			nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 2800000.0f,
+			                        ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV, 100.0f, p1);
+			assert(nd_seven_gl_should_queue_cloud_chunk(-1310720, -1310720, 2621440, 2621440, p1));
 
 			/* Synoptic clear-sky pre-cull on regional chunks (span = 16,384 wu) inside the visible frustum */
 			nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 180000.0f,
