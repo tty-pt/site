@@ -1337,6 +1337,37 @@ static int on_settings_card_click(bud_event *ev)
 	return 0;
 }
 
+static const char *settings_event_value(bud_event *ev)
+{
+	if (!ev)
+		return NULL;
+	const char *v = (const char *)ev->user;
+	if (v && v[0])
+		return v;
+	bud_node *n = ev->target ? ev->target : ev->current_target;
+	if (n) {
+		v = bud_get_attr(n, "value");
+		if (v && v[0])
+			return v;
+	}
+	return NULL;
+}
+
+static int on_settings_detail_slider(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	const char *val_str = settings_event_value(ev);
+	if (val_str && val_str[0]) {
+		int pct = atoi(val_str);
+		if (pct >= 20 && pct <= 250) {
+			nd_seven_set_detail_scale((float)pct * 0.01f);
+			seven_stage_redraw();
+			bud_app_set_state();
+		}
+	}
+	return 0;
+}
+
 static int on_settings_detail_out(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
@@ -1355,18 +1386,17 @@ static int on_settings_detail_in(bud_event *ev)
 	return 0;
 }
 
-static int on_settings_detail_preset(bud_event *ev)
+static int on_settings_zoom_slider(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
-	bud_node *node = ev ? (ev->current_target ? ev->current_target : ev->target) : NULL;
-	const char *val_str = node ? bud_get_attr(node, "data-detail") : NULL;
-	if (!val_str && ev && ev->target)
-		val_str = bud_get_attr(ev->target, "data-detail");
+	const char *val_str = settings_event_value(ev);
 	if (val_str && val_str[0]) {
-		float scale = (float)strtod(val_str, NULL);
-		nd_seven_set_detail_scale(scale);
-		seven_stage_redraw();
-		bud_app_set_state();
+		int pct = atoi(val_str);
+		if (pct >= 10 && pct <= 250) {
+			nd_seven_set_zoom((float)pct * 0.01f);
+			seven_stage_redraw();
+			bud_app_set_state();
+		}
 	}
 	return 0;
 }
@@ -1398,20 +1428,6 @@ static int on_settings_zoom_reset(bud_event *ev)
 	return 0;
 }
 
-static bud_node *make_settings_preset_btn(const char *label, const char *scale_str, float cur_scale, float target_scale)
-{
-	int active = (cur_scale >= target_scale - 0.05f && cur_scale <= target_scale + 0.05f);
-	bud_node *btn = bud_element("button");
-	bud_set_attr(btn, "type", "button");
-	bud_set_attr(btn, "data-detail", scale_str);
-	bud_set_attr(btn, "class", active
-		? "btn px-2 py-1 text-xs rounded border border-[#9589c5] bg-[#9589c5]/30 text-white font-bold select-none"
-		: "btn px-2 py-1 text-xs rounded border border-neutral-700 hover:bg-neutral-800 text-neutral-300 select-none");
-	bud_append(btn, bud_text(label));
-	bud_bind(btn, "click", 1, on_settings_detail_preset);
-	return btn;
-}
-
 static bud_node *render_settings_modal(const nd_client_state_t *st)
 {
 	const char *active = nd_ui_get_active_modal();
@@ -1426,19 +1442,19 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 
 	bud_node *card = bud_element("div");
 	bud_set_attr(card, "id", "settings");
-	bud_set_attr(card, "class", "rpg-modal-card settings-card flex flex-col gap-3 p-4 border border-[#9589c5] bg-[#2c2c2c]/95 shadow-2xl min-w-[320px] select-none");
+	bud_set_attr(card, "class", "rpg-modal-card settings-card select-none");
 	bud_bind(card, "click", 1, on_settings_card_click);
 
 	bud_node *hdr = bud_element("div");
-	bud_set_attr(hdr, "class", "rpg-modal-header flex items-center justify-between gap-2 pb-2 border-b border-[#9589c5]/50");
+	bud_set_attr(hdr, "class", "rpg-modal-header");
 	bud_node *title = bud_element("span");
-	bud_set_attr(title, "class", "text-xs font-bold text-neutral-100 tracking-wider uppercase");
+	bud_set_attr(title, "class", "settings-label");
 	bud_append(title, bud_text("⚙️ Settings"));
 	bud_append(hdr, title);
 
 	bud_node *close_btn = bud_element("button");
 	bud_set_attr(close_btn, "type", "button");
-	bud_set_attr(close_btn, "class", "btn px-1.5 py-0.5 text-xs text-neutral-400 hover:text-white");
+	bud_set_attr(close_btn, "class", "btn round");
 	bud_set_attr(close_btn, "title", "Close Settings");
 	bud_append(close_btn, bud_text("✕"));
 	bud_bind(close_btn, "click", 1, on_settings_modal_close);
@@ -1446,91 +1462,129 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 	bud_append(card, hdr);
 
 	bud_node *body = bud_element("div");
-	bud_set_attr(body, "class", "flex flex-col gap-3 w-full text-xs");
+	bud_set_attr(body, "class", "settings-body");
 
-	/* 1. Scenery Detail / Draw Distance */
+	/* 1. Scenery Detail / Draw Distance Slider */
 	{
 		float det = nd_seven_get_detail_scale();
-		char det_val[32];
-		snprintf(det_val, sizeof(det_val), "%d%% (%.2fx)", (int)(det * 100.0f + 0.5f), det);
+		int det_pct = (int)(det * 100.0f + 0.5f);
+		if (det_pct < 20) det_pct = 20;
+		if (det_pct > 250) det_pct = 250;
+		char det_val[32], det_num[16];
+		snprintf(det_val, sizeof(det_val), "%d%%", det_pct);
+		snprintf(det_num, sizeof(det_num), "%d", det_pct);
 
 		bud_node *sec = bud_element("div");
-		bud_set_attr(sec, "class", "flex flex-col gap-1.5 pb-2 border-b border-neutral-700/50");
+		bud_set_attr(sec, "class", "settings-row");
 
 		bud_node *top_row = bud_element("div");
-		bud_set_attr(top_row, "class", "flex items-center justify-between gap-2");
+		bud_set_attr(top_row, "class", "settings-row-top");
 		bud_node *lbl = bud_element("span");
-		bud_set_attr(lbl, "class", "font-bold text-[#c2b3ff] uppercase tracking-wider");
+		bud_set_attr(lbl, "class", "settings-label");
 		bud_append(lbl, bud_text("🌿 Scenery Detail"));
 		bud_node *val = bud_element("span");
 		bud_set_attr(val, "id", "settings-detail-value");
-		bud_set_attr(val, "class", "font-mono font-bold text-neutral-100");
+		bud_set_attr(val, "class", "settings-badge");
 		bud_append(val, bud_text(det_val));
 		bud_append(top_row, lbl);
 		bud_append(top_row, val);
 		bud_append(sec, top_row);
 
 		bud_node *ctrl_row = bud_element("div");
-		bud_set_attr(ctrl_row, "class", "flex items-center justify-between gap-1");
+		bud_set_attr(ctrl_row, "class", "settings-slider-wrap");
 		bud_append(ctrl_row, make_btn("−", "Less Scenery Detail (,)", on_settings_detail_out));
-		bud_append(ctrl_row, make_settings_preset_btn("Low", "0.40", det, 0.40f));
-		bud_append(ctrl_row, make_settings_preset_btn("Med", "0.75", det, 0.75f));
-		bud_append(ctrl_row, make_settings_preset_btn("High", "1.00", det, 1.00f));
-		bud_append(ctrl_row, make_settings_preset_btn("Ultra", "1.75", det, 1.75f));
+
+		bud_node *slider = bud_element("input");
+		bud_set_attr(slider, "id", "settings-detail-slider");
+		bud_set_attr(slider, "type", "range");
+		bud_set_attr(slider, "class", "settings-slider");
+		bud_set_attr(slider, "min", "20");
+		bud_set_attr(slider, "max", "250");
+		bud_set_attr(slider, "step", "5");
+		bud_set_attr(slider, "value", det_num);
+		bud_bind(slider, "input", 1, on_settings_detail_slider);
+		bud_bind(slider, "change", 1, on_settings_detail_slider);
+		bud_append(ctrl_row, slider);
+
 		bud_append(ctrl_row, make_btn("+", "More Scenery Detail (.)", on_settings_detail_in));
 		bud_append(sec, ctrl_row);
 		bud_append(body, sec);
 	}
 
-	/* 2. Camera Zoom */
+	/* 2. Camera Zoom Slider */
 	{
 		float zoom = nd_seven_get_zoom();
-		char zoom_val[32];
-		snprintf(zoom_val, sizeof(zoom_val), "%d%%", (int)(zoom * 100.0f + 0.5f));
+		int zoom_pct = (int)(zoom * 100.0f + 0.5f);
+		int slider_pct = zoom_pct;
+		if (slider_pct < 10) slider_pct = 10;
+		if (slider_pct > 250) slider_pct = 250;
+		char zoom_val[32], zoom_num[16];
+		snprintf(zoom_val, sizeof(zoom_val), "%d%%", zoom_pct);
+		snprintf(zoom_num, sizeof(zoom_num), "%d", slider_pct);
 
 		bud_node *sec = bud_element("div");
-		bud_set_attr(sec, "class", "flex flex-col gap-1.5 pb-2 border-b border-neutral-700/50");
+		bud_set_attr(sec, "class", "settings-row");
 
 		bud_node *top_row = bud_element("div");
-		bud_set_attr(top_row, "class", "flex items-center justify-between gap-2");
+		bud_set_attr(top_row, "class", "settings-row-top");
 		bud_node *lbl = bud_element("span");
-		bud_set_attr(lbl, "class", "font-bold text-[#c2b3ff] uppercase tracking-wider");
+		bud_set_attr(lbl, "class", "settings-label");
 		bud_append(lbl, bud_text("🔍 Camera Zoom"));
 		bud_node *val = bud_element("span");
 		bud_set_attr(val, "id", "settings-zoom-value");
-		bud_set_attr(val, "class", "font-mono font-bold text-neutral-100");
+		bud_set_attr(val, "class", "settings-badge");
 		bud_append(val, bud_text(zoom_val));
 		bud_append(top_row, lbl);
 		bud_append(top_row, val);
 		bud_append(sec, top_row);
 
 		bud_node *ctrl_row = bud_element("div");
-		bud_set_attr(ctrl_row, "class", "flex items-center justify-between gap-2");
+		bud_set_attr(ctrl_row, "class", "settings-slider-wrap");
 		bud_append(ctrl_row, make_btn("−", "Zoom Out (-)", on_settings_zoom_out));
-		bud_append(ctrl_row, make_btn("Reset (100%)", "Reset Zoom (0)", on_settings_zoom_reset));
+
+		bud_node *slider = bud_element("input");
+		bud_set_attr(slider, "id", "settings-zoom-slider");
+		bud_set_attr(slider, "type", "range");
+		bud_set_attr(slider, "class", "settings-slider");
+		bud_set_attr(slider, "min", "10");
+		bud_set_attr(slider, "max", "250");
+		bud_set_attr(slider, "step", "5");
+		bud_set_attr(slider, "value", zoom_num);
+		bud_bind(slider, "input", 1, on_settings_zoom_slider);
+		bud_bind(slider, "change", 1, on_settings_zoom_slider);
+		bud_append(ctrl_row, slider);
+
 		bud_append(ctrl_row, make_btn("+", "Zoom In (+)", on_settings_zoom_in));
+		bud_append(ctrl_row, make_btn("100%", "Reset Zoom (0)", on_settings_zoom_reset));
 		bud_append(sec, ctrl_row);
 		bud_append(body, sec);
 	}
 
-	/* 3. Viewport Mode */
+	/* 3. Viewport Mode Toggle */
 	{
 		const char *req_drv = (st && st->preferred_driver[0]) ? st->preferred_driver : "tty";
 		int is_seven_drv = (strcmp(req_drv, "lamina-seven") == 0);
 
 		bud_node *sec = bud_element("div");
-		bud_set_attr(sec, "class", "flex items-center justify-between gap-2");
+		bud_set_attr(sec, "class", "settings-row-inline");
 		bud_node *lbl = bud_element("span");
-		bud_set_attr(lbl, "class", "font-bold text-[#c2b3ff] uppercase tracking-wider");
-		bud_append(lbl, bud_text("🖥️ Viewport"));
+		bud_set_attr(lbl, "class", "settings-label");
+		bud_append(lbl, bud_text("🖥️ 3D Viewport"));
 		bud_append(sec, lbl);
-		bud_append(sec, make_btn(is_seven_drv ? "🕹️ Seven 3D" : "📺 Terminal",
-		                         "Switch Viewport Mode", on_cycle_viewport));
+
+		bud_node *tog = bud_element("button");
+		bud_set_attr(tog, "id", "settings-viewport-toggle");
+		bud_set_attr(tog, "type", "button");
+		bud_set_attr(tog, "class", "settings-toggle");
+		bud_set_attr(tog, "title", "Toggle between 3D Seven Viewport and Terminal");
+		bud_append(tog, bud_text(is_seven_drv ? "🕹️ Seven 3D (On)" : "📺 Terminal (Off)"));
+		bud_bind(tog, "click", 1, on_cycle_viewport);
+		bud_append(sec, tog);
 		bud_append(body, sec);
 	}
 
 	bud_node *hint = bud_element("div");
-	bud_set_attr(hint, "class", "text-[10px] text-neutral-400 text-center pt-1 font-mono");
+	bud_set_attr(hint, "class", "settings-hint");
 	bud_append(hint, bud_text("Shortcuts: , / . Detail  |  - / + / 0 Zoom"));
 	bud_append(body, hint);
 

@@ -194,8 +194,6 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
                                      float sea_level,
                                      const nd_planet_def_t *pdef);
 
-void nd_seven_gl_flush_terrain_batches(void);
-
 void nd_seven_gl_flush_water(void);
 
 void nd_seven_gl_flush_clouds(void);

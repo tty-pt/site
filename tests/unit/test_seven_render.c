@@ -2247,19 +2247,19 @@ int main(void)
 		assert(ring_4_12_large_mid_zoom > 50);
 		assert(small_mid_zoom > 0);
 
-		/* Now zoom all the way out to -22x (0.00738f): large trees in ring [4..12] must NOT thin out,
-		 * while small plants (sz <= 24) have already faded/culled out by size/distance! */
-		nd_seven_set_zoom(0.00738f);
+		/* Now zoom out to canopy/horizon zoom (0.10f, cam_dist = 2,800 wu):
+		 * large trees in ring [4..12] must NOT thin out, while small plants (sz <= 22)
+		 * have already faded/culled out by the linear size/distance law! */
+		nd_seven_set_zoom(0.10f);
 		nd_seven_render(fb, 1280, 720, &st);
 
 		uint32_t mid_cnt = nd_seven_last_mid_billboard_count();
-		assert(mid_cnt > 800);
+		assert(mid_cnt > 400);
 
 		int ring_4_12_far_zoom = 0;
 		int ring_4_12_large_far_zoom = 0;
 		int small_far_zoom = 0;
 		int far_horizon_cnt = 0;
-		int deep_horizon_30_cnt = 0;
 		int max_cheb_seen = 0;
 		int unscaled_cnt = 0;
 		for (uint32_t i = 0; i < mid_cnt; i++) {
@@ -2278,22 +2278,25 @@ int main(void)
 					if (sz >= 34.0f)
 						ring_4_12_large_far_zoom++;
 				}
-				if (sz <= 24.0f)
+				if (sz <= 22.0f)
 					small_far_zoom++;
 				if (cheb > 14)
 					far_horizon_cnt++;
-				if (cheb > 30)
-					deep_horizon_30_cnt++;
 				assert(bw > 0.0f && bh > 0.0f && bh <= 74.0f); /* True 1:1 physical world-space dimensions */
 				unscaled_cnt++;
 			}
 		}
 		assert(ring_4_12_large_far_zoom >= ring_4_12_large_mid_zoom);
 		assert(small_far_zoom == 0);
-		assert(far_horizon_cnt > 250);
-		assert(deep_horizon_30_cnt > 250);
-		assert(max_cheb_seen > 100 && max_cheb_seen <= 255);
-		assert(unscaled_cnt > 800 && unscaled_cnt == (int)(mid_cnt < 262144 ? mid_cnt : 262144));
+		assert(far_horizon_cnt > 100);
+		assert(max_cheb_seen > 16 && max_cheb_seen <= 96);
+		assert(unscaled_cnt > 400 && unscaled_cnt == (int)(mid_cnt < 262144 ? mid_cnt : 262144));
+
+		/* At orbital zoom (-22x, 0.00738f, cam_dist = 37,940 wu), linear size/distance culling
+		 * cleanly culls all billboards so zero room scenery scans or billboard draws occur. */
+		nd_seven_set_zoom(0.00738f);
+		nd_seven_render(fb, 1280, 720, &st);
+		assert(nd_seven_last_mid_billboard_count() == 0);
 
 		/* Verify configurable per-object vertical anchor (anchor_y), lamb centering, and water cutoff calibration */
 		{
@@ -2333,8 +2336,8 @@ int main(void)
 		nd_seven_set_zoom(1.0f);
 		nd_seven_set_3d_mode(0);
 		nd_seven_forget();
-		printf("PASS: -22x zoom (0.00738) emits %u homogeneous billboards with zero zoom-out thinning (ring[4..12]: %d vs %d at 0.15x, >14: %d, >30: %d, max_cheb=%d) and fades out uniformly by -23x zoom\n",
-		       mid_cnt, ring_4_12_far_zoom, ring_4_12_mid_zoom, far_horizon_cnt, deep_horizon_30_cnt, max_cheb_seen);
+		printf("PASS: 0.10x zoom emits %u homogeneous billboards with linear size/distance culling (ring[4..12]: %d vs %d at 0.15x, >14: %d, max_cheb=%d) and culls orbital zoom cleanly\n",
+		       mid_cnt, ring_4_12_far_zoom, ring_4_12_mid_zoom, far_horizon_cnt, max_cheb_seen);
 	}
 
 	/* High-Resolution 48x48 Level 0 Terrain Grid & Exact Seam Continuity Verification */
@@ -3733,30 +3736,30 @@ int main(void)
 			nd_seven_detail_in();
 			assert(fabsf(nd_seven_get_detail_scale() - 1.0f) < 1e-4f);
 
-			/* Lowering detail scale culls distant billboards earlier at zoom = 0.012f (cam_dist = 23,333 wu) */
+			/* Lowering detail scale culls distant billboards earlier at zoom = 0.08f (cam_dist = 3,500 wu) */
 			set_map(10, 10, 12, 0x1B, 0, 'X', 'o', 'T');
-			nd_seven_set_zoom(0.012f);
+			nd_seven_set_zoom(0.08f);
 
-			/* At detail = 0.50f (max_cull = 21,999 < 23,333), all billboards cull */
-			nd_seven_set_detail_scale(0.50f);
+			/* At detail = 0.35f (max_cull = 2,856 < 3,500), all billboards cull */
+			nd_seven_set_detail_scale(0.35f);
 			nd_seven_render(fb, 1280, 720, &st);
 			assert(nd_seven_last_mid_billboard_count() == 0);
 
-			/* At detail = 0.55f (max_cull = 24,199 > 23,333), only near-focal trees within ~116 rooms are emitted */
-			nd_seven_set_detail_scale(0.55f);
+			/* At detail = 0.85f, near-focal large trees are emitted */
+			nd_seven_set_detail_scale(0.85f);
 			nd_seven_render(fb, 1280, 720, &st);
 			uint32_t cnt_mid_detail = nd_seven_last_mid_billboard_count();
 			assert(cnt_mid_detail > 0);
 
-			/* At detail = 1.0f (max_cull = 43,999), trees across the full frustum out to 250 rooms are emitted */
-			nd_seven_set_detail_scale(1.0f);
+			/* At detail = 1.25f, more trees and medium plants across the frustum are emitted */
+			nd_seven_set_detail_scale(1.25f);
 			nd_seven_render(fb, 1280, 720, &st);
 			uint32_t cnt_full_detail = nd_seven_last_mid_billboard_count();
 			assert(cnt_full_detail > cnt_mid_detail);
 
 			nd_seven_set_detail_scale(1.0f);
 			nd_seven_set_zoom(1.0f);
-			printf("PASS: User-adjustable detail scale verified (1.0x=%u, 0.55x=%u, 0.50x=0 billboards at 0.012x zoom)\n",
+			printf("PASS: User-adjustable detail scale verified (1.25x=%u, 0.85x=%u, 0.35x=0 billboards at 0.08x zoom)\n",
 			       cnt_full_detail, cnt_mid_detail);
 		}
 	}

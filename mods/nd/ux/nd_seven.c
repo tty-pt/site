@@ -103,10 +103,9 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 		/* Natural ecological ecotone mosaic: modulate smooth Whittaker blend (0..128)
 		 * with multi-scale spatial patches and micro-relief (hollows vs rises) so
 		 * adjacent biomes interdigitate organically without hard seams or flat washes. */
-		static noise_wcache_t s_eco_c5, s_eco_c3;
 		int16_t p_eco[2] = { (int16_t)wy, (int16_t)wx };
-		uint32_t n_meso = noise_wpoint_c(&s_eco_c5, p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
-		uint32_t n_loc  = noise_wpoint_c(&s_eco_c3, p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_meso = noise_wpoint_n(p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_loc  = noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
 		int32_t eco_jitter = ((int32_t)n_meso - 128) + (((int32_t)n_loc - 128) >> 1) - ((int32_t)fs.fine_elev * 2);
 		int32_t span = (blend <= 128) ? 128 : 252;
 		int32_t env_w = (int32_t)blend * (span - (int32_t)blend);
@@ -167,18 +166,6 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	out->rgba = col;
 }
 
-static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_t level,
-                                         int32_t wy, int32_t ox, int32_t span_w,
-                                         uint32_t count, ar_sample_t *out_row)
-{
-	(void)user_ctx;
-	uint32_t gdim = (count > 1) ? (count - 1) : 1;
-	for (uint32_t c = 0; c < count; c++) {
-		int32_t wx = ox + (int32_t)(((int64_t)c * span_w) / gdim);
-		seven_macro_chunk_sampler(NULL, world, level, wx, wy, &out_row[c]);
-	}
-}
-
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
@@ -188,8 +175,6 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.base_h = NDW_TILE_H;
 		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
-		cfg.row_sampler = seven_macro_chunk_row_sampler;
-		cfg.max_populates_per_frame = 0;
 		cfg.max_active = 160;
 		cfg.pool_capacity = 384;
 		cfg.max_levels = 17;
@@ -498,10 +483,10 @@ static inline int seven_test_frustum_xy_state(float min_x, float min_y, float ma
  * Every billboard's cull distance and opacity depend solely on its physical
  * dimensions (bw, bh) and 3D camera distance d = sqrt(cam_dist^2 + dx^2 + dy^2 + dz^2),
  * scaled by the user-adjustable detail multiplier s_frame_detail_scale. */
-#define SCENERY_RAD_MAX_ROOMS        250
-#define SEVEN_BB_MAX_EFF_SIZE        34.0f
-#define SEVEN_BB_DIST_PER_SIZE_CB    1.1195f
-#define SEVEN_BB_FADE_START_RATIO    0.45f
+#define SCENERY_RAD_MAX_ROOMS        96
+#define SEVEN_BB_MAX_EFF_SIZE        68.0f
+#define SEVEN_BB_DIST_PER_SIZE       120.0f
+#define SEVEN_BB_FADE_START_RATIO    0.60f
 
 static float s_cam_focal_x = 0.0f;
 static float s_cam_focal_y = 0.0f;
@@ -516,7 +501,7 @@ static inline float seven_billboard_cull_dist(float bw, float bh)
 		sz = 1.0f;
 	if (sz > SEVEN_BB_MAX_EFF_SIZE)
 		sz = SEVEN_BB_MAX_EFF_SIZE;
-	return SEVEN_BB_DIST_PER_SIZE_CB * s_frame_detail_scale * sz * sz * sz;
+	return SEVEN_BB_DIST_PER_SIZE * s_frame_detail_scale * sz;
 }
 
 static inline float seven_eval_billboard_alpha(float wx, float wy, float wz,
@@ -547,168 +532,6 @@ static inline uint32_t seven_pack_white_alpha(float alpha)
 	if (a >= 255)
 		return 0xFFFFFFFFu;
 	return 0xFFFFFF00u | (uint32_t)a;
-}
-
-#define SEVEN_HORIZON_BINS 128
-static float s_horizon_y[SEVEN_HORIZON_BINS];
-
-static inline bool seven_project_point(const float m[16], float x, float y, float z,
-                                      float *out_ndc_x, float *out_ndc_y)
-{
-	float rx = m[0] * x + m[4] * y + m[8]  * z + m[12];
-	float ry = m[1] * x + m[5] * y + m[9]  * z + m[13];
-	float rw = m[3] * x + m[7] * y + m[11] * z + m[15];
-	if (rw <= 0.1f) return false;
-	float inv_w = 1.0f / rw;
-	*out_ndc_x = rx * inv_w;
-	*out_ndc_y = ry * inv_w;
-	return true;
-}
-
-static bool seven_node_occluded_by_horizon(const ar_node_t *node, const float mvp[16])
-{
-	if (!node) return false;
-	float x0 = (float)node->ox;
-	float x1 = (float)(node->ox + node->w);
-	float y0 = (float)node->oy;
-	float y1 = (float)(node->oy + node->h);
-	float z0 = (float)node->min_val * (1.0f / 16.0f);
-	/* Include 64m scenery margin so trees/rocks on peaks don't trigger false culling */
-	float z1 = (float)node->max_val * (1.0f / 16.0f) + 64.0f;
-
-	float xs[2] = { x0, x1 };
-	float ys[2] = { y0, y1 };
-	float zs[2] = { z0, z1 };
-
-	float min_ndc_x =  1e9f, max_ndc_x = -1e9f;
-	float min_ndc_y =  1e9f, max_ndc_y = -1e9f;
-
-	for (int xi = 0; xi < 2; xi++) {
-		for (int yi = 0; yi < 2; yi++) {
-			for (int zi = 0; zi < 2; zi++) {
-				float px, py;
-				if (!seven_project_point(mvp, xs[xi], ys[yi], zs[zi], &px, &py)) {
-					return false;
-				}
-				if (px < min_ndc_x) min_ndc_x = px;
-				if (px > max_ndc_x) max_ndc_x = px;
-				if (py < min_ndc_y) min_ndc_y = py;
-				if (py > max_ndc_y) max_ndc_y = py;
-			}
-		}
-	}
-
-	if (max_ndc_x < -1.0f || min_ndc_x > 1.0f || max_ndc_y < -1.0f || min_ndc_y > 1.0f)
-		return false;
-
-	float cx0 = fmaxf(-1.0f, min_ndc_x);
-	float cx1 = fminf( 1.0f, max_ndc_x);
-	if (cx0 > cx1) return false;
-
-	int b0 = (int)floorf((cx0 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
-	int b1 = (int)floorf((cx1 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
-	if (b0 < 0) b0 = 0;
-	if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
-	if (b0 > b1) return false;
-
-	for (int b = b0; b <= b1; b++) {
-		if (max_ndc_y >= s_horizon_y[b] - 0.02f) {
-			return false;
-		}
-	}
-	return true;
-}
-
-static void seven_horizon_update(const ar_node_t *node, const float mvp[16], float sea_lvl)
-{
-	if (!node) return;
-	float x0 = (float)node->ox;
-	float x1 = (float)(node->ox + node->w);
-	float y_back = (float)(node->oy + node->h);
-	float z_min = (float)node->min_val * (1.0f / 16.0f);
-	float z_surf = (sea_lvl > -900.0f) ? fmaxf(z_min, sea_lvl) : z_min;
-
-	float px0, py0, px1, py1;
-	if (!seven_project_point(mvp, x0, y_back, z_surf, &px0, &py0)) return;
-	if (!seven_project_point(mvp, x1, y_back, z_surf, &px1, &py1)) return;
-
-	float min_x = fminf(px0, px1);
-	float max_x = fmaxf(px0, px1);
-	if (max_x < -1.0f || min_x > 1.0f) return;
-
-	float cx0 = fmaxf(-1.0f, min_x);
-	float cx1 = fminf( 1.0f, max_x);
-	if (cx0 >= cx1) return;
-
-	int b0 = (int)floorf((cx0 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
-	int b1 = (int)floorf((cx1 + 1.0f) * 0.5f * (float)SEVEN_HORIZON_BINS);
-	if (b0 < 0) b0 = 0;
-	if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
-
-	float dx = px1 - px0;
-	for (int b = b0; b <= b1; b++) {
-		float bin_x = ((float)b + 0.5f) * (2.0f / (float)SEVEN_HORIZON_BINS) - 1.0f;
-		float t = (fabsf(dx) > 1e-5f) ? ((bin_x - px0) / dx) : 0.5f;
-		if (t < 0.0f) t = 0.0f;
-		if (t > 1.0f) t = 1.0f;
-		float seg_y = py0 + t * (py1 - py0);
-		if (seg_y > s_horizon_y[b]) {
-			s_horizon_y[b] = seg_y;
-		}
-	}
-}
-
-static void seven_sort_leaves_front_to_back(const ar_node_t **leaves, size_t count,
-                                            bool use_3d_primary,
-                                            const float eye_flat[3],
-                                            const float eye_3d[3],
-                                            const nd_planet_def_t *pdef)
-{
-	if (count <= 1) return;
-	float dist_sq[SEVEN_MAX_VISIBLE_LEAVES];
-
-	for (size_t i = 0; i < count; i++) {
-		const ar_node_t *node = leaves[i];
-		if (!node) {
-			dist_sq[i] = 1e30f;
-			continue;
-		}
-		float z_min = (float)node->min_val * (1.0f / 16.0f);
-		float z_max = (float)node->max_val * (1.0f / 16.0f);
-
-		if (use_3d_primary) {
-			float mx = (float)node->ox + (float)node->w * 0.5f;
-			float my = (float)node->oy + (float)node->h * 0.5f;
-			float mz = (z_min + z_max) * 0.5f;
-			float pos_3d[3];
-			nd_seven_gl_torus_frame(mx, my, mz, pdef, pos_3d, NULL, NULL, NULL);
-			float dx = eye_3d[0] - pos_3d[0];
-			float dy = eye_3d[1] - pos_3d[1];
-			float dz = eye_3d[2] - pos_3d[2];
-			dist_sq[i] = dx * dx + dy * dy + dz * dz;
-		} else {
-			float cx = fmaxf((float)node->ox, fminf(eye_flat[0], (float)(node->ox + node->w)));
-			float cy = fmaxf((float)node->oy, fminf(eye_flat[1], (float)(node->oy + node->h)));
-			float cz = fmaxf(z_min, fminf(eye_flat[2], z_max));
-			float dx = eye_flat[0] - cx;
-			float dy = eye_flat[1] - cy;
-			float dz = eye_flat[2] - cz;
-			dist_sq[i] = dx * dx + dy * dy + dz * dz;
-		}
-	}
-
-	for (size_t a = 1; a < count; a++) {
-		const ar_node_t *key_node = leaves[a];
-		float key_dist = dist_sq[a];
-		size_t b = a;
-		while (b > 0 && dist_sq[b - 1] > key_dist) {
-			leaves[b] = leaves[b - 1];
-			dist_sq[b] = dist_sq[b - 1];
-			b--;
-		}
-		leaves[b] = key_node;
-		dist_sq[b] = key_dist;
-	}
 }
 
 static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t *st,
@@ -770,8 +593,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		target_quad_px = 1.33f + 3.80f * atmo_t;
 		int lvl_step = (int)floorf(log2f(dist * (1.0f / 5000.0f)));
 		if (lvl_step < 1) lvl_step = 1;
-		if (dist < 44000.0f && lvl_step > 4) lvl_step = 4;
-		else if (lvl_step > 11) lvl_step = 11;
+		if (lvl_step > 4) lvl_step = 4;
 		min_lvl = (uint8_t)lvl_step;
 	}
 
@@ -805,7 +627,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.split_hysteresis = 0.14f
 	};
 
-	ar_system_begin_frame(cs);
 	s_visible_leaf_count = ar_system_query_matrix(cs, world, use_3d_primary ? mvp_3d : flat_mvp,
 	                                              &opts, s_visible_leaves, max_leaves);
 	size_t macro_count = s_visible_leaf_count;
@@ -1013,30 +834,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 
-	float pitch_rad = ND_SEVEN_DIORAMA_PITCH * ((float)COROLLA_PI / 180.0f);
-	float cos_p = cosf(pitch_rad);
-	float sin_p = sinf(pitch_rad);
-	float eye_flat[3] = { (float)lwx, (float)lwy + dist * cos_p, lwz_est + dist * sin_p };
-
-	/* 1. Front-to-back sorting for zero-cost GPU hardware Early-Z */
-	seven_sort_leaves_front_to_back(s_visible_leaves, macro_count, use_3d_primary, eye_flat, eye_3d, pdef);
-
-	/* 2. Initialize 1D horizon occlusion buffer */
-	for (int i = 0; i < SEVEN_HORIZON_BINS; i++) {
-		s_horizon_y[i] = -1.0f;
-	}
-
-	size_t unoccluded_count = 0;
 	for (size_t m = 0; m < macro_count; m++) {
 		const ar_node_t *node = s_visible_leaves[m];
 		if (!node) continue;
-
-		/* CPU 1D horizon occlusion culling for diorama views */
-		if (!use_3d_primary && seven_node_occluded_by_horizon(node, flat_mvp)) {
-			continue;
-		}
-
-		s_visible_leaves[unoccluded_count++] = node;
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
@@ -1063,13 +863,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                                vdim, vdim,
 		                                (uint32_t)w, (uint32_t)h,
 		                                sea_lvl, pdef);
-
-		if (!use_3d_primary) {
-			seven_horizon_update(node, flat_mvp, sea_lvl);
-		}
 	}
-	s_visible_leaf_count = unoccluded_count;
-	nd_seven_gl_flush_terrain_batches();
 
 	/* Multi-Planet 3D Manifold Rendering:
 	 * Evaluate the companion body's dynamic 3D Keplerian orbit & tilted spin pose at anim_t,
@@ -1121,7 +915,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 				                                (uint32_t)w, (uint32_t)h,
 				                                (float)alt_wl_i, &alt_pdef);
 			}
-			nd_seven_gl_flush_terrain_batches();
 		}
 	}
 
@@ -1380,7 +1173,7 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 		int16_t wz = nd_field_elevation_to_block(elev_q);
 
-		if (wz <= local_wl && node->level >= 2 && (node->max_val >> 4) > local_wl) {
+		if (wz <= local_wl && node->level >= 2) {
 			int16_t canon_elev = nd_field_sample((uint16_t)pos[3], 0, wx, wy).elevation;
 			if (canon_elev > local_wl)
 				wz = canon_elev;
@@ -1452,20 +1245,22 @@ static inline uint32_t meadow_hash32(int32_t x, int32_t y, uint32_t seed)
 
 static inline float meadow_noise_2d(float wx, float wy, float scale, uint32_t seed)
 {
-	unsigned shift;
-	if (scale <= 24.0f) shift = 4u;
-	else if (scale <= 36.0f) shift = 5u;
-	else if (scale <= 72.0f) shift = 6u;
-	else if (scale <= 144.0f) shift = 7u;
-	else shift = 8u;
-
-	static noise_wcache_t s_mc[32];
-	uint32_t idx = (seed ^ (seed >> 8u) ^ (uint32_t)shift) & 31u;
-	noise_wcache_t *c = &s_mc[idx];
-
-	int16_t p[2] = { (int16_t)(int32_t)wx, (int16_t)(int32_t)wy };
-	uint32_t raw = noise_wpoint_c(c, p, shift, 16u, seed, 2u, NOISE_FADE);
-	return (float)raw * (1.0f / 65535.0f);
+	float inv_s = 1.0f / scale;
+	float px = wx * inv_s;
+	float py = wy * inv_s;
+	int32_t ix = (int32_t)floorf(px);
+	int32_t iy = (int32_t)floorf(py);
+	float fx = px - (float)ix;
+	float fy = py - (float)iy;
+	float ux = fx * fx * (3.0f - 2.0f * fx);
+	float uy = fy * fy * (3.0f - 2.0f * fy);
+	float v00 = (float)(meadow_hash32(ix,     iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float v10 = (float)(meadow_hash32(ix + 1, iy,     seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float v01 = (float)(meadow_hash32(ix,     iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float v11 = (float)(meadow_hash32(ix + 1, iy + 1, seed) & 0xFFFFu) * (1.0f / 65535.0f);
+	float a = v00 + (v10 - v00) * ux;
+	float b = v01 + (v11 - v01) * ux;
+	return a + (b - a) * uy;
 }
 
 static int meadow_lookup_rect(int zone, unsigned biome, uint32_t h, nd_seven_sprite_rect_t *out_rect)

@@ -855,7 +855,8 @@ nd-stage,
 
 #equipment,
 #stats,
-#spell {
+#spell,
+#settings {
     background: linear-gradient(160deg, rgba(24, 26, 38, 0.96) 0%, rgba(12, 14, 22, 0.98) 100%) !important;
     border: 1px solid #9589c5 !important;
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 24px rgba(149, 137, 197, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
@@ -870,11 +871,161 @@ nd-stage,
 }
 
 #equipment,
-#stats {
+#stats,
+#settings {
     border-radius: 10px !important;
     padding: 16px 20px !important;
     width: max-content !important;
     height: auto !important;
+}
+
+#settings {
+    min-width: 330px !important;
+    max-width: 380px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+}
+
+#settings .rpg-modal-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    padding-bottom: 10px !important;
+    border-bottom: 1px solid rgba(149, 137, 197, 0.35) !important;
+}
+
+#settings .settings-body {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+}
+
+#settings .settings-row {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+    background: rgba(10, 12, 20, 0.58) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
+    border-radius: 8px !important;
+}
+
+#settings .settings-row-inline {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+    padding: 10px 12px !important;
+    background: rgba(10, 12, 20, 0.58) !important;
+    border: 1px solid rgba(149, 137, 197, 0.22) !important;
+    border-radius: 8px !important;
+}
+
+#settings .settings-row-top {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    width: 100% !important;
+}
+
+#settings .settings-label {
+    color: #e2e8f0 !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+}
+
+#settings .settings-badge {
+    background: rgba(149, 137, 197, 0.22) !important;
+    border: 1px solid rgba(194, 179, 255, 0.38) !important;
+    color: #f8fafc !important;
+    padding: 2px 8px !important;
+    border-radius: 9999px !important;
+    font-size: 11px !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    font-weight: 700 !important;
+    min-width: 44px !important;
+    text-align: center !important;
+}
+
+#settings .settings-slider-wrap {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+}
+
+#settings input[type="range"].settings-slider {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: 6px !important;
+    background: rgba(149, 137, 197, 0.25) !important;
+    border: 1px solid rgba(194, 179, 255, 0.35) !important;
+    border-radius: 9999px !important;
+    outline: none !important;
+    cursor: pointer !important;
+    margin: 4px 0 !important;
+    padding: 0 !important;
+}
+
+#settings input[type="range"].settings-slider::-webkit-slider-thumb {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 9999px !important;
+    background: #c2b3ff !important;
+    border: 2px solid #ffffff !important;
+    box-shadow: 0 0 8px rgba(194, 179, 255, 0.75) !important;
+    cursor: pointer !important;
+}
+
+#settings input[type="range"].settings-slider::-moz-range-thumb {
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 9999px !important;
+    background: #c2b3ff !important;
+    border: 2px solid #ffffff !important;
+    box-shadow: 0 0 8px rgba(194, 179, 255, 0.75) !important;
+    cursor: pointer !important;
+}
+
+#settings .settings-toggle {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 4px 10px !important;
+    border-radius: 9999px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease !important;
+    border: 1px solid rgba(194, 179, 255, 0.45) !important;
+    background: rgba(149, 137, 197, 0.25) !important;
+    color: #ffffff !important;
+}
+
+#settings .settings-toggle:hover {
+    background: rgba(149, 137, 197, 0.42) !important;
+    border-color: #c2b3ff !important;
+}
+
+#settings .settings-hint {
+    font-size: 10px !important;
+    color: #94a3b8 !important;
+    text-align: center !important;
+    padding-top: 2px !important;
 }
 
 #equipment {

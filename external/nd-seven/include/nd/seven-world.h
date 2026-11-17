@@ -29,12 +29,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#if __has_include("../../../libchaff/include/ttypt/noise.h")
-#include "../../../libchaff/include/ttypt/noise.h"
-#elif __has_include(<ttypt/noise.h>)
-#include <ttypt/noise.h>
-#endif
-
 #if __has_include("../../../nd-world/include/nd/field.h")
 #include "../../../nd-world/include/nd/field.h"
 #define NDW_HAVE_FIELD 1
@@ -885,31 +879,30 @@ typedef struct {
 	uint32_t seed;       /* (z, world) seed of the edge detail */
 } ndw_warp_grid_t;
 
-/* Smooth value noise, 0..255, lattice spacing 1 << shift using canonical libchaff. */
-static inline int
-ndw_vnoise_cached(uint32_t seed, int x, int y, int shift, noise_wcache_t *c)
-{
-	int16_t p[2] = { (int16_t)x, (int16_t)y };
-	uint32_t raw;
-	if (c)
-		raw = noise_wpoint_c(c, p, (unsigned)shift, 16u, seed, 2u, NOISE_FADE);
-	else
-		raw = noise_wpoint_n(p, (unsigned)shift, 16u, seed, 2u, NOISE_FADE);
-	return (int)(raw >> 8u);
-}
-
-static inline int
-ndw_vnoise(uint32_t seed, int x, int y, int shift)
-{
-	return ndw_vnoise_cached(seed, x, y, shift, NULL);
-}
-
-/* One lattice value, 0..255 (retained for backward compatibility). */
+/* One lattice value, 0..255. */
 static inline int
 ndw_lattice(uint32_t seed, int gx, int gy)
 {
-	int16_t p[2] = { (int16_t)gx, (int16_t)gy };
-	return (int)(noise_r(p, seed, 24u, 2u) & 0xFFu);
+	return (int)(ndw_mix(ndw_mix(seed ^ ((uint32_t)gx * 0x9E3779B1u))
+	                     ^ ((uint32_t)gy * 0x85EBCA77u)) & 0xFFu);
+}
+
+/* Smooth value noise, 0..255, lattice spacing 1 << shift. */
+static inline int
+ndw_vnoise(uint32_t seed, int x, int y, int shift)
+{
+	int cell = 1 << shift;
+	int gx = ndw_fdiv(x, cell), gy = ndw_fdiv(y, cell);
+	int fx = ((x - gx * cell) * 256) >> shift;   /* 0..255 */
+	int fy = ((y - gy * cell) * 256) >> shift;
+	int sx = (fx * fx * (768 - 2 * fx)) >> 16;   /* smoothstep, 0..255 */
+	int sy = (fy * fy * (768 - 2 * fy)) >> 16;
+	int a = ndw_lattice(seed, gx, gy),     b = ndw_lattice(seed, gx + 1, gy);
+	int c = ndw_lattice(seed, gx, gy + 1), d = ndw_lattice(seed, gx + 1, gy + 1);
+	int top = a + (b - a) * sx / 256;
+	int bot = c + (d - c) * sx / 256;
+
+	return top + (bot - top) * sy / 256;
 }
 
 /*
@@ -917,7 +910,7 @@ ndw_lattice(uint32_t seed, int gx, int gy)
  * Iterates declaratively over NDW_OCTAVES[] with programmatic decorrelation and contrast gain.
  */
 static inline int
-ndw_warp_axis_cached(const int16_t pos[4], int wx, int wy, uint32_t salt, noise_wcache_t *caches)
+ndw_warp_axis(const int16_t pos[4], int wx, int wy, uint32_t salt)
 {
 	uint32_t base_seed = ndw_mix(0x424F5244u ^ salt
 	                            ^ ((uint32_t)(uint16_t)pos[2] * 0x9E3779B1u)
@@ -929,8 +922,7 @@ ndw_warp_axis_cached(const int16_t pos[4], int wx, int wy, uint32_t salt, noise_
 		uint32_t octave_seed = ndw_mix(base_seed ^ (uint32_t)(i * 0x9E3779B1u + 1));
 		int sx = (int)(i + 4);
 		int sy = (int)(i + 3);
-		noise_wcache_t *c = caches ? &caches[i] : NULL;
-		int n = ndw_vnoise_cached(octave_seed, x + y / sx, y - x / sy, NDW_OCTAVES[i].shift, c);
+		int n = ndw_vnoise(octave_seed, x + y / sx, y - x / sy, NDW_OCTAVES[i].shift);
 		int v = ((n - 128) * NDW_WARP_CONTRAST) / 128;
 		if (v < -128) v = -128;
 		if (v > 127)  v = 127;
@@ -938,12 +930,6 @@ ndw_warp_axis_cached(const int16_t pos[4], int wx, int wy, uint32_t salt, noise_
 	}
 
 	return (total_disp / 128) * NDW_SUB;
-}
-
-static inline int
-ndw_warp_axis(const int16_t pos[4], int wx, int wy, uint32_t salt)
-{
-	return ndw_warp_axis_cached(pos, wx, wy, salt, NULL);
 }
 
 /* Fill all nodes across the tile for full macro displacement coverage. */
@@ -960,19 +946,13 @@ ndw_warp_grid_fill(ndw_warp_grid_t *g, const int16_t pos[4])
 	g->by = by;
 	g->seed = ndw_mix(0x45444745u ^ ((uint32_t)(uint16_t)pos[2] * 0x9E3779B1u)
 	                  ^ ((uint32_t)(uint16_t)pos[3] * 0x85EBCA6Bu));
-
-	noise_wcache_t caches_x[NDW_OCTAVE_COUNT];
-	noise_wcache_t caches_y[NDW_OCTAVE_COUNT];
-	memset(caches_x, 0, sizeof(caches_x));
-	memset(caches_y, 0, sizeof(caches_y));
-
 	for (int ny = 0; ny < NDW_WARP_NY; ny++) {
 		int wy = by + ny * step_y;
 
 		for (int nx = 0; nx < NDW_WARP_NX; nx++) {
 			int wx = bx + nx * step_x;
-			g->dx[ny][nx] = (int16_t)ndw_warp_axis_cached(pos, wx, wy, 0x1u, caches_x);
-			g->dy[ny][nx] = (int16_t)ndw_warp_axis_cached(pos, wx, wy, 0x2u, caches_y);
+			g->dx[ny][nx] = (int16_t)ndw_warp_axis(pos, wx, wy, 0x1u);
+			g->dy[ny][nx] = (int16_t)ndw_warp_axis(pos, wx, wy, 0x2u);
 		}
 	}
 }
