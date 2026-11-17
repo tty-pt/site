@@ -23,7 +23,7 @@ float nd_seven_gl_cloud_shadow_from_density(float density, float frag_z);
 float nd_seven_gl_scene_light(float cloud_shadow, float diffuse);
 
 /* Cloud-shadow map window: the R8 map (ND_CSM_RES^2) covers a power-of-two half-extent around the camera target on the
- * cloud slice and is snapped to whole texels so panning never shimmers. Returns false (no map) above 14 km, where the
+ * cloud slice and is snapped to whole texels so panning never shimmers. Returns false (no map) above 180 km, where the
  * analytic shadow evaluation is used. */
 #define ND_CSM_RES 1024
 typedef struct {

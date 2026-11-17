@@ -69,22 +69,31 @@
 	"}\n" \
 	"float nd_cloud_shadow_map(vec2 fragXY, float fragZ, float dist) {\n" \
 	"    const float zk = 920.0;\n" \
-	"    if (uCsm.z <= 0.0 || fragZ >= zk + 240.0) return 0.0;\n" \
-	"    float sliceFade = smoothstep(zk + 240.0, zk - 120.0, fragZ);\n" \
+	"    float distFadeZ = smoothstep(8000.0, 14000.0, dist);\n" \
+	"    if (uCsm.z <= 0.0 || (fragZ >= zk + 240.0 && distFadeZ < 0.999)) return 0.0;\n" \
+	"    float sliceFade = mix(smoothstep(zk + 240.0, zk - 120.0, fragZ), 1.0, distFadeZ);\n" \
 	"    float dz = max(0.0, zk - fragZ) + clamp(dist * 0.045, 0.0, 14000.0);\n" \
 	"    vec2 sunProj = (length(uSunDir.xy) > 0.05) ? -normalize(uSunDir.xy) : vec2(-0.7071, -0.7071);\n" \
 	"    vec2 projXY = fragXY + sunProj * dz;\n" \
 	"    return clamp(smoothstep(0.05, 0.66, nd_csm_density(projXY) * sliceFade), 0.0, 0.95);\n" \
 	"}\n"
 
-/* Terrain / water entry point: one map fetch below 9 km, smooth crossfade 9..14 km, analytic evaluation above 14 km. */
+/* Terrain / water entry point: one map fetch below 140 km inside the CSM window, smooth crossfade 140..180 km, analytic evaluation above 180 km. */
 #define ND_GLSL_CLOUD_SHADOW_ENTRY_FN \
 	"float nd_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    if (dist >= 14000.0 || uCsm.z <= 0.0) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
+	"    if (dist >= 180000.0 || uCsm.z <= 0.0) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
+	"    const float zk = 920.0;\n" \
+	"    float dz = max(0.0, zk - fragZ) + clamp(dist * 0.045, 0.0, 14000.0);\n" \
+	"    vec2 sunProj = (length(uSunDir.xy) > 0.05) ? -normalize(uSunDir.xy) : vec2(-0.7071, -0.7071);\n" \
+	"    vec2 projXY = fragXY + sunProj * dz;\n" \
+	"    vec2 csmRel = abs(projXY - uCsm.xy) / uCsm.z;\n" \
+	"    float csmBox = max(csmRel.x, csmRel.y);\n" \
+	"    if (csmBox >= 0.96) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
 	"    float csmSh = nd_cloud_shadow_map(fragXY, fragZ, dist);\n" \
-	"    if (dist <= 9000.0) return csmSh;\n" \
+	"    if (dist <= 140000.0 && csmBox <= 0.88) return csmSh;\n" \
 	"    float anaSh = eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
-	"    return mix(csmSh, anaSh, smoothstep(9000.0, 14000.0, dist));\n" \
+	"    float blend = max(smoothstep(140000.0, 180000.0, dist), smoothstep(0.88, 0.96, csmBox));\n" \
+	"    return mix(csmSh, anaSh, blend);\n" \
 	"}\n"
 
 /* Toroidal geometric self-eclipse raymarch:
@@ -119,7 +128,8 @@
  *    convective cumulus cells (FEW / SCT / BKN) whose analytical area-fraction expectation matches
  *    the band-limited orbital envelope so zooming never triggers a sudden cloud-cover jump. */
 #define ND_GLSL_SYNOPTIC_CLOUD_FN \
-	"vec4 eval_synoptic_macro_cloud_core(vec2 worldXY, float anim_time, float humidity, float fw, bool wantCirrus, out vec2 outGrad, out float outHighCirrus) {\n" \
+	"bool eval_synoptic_carrier(vec2 worldXY, float anim_time, float humidity, float fw,\n" \
+	"                           out vec4 outSyn, out vec2 outPDisp, out vec2 outPZonal, out vec2 outBaseGrad) {\n" \
 	"    const vec2 prevDir = vec2(0.741, -0.671);\n" \
 	"    const vec2 prevPerp = vec2(0.671, 0.741);\n" \
 	"    float tFlow = mod(anim_time * 0.005, 1024.0);\n" \
@@ -141,14 +151,31 @@
 	"    float r1 = 1.0 - 2.0 * abs(oct1.x - 0.5);\n" \
 	"    float dR0 = 4.0 * (0.5 - oct0.x);\n" \
 	"    float dR1 = 4.0 * (0.5 - oct1.x);\n" \
-	"    /* Zero-mean ridge shaping (r - 0.68) preserves a balanced 0.50 global synoptic mean\n" \
-	"     * so anticyclonic subsidence basins keep >= 65%..75% of the planet sunny & clear! */\n" \
 	"    float front0 = oct0.x + (r0 - 0.68) * 0.28;\n" \
 	"    float front1 = oct1.x + (r1 - 0.68) * 0.24;\n" \
 	"    vec2 g0 = oct0.yz * (1.0 + 0.28 * dR0) * 0.72;\n" \
 	"    vec2 g1 = (irot * oct1.yz) * (1.0 + 0.24 * dR1) * (0.54 * 1.65 * wOct1);\n" \
-	"    vec2 macroGrad = g0 + g1;\n" \
+	"    outBaseGrad = g0 + g1;\n" \
 	"    float synFront = 0.50 + (front0 - 0.50) * 0.72 + (front1 - 0.50) * (0.54 * wOct1) + (psi0.x - 0.50) * 0.34;\n" \
+	"    outSyn = vec4(synFront, r0, synWarp);\n" \
+	"    outPDisp = pDisp;\n" \
+	"    outPZonal = pZonal;\n" \
+	"    float wReg2 = smoothstep(0.26, 0.07, 0.00001150 * fw);\n" \
+	"    float wReg3 = smoothstep(0.24, 0.06, 0.00005500 * fw);\n" \
+	"    float maxFront = synFront + 0.116 * wReg2 + 0.070 * wReg3 + 0.055;\n" \
+	"    return (maxFront <= (0.555 - 0.105 * humidity)) && ((synFront + 0.173) <= (0.56 - 0.08 * humidity));\n" \
+	"}\n" \
+	"vec4 eval_synoptic_macro_cloud_from_carrier(vec2 worldXY, float anim_time, float humidity, float fw, bool wantCirrus,\n" \
+	"                                            vec4 synCarrier, vec2 pZonal, vec2 baseGrad,\n" \
+	"                                            out vec2 outGrad, out float outHighCirrus) {\n" \
+	"    const vec2 prevDir = vec2(0.741, -0.671);\n" \
+	"    const vec2 prevPerp = vec2(0.671, 0.741);\n" \
+	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n" \
+	"    const mat2 irot = mat2(0.8, 0.6, -0.6, 0.8);\n" \
+	"    float synFront = synCarrier.x;\n" \
+	"    float r0 = synCarrier.y;\n" \
+	"    vec2 synWarp = synCarrier.zw;\n" \
+	"    vec2 macroGrad = baseGrad;\n" \
 	"    float wReg2 = smoothstep(0.26, 0.07, 0.00001150 * fw);\n" \
 	"    float wReg3 = smoothstep(0.24, 0.06, 0.00005500 * fw);\n" \
 	"    /* Exact analytical upper bound of regional squalls (0.116*wReg2 + 0.070*wReg3) and cirrus (+0.118):\n" \
@@ -161,7 +188,8 @@
 	"    }\n" \
 	"    outHighCirrus = 0.0;\n" \
 	"    if (wantCirrus) {\n" \
-	"    /* High-troposphere jet-stream cirrus & frontal outflow shield (confined to baroclinic fronts) */\n" \
+	"        float phase1 = mod(anim_time * 0.008, 1024.0);\n" \
+	"        /* High-troposphere jet-stream cirrus & frontal outflow shield (confined to baroclinic fronts) */\n" \
 	"        vec2 pJet = irot * pZonal + vec2(38000.0, -52000.0);\n" \
 	"        vec3 cir0 = chaff_grad_noise2d(pJet * 0.00000115 - prevDir * (phase1 * 1.35), 0x43495230u);\n" \
 	"        float wCir = smoothstep(0.32, 0.08, 0.00000380 * fw);\n" \
@@ -228,6 +256,11 @@
 	"    outGrad = macroGrad;\n" \
 	"    return vec4(macroCoverage, synFront, synWarp);\n" \
 	"}\n" \
+	"vec4 eval_synoptic_macro_cloud_core(vec2 worldXY, float anim_time, float humidity, float fw, bool wantCirrus, out vec2 outGrad, out float outHighCirrus) {\n" \
+	"    vec4 synC; vec2 pD; vec2 pZ; vec2 baseG;\n" \
+	"    eval_synoptic_carrier(worldXY, anim_time, humidity, fw, synC, pD, pZ, baseG);\n" \
+	"    return eval_synoptic_macro_cloud_from_carrier(worldXY, anim_time, humidity, fw, wantCirrus, synC, pZ, baseG, outGrad, outHighCirrus);\n" \
+	"}\n" \
 	"vec4 eval_synoptic_macro_cloud_grad(vec2 worldXY, float anim_time, float humidity, float fw, out vec2 outGrad, out float outHighCirrus) {\n" \
 	"    return eval_synoptic_macro_cloud_core(worldXY, anim_time, humidity, fw, true, outGrad, outHighCirrus);\n" \
 	"}\n" \
@@ -239,29 +272,8 @@
 	"    return eval_synoptic_macro_cloud_fw(worldXY, anim_time, humidity, 12000.0);\n" \
 	"}\n" \
 	"bool eval_synoptic_is_clear_sky(vec2 worldXY, float anim_time, float humidity, float fw) {\n" \
-	"    const vec2 prevDir = vec2(0.741, -0.671);\n" \
-	"    const vec2 prevPerp = vec2(0.671, 0.741);\n" \
-	"    float tFlow = mod(anim_time * 0.005, 1024.0);\n" \
-	"    vec3 psi0 = chaff_grad_noise2d(worldXY * 0.00000042 - prevDir * (tFlow * 0.40), 0x4359434Cu);\n" \
-	"    vec3 psi1 = chaff_grad_noise2d(worldXY * 0.00000180 + vec2(-psi0.z, psi0.y) * 0.30 - prevDir * tFlow, 0x5354524Du);\n" \
-	"    vec2 synWarp = vec2(-psi0.z, psi0.y) * 260000.0 + vec2(-psi1.z, psi1.y) * 68000.0;\n" \
-	"    vec2 pDisp = worldXY + synWarp;\n" \
-	"    vec2 pZonal = prevDir * (dot(pDisp, prevDir) * 0.65) + prevPerp * (dot(pDisp, prevPerp) * 1.55);\n" \
-	"    float phase0 = mod(anim_time * 0.004, 1024.0);\n" \
-	"    float phase1 = mod(anim_time * 0.008, 1024.0);\n" \
-	"    vec3 oct0 = chaff_grad_noise2d(pZonal * 0.00000050 - prevDir * phase0, 0x434C4430u);\n" \
-	"    const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);\n" \
-	"    float wOct1 = smoothstep(0.32, 0.08, 0.00000240 * fw);\n" \
-	"    vec3 oct1 = (wOct1 > 0.001) ? chaff_grad_noise2d((rot * pZonal) * 0.00000240 - prevDir * phase1, 0x434C4431u) : vec3(0.5, 0.0, 0.0);\n" \
-	"    float r0 = 1.0 - 2.0 * abs(oct0.x - 0.5);\n" \
-	"    float r1 = 1.0 - 2.0 * abs(oct1.x - 0.5);\n" \
-	"    float front0 = oct0.x + (r0 - 0.68) * 0.28;\n" \
-	"    float front1 = oct1.x + (r1 - 0.68) * 0.24;\n" \
-	"    float synFront = 0.50 + (front0 - 0.50) * 0.72 + (front1 - 0.50) * (0.54 * wOct1) + (psi0.x - 0.50) * 0.34;\n" \
-	"    float wReg2 = smoothstep(0.26, 0.07, 0.00001150 * fw);\n" \
-	"    float wReg3 = smoothstep(0.24, 0.06, 0.00005500 * fw);\n" \
-	"    float maxFront = synFront + 0.116 * wReg2 + 0.070 * wReg3 + 0.055;\n" \
-	"    return (maxFront <= (0.555 - 0.105 * humidity)) && ((synFront + 0.173) <= (0.56 - 0.08 * humidity));\n" \
+	"    vec4 synC; vec2 pD; vec2 pZ; vec2 baseG;\n" \
+	"    return eval_synoptic_carrier(worldXY, anim_time, humidity, fw, synC, pD, pZ, baseG);\n" \
 	"}\n"
 
 /* Macro low-zoom grid: 16x16 quads = 17x17 vertices = 289 vertices (512 triangles, 4x lighter than 32x32) */
@@ -3525,6 +3537,8 @@ static const char *s_fs_cloud =
 	"in vec3 vTangentV;\n"
 	"uniform isampler2D uHeightTex;\n"
 	"uniform sampler2D uSubstrateTex;\n"
+	"uniform sampler2D uSceneDepth;\n"
+	"uniform vec2 uViewport;\n"
 	"uniform vec2 uChunkSpan;\n"
 	"uniform vec2 uTorusRadii;\n"
 	"uniform float uSeaLevel;\n"
@@ -3571,6 +3585,7 @@ static const char *s_fs_cloud =
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
 	ND_GLSL_SYNOPTIC_CLOUD_FN
+	ND_GLSL_CSM_LOOKUP_FN
 	ND_GLSL_TORUS_ECLIPSE_FN
 	"vec4 eval_recursive_wind(vec2 worldPos, float anim_time) {\n"
 	"    return chaff_eval_flow_2d(worldPos, anim_time);\n"
@@ -3611,7 +3626,8 @@ static const char *s_fs_cloud =
 	" *   Deck 2 (Altocumulus Shelf, h in [0.35, 0.64]) : cross-wind-displaced baroclinic bands + only the deepest convective cores\n"
 	" *   Deck 3 (Anvil / Cirrus, h in [0.72, 1.00])   : downwind anvil plumes (coarse macro sampled 38 km upwind) + jet-stream cirrus\n"
 	" * Returns vec4(density, gradX, gradY, gradZ). */\n"
-	"vec4 eval_zoom_cloud_density_grad(vec3 worldPos, float anim_time, float humidity, float dist, float fw, vec4 synFlow, vec4 sfcFlow) {\n"
+	"vec4 eval_zoom_cloud_density_grad(vec3 worldPos, float anim_time, float humidity, float dist, float fw, vec4 synFlow, vec4 sfcFlow,\n"
+	"                                  vec4 synCarrier, vec2 pZonalBase, vec2 baseMacroGrad) {\n"
 	"    float z = worldPos.z;\n"
 	"    const float zBase = 420.0;\n"
 	"    const float zTop  = 2820.0;\n"
@@ -3633,7 +3649,11 @@ static const char *s_fs_cloud =
 	"    float synFw = upperDeck ? max(fw, 4000.0) : fw;\n"
 	"    vec2 macroGrad = vec2(0.0);\n"
 	"    float highCirrus = 0.0;\n"
-	"    vec4 synCloud = eval_synoptic_macro_cloud_core(synQueryXY, anim_time, humidity, synFw, upperDeck, macroGrad, highCirrus);\n"
+	"    /* Reuse pixel's precomputed synoptic Rossby streamfunction (psi0, psi1, oct0, oct1) across all lower/mid steps;\n"
+	"     * only re-evaluate the 600..2800 km carrier for Deck 3 when shifted 14 km upwind at close/regional zoom */\n"
+	"    vec4 synCloud = (upperDeck && dist < 80000.0)\n"
+	"        ? eval_synoptic_macro_cloud_core(synQueryXY, anim_time, humidity, synFw, true, macroGrad, highCirrus)\n"
+	"        : eval_synoptic_macro_cloud_from_carrier(synQueryXY, anim_time, humidity, synFw, upperDeck, synCarrier, pZonalBase, baseMacroGrad, macroGrad, highCirrus);\n"
 	"    float macroCoverage = synCloud.x;\n"
 	"    if (macroCoverage <= 0.008 && (!upperDeck || highCirrus <= 0.015)) return vec4(0.0);\n"
 	"    float coreStrength = smoothstep(0.06, 0.75, macroCoverage);\n"
@@ -3734,6 +3754,12 @@ static const char *s_fs_cloud =
 	"    return vec4(dens, gradAcc * vProf);\n"
 	"}\n"
 	"void main() {\n"
+	"    /* Exact scene depth occlusion when rendering into the half-res offscreen cloud buffer:\n"
+	"     * Rejects cloud fragments occluded behind the solid front torus ring or high mountains BEFORE any noise! */\n"
+	"    if (uViewport.x > 0.0) {\n"
+	"        float sceneZ = texture(uSceneDepth, gl_FragCoord.xy / uViewport).r;\n"
+	"        if (gl_FragCoord.z > sceneZ) discard;\n"
+	"    }\n"
 	"    /* True 3D Curved-Torus Volumetric Cloud Projection:\n"
 	"     * Each screen pixel reconstructs its 3D camera ray through the 3 concentric tropospheric cloud decks\n"
 	"     * z in [zBase, zTop] = [380, 980] above the curved torus (radius r0 = 1,335,000), with zero\n"
@@ -3803,9 +3829,10 @@ static const char *s_fs_cloud =
 	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
 	"    float worldBioHumidity = clamp(texBioHumidity - eqEvapDry + midLatWet + subpolarWet, 0.06, 0.92);\n"
 	"    float bioHumidity = worldBioHumidity;\n"
-	"    /* Fast synoptic clear-sky early-out: bails out in 3..4 2D noises over anticyclonic clear-sky basins (~65% of planet)\n"
-	"     * before evaluating the 5-noise wind column or the 4 raymarching steps! */\n"
-	"    if (eval_synoptic_is_clear_sky(entryWorldPos, uAnimTime, bioHumidity, fw)) discard;\n"
+	"    /* Fast synoptic carrier evaluation & clear-sky early-out: computes the 2D planetary Rossby carrier ONCE per pixel\n"
+	"     * and bails out in 3..4 2D noises over anticyclonic clear-sky basins (~65% of planet) before wind or raymarching! */\n"
+	"    vec4 synCarrier; vec2 pDispBase; vec2 pZonalBase; vec2 baseMacroGrad;\n"
+	"    if (eval_synoptic_carrier(entryWorldPos, uAnimTime, bioHumidity, fw, synCarrier, pDispBase, pZonalBase, baseMacroGrad)) discard;\n"
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float orbitLight = smoothstep(24000.0, 220000.0, uCamDist);\n"
 	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
@@ -3874,14 +3901,22 @@ static const char *s_fs_cloud =
 	"        float stepClear = smoothstep(terrZ - 24.0, terrZ + 110.0, z);\n"
 	"        rayGroundVis *= smoothstep(terrZ - 36.0, terrZ + 28.0, z);\n"
 	"        if (stepClear * rayGroundVis <= 0.002) continue;\n"
-	"        vec4 cloudSample = eval_zoom_cloud_density_grad(vec3(sampleXY, z), uAnimTime, bioHumidity, uCamDist, fw, windSyn, windSfc);\n"
+	"        vec4 cloudSample = eval_zoom_cloud_density_grad(vec3(sampleXY, z), uAnimTime, bioHumidity, uCamDist, fw, windSyn, windSfc,\n"
+	"                                                        synCarrier, pZonalBase, baseMacroGrad);\n"
 	"        float dens = cloudSample.x * camClearRamp * stepClear * rayGroundVis;\n"
 	"        if (dens > 0.002) {\n"
 	"            vec3 grad = cloudSample.yzw;\n"
-	"            /* Scale-adaptive 3D sunward shadow probe (lazy) & analytical directional derivative along sun vector */\n"
+	"            /* Scale-adaptive 3D sunward shadow probe (lazy): uses 1-tap uCloudShadowMap when valid, else synoptic fallback */\n"
 	"            if (!towerReady) {\n"
-	"                vec4 sunTowerCloud = eval_synoptic_macro_cloud_fw(entryWorldPos + sunHoriz * sunStepDist, uAnimTime, bioHumidity, max(fw * 1.5, 400.0));\n"
-	"                baseTowerOcc = smoothstep(0.10, 0.72, sunTowerCloud.x);\n"
+	"                vec2 probeXY = entryWorldPos + sunHoriz * sunStepDist;\n"
+	"                float probeDens = 0.0;\n"
+	"                if (uCsm.z > 0.0 && max(abs(probeXY.x - uCsm.x), abs(probeXY.y - uCsm.y)) < uCsm.z * 0.90) {\n"
+	"                    probeDens = nd_csm_density(probeXY);\n"
+	"                } else {\n"
+	"                    vec4 sunTowerCloud = eval_synoptic_macro_cloud_fw(probeXY, uAnimTime, bioHumidity, max(fw * 1.5, 400.0));\n"
+	"                    probeDens = sunTowerCloud.x;\n"
+	"                }\n"
+	"                baseTowerOcc = smoothstep(0.10, 0.72, probeDens);\n"
 	"                towerReady = true;\n"
 	"            }\n"
 	"            float towerOcc = baseTowerOcc * (1.0 - 0.55 * hFrac);\n"
@@ -3943,7 +3978,19 @@ static const char *s_fs_cloud =
 	"    cloudRgb = mix(cloudRgb, vec3(0.45, 0.72, 0.98), limb * 0.42 * uAtmoIntensity);\n"
 	"    float fogFactor = clamp((vDistance - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    vec3 finalCloudRgb = mix(cloudRgb, sky, fogFactor * uAtmoIntensity);\n"
-	"    FragColor = vec4(finalCloudRgb, cloudAlpha);\n"
+	"    FragColor = vec4((uViewport.x > 0.0) ? (finalCloudRgb * cloudAlpha) : finalCloudRgb, cloudAlpha);\n"
+	"}\n";
+
+static const char *s_fs_cloud_comp =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 vUv;\n"
+	"uniform sampler2D uCloudTex;\n"
+	"out vec4 FragColor;\n"
+	"void main() {\n"
+	"    vec4 c = texture(uCloudTex, vUv);\n"
+	"    if (c.a <= 0.002) discard;\n"
+	"    FragColor = c;\n"
 	"}\n";
 
 const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
@@ -5249,8 +5296,17 @@ typedef struct {
 	GLint uCamDist;
 	GLint uCloudDeck;
 	GLint uSunDir;
+	GLint uCloudShadowMap;
+	GLint uCsm;
+	GLint uSceneDepth;
+	GLint uViewport;
 	GLint aGridUV;
 } gl_cloud_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLint uCloudTex;
+} gl_cloud_comp_pipe_t;
 
 typedef struct {
 	GLuint prog;
@@ -5292,6 +5348,7 @@ static struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_cloud_pipe_t cloud_pipe;
+	gl_cloud_comp_pipe_t cloud_comp_pipe;
 	gl_csm_pipe_t csm_pipe;
 	GLuint csm_tex;
 	GLuint csm_fbo;
@@ -5312,6 +5369,10 @@ static struct {
 	GLuint res_fbo;
 	GLuint res_color_tex;
 	GLuint res_depth_tex;
+	GLuint cloud_fbo;
+	GLuint cloud_tex;
+	uint32_t cloud_w;
+	uint32_t cloud_h;
 	uint32_t scene_w;
 	uint32_t scene_h;
 	int scene_samples;
@@ -5467,11 +5528,12 @@ static void init_grid_buffers(void)
 
 static void init_pipelines(void)
 {
-	s_gl.terrain_pipe.prog = create_program_async(s_vs_terrain, s_fs_terrain);
-	s_gl.water_pipe.prog   = create_program_async(s_vs_water, s_fs_water);
-	s_gl.bb_pipe.prog      = create_program_async(s_vs_billboard, s_fs_billboard);
-	s_gl.cloud_pipe.prog   = create_program_async(s_vs_cloud, s_fs_cloud);
-	s_gl.csm_pipe.prog     = create_program_async(s_vs_csm, s_fs_csm);
+	s_gl.terrain_pipe.prog    = create_program_async(s_vs_terrain, s_fs_terrain);
+	s_gl.water_pipe.prog      = create_program_async(s_vs_water, s_fs_water);
+	s_gl.bb_pipe.prog         = create_program_async(s_vs_billboard, s_fs_billboard);
+	s_gl.cloud_pipe.prog      = create_program_async(s_vs_cloud, s_fs_cloud);
+	s_gl.cloud_comp_pipe.prog = create_program_async(s_vs_csm, s_fs_cloud_comp);
+	s_gl.csm_pipe.prog        = create_program_async(s_vs_csm, s_fs_csm);
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
@@ -5491,6 +5553,8 @@ static bool check_pipelines_ready(void)
 	if (s_gl.bb_pipe.prog && !glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.cloud_pipe.prog && !glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.cloud_comp_pipe.prog && !glGetProgramParameter(s_gl.cloud_comp_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.csm_pipe.prog && !glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
@@ -5643,7 +5707,22 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
 			s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
 			s_gl.cloud_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.cloud_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.cloud_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.cloud_pipe.uSceneDepth     = glGetUniformLocation(p, "uSceneDepth", 11);
+			s_gl.cloud_pipe.uViewport       = glGetUniformLocation(p, "uViewport", 9);
 			s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+		}
+	}
+
+	/* Cloud composite pipeline */
+	if (s_gl.cloud_comp_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.cloud_comp_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.cloud_comp_pipe.prog);
+			s_gl.cloud_comp_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.cloud_comp_pipe.prog;
+			s_gl.cloud_comp_pipe.uCloudTex = glGetUniformLocation(p, "uCloudTex", 9);
 		}
 	}
 
@@ -5719,10 +5798,10 @@ float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
 
 bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_window_t *out)
 {
-	if (!out || dist > 14000.0f) return false;
+	if (!out || dist > 180000.0f) return false;
 	float need = 4.5f * dist + 2000.0f;
 	float half = 4096.0f;
-	while (half < need && half < 65536.0f) half *= 2.0f;
+	while (half < need && half < 1048576.0f) half *= 2.0f;
 	float texel = (2.0f * half) / (float)ND_CSM_RES;
 	out->half = half;
 	out->cx = floorf(tx / texel + 0.5f) * texel;
@@ -5735,13 +5814,16 @@ static void gl_free_scene_targets(void)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	if (s_gl.scene_fbo) glDeleteFramebuffer(s_gl.scene_fbo);
 	if (s_gl.res_fbo) glDeleteFramebuffer(s_gl.res_fbo);
+	if (s_gl.cloud_fbo) glDeleteFramebuffer(s_gl.cloud_fbo);
 	if (s_gl.scene_rb_color) glDeleteRenderbuffer(s_gl.scene_rb_color);
 	if (s_gl.scene_rb_depth) glDeleteRenderbuffer(s_gl.scene_rb_depth);
 	if (s_gl.res_color_tex) glDeleteTexture(s_gl.res_color_tex);
 	if (s_gl.res_depth_tex) glDeleteTexture(s_gl.res_depth_tex);
-	s_gl.scene_fbo = s_gl.res_fbo = 0;
+	if (s_gl.cloud_tex) glDeleteTexture(s_gl.cloud_tex);
+	s_gl.scene_fbo = s_gl.res_fbo = s_gl.cloud_fbo = 0;
 	s_gl.scene_rb_color = s_gl.scene_rb_depth = 0;
-	s_gl.res_color_tex = s_gl.res_depth_tex = 0;
+	s_gl.res_color_tex = s_gl.res_depth_tex = s_gl.cloud_tex = 0;
+	s_gl.cloud_w = s_gl.cloud_h = 0;
 	s_gl.scene_ok = false;
 }
 
@@ -5780,7 +5862,25 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.res_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.res_color_tex, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_gl.res_depth_tex, 0);
-	return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
+
+	/* Half-resolution single-sampled cloud buffer (4x fewer cloud raymarch pixels + zero MSAA blend bandwidth) */
+	uint32_t cw = (w > 1) ? (w / 2) : 1;
+	uint32_t ch = (h > 1) ? (h / 2) : 1;
+	s_gl.cloud_tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)cw, (GLsizei)ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	s_gl.cloud_fbo = glCreateFramebuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.cloud_tex, 0);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
+	s_gl.cloud_w = cw;
+	s_gl.cloud_h = ch;
+	return true;
 }
 
 /* (Re)create the scene targets for the stage size; falls back to single-sampled, then to the canvas itself. */
@@ -6210,18 +6310,20 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 	if (!ar_frustum_test_box(&s_gl.cur_frustum, bmin[0], bmin[1], bmin[2], bmax[0], bmax[1], bmax[2]))
 		return false;
 
-	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks */
-	if (span_w <= 65536 && span_h <= 65536) {
+	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks up to 262,144 wu */
+	if (span_w <= 262144 && span_h <= 262144) {
 		float pad = 2400.0f;
 		float x0 = (float)ox - pad;
 		float y0 = (float)oy - pad;
 		float w_pad = (float)span_w + 2.0f * pad;
 		float h_pad = (float)span_h + 2.0f * pad;
+		int steps = (span_w > 65536 || span_h > 65536) ? 3 : 2;
+		float inv_steps = 1.0f / (float)steps;
 		bool all_clear = true;
-		for (int gy = 0; gy <= 2 && all_clear; gy++) {
-			float wy = y0 + (0.5f * (float)gy) * h_pad;
-			for (int gx = 0; gx <= 2; gx++) {
-				float wx = x0 + (0.5f * (float)gx) * w_pad;
+		for (int gy = 0; gy <= steps && all_clear; gy++) {
+			float wy = y0 + ((float)gy * inv_steps) * h_pad;
+			for (int gx = 0; gx <= steps; gx++) {
+				float wx = x0 + ((float)gx * inv_steps) * w_pad;
 				if (!gl_eval_synoptic_is_clear_sky_cpu(wx, wy, s_gl.cur_anim_time)) {
 					all_clear = false;
 					break;
@@ -6590,16 +6692,40 @@ void nd_seven_gl_flush_clouds(void)
 		return;
 	}
 
-	glUseProgram(s_gl.cloud_pipe.prog);
+	bool half_res = (s_gl.scene_ok && s_gl.cloud_fbo != 0 && s_gl.cloud_comp_pipe.prog != 0);
+	if (half_res) {
+		gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
+		glViewport(0, 0, (GLsizei)s_gl.cloud_w, (GLsizei)s_gl.cloud_h);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	} else {
+		/* Keep hardware depth test (GL_LEQUAL) enabled so the solid front ring of the torus
+		 * properly occludes cloud shells on the far side of the torus at orbital min-zoom! */
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+	}
 
-	/* Keep hardware depth test (GL_LEQUAL) enabled so the solid front ring of the torus
-	 * properly occludes cloud shells on the far side of the torus at orbital min-zoom! */
-	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_LEQUAL);
-	glDepthMask(GL_FALSE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+	glUseProgram(s_gl.cloud_pipe.prog);
+	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap, s_gl.cloud_pipe.uCsm);
+	if (half_res) {
+		glActiveTexture(GL_TEXTURE0 + 5);
+		glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
+		glUniform1i(s_gl.cloud_pipe.uSceneDepth, 5);
+		glActiveTexture(GL_TEXTURE0);
+		glUniform2f(s_gl.cloud_pipe.uViewport, (float)s_gl.cloud_w, (float)s_gl.cloud_h);
+	} else {
+		glUniform2f(s_gl.cloud_pipe.uViewport, 0.0f, 0.0f);
+	}
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
 	glUniformMatrix4fv(s_gl.cloud_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
@@ -6671,10 +6797,21 @@ void nd_seven_gl_flush_clouds(void)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_TRUE);
-	s_gl.cloud_count = 0;
+	if (half_res) {
+		gl_bind_scene_target();
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+		glUseProgram(s_gl.cloud_comp_pipe.prog);
+		glActiveTexture(GL_TEXTURE0 + 6);
+		glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
+		glUniform1i(s_gl.cloud_comp_pipe.uCloudTex, 6);
+		glActiveTexture(GL_TEXTURE0);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glEnable(GL_DEPTH_TEST);

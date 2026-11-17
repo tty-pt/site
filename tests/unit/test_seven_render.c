@@ -2683,14 +2683,15 @@ int main(void)
 		}
 
 		/* 4c. Cloud-shadow map window: power-of-two half-extent, texel-snapped centre (no shimmer when panning),
-		 * full coverage of the visible ground plus the sun-ward slice shift, none above 14 km (analytic path). */
+		 * full coverage of the visible ground plus the sun-ward slice shift up to 180 km (analytic path above). */
 		{
 			nd_seven_gl_csm_window_t w;
 			assert(nd_seven_gl_csm_window(400.0f, 123456.0f, 654321.0f, &w) && w.half == 4096.0f);
 			assert(nd_seven_gl_csm_window(3000.0f, 0.0f, 0.0f, &w) && w.half == 16384.0f);
 			assert(nd_seven_gl_csm_window(14000.0f, 0.0f, 0.0f, &w) && w.half == 65536.0f);
-			assert(!nd_seven_gl_csm_window(14001.0f, 0.0f, 0.0f, &w));
-			for (float d = 160.0f; d <= 14000.0f; d *= 1.3f) {
+			assert(nd_seven_gl_csm_window(180000.0f, 0.0f, 0.0f, &w) && w.half == 1048576.0f);
+			assert(!nd_seven_gl_csm_window(180001.0f, 0.0f, 0.0f, &w));
+			for (float d = 160.0f; d <= 180000.0f; d *= 1.3f) {
 				assert(nd_seven_gl_csm_window(d, 5000.0f, 5000.0f, &w));
 				assert(w.half >= 4.5f * d + 1100.0f);
 				assert(w.half <= 2.0f * (4.5f * d + 2000.0f) || w.half == 4096.0f);
@@ -3315,6 +3316,10 @@ int main(void)
 		assert(strstr(fs_c, "synQueryXY") != NULL);
 		assert(strstr(fs_c, "maxFront") != NULL);
 		assert(strstr(fs_c, "eval_synoptic_macro_cloud_core") != NULL);
+		assert(strstr(fs_c, "eval_synoptic_carrier") != NULL);
+		assert(strstr(fs_c, "eval_synoptic_macro_cloud_from_carrier") != NULL);
+		assert(strstr(fs_c, "nd_csm_density") != NULL);
+		assert(strstr(fs_c, "uSceneDepth") != NULL);
 		assert(strstr(fs_c, "hgPhase") != NULL);
 		assert(strstr(fs_c, "sEnter") != NULL);
 		assert(strstr(fs_c, "sExit") != NULL);
@@ -3848,6 +3853,26 @@ int main(void)
 			}
 			assert(syn_clear_culled > 50);
 			assert(syn_cloudy_kept > 50);
+
+			/* Also verify 262,144-span macro chunks are pre-culled when entirely inside a synoptic clear-sky corridor */
+			int macro_clear_culled = 0, macro_cloudy_kept = 0;
+			for (int gy = -2; gy <= 1; gy++) {
+				for (int gx = -2; gx <= 2; gx++) {
+					int32_t rx = gx * 262144;
+					int32_t ry = gy * 262144;
+					for (int ti = 0; ti < 8; ti++) {
+						nd_seven_gl_begin_frame(1280, 720, 80.0f, -64.0f, 0.0f, 450000.0f,
+						                        ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_FOV,
+						                        (float)(ti * 18000), p1);
+						if (nd_seven_gl_should_queue_cloud_chunk(rx, ry, 262144, 262144, p1))
+							macro_cloudy_kept++;
+						else
+							macro_clear_culled++;
+					}
+				}
+			}
+			assert(macro_clear_culled > 5);
+			assert(macro_cloudy_kept > 10);
 
 			/* 13c. Companion Planet (alt_world) Ground Horizon & Solid-Body Torus Eclipse Occlusion */
 			nd_seven_set_zoom(1.0f);
