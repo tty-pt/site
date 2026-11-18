@@ -409,6 +409,27 @@ int  nd_seven_gl_add_spot_light(float wx, float wy, float wz,
 uint32_t nd_seven_gl_get_active_light_count(void);
 uint32_t nd_seven_gl_get_active_cluster_count(void);
 
+/* =========================================================================
+ * GPU-Driven Hi-Z Culling & Multi-Draw Indirect Batching
+ * ========================================================================= */
+#define ND_HIZ_MIP_LEVELS     6
+#define ND_GPU_INDIRECT_MAX   512
+
+/* Indirect indexed draw command descriptor (matches DrawElementsIndirectCommand) */
+typedef struct {
+	uint32_t count;
+	uint32_t instance_count;
+	uint32_t first_index;
+	int32_t  base_vertex;
+	uint32_t base_instance;
+} nd_gpu_draw_elements_indirect_cmd_t;
+
+/* Query GPU-driven culling and indirect batching state */
+bool     nd_seven_gl_is_gpu_hiz_active(void);
+int      nd_seven_gl_get_hiz_mip_levels(void);
+uint32_t nd_seven_gl_get_indirect_draw_count(void);
+const char *nd_seven_gl_vs_billboard(void);
+
 #ifdef __cplusplus
 }
 #endif

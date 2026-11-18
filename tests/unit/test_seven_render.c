@@ -4092,12 +4092,21 @@ int main(void)
 				int sp_id = nd_seven_gl_add_spot_light(120.0f, -80.0f, 480.0f, 0.0f, 0.0f, 1.0f, 0.4f, 0.8f, 1.0f, 2.5f, 1500.0f, 35.0f, 4.0f);
 				assert(pt_id >= 0 && sp_id > pt_id);
 				nd_seven_gl_flush_clouds();
+
+				/* 6) Verify GPU-Driven Hi-Z Occlusion Culling & Multi-Draw Indirect Batching */
+				assert(strstr(nd_seven_gl_vs_billboard(), "uHiZTex") != NULL);
+				assert(strstr(nd_seven_gl_vs_billboard(), "uHiZActive") != NULL);
+				assert(strstr(nd_seven_gl_vs_billboard(), "maxOccZ") != NULL);
+				assert(nd_seven_gl_get_hiz_mip_levels() == ND_HIZ_MIP_LEVELS);
+				assert(nd_seven_gl_is_gpu_hiz_active() == true);
+				assert(nd_seven_gl_get_indirect_draw_count() > 0);
 			}
 
 			nd_seven_set_zoom(1.0f);
-			printf("PASS: 3D occlusion & culling verified (orb_leaves=%u, back_leaves=%d, back_clouds=%d, front_clouds=%d, syn_culled=%d/%d, front_to_back=%u)\n",
+			printf("PASS: 3D occlusion & culling verified (orb_leaves=%u, back_leaves=%d, back_clouds=%d, front_clouds=%d, syn_culled=%d/%d, front_to_back=%u, hiz_mips=%d, indirect_draws=%u)\n",
 			       orb_leaves, back_hemisphere_leaves, back_clouds_queued, front_clouds_queued,
-			       syn_clear_culled, syn_clear_culled + syn_cloudy_kept, mid_leaves);
+			       syn_clear_culled, syn_clear_culled + syn_cloudy_kept, mid_leaves,
+			       nd_seven_gl_get_hiz_mip_levels(), nd_seven_gl_get_indirect_draw_count());
 		}
 	}
 

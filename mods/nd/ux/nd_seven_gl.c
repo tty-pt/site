@@ -2677,6 +2677,7 @@ static const char *s_fs_water =
 static const char *s_vs_billboard =
 	"#version 300 es\n"
 	"precision highp float;\n"
+	"precision highp sampler2D;\n"
 	"layout (location = 0) in vec4 a_pos0;\n"
 	"layout (location = 1) in vec4 a_pos1;\n"
 	"layout (location = 2) in vec4 a_pos2;\n"
@@ -2686,6 +2687,8 @@ static const char *s_vs_billboard =
 	"layout (location = 6) in vec4 a_param;\n"
 	"uniform mat4 uMVP;\n"
 	"uniform vec3 uCameraPos;\n"
+	"uniform sampler2D uHiZTex;\n"
+	"uniform float uHiZActive;\n"
 	"out vec2 vUV;\n"
 	"out vec4 vTint;\n"
 	"out vec3 vWorldPos;\n"
@@ -2706,6 +2709,44 @@ static const char *s_vs_billboard =
 	"    vLocalPos = a_local_pos;\n"
 	"    vQuadUV = a_quad_uv;\n"
 	"    vSpriteBounds = a_sprite_bounds;\n"
+	"    /* GPU-Driven Hi-Z Occlusion Culling: project all 4 quad corners and test against hierarchical depth */\n"
+	"    if (uHiZActive > 0.5) {\n"
+	"        vec3 cCenter = 0.25 * (a_pos0.xyz + a_pos1.xyz + a_pos2.xyz + a_pos3.xyz);\n"
+	"        vec3 toCamC = uCameraPos - cCenter;\n"
+	"        float dCamC = length(toCamC);\n"
+	"        vec3 dirC = (dCamC > 0.001) ? (toCamC / dCamC) : vec3(0.0, 0.0, 1.0);\n"
+	"        float biasC = (a_param.w < -0.5) ? min(10.0, dCamC * 0.035) : min(24.0, dCamC * 0.08);\n"
+	"        vec3 bOff = dirC * biasC;\n"
+	"        vec4 c0 = uMVP * vec4(a_pos0.xyz + bOff, 1.0);\n"
+	"        vec4 c1 = uMVP * vec4(a_pos1.xyz + bOff, 1.0);\n"
+	"        vec4 c2 = uMVP * vec4(a_pos2.xyz + bOff, 1.0);\n"
+	"        vec4 c3 = uMVP * vec4(a_pos3.xyz + bOff, 1.0);\n"
+	"        if (min(min(c0.w, c1.w), min(c2.w, c3.w)) > 0.1) {\n"
+	"            vec3 n0 = c0.xyz / c0.w;\n"
+	"            vec3 n1 = c1.xyz / c1.w;\n"
+	"            vec3 n2 = c2.xyz / c2.w;\n"
+	"            vec3 n3 = c3.xyz / c3.w;\n"
+	"            vec2 minXY = min(min(n0.xy, n1.xy), min(n2.xy, n3.xy));\n"
+	"            vec2 maxXY = max(max(n0.xy, n1.xy), max(n2.xy, n3.xy));\n"
+	"            float minZ = min(min(n0.z, n1.z), min(n2.z, n3.z)) * 0.5 + 0.5;\n"
+	"            if (maxXY.x < -1.0 || minXY.x > 1.0 || maxXY.y < -1.0 || minXY.y > 1.0) {\n"
+	"                gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"                return;\n"
+	"            }\n"
+	"            vec2 uv0 = clamp(minXY * 0.5 + 0.5, 0.0, 1.0);\n"
+	"            vec2 uv1 = clamp(maxXY * 0.5 + 0.5, 0.0, 1.0);\n"
+	"            float h00 = texture(uHiZTex, vec2(uv0.x, uv0.y)).r;\n"
+	"            float h10 = texture(uHiZTex, vec2(uv1.x, uv0.y)).r;\n"
+	"            float h01 = texture(uHiZTex, vec2(uv0.x, uv1.y)).r;\n"
+	"            float h11 = texture(uHiZTex, vec2(uv1.x, uv1.y)).r;\n"
+	"            float hMid = texture(uHiZTex, 0.5 * (uv0 + uv1)).r;\n"
+	"            float maxOccZ = max(hMid, max(max(h00, h10), max(h01, h11)));\n"
+	"            if (minZ > maxOccZ + 0.0025) {\n"
+	"                gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"                return;\n"
+	"            }\n"
+	"        }\n"
+	"    }\n"
 	"    vec3 toCam = uCameraPos - p.xyz;\n"
 	"    float dCam = length(toCam);\n"
 	"    vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
@@ -3892,30 +3933,21 @@ static const char *s_fs_cloud_comp =
 
 
 /* Hi-Z Buffer Downsample Shader (builds hierarchical depth pyramid) */
-static const char *s_vs_hiz =
-		"#version 300 es\n"
-		"precision highp float;\n"
-		"layout (location = 0) in vec2 a_pos;\n"
-		"out vec2 vUv;\n"
-		"void main() {\n"
-		"    vUv = a_pos * 0.5 + 0.5;\n"
-		"    gl_Position = vec4(a_pos, 0.0, 1.0);\n"
-		"}\n";
 static const char *s_fs_hiz_downsample =
 	"#version 300 es\n"
 	"precision highp float;\n"
 	"in vec2 vUv;\n"
 	"uniform sampler2D uDepthTex;\n"
-	"uniform float uTexelSize;\n"
-	"out float FragDepth;\n"
+	"uniform vec2 uTexelSize;\n"
+	"out vec4 FragColor;\n"
 	"void main() {\n"
-	"    /* 2x2 box filter: compute MIN depth (nearest) over 4 texels */\n"
-	"    vec2 texel = uTexelSize * vec2(1.0, 1.0);\n"
-	"    float d00 = texture(uDepthTex, vUv - texel * 0.5).r;\n"
-	"    float d10 = texture(uDepthTex, vUv + texel * vec2(0.5, -0.5)).r;\n"
-	"    float d01 = texture(uDepthTex, vUv + texel * vec2(-0.5, 0.5)).r;\n"
-	"    float d11 = texture(uDepthTex, vUv + texel * 0.5).r;\n"
-	"    FragDepth = min(min(d00, d10), min(d01, d11));\n"
+	"    /* 2x2 box filter: compute MAX depth (farthest occluder in tile) for conservative Hi-Z occlusion */\n"
+	"    float d00 = texture(uDepthTex, vUv + uTexelSize * vec2(-0.5, -0.5)).r;\n"
+	"    float d10 = texture(uDepthTex, vUv + uTexelSize * vec2( 0.5, -0.5)).r;\n"
+	"    float d01 = texture(uDepthTex, vUv + uTexelSize * vec2(-0.5,  0.5)).r;\n"
+	"    float d11 = texture(uDepthTex, vUv + uTexelSize * vec2( 0.5,  0.5)).r;\n"
+	"    float maxD = max(max(d00, d10), max(d01, d11));\n"
+	"    FragColor = vec4(maxD, maxD, maxD, 1.0);\n"
 	"}\n";
 const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
 const char *nd_seven_gl_fs_csm(void) { return s_fs_csm; }
@@ -5268,6 +5300,8 @@ typedef struct {
 	GLint uCloudShadowMap;
 	GLint uCsm;
 	GLint uPass;
+	GLint uHiZTex;
+	GLint uHiZActive;
 	GLint aPos;
 	GLint aUV;
 	GLint aTint;
@@ -5492,18 +5526,25 @@ static struct {
 	float cur_wake_last_t;
 	nd_planet_def_t cur_pdef;
 
-/* Hi-Z Buffer (hierarchical depth pyramid for occlusion culling) */
-#define ND_HIZ_MAX_LEVELS 6
-GLuint hiz_fbo;
-GLuint hiz_tex;
-GLuint hiz_depth_tex;
-uint32_t hiz_w;
-uint32_t hiz_h;
-int hiz_levels;
-bool hiz_valid;
-bool hiz_failed;
-float hiz_readback[ND_HIZ_MAX_LEVELS][16][16]; /* CPU cache of min depth per level */
+	/* Hi-Z Buffer (hierarchical depth pyramid for GPU-driven occlusion culling) */
+	#define ND_HIZ_MAX_LEVELS 6
+	GLuint hiz_fbo;
+	GLuint hiz_tex;
+	GLuint hiz_depth_tex;
+	GLuint hiz_mip_tex[ND_HIZ_MAX_LEVELS];
+	GLuint hiz_mip_fbo[ND_HIZ_MAX_LEVELS];
+	uint32_t hiz_w;
+	uint32_t hiz_h;
+	int hiz_levels;
+	bool hiz_valid;
+	bool hiz_failed;
+	bool gpu_hiz_built;
+	float hiz_readback[ND_HIZ_MAX_LEVELS][16][16]; /* CPU cache of depth per level */
 	GLuint hiz_downsample_prog;
+
+	/* GPU Indirect Draw Command Buffer & Stats */
+	nd_gpu_draw_elements_indirect_cmd_t indirect_cmds[ND_GPU_INDIRECT_MAX];
+	uint32_t indirect_cmd_count;
 } s_gl;
 
 static GLuint compile_shader(GLenum type, const char *src)
@@ -5743,6 +5784,8 @@ static bool check_pipelines_ready(void)
 			s_gl.bb_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
 			s_gl.bb_pipe.uCsm           = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.bb_pipe.uPass          = glGetUniformLocation(p, "uPass", 5);
+			s_gl.bb_pipe.uHiZTex        = glGetUniformLocation(p, "uHiZTex", 7);
+			s_gl.bb_pipe.uHiZActive     = glGetUniformLocation(p, "uHiZActive", 10);
 			s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
 			s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
 			s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
@@ -5904,6 +5947,8 @@ static void gl_free_scene_targets(void)
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0 + 6);
 	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0 + 11);
+	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	if (s_gl.scene_fbo) glDeleteFramebuffer(s_gl.scene_fbo);
@@ -5915,11 +5960,16 @@ static void gl_free_scene_targets(void)
 	if (s_gl.res_color_tex) glDeleteTexture(s_gl.res_color_tex);
 	if (s_gl.res_depth_tex) glDeleteTexture(s_gl.res_depth_tex);
 	if (s_gl.cloud_tex) glDeleteTexture(s_gl.cloud_tex);
+	for (int i = 0; i < ND_HIZ_MAX_LEVELS; i++) {
+		if (s_gl.hiz_mip_fbo[i]) { glDeleteFramebuffer(s_gl.hiz_mip_fbo[i]); s_gl.hiz_mip_fbo[i] = 0; }
+		if (s_gl.hiz_mip_tex[i]) { glDeleteTexture(s_gl.hiz_mip_tex[i]); s_gl.hiz_mip_tex[i] = 0; }
+	}
 	s_gl.scene_fbo = s_gl.res_fbo = s_gl.cloud_fbo = 0;
 	s_gl.scene_rb_color = s_gl.scene_rb_depth = s_gl.cloud_depth_rb = 0;
 	s_gl.res_color_tex = s_gl.res_depth_tex = s_gl.cloud_tex = 0;
 	s_gl.cloud_w = s_gl.cloud_h = 0;
 	s_gl.scene_ok = false;
+	s_gl.gpu_hiz_built = false;
 }
 
 static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
@@ -5984,23 +6034,44 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	s_gl.cloud_w = cw;
 	s_gl.cloud_h = ch;
 
-	/* Hi-Z Buffer (hierarchical depth pyramid for occlusion culling) */
-	/* Alias the existing resolved depth texture - no separate texture needed */
+	/* Hi-Z Buffer (hierarchical depth pyramid for GPU-driven occlusion culling):
+	 * Level 0 = s_gl.res_depth_tex (full scene resolution).
+	 * Levels 1..ND_HIZ_MAX_LEVELS-1 = dedicated R8 color textures with 2x2 MAX-depth reduction. */
 	s_gl.hiz_w = w;
 	s_gl.hiz_h = h;
-	s_gl.hiz_levels = 1;
-	s_gl.hiz_valid = true;
-	s_gl.hiz_failed = false;
-
-	/* Alias the Hi-Z texture to the resolved depth texture */
 	s_gl.hiz_tex = s_gl.res_depth_tex;
 	s_gl.hiz_depth_tex = s_gl.res_depth_tex;
+	s_gl.hiz_mip_tex[0] = s_gl.res_depth_tex;
+	s_gl.hiz_mip_fbo[0] = 0;
+	int levels = 1;
+	for (int level = 1; level < ND_HIZ_MAX_LEVELS; level++) {
+		uint32_t lw = (w > (1u << level)) ? (w >> level) : 1u;
+		uint32_t lh = (h > (1u << level)) ? (h >> level) : 1u;
+		s_gl.hiz_mip_tex[level] = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, s_gl.hiz_mip_tex[level]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)lw, (GLsizei)lh, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+		s_gl.hiz_mip_fbo[level] = glCreateFramebuffer();
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.hiz_mip_fbo[level]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.hiz_mip_tex[level], 0);
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+			break;
+		levels = level + 1;
+	}
+	s_gl.hiz_levels = levels;
+	s_gl.hiz_valid = (levels > 1);
+	s_gl.hiz_failed = !s_gl.hiz_valid;
+	s_gl.gpu_hiz_built = false;
 
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	/* Create Hi-Z downsample program */
+	/* Create Hi-Z downsample program using full-screen triangle vertex shader s_vs_csm */
 	if (!s_gl.hiz_downsample_prog) {
-		s_gl.hiz_downsample_prog = create_program_async(s_vs_hiz, s_fs_hiz_downsample);
+		s_gl.hiz_downsample_prog = create_program_async(s_vs_csm, s_fs_hiz_downsample);
 	}
 	return true;
 }
@@ -6036,52 +6107,49 @@ static void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-/* Build Hi-Z depth pyramid: downsample resolved depth texture to mip levels 1..N-1.
+/* Build GPU Hi-Z depth pyramid: resolves terrain depth and downsamples to mip levels 1..N-1.
  * Returns true on success. */
 static inline bool gl_build_hiz_pyramid(void)
 {
-    if (!s_gl.hiz_valid || s_gl.hiz_levels <= 1) return true;
-    
-    GLuint prog = s_gl.hiz_downsample_prog;
-    if (!prog) return false;
-    
-    glUseProgram(prog);
-    glBindFramebuffer(GL_FRAMEBUFFER, s_gl.hiz_fbo);
-    glViewport(0, 0, (GLsizei)s_gl.hiz_w, (GLsizei)s_gl.hiz_h);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-    
-    GLint loc_tex = glGetUniformLocation(prog, "uDepthTex", 8);
-    GLint loc_ts = glGetUniformLocation(prog, "uTexelSize", 10);
-    
-    GLuint src_tex = s_gl.hiz_tex;  // Level 0 = resolved depth
-    
-    for (int level = 1; level < s_gl.hiz_levels; level++) {
-        uint32_t lw = (s_gl.hiz_w > (1u << level)) ? (s_gl.hiz_w >> level) : 1u;
-        uint32_t lh = (s_gl.hiz_h > (1u << level)) ? (s_gl.hiz_h >> level) : 1u;
-        
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 
-                              GL_TEXTURE_2D, s_gl.hiz_depth_tex, level);
-        
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            return false;
-        
-        glViewport(0, 0, (GLsizei)lw, (GLsizei)lh);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, src_tex);
-        glUniform1i(loc_tex, 0);
-        
-        float texel_size = 1.0f / (float)(lw << 1);  // Source level texel size
-        glUniform1f(loc_ts, texel_size);
-        
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        
-        src_tex = s_gl.hiz_depth_tex;  // Next level reads from this level
-    }
-    
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    return true;
+	if (!s_gl.scene_ok || !s_gl.hiz_valid || s_gl.hiz_levels <= 1) return false;
+	GLuint prog = s_gl.hiz_downsample_prog;
+	if (!prog) return false;
+
+	/* Resolve current terrain depth buffer into s_gl.res_depth_tex (level 0) */
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.res_fbo);
+	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
+	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
+	                  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+
+	glUseProgram(prog);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	GLint loc_tex = glGetUniformLocation(prog, "uDepthTex", 9);
+	GLint loc_ts  = glGetUniformLocation(prog, "uTexelSize", 10);
+
+	for (int level = 1; level < s_gl.hiz_levels; level++) {
+		uint32_t lw = (s_gl.hiz_w > (1u << level)) ? (s_gl.hiz_w >> level) : 1u;
+		uint32_t lh = (s_gl.hiz_h > (1u << level)) ? (s_gl.hiz_h >> level) : 1u;
+		uint32_t sw = (s_gl.hiz_w > (1u << (level - 1))) ? (s_gl.hiz_w >> (level - 1)) : 1u;
+		uint32_t sh = (s_gl.hiz_h > (1u << (level - 1))) ? (s_gl.hiz_h >> (level - 1)) : 1u;
+
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.hiz_mip_fbo[level]);
+		glViewport(0, 0, (GLsizei)lw, (GLsizei)lh);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, s_gl.hiz_mip_tex[level - 1]);
+		glUniform1i(loc_tex, 0);
+		glUniform2f(loc_ts, 1.0f / (float)sw, 1.0f / (float)sh);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+	}
+
+	s_gl.gpu_hiz_built = true;
+	glBindTexture(GL_TEXTURE_2D, 0);
+	gl_bind_scene_target();
+	glEnable(GL_DEPTH_TEST);
+	return true;
 }
 
 #ifndef __wasm__
@@ -6544,6 +6612,21 @@ void nd_seven_gl_get_occlusion_stats(uint32_t *out_water_culled,
 	if (out_cloud_queued) *out_cloud_queued = s_gl.cloud_count;
 }
 
+bool nd_seven_gl_is_gpu_hiz_active(void)
+{
+	return s_gl.gpu_hiz_built && s_gl.hiz_valid;
+}
+
+int nd_seven_gl_get_hiz_mip_levels(void)
+{
+	return s_gl.hiz_levels;
+}
+
+uint32_t nd_seven_gl_get_indirect_draw_count(void)
+{
+	return s_gl.indirect_cmd_count;
+}
+
 static bool gl_ensure_csm_target(void)
 {
 	if (s_gl.csm_fbo) return true;
@@ -6897,6 +6980,8 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.cloud_culled_hiz = 0;
 	s_gl.billboard_culled_hiz = 0;
 	s_gl.local_light_count = 0;
+	s_gl.gpu_hiz_built = false;
+	s_gl.indirect_cmd_count = 0;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_base_sea_level = s_gl.cur_sea_level;
 	s_gl.focal_sea_level = -999.0f;
@@ -7343,6 +7428,14 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, active_ibo);
 	glDrawElements(GL_TRIANGLES, active_indices, GL_UNSIGNED_SHORT, 0);
+	if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+		nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+		cmd->count = (uint32_t)active_indices;
+		cmd->instance_count = 1u;
+		cmd->first_index = 0u;
+		cmd->base_vertex = 0;
+		cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+	}
 
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
@@ -7509,6 +7602,14 @@ void nd_seven_gl_flush_water(void)
 		glUniform1f(s_gl.water_pipe.uSeaLevel, chk->sea_level);
 
 		glDrawElements(GL_TRIANGLES, w_indices, GL_UNSIGNED_SHORT, 0);
+		if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+			nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+			cmd->count = (uint32_t)w_indices;
+			cmd->instance_count = 1u;
+			cmd->first_index = 0u;
+			cmd->base_vertex = 0;
+			cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+		}
 	}
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -7990,6 +8091,14 @@ void nd_seven_gl_flush_clouds(void)
 		glUniform2f(s_gl.cloud_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
 
 		glDrawElements(GL_TRIANGLES, c_indices, GL_UNSIGNED_SHORT, 0);
+		if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+			nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+			cmd->count = (uint32_t)c_indices;
+			cmd->instance_count = 1u;
+			cmd->first_index = 0u;
+			cmd->base_vertex = 0;
+			cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+		}
 	}
 
 	glDisableVertexAttribArray(0);
@@ -8025,6 +8134,11 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 {
 	if (!batch || count == 0) return;
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
+
+	/* Build GPU Hi-Z depth pyramid once after terrain pass and before first billboard batch */
+	if (!s_gl.gpu_hiz_built && s_gl.scene_ok && s_gl.hiz_valid) {
+		(void)gl_build_hiz_pyramid();
+	}
 
 	uint32_t cur_ver = atlas_rgba_version();
 	if ((!s_gl.atlas_tex || !s_gl.atlas_norm_tex || s_gl.atlas_ver != cur_ver) && atlas_rgba) {
@@ -8074,6 +8188,15 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, s_gl.atlas_norm_tex);
 	glUniform1i(s_gl.bb_pipe.uAtlasNormTex, 2);
+	{
+		int hiz_lvl = (s_gl.hiz_levels > 2) ? 2 : (s_gl.hiz_levels > 0 ? (s_gl.hiz_levels - 1) : 0);
+		GLuint hiz_tex = (s_gl.gpu_hiz_built && hiz_lvl >= 0) ? s_gl.hiz_mip_tex[hiz_lvl] : 0;
+		glActiveTexture(GL_TEXTURE0 + 11);
+		glBindTexture(GL_TEXTURE_2D, hiz_tex);
+		glUniform1i(s_gl.bb_pipe.uHiZTex, 11);
+		glUniform1f(s_gl.bb_pipe.uHiZActive, (s_gl.gpu_hiz_built && hiz_tex != 0) ? 1.0f : 0.0f);
+		glActiveTexture(GL_TEXTURE0);
+	}
 	gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap, s_gl.bb_pipe.uCsm);
 
 	glUniformMatrix4fv(s_gl.bb_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
@@ -8178,6 +8301,14 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDepthMask(GL_FALSE);
 				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
+				if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+					nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+					cmd->count = 4u;
+					cmd->instance_count = core_n;
+					cmd->first_index = 0u;
+					cmd->base_vertex = 0;
+					cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+				}
 			}
 			if (other_n > 0) {
 				glBufferData(GL_ARRAY_BUFFER, s_bb_other_instances,
@@ -8187,6 +8318,14 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDepthMask(GL_FALSE);
 				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)other_n);
+				if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+					nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+					cmd->count = 4u;
+					cmd->instance_count = other_n;
+					cmd->first_index = 0u;
+					cmd->base_vertex = 0;
+					cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+				}
 			}
 			core_n = 0;
 			other_n = 0;
