@@ -2355,24 +2355,21 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 
 	int map_on = nd_map_canvas_enabled(&client_state);
 
-	/* Phase 3: Simulation */
+	/* Phase 3 & 4: Simulation + Presentation at capped FPS */
 	if (now_seven) {
-		int mv = nd_seven_tick(&client_state, dt);
-		if (mv) {
-			char m[2] = { (char)mv, '\n' };
-			ws_send(m, 2);
-		}
-		/* Phase 4: Presentation (Pure drawing without state mutation)
-		 * Seven stage redraws at native display refresh or configured FPS cap. */
-		{
-			static float s_render_accum_dt = 0.0f;
-			int fps_cap = nd_seven_get_fps_cap();
-			float min_dt = (fps_cap == 30) ? 0.031f : (fps_cap == 60 ? 0.0155f : 0.0f);
-			s_render_accum_dt += (dt > 0.0f ? dt : 0.016f);
-			if (min_dt <= 0.0f || s_render_accum_dt >= min_dt || mv || g_map_dirty) {
-				s_render_accum_dt = 0.0f;
-				seven_stage_redraw();
+		static float s_render_accum_dt = 0.0f;
+		int fps_cap = nd_seven_get_fps_cap();
+		float min_dt = (fps_cap == 30) ? 0.031f : (fps_cap == 60 ? 0.0155f : 0.0f);
+		s_render_accum_dt += (dt > 0.0f ? dt : 0.016f);
+		if (min_dt <= 0.0f || s_render_accum_dt >= min_dt || g_map_dirty) {
+			s_render_accum_dt = 0.0f;
+			/* Run simulation tick at the capped frame rate */
+			int mv = nd_seven_tick(&client_state, min_dt <= 0.0f ? dt : min_dt);
+			if (mv) {
+				char m[2] = { (char)mv, '\n' };
+				ws_send(m, 2);
 			}
+			seven_stage_redraw();
 		}
 		int map_vis = map_on && !s_win[ND_WIN_MAP].minimized &&
 		              client_state.target_ref == 0;
