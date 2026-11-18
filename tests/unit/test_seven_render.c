@@ -3932,6 +3932,22 @@ int main(void)
 				prev_d2 = d2;
 			}
 
+			/* 13e. Stride-Aware Canonical Field Sampling & Sub-Texel Band-Pass Encapsulation */
+			{
+				nd_field_sample_t s_exact = nd_field_sample(0, 3, 12800, -9600);
+				nd_field_sample_t s_step0 = nd_field_sample_step(0, 0, 12800, -9600);
+				assert(s_exact.elevation_q12_4 == s_step0.elevation_q12_4);
+				assert(s_exact.bio == s_step0.bio);
+				assert(s_exact.water_level == s_step0.water_level);
+
+				/* At coarse orbital chunk step (level 10 -> step = 5120 * 1024 / 48 = 109,226 wu),
+				 * sub-Nyquist fine octaves/rivers/lakes are band-limited out while macro elevation & biome remain valid */
+				int32_t coarse_step_q16 = (int32_t)(((int64_t)(5120 << 10) << 16) / 48);
+				nd_field_sample_t s_coarse = nd_field_sample_step(0, coarse_step_q16, 12800, -9600);
+				assert(s_coarse.bio < BIOME_MAX);
+				assert(strstr(nd_seven_gl_fs_terrain(), "chaff_band_weight") != NULL);
+			}
+
 			nd_seven_set_zoom(1.0f);
 			printf("PASS: 3D occlusion & culling verified (orb_leaves=%u, back_leaves=%d, back_clouds=%d, front_clouds=%d, syn_culled=%d/%d, front_to_back=%u)\n",
 			       orb_leaves, back_hemisphere_leaves, back_clouds_queued, front_clouds_queued,

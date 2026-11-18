@@ -1728,7 +1728,8 @@ nd_field_eval_river(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
 }
 
 static inline nd_field_sample_t
-nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, uint16_t sun_azimuth)
+nd_field_sample_at_azimuth_step(uint16_t world, uint8_t lod, int32_t step_q16,
+                                int32_t wx, int32_t wy, uint16_t sun_azimuth)
 {
 	nd_field_sample_t s;
 	memset(&s, 0, sizeof(s));
@@ -1741,15 +1742,19 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 
 	int32_t coarse_q12_4 = nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
 	s.water_level = nd_field_water_level(world);
-	nd_field_eval_mountain_lake(world, wx, wy, &coarse_q12_4, &s.water_level);
+	nd_field_eval_mountain_lake_step(world, step_q16, wx, wy, &coarse_q12_4, &s.water_level);
 	uint32_t cl_macro = 0, tm_macro = 0;
 	nd_field_interp_macro_q16(world, rx_q16, ry_q16, &cl_macro, &tm_macro);
 	uint32_t cl_prov  = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 10, 8, 101 + world);
 	uint32_t tm_prov  = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 10, 8, 153 + world);
 	uint32_t cl_reg   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 7, 8, 1 + world);
 	uint32_t tm_reg   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 7, 8, 53 + world);
-	uint32_t cl_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 201 + world);
-	uint32_t tm_loc   = nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 253 + world);
+	uint32_t cl_loc   = (step_q16 >= (2048 << 16))
+		? 32768u
+		: nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 201 + world);
+	uint32_t tm_loc   = (step_q16 >= (2048 << 16))
+		? 32768u
+		: nd_field_eval_coarse_oct_q16(ry_q16, rx_q16, 4, 8, 253 + world);
 
 	/* Continuous sub-room toroidal distance from the equatorial plane (Z = 0: 0 at outer equator ry=0
 	 * and inner equator ry=+-32768; 16384 at North/South polar crowns ry=+-16384) and inner-throat factor.
@@ -1851,7 +1856,10 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	s.rain = (uint32_t)rn_val;
 
 	uint16_t river_fine_damp_q8 = 0;
-	nd_field_eval_river(world, wx, wy, s.rain, &coarse_q12_4, &s.water_level, &s.river_carve_q4, &river_fine_damp_q8);
+	if (step_q16 <= (880 << 16)) {
+		nd_field_eval_river(world, wx, wy, s.rain, &coarse_q12_4, &s.water_level,
+		                    &s.river_carve_q4, &river_fine_damp_q8);
+	}
 
 	int32_t elev_rel_coarse = (int32_t)(coarse_q12_4 >> 4) - (int32_t)s.water_level;
 	int16_t bio_temp = nd_field_lat_climate_temp_q16(ry_q16, tm_raw, elev_rel_coarse);
@@ -1878,8 +1886,8 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	}
 
 	int32_t fine_q12_4 = 0;
-	if (lod > 0) {
-		nd_field_elevation_q12_4(world, lod, wx, wy, NULL, &fine_q12_4);
+	if (lod > 0 && chaff_octave_weight_q16(ND_FIELD_SHIFT_FINE_MAX, step_q16) > 0) {
+		nd_field_elevation_step_q12_4(world, step_q16, wx, wy, NULL, &fine_q12_4);
 
 		/* Smooth C1 coastal/bathymetric transition: keep immediate beach & surf zone
 		 * (-8..+6 world units relative to water_level) gently sloped without hard shelf clamps. */
@@ -1998,7 +2006,7 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	/* Volcanic Hotspots: Rare localized tectonic rifts/calderas on dry land (~0.2% of terrain),
 	 * centered on the true room coordinates (true_rx, true_ry) with a smooth radial transition
 	 * to the surrounding highland biome at the room edges. */
-	if (!s.is_water && s.elevation > s.water_level + 20) {
+	if (step_q16 <= (160 << 16) && !s.is_water && s.elevation > s.water_level + 20) {
 		int16_t true_rx = (lod > 0) ? (int16_t)((rx_q16 + 32768) >> 16) : room_x;
 		int16_t true_ry = (lod > 0) ? (int16_t)((ry_q16 + 32768) >> 16) : room_y;
 		uint32_t v_caldera = chaff_sample_torus_macro((int32_t)true_rx, (int32_t)true_ry, 6, 0x564F4C43u);
@@ -2026,6 +2034,18 @@ nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, 
 	}
 
 	return s;
+}
+
+static inline nd_field_sample_t
+nd_field_sample_at_azimuth(uint16_t world, uint8_t lod, int32_t wx, int32_t wy, uint16_t sun_azimuth)
+{
+	return nd_field_sample_at_azimuth_step(world, lod, nd_field_lod_to_step_q16(lod), wx, wy, sun_azimuth);
+}
+
+static inline nd_field_sample_t
+nd_field_sample_step(uint16_t world, int32_t step_q16, int32_t wx, int32_t wy)
+{
+	return nd_field_sample_at_azimuth_step(world, 3, step_q16, wx, wy, nd_field_get_sun_azimuth());
 }
 
 static inline nd_field_sample_t

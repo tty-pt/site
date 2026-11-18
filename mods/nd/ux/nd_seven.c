@@ -58,11 +58,13 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
                                      int32_t wx, int32_t wy, ar_sample_t *out)
 {
 	(void)user_ctx;
-	(void)level;
-	/* Always evaluate canonical full-precision field (lod=3) so that parent and child
-	 * quadtree levels agree 100% on world elevation, coastlines, and water depth
-	 * (zero elevation/shoreline popping when chunks split or merge). */
-	nd_field_sample_t fs = nd_field_sample(world, 3, wx, wy);
+	/* Evaluate canonical field band-limited by the chunk's vertex stride step_q16 so
+	 * fine chunks (level <= 2) resolve full sub-room octaves while coarse chunks
+	 * automatically skip sub-Nyquist fine octaves, mountain lakes, and river channels. */
+	int32_t step_q16 = (level <= 2)
+		? 0
+		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
+	nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
 	uint8_t water_depth = fs.is_water ? (uint8_t)(fs.depth > 255 ? 255 : fs.depth) : 0;
 
 	out->val = fs.elevation_q12_4;
@@ -100,13 +102,15 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	uint32_t c1 = ndw_biome_base_rgb(fs.bio);
 	uint32_t c2 = ndw_biome_base_rgb(fs.bio2);
 	uint8_t blend = fs.blend;
-	if (blend > 0 && fs.bio != fs.bio2) {
+	if (level < 5 && blend > 0 && fs.bio != fs.bio2) {
 		/* Natural ecological ecotone mosaic: modulate smooth Whittaker blend (0..128)
 		 * with multi-scale spatial patches and micro-relief (hollows vs rises) so
 		 * adjacent biomes interdigitate organically without hard seams or flat washes. */
 		int16_t p_eco[2] = { (int16_t)wy, (int16_t)wx };
 		uint32_t n_meso = noise_wpoint_n(p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
-		uint32_t n_loc  = noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_loc  = (level <= 2)
+			? (noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16)
+			: 128u;
 		int32_t eco_jitter = ((int32_t)n_meso - 128) + (((int32_t)n_loc - 128) >> 1) - ((int32_t)fs.fine_elev * 2);
 		int32_t span = (blend <= 128) ? 128 : 252;
 		int32_t env_w = (int32_t)blend * (span - (int32_t)blend);
@@ -1409,6 +1413,7 @@ typedef struct {
 	uint32_t      forget_seq;
 	uint64_t      arena_seq;
 	uint32_t      arena_off;
+	float         max_dim;
 	uint16_t      count;
 	int16_t       world, rz, w_level;
 	uint8_t       node_level, valid;
@@ -1421,6 +1426,7 @@ static block_bb_cache_slot_t s_block_bb_cache[BLOCK_BB_CACHE_SLOTS];
 static lam_billboard_gpu_t   s_block_bb_arena[BLOCK_BB_ARENA_CAP];
 static lam_billboard_gpu_t   s_block_bb_staging[BLOCK_BB_STAGING_SLOTS][BLOCK_BB_MAX_PER_BLK];
 static uint16_t              s_block_bb_staging_cnt[BLOCK_BB_STAGING_SLOTS];
+static float                 s_block_bb_staging_max_dim[BLOCK_BB_STAGING_SLOTS];
 static uint32_t              s_block_bb_staging_cursor = 0;
 static uint64_t              s_block_bb_arena_cursor = 1;
 
@@ -1433,6 +1439,7 @@ static void seven_async_block_bb_worker(void *ctx)
 
 	lam_billboard_gpu_t *dst = s_block_bb_staging[slot->staging_idx];
 	uint16_t cnt = 0;
+	float max_dim = 0.0f;
 	int32_t bx0 = slot->bx0;
 	int32_t by0 = slot->by0;
 	int16_t world = slot->world;
@@ -1484,6 +1491,9 @@ static void seven_async_block_bb_worker(void *ctx)
 				bb.y = (float)wy;
 				bb.z = z_f;
 				seven_calc_obj_billboard_dims(&raw_objs[k], &sr_val, &bb.width, &bb.height, &bb.anchor_y);
+				float dim = (bb.width > bb.height) ? bb.width : bb.height;
+				if (dim > max_dim)
+					max_dim = dim;
 				bb.water_z_off = bb.anchor_y;
 				if (flip) {
 					bb.u0 = (float)(sr_val.x + sr_val.w) / (float)ND_SEVEN_ATLAS_W;
@@ -1500,6 +1510,7 @@ static void seven_async_block_bb_worker(void *ctx)
 		}
 	}
 	s_block_bb_staging_cnt[slot->staging_idx] = cnt;
+	s_block_bb_staging_max_dim[slot->staging_idx] = max_dim;
 }
 
 static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb)
@@ -1525,7 +1536,8 @@ static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb
 static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_node_t *node,
                                          const int16_t pos[4], int16_t w_level,
                                          uint32_t tint, bool pure_virgin,
-                                         lam_billboard_gpu_t *arena_dst, uint16_t *inout_arena_cnt)
+                                         lam_billboard_gpu_t *arena_dst, uint16_t *inout_arena_cnt,
+                                         float *inout_max_dim)
 {
 	if (tint == 0)
 		return 0;
@@ -1551,6 +1563,19 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		int32_t wx = base_wx + raw_objs[k].x;
 		int32_t wy = base_wy + raw_objs[k].y;
 
+		lam_billboard_gpu_t bb;
+		bb.x = (float)wx;
+		bb.y = (float)wy;
+		seven_calc_obj_billboard_dims(&raw_objs[k], sr, &bb.width, &bb.height, &bb.anchor_y);
+		if (!arena_dst) {
+			float cull_d = seven_billboard_cull_dist(bb.width, bb.height);
+			float dx_c = bb.x - s_cam_focal_x;
+			float dy_c = bb.y - s_cam_focal_y;
+			if (cull_d <= 1.0f ||
+			    s_cam_dist * s_cam_dist + 0.12f * (dx_c * dx_c + dy_c * dy_c) >= cull_d * cull_d)
+				continue;
+		}
+
 		int16_t elev_q = 0, local_wl = w_level;
 		seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 		int16_t wz = nd_field_elevation_to_block(elev_q);
@@ -1566,18 +1591,13 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 			continue; /* Anti-submersion for flora */
 
 		float z_f = (float)elev_q / 16.0f;
-
-		int flip = (raw_objs[k].variant >> 2) & 1;
-		lam_billboard_gpu_t bb;
-		bb.x = (float)wx;
-		bb.y = (float)wy;
 		bb.z = z_f;
-		seven_calc_obj_billboard_dims(&raw_objs[k], sr, &bb.width, &bb.height, &bb.anchor_y);
 		if (!arena_dst) {
 			float test_alpha = seven_eval_billboard_alpha(bb.x, bb.y, bb.z, bb.width, bb.height);
 			if (test_alpha <= (0.5f / 255.0f))
 				continue;
 		}
+		int flip = (raw_objs[k].variant >> 2) & 1;
 		bb.water_z_off = bb.anchor_y;
 		if (flip) {
 			bb.u0 = (float)(sr->x + sr->w) / (float)ND_SEVEN_ATLAS_W;
@@ -1590,8 +1610,14 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 		seven_apply_obj_billboard_style(&raw_objs[k], sr, 0xFFFFFFFFu, &bb);
 
-		if (arena_dst && inout_arena_cnt && *inout_arena_cnt < BLOCK_BB_MAX_PER_BLK)
+		if (arena_dst && inout_arena_cnt && *inout_arena_cnt < BLOCK_BB_MAX_PER_BLK) {
 			arena_dst[(*inout_arena_cnt)++] = bb;
+			if (inout_max_dim) {
+				float dim = (bb.width > bb.height) ? bb.width : bb.height;
+				if (dim > *inout_max_dim)
+					*inout_max_dim = dim;
+			}
+		}
 
 		emitted += seven_stream_faded_billboard(&bb);
 	}
@@ -1602,7 +1628,7 @@ static inline int seven_emit_room_billboards(const nd_client_state_t *st, const 
                                              const int16_t pos[4], int16_t w_level,
                                              uint32_t tint)
 {
-	return seven_emit_room_billboards_ex(st, node, pos, w_level, tint, false, NULL, NULL);
+	return seven_emit_room_billboards_ex(st, node, pos, w_level, tint, false, NULL, NULL, NULL);
 }
 
 enum { D_OBJ, D_ENTITY, D_LAMB };
@@ -2445,7 +2471,12 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		int cached_ti = 0x7FFFFFFF, cached_tj = 0x7FFFFFFF;
 		unsigned cached_bio = 10u;
 
+		float max_meadow_cull2 = max_meadow_cull * max_meadow_cull;
 		for (int32_t gy = cy0; gy <= lwy + rad && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; gy += step) {
+			float dy_row = fabsf((float)gy - s_cam_focal_y) - 9.0f;
+			if (dy_row < 0.0f) dy_row = 0.0f;
+			if (s_cam_dist * s_cam_dist + 0.12f * dy_row * dy_row >= max_meadow_cull2)
+				continue;
 			if (s_frame_frustum_valid &&
 			    !seven_test_frustum_xy((float)(lwx - rad) - 32.0f, (float)gy - 32.0f,
 			                           (float)(lwx + rad) + 32.0f, (float)gy + 32.0f,
@@ -2460,6 +2491,10 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				float ddy = (float)(wy - lwy);
 				float r2 = ddx * ddx + ddy * ddy;
 				if (r2 > (float)(rad * rad))
+					continue;
+				float mdx = (float)wx - s_cam_focal_x;
+				float mdy = (float)wy - s_cam_focal_y;
+				if (s_cam_dist * s_cam_dist + 0.12f * (mdx * mdx + mdy * mdy) >= max_meadow_cull2)
 					continue;
 				if (s_frame_frustum_valid &&
 				    !seven_test_frustum_xy((float)wx - 24.0f, (float)wy - 24.0f,
@@ -2744,12 +2779,28 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				}
 				for (int32_t bx0 = cx0; bx0 < cx1; bx0 += 8) {
 					int32_t bx1 = (bx0 + 8 < cx1) ? (bx0 + 8) : cx1;
+					bool straddles_near_flush =
+						(!near_flushed && by0 <= center_ry_grid + obj_j1 && by1 - 1 > center_ry_grid + obj_j1);
+
+					float blk_wx0 = (float)(bx0 * NDW_TILE_W);
+					float blk_wx1 = (float)(bx1 * NDW_TILE_W);
+					float blk_wy0 = (float)(by0 * NDW_TILE_H);
+					float blk_wy1 = (float)(by1 * NDW_TILE_H);
+					float dx_blk = (s_cam_focal_x < blk_wx0) ? (blk_wx0 - s_cam_focal_x)
+					             : ((s_cam_focal_x > blk_wx1) ? (s_cam_focal_x - blk_wx1) : 0.0f);
+					float dy_blk = (s_cam_focal_y < blk_wy0) ? (blk_wy0 - s_cam_focal_y)
+					             : ((s_cam_focal_y > blk_wy1) ? (s_cam_focal_y - blk_wy1) : 0.0f);
+					float d2_blk_min = s_cam_dist * s_cam_dist + 0.12f * (dx_blk * dx_blk + dy_blk * dy_blk);
+					float min_vis_sz = sqrtf(d2_blk_min) / (SEVEN_BB_DIST_PER_SIZE * s_frame_detail_scale);
+					if (!straddles_near_flush && min_vis_sz >= SEVEN_BB_MAX_EFF_SIZE)
+						continue;
+
 					int b_frustum_state = 2;
 					if (s_frame_frustum_valid) {
-						float bmin_x = (float)(bx0 * NDW_TILE_W) - 512.0f;
-						float bmax_x = (float)(bx1 * NDW_TILE_W) + 512.0f;
-						float bmin_y = (float)(by0 * NDW_TILE_H) - 512.0f;
-						float bmax_y = (float)(by1 * NDW_TILE_H) + 512.0f;
+						float bmin_x = blk_wx0 - 512.0f;
+						float bmax_x = blk_wx1 + 512.0f;
+						float bmin_y = blk_wy0 - 512.0f;
+						float bmax_y = blk_wy1 + 512.0f;
 						b_frustum_state = seven_test_frustum_xy_state(bmin_x, bmin_y, bmax_x, bmax_y,
 						                                              (float)lwx, (float)lwy, nz_min, nz_max);
 						if (b_frustum_state == 0)
@@ -2761,8 +2812,6 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						  bx0     > (int32_t)base_rx + obj_i1 ||
 						  by1 - 1 < center_ry_grid + obj_j0   ||
 						  by0     > center_ry_grid + obj_j1);
-					bool straddles_near_flush =
-						(!near_flushed && by0 <= center_ry_grid + obj_j1 && by1 - 1 > center_ry_grid + obj_j1);
 
 					if (b_frustum_state == 2 && tint_scenery != 0 &&
 					    (bx1 - bx0) == 8 && (by1 - by0) == 8 &&
@@ -2795,6 +2844,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 								s_block_bb_arena_cursor += (uint64_t)scnt;
 								slot->arena_seq = start_seq + (uint64_t)scnt;
 								slot->arena_off = cur_off;
+								slot->max_dim = s_block_bb_staging_max_dim[slot->staging_idx];
 								slot->count = scnt;
 								slot->node_rev = node->rev;
 								slot->atlas_ver = cur_atlas_ver;
@@ -2816,9 +2866,14 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						    slot->atlas_ver == cur_atlas_ver &&
 						    slot->forget_seq == cur_forget_seq &&
 						    (s_block_bb_arena_cursor - slot->arena_seq) <= BLOCK_BB_ARENA_CAP) {
+							if (slot->max_dim <= min_vis_sz)
+								continue;
 							const lam_billboard_gpu_t *cached = &s_block_bb_arena[slot->arena_off];
 							uint16_t cnt = slot->count;
 							for (uint16_t ci = 0; ci < cnt; ci++) {
+								float bsz = (cached[ci].width > cached[ci].height) ? cached[ci].width : cached[ci].height;
+								if (bsz <= min_vis_sz)
+									continue;
 								seven_stream_faded_billboard(&cached[ci]);
 							}
 							continue;
@@ -2854,6 +2909,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						uint64_t start_seq = s_block_bb_arena_cursor;
 						lam_billboard_gpu_t *arena_dst = &s_block_bb_arena[cur_off];
 						uint16_t arena_cnt = 0;
+						float arena_max_dim = 0.0f;
 
 						for (int32_t ry_grid = by0; ry_grid < by1; ry_grid++) {
 							for (int32_t rx_grid = bx0; rx_grid < bx1; rx_grid++) {
@@ -2865,7 +2921,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 								};
 								seven_emit_room_billboards_ex(st, node, pos, w_level,
 								                              tint_scenery, true,
-								                              arena_dst, &arena_cnt);
+								                              arena_dst, &arena_cnt,
+								                              &arena_max_dim);
 							}
 						}
 
@@ -2879,6 +2936,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						slot->forget_seq = cur_forget_seq;
 						slot->arena_seq = start_seq + (uint64_t)arena_cnt;
 						slot->arena_off = cur_off;
+						slot->max_dim = arena_max_dim;
 						slot->count = arena_cnt;
 						slot->world = (int16_t)world;
 						slot->rz = base_rz;
