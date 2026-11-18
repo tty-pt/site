@@ -8,7 +8,7 @@ echo "=== Checking for forbidden *_IMPL guards ==="
 
 # Pass 1a: Check for #ifndef *_IMPL in any *.h across the repo
 impl_ifndefs=$(grep -rnE '^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+[A-Za-z0-9_]+_IMPL([[:space:]]|$)' "$REPO_ROOT" \
-	--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.pi --include='*.h' || true)
+	--exclude-dir=node_modules --exclude-dir=submodules --exclude-dir=.git --exclude-dir=.pi --include='*.h' || true)
 
 if [ -n "$impl_ifndefs" ]; then
 	echo "FAIL: Found #ifndef *_IMPL guard in header(s):" >&2
@@ -18,7 +18,7 @@ fi
 
 # Pass 1b: Check for #define *_IMPL in any *.c or *.h (excluding XY_IMPL macro definition)
 impl_defines=$(grep -rnE '^[[:space:]]*#[[:space:]]*define[[:space:]]+[A-Za-z0-9_]+_IMPL([[:space:]]|$)' "$REPO_ROOT" \
-	--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.pi --include='*.c' --include='*.h' || true)
+	--exclude-dir=node_modules --exclude-dir=submodules --exclude-dir=.git --exclude-dir=.pi --include='*.c' --include='*.h' || true)
 
 if [ -n "$impl_defines" ]; then
 	echo "FAIL: Found #define *_IMPL in source file(s):" >&2

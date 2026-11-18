@@ -3743,11 +3743,11 @@ int main(void)
 
 		/* 12. User-Adjustable Detail Scale (nd_seven_set_detail_scale / nd_seven_detail_in / nd_seven_detail_out) */
 		{
-			assert(fabsf(nd_seven_get_detail_scale() - 1.0f) < 1e-5f);
+			assert(fabsf(nd_seven_get_detail_scale() - 0.75f) < 1e-5f);
 			nd_seven_detail_out();
-			assert(nd_seven_get_detail_scale() < 1.0f && nd_seven_get_detail_scale() >= ND_SEVEN_DETAIL_MIN);
+			assert(nd_seven_get_detail_scale() < 0.75f && nd_seven_get_detail_scale() >= ND_SEVEN_DETAIL_MIN);
 			nd_seven_detail_in();
-			assert(fabsf(nd_seven_get_detail_scale() - 1.0f) < 1e-4f);
+			assert(fabsf(nd_seven_get_detail_scale() - 0.75f) < 1e-4f);
 
 			/* Lowering detail scale culls distant billboards earlier at zoom = 0.08f (cam_dist = 3,500 wu) */
 			set_map(10, 10, 12, 0x1B, 0, 'X', 'o', 'T');

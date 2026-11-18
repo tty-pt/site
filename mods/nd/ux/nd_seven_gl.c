@@ -5621,7 +5621,18 @@ bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_wind
 
 static void gl_free_scene_targets(void)
 {
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	glActiveTexture(GL_TEXTURE0 + 4);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0 + 5);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0 + 6);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
 	if (s_gl.scene_fbo) glDeleteFramebuffer(s_gl.scene_fbo);
 	if (s_gl.res_fbo) glDeleteFramebuffer(s_gl.res_fbo);
 	if (s_gl.cloud_fbo) glDeleteFramebuffer(s_gl.cloud_fbo);
@@ -5695,6 +5706,8 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.cloud_tex, 0);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s_gl.cloud_depth_rb);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 	s_gl.cloud_w = cw;
 	s_gl.cloud_h = ch;
 	return true;

@@ -197,7 +197,7 @@ void nd_seven_zoom_out(void)
 	nd_seven_set_zoom(s_camera_zoom / 1.15f);
 }
 
-static float s_detail_scale = 1.0f;
+static float s_detail_scale = 0.75f;
 
 void nd_seven_set_detail_scale(float scale)
 {
@@ -221,10 +221,10 @@ void nd_seven_detail_out(void)
 	nd_seven_set_detail_scale(s_detail_scale / ND_SEVEN_DETAIL_STEP);
 }
 
-static float s_res_scale = 1.0f;
-static int s_cloud_quality = ND_CLOUD_QUALITY_HIGH;
-static int s_msaa_enabled = 1;
-static int s_fps_cap = 0;
+static float s_res_scale = 0.75f;
+static int s_cloud_quality = ND_CLOUD_QUALITY_MEDIUM;
+static int s_msaa_enabled = 0;
+static int s_fps_cap = 60;
 
 void nd_seven_set_res_scale(float scale)
 {
@@ -332,20 +332,20 @@ void nd_seven_apply_quality_preset(int preset)
 		nd_seven_set_msaa(0);
 		nd_seven_set_fps_cap(30);
 		break;
-	case ND_QUALITY_MEDIUM:
-		nd_seven_set_res_scale(0.75f);
-		nd_seven_set_detail_scale(0.75f);
-		nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_MEDIUM);
-		nd_seven_set_msaa(0);
-		nd_seven_set_fps_cap(60);
-		break;
 	case ND_QUALITY_HIGH:
-	default:
 		nd_seven_set_res_scale(1.00f);
 		nd_seven_set_detail_scale(1.00f);
 		nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_HIGH);
 		nd_seven_set_msaa(1);
 		nd_seven_set_fps_cap(0);
+		break;
+	case ND_QUALITY_MEDIUM:
+	default:
+		nd_seven_set_res_scale(0.75f);
+		nd_seven_set_detail_scale(0.75f);
+		nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_MEDIUM);
+		nd_seven_set_msaa(0);
+		nd_seven_set_fps_cap(60);
 		break;
 	}
 }

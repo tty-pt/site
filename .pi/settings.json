@@ -1,217 +1,44 @@
 {
-  "defaultProvider": "quest",
-  "defaultModel": "auto",
-  "retry": {
-    "enabled": true,
-    "maxRetries": 5,
-    "baseDelayMs": 2000,
-    "provider": {
-      "maxRetries": 5,
-      "maxRetryDelayMs": 30000
+  "lastChangelogVersion": "1.5.2",
+  "theme": "tokyo-night-storm-improved",
+  "defaultProvider": "auren",
+  "defaultModel": "fast",
+  "packages": [
+    "npm:pi-theme-tokyo-night-storm-improved",
+    "npm:pi-thinking-box",
+    "npm:@juicesharp/rpiv-todo",
+    "npm:@mazli/pi-worktree",
+    "npm:pi-subagents",
+    "npm:pi-background-tasks",
+    "npm:pi-thinking-header"
+  ],
+  "showHardwareCursor": false,
+  "subagents": {
+    "agentOverrides": {
+      "reviewer": {
+        "thinking": false
+      }
+    },
+    "agentOverridesByProvider": {
+      "auren": {
+        "reviewer": {
+          "model": "auren/fast",
+          "thinking": false
+        }
+      }
     }
   },
-  "compaction": {
-    "enabled": true,
-    "reserveTokens": 16384,
-    "keepRecentTokens": 20000,
-    "modelOverrides": {
-      "antigravity-acp/gemini-3.8-flash": {
-        "reserveTokens": 300000
-      },
-      "antigravity-acp/gemini-4-argon": {
-        "reserveTokens": 300000
-      },
-      "quest/auto": {
-        "reserveTokens": 300000
-      }
-    }
+  "terminal": {
+    "showTerminalProgress": false
   },
-  "pi-quest": {
-    "askTimeoutMs": 60000,
-    "depthCap": 3,
-    "reviewPolicy": "strict",
-    "strictMode": false,
-    "draftThresholds": {
-      "requirements": 2,
-      "evidence": 7
-    },
-    "bindings": {
-      "reviewRunner": {
-        "tool": "subagent"
-      }
-    },
-    "modelAccuracy": {
-      "antigravity-acp/gemini-4-argon*": 1.0,
-      "antigravity-acp/gemini-3.1-pro*": 0.95,
-      "antigravity-acp/gemini-3.8-flash*": 0.67,
-      "anthropic/claude-sonnet-5-5*": 0.95,
-      "openai/gpt-4o*": 0.92,
-      "local/qwen2.5-coder-32b": 0.75,
-      "local/qwen*0.5b*": 0.35,
-      "*": 0.67
-    },
-    "judgeFallback": "skip",
-    "roles": {
-      "reviewer": [
-        "antigravity-acp/gemini-3.8-flash:medium",
-        "antigravity-acp/gemini-4-argon:medium"
-      ],
-      "validator": [
-        "antigravity-acp/gemini-3.8-flash:low",
-        "antigravity-acp/gemini-4-argon:low"
-      ]
-    },
-    "router": {
-      "enabled": true,
-      "provider": "quest",
-      "id": "auto",
-      "default": "antigravity-acp/gemini-3.8-flash:low",
-      "direct": "antigravity-acp/gemini-3.8-flash:low",
-      "cooldownMs": 900000,
-      "matrix": {
-        "idle": [
-          "antigravity-acp/gemini-4-argon:high",
-          "antigravity-acp/gemini-3.8-flash:high"
-        ],
-        "provisional": [
-          "antigravity-acp/gemini-4-argon:high",
-          "antigravity-acp/gemini-3.8-flash:high"
-        ],
-        "drafting": {
-          "trivial": "antigravity-acp/gemini-3.8-flash:low",
-          "minor": "antigravity-acp/gemini-3.8-flash:low",
-          "standard": [
-            "antigravity-acp/gemini-4-argon:high",
-            "antigravity-acp/gemini-3.8-flash:medium"
-          ],
-          "major": [
-            "antigravity-acp/gemini-4-argon:high",
-            "antigravity-acp/gemini-3.8-flash:high"
-          ],
-          "complex": [
-            "antigravity-acp/gemini-4-argon:high",
-            "antigravity-acp/gemini-3.8-flash:high"
-          ],
-          "*": [
-            "antigravity-acp/gemini-4-argon:high",
-            "antigravity-acp/gemini-3.8-flash:medium"
-          ]
-        },
-        "implementing": {
-          "trivial": "antigravity-acp/gemini-3.8-flash:low",
-          "minor": "antigravity-acp/gemini-3.8-flash:low",
-          "standard": "antigravity-acp/gemini-3.8-flash:medium",
-          "major": [
-            "antigravity-acp/gemini-4-argon:medium",
-            "antigravity-acp/gemini-3.8-flash:high"
-          ],
-          "complex": [
-            "antigravity-acp/gemini-4-argon:high",
-            "antigravity-acp/gemini-3.8-flash:high"
-          ],
-          "*": "antigravity-acp/gemini-3.8-flash:medium"
-        },
-        "validating": "antigravity-acp/gemini-3.8-flash:low"
-      }
-    },
-    "lintRules": [
-      {
-        "id": "no-ux-compile-branch",
-        "filePattern": "/ux/[^/]*\\.c$",
-        "excludeFilePattern": "site_ui\\.c$",
-        "linePattern": "^\\s*#\\s*(?:if|ifdef|elif)\\b|^\\s*#\\s*ifndef\\b",
-        "excludeLinePattern": "^\\s*#\\s*ifndef\\s+[A-Za-z0-9_]+_C\\b",
-        "message": "UX avoids compile-time branching: forbidden macro branch '{line}' in {file}. Use runtime state branching instead."
-      },
-      {
-        "id": "no-ux-compile-branch",
-        "filePattern": "site_ui\\.c$",
-        "linePattern": "^\\s*#\\s*(?:if|ifdef|elif)\\b|^\\s*#\\s*ifndef\\b",
-        "excludeLinePattern": "^\\s*#\\s*ifndef\\s+(?:[A-Za-z0-9_]+_C|__wasm__)\\b",
-        "message": "UX avoids compile-time branching: forbidden macro branch '{line}' in {file}. Use runtime state branching instead."
-      },
-      {
-        "id": "no-ux-engine-symbols",
-        "filePattern": "/ux/[^/]*\\.c$",
-        "linePattern": "\\b(?:corm_|source_|axil_|lemma_|hyle_source|XY_)",
-        "message": "Forbidden engine symbol in isomorphic UX: {file} cannot reference XY_/corm_/source_/axil_/lemma_/hyle_source."
-      },
-      {
-        "id": "no-cross-module-c-include",
-        "excludeFilePattern": "(?:site_ui|list)\\.c$",
-        "linePattern": "^\\s*#\\s*include\\s+[\"<].*?\\.c[\">]",
-        "message": "Forbidden #include '*.c' in {file}. Cross-module calls must use XY boundaries."
-      }
-    ],
-    "steeringPhrases": [
-      "go on",
-      "carry on",
-      "keep going",
-      "proceed",
-      "ship it",
-      "looks good",
-      "confirm",
-      "continua",
-      "vai em frente",
-      "avança",
-      "pode avançar"
-    ],
-    "testCommands": [
-      "sh tests/unit/",
-      "sh scripts/check-",
-      "node tests/",
-      "make site-wasm",
-      "make test-mod",
-      "make test-fast",
-      "make boundary-check",
-      "make standalone-unit-tests"
-    ],
-    "actionMatrix": [
-      {
-        "scope": "client-isomorphic-ux",
-        "pattern": "^mods/([^/]+)/ux/",
-        "buildCommands": ["make site-wasm", "make -C mods/$1"],
-        "testCommands": ["sh scripts/check-module-boundaries.sh", "sh scripts/check-wasm-imports.sh", "make test-mod MOD=$1"],
-        "warning": "Do NOT run full test suite (make test); execute only the targeted actions above."
-      },
-      {
-        "scope": "server-module",
-        "pattern": "^mods/([^/]+)/(?!ux/)",
-        "buildCommands": ["make -C mods/$1"],
-        "testCommands": ["make test-mod MOD=$1"],
-        "warning": "Do NOT run full test suite (make test); execute only the targeted actions above."
-      },
-      {
-        "scope": "client-assets-or-bridge",
-        "pattern": "^(?:external/liblamina/)?htdocs/",
-        "testCommands": ["sh scripts/check-no-site-specific-js.sh", "sh tests/unit/run-test-lamina-bridge.sh"],
-        "warning": "Do NOT compile C modules or run make test; only verify generic JS and bridge tests."
-      },
-      {
-        "scope": "core-library",
-        "pattern": "^external/lib([^/]+)/",
-        "buildCommands": ["make $1-lib"],
-        "testCommands": ["make standalone-unit-tests"],
-        "warning": "Do NOT run e2e or integration tests; verify via standalone unit tests."
-      },
-      {
-        "scope": "pi-quest-extension",
-        "pattern": "^\\.pi/extensions/pi-quest/",
-        "testCommands": ["deno test --allow-all tests/", "deno run --allow-all scripts/check-complexity.ts"],
-        "warning": "Zero C/WASM rebuilds needed; run deno test and check-complexity."
-      }
-    ]
+  "tuiMode": "fullscreen",
+  "hideThinkingBlock": true,
+  "extensionChangelogVersions": {
+    "{\"source\":\"npm:pi-models\",\"scope\":\"user\"}": "0.2.9",
+    "{\"source\":\"npm:pi-vcc\",\"scope\":\"user\"}": "0.4.1",
+    "{\"source\":\"npm:@mazli/pi-worktree\",\"scope\":\"user\"}": "0.1.1",
+    "{\"source\":\"npm:pi-free\",\"scope\":\"user\"}": "2.9.0",
+    "{\"source\":\"npm:pi-subagents\",\"scope\":\"user\"}": "0.89.0"
   },
-  "pi-early-compact": {
-    "tiers": [
-      {
-        "upTo": 200000,
-        "pct": 80
-      },
-      {
-        "upTo": 1000000,
-        "pct": 50
-      }
-    ]
-  }
+  "useG1Credits": true
 }

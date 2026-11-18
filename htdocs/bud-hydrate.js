@@ -228,7 +228,12 @@ function hydratePersistNodes(root, wasm = null, memory = null, dispatchCb = null
 		if (!key) continue;
 		try {
 			const raw = window.localStorage.getItem(`bud:layout:${key}`);
-			if (!raw) continue;
+			if (!raw) {
+				if (el.getAttribute('style')) {
+					persistNodeState(el);
+				}
+				continue;
+			}
 			const saved = JSON.parse(raw);
 			if (saved && typeof saved === 'object') {
 				if (typeof saved.style === 'string' && saved.style) {
@@ -1080,7 +1085,8 @@ export class BudWasmBridge {
 	}
 
 	mount() {
-		if (this.root) {
+		if (this.root && !this._persistHydrated) {
+			this._persistHydrated = true;
 			hydratePersistNodes(this.root, this.wasm, this.memory, (nodeId, eventName, bubbles, valStr) => {
 				this.dispatch(nodeId, eventName, bubbles, valStr);
 			});
@@ -1123,6 +1129,13 @@ export class BudWasmBridge {
 
 		return (evt) => {
 			if (!info.bubbles && info.target !== 'window' && evt && evt.target && evt.currentTarget && evt.target !== evt.currentTarget) {
+				return;
+			}
+			if (typeof this.onDispatch !== 'function' && !getWasmExport(this.wasm, ['bud_app_dispatch'])) {
+				if (typeof this.listenerResolver === 'function') {
+					const fn = this.listenerResolver(info);
+					if (typeof fn === 'function') fn(evt);
+				}
 				return;
 			}
 			const value = buildEventPayload(info, evt);
@@ -1271,6 +1284,9 @@ export class BudWasmBridge {
 	}
 
 	_dispatchDomFallback(nodeId, eventName, bubbles = true, eventInit = null) {
+		if (this._inDomFallback) {
+			return false;
+		}
 		const node = this.host.getNode(nodeId);
 		if (!node) {
 			return false;
@@ -1287,7 +1303,12 @@ export class BudWasmBridge {
 			}
 			Object.assign(event, safe);
 		}
-		return node.dispatchEvent(event);
+		this._inDomFallback = true;
+		try {
+			return node.dispatchEvent(event);
+		} finally {
+			this._inDomFallback = false;
+		}
 	}
 
 	dispatchEvent(nodeId, eventName, bubbles = true, eventInit = null) {

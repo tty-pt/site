@@ -321,7 +321,6 @@ int main(void)
 	{
 		strncpy(client_state.preferred_driver, "lamina-seven", sizeof(client_state.preferred_driver) - 1);
 		client_state.layout_mode = ND_LAYOUT_GAME_2D;
-		nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 		nd_seven_set_zoom(1.0f);
 		nd_ui_set_active_modal("");
 
@@ -344,17 +343,43 @@ int main(void)
 		assert(modal_overlay != NULL);
 		assert(strstr(bud_get_attr(modal_overlay, "class"), "modal") != NULL);
 
-		/* Verify initial High (Default) state and persisted style attribute */
+		/* Verify initial Medium (Default) state and persisted style attribute */
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 75);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 75);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
+		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_fps_cap() == 60);
 		bud_node *settings_card = find_by_attr(root, "id", "settings");
 		assert(settings_card != NULL);
 		const char *init_style = bud_get_attr(settings_card, "style");
 		assert(init_style != NULL);
-		assert(strcmp(init_style, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") == 0);
+		assert(strcmp(init_style, "--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:100;") == 0);
+		html = bud_render_html(root);
+		assert(strstr(html, "⚖️ Medium (Default)") != NULL);
+		bud_free_string(html);
 
-		/* 8b. Graphics Quality Preset cycling: High -> Low -> Medium -> High */
+		/* 8b. Graphics Quality Preset cycling: Medium -> High -> Low -> Medium -> High */
 		rt = bud_runtime_new(root);
 		bud_node *preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
 		assert(preset_btn != NULL);
+		bud_runtime_dispatch(rt, preset_btn, "click", "");
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 100);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
+		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_fps_cap() == 0);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "✨ High") != NULL);
+		assert(strstr(html, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
 		bud_runtime_dispatch(rt, preset_btn, "click", "");
 		assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
 		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 50);
@@ -383,7 +408,7 @@ int main(void)
 
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
-		assert(strstr(html, "⚖️ Medium (Balanced)") != NULL);
+		assert(strstr(html, "⚖️ Medium (Default)") != NULL);
 		assert(strstr(html, "--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
@@ -400,7 +425,7 @@ int main(void)
 
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
-		assert(strstr(html, "✨ High (Default)") != NULL);
+		assert(strstr(html, "✨ High") != NULL);
 		assert(strstr(html, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
@@ -685,6 +710,56 @@ int main(void)
 		root = nd_ui_render(&client_state);
 		modal_overlay = find_by_attr(root, "id", "settings-modal");
 		assert(strcmp(bud_get_attr(modal_overlay, "class"), "hidden") == 0);
+
+		/* 8l. Regression test: Open Settings, drop down settings (res slider input+change, detail slider input+change, cloud quality), and click Anti-Aliasing button (#settings-msaa-toggle) during active 3D rendering */
+		rt = bud_runtime_new(root);
+		dock_settings_btn = find_by_attr(root, "id", "dock-settings-btn");
+		assert(dock_settings_btn != NULL);
+		bud_runtime_dispatch(rt, dock_settings_btn, "click", "");
+		assert(strcmp(nd_ui_get_active_modal(), "settings") == 0);
+		free(rt);
+
+		wasm_tick(0.016f, 640, 480);
+		uint32_t st_w = 0, st_h = 0, sc_w = 0, sc_h = 0, cl_w = 0, cl_h = 0;
+		int sc_samples = -1;
+		bool csm_act = false;
+		nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+		assert(sc_samples == 4);
+
+		root = nd_ui_render(&client_state);
+		rt = bud_runtime_new(root);
+		res_slider = find_by_attr(root, "id", "settings-res-slider");
+		det_slider = find_by_attr(root, "id", "settings-detail-slider");
+		msaa_btn = find_by_attr(root, "id", "settings-msaa-toggle");
+		assert(res_slider != NULL && det_slider != NULL && msaa_btn != NULL);
+
+		/* Drop down resolution to 65%: input followed by change with identical value must not trigger a duplicate 3D stage redraw */
+		bud_runtime_dispatch(rt, res_slider, "input", "65");
+		uint32_t fc_after_res_input = nd_seven_gl_get_frame_count();
+		bud_runtime_dispatch(rt, res_slider, "change", "65");
+		assert(nd_seven_gl_get_frame_count() == fc_after_res_input);
+
+		/* Drop down detail to 70%: input followed by change with identical value must not trigger a duplicate 3D stage redraw */
+		bud_runtime_dispatch(rt, det_slider, "input", "70");
+		uint32_t fc_after_det_input = nd_seven_gl_get_frame_count();
+		bud_runtime_dispatch(rt, det_slider, "change", "70");
+		assert(nd_seven_gl_get_frame_count() == fc_after_det_input);
+
+		/* Click Anti-Aliasing button (#settings-msaa-toggle): must cleanly toggle 4x MSAA -> 1x Off in a single pass and reallocate FBO targets */
+		bud_runtime_dispatch(rt, msaa_btn, "click", "");
+		assert(nd_seven_get_msaa() == 0);
+		nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+		assert(sc_samples == 0);
+
+		/* Click Anti-Aliasing button again: must cleanly toggle 1x Off -> 4x MSAA */
+		bud_runtime_dispatch(rt, msaa_btn, "click", "");
+		assert(nd_seven_get_msaa() == 1);
+		nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+		assert(sc_samples == 4);
+		free(rt);
+
+		nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
+		nd_ui_set_active_modal("");
 		printf("PASS: all Settings modal controls, presets, sliders, buttons, keyboard shortcuts, and persistence verified\n");
 	}
 

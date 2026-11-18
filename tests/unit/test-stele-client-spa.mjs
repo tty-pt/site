@@ -190,3 +190,189 @@ test('SteleWasmClient preserves native link navigation while delegating in-place
 	assert.equal(actionPrevented, true, 'Interactive data-actions must preventDefault');
 	assert.equal(capturedActionId, 1, 'Action ID 1 must be dispatched to wasm_action');
 });
+
+test('SteleWasmClient mountSlot skips duplicate bud capability bridge and BudWasmBridge guards against recursive DOM event dispatch', async () => {
+	globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
+	globalThis.Event = class Event {
+		constructor(type, opts = {}) {
+			this.type = type;
+			this.bubbles = !!opts.bubbles;
+		}
+	};
+	const { createBudWasmBridge } = await import('../../htdocs/bud-cap.js');
+	window.__wasm_capability_registry['bud'] = (root) => createBudWasmBridge(root);
+	window.__wasm_slot_bridge_namespaces = ['bud'];
+
+	const slotListeners = new Map();
+	const btnListeners = new Map();
+	let btnDispatchCount = 0;
+
+	const childBtn = {
+		nodeType: 1,
+		tagName: 'BUTTON',
+		id: 'settings-msaa-toggle',
+		attributes: new Map([['id', 'settings-msaa-toggle'], ['data-bud-id', '42'], ['data-bud-on', 'click:1']]),
+		childNodes: [],
+		getAttribute(k) { return this.attributes.get(k) || null; },
+		setAttribute(k, v) { this.attributes.set(k, String(v)); },
+		hasAttribute(k) { return this.attributes.has(k); },
+		addEventListener(type, fn) {
+			if (!btnListeners.has(type)) btnListeners.set(type, []);
+			btnListeners.get(type).push(fn);
+		},
+		dispatchEvent(evt) {
+			btnDispatchCount++;
+			if (btnDispatchCount > 10) {
+				throw new RangeError('Infinite recursive DOM dispatch detected');
+			}
+			const fns = slotListeners.get(evt.type) || [];
+			for (const fn of fns) {
+				fn({ type: evt.type, target: childBtn, currentTarget: slotEl, bubbles: true, stopPropagation() {}, preventDefault() {} });
+			}
+			return true;
+		}
+	};
+
+	const slotEl = {
+		nodeType: 1,
+		tagName: 'DIV',
+		id: 'bud-root',
+		attributes: new Map([
+			['data-slot', '1'],
+			['data-capabilities', 'lamina bud']
+		]),
+		childNodes: [childBtn],
+		getAttribute(k) { return this.attributes.get(k) || null; },
+		setAttribute(k, v) { this.attributes.set(k, String(v)); },
+		hasAttribute(k) { return this.attributes.has(k); },
+		querySelector(sel) {
+			if (sel === '#settings-msaa-toggle' || sel === '[data-bud-id="42"]') return childBtn;
+			return null;
+		},
+		querySelectorAll(sel) {
+			if (sel === '[data-bud-persist-key]') return [];
+			return [childBtn];
+		},
+		addEventListener(type, fn) {
+			if (!slotListeners.has(type)) slotListeners.set(type, []);
+			slotListeners.get(type).push(fn);
+		}
+	};
+	childBtn.parentNode = slotEl;
+	childBtn.parentElement = slotEl;
+
+	let budCapFactoryCalls = 0;
+	window.__wasm_capability_registry['bud'] = (root) => {
+		budCapFactoryCalls++;
+		return createBudWasmBridge(root);
+	};
+
+	const client = new SteleWasmClient();
+	client.workerReady = true;
+	client._pendingMountPromises = new Map();
+	const dispatchedToWorker = [];
+	client.worker = {
+		postMessage(msg) {
+			if (msg && msg.type === 'stele:mount_slot') {
+				const resolve = client._pendingMountPromises.get(msg.slot);
+				if (resolve) resolve(true);
+			} else if (msg && msg.type === 'stele:dispatch') {
+				dispatchedToWorker.push(msg);
+			}
+		}
+	};
+	const primaryBridge = createBudWasmBridge(slotEl);
+	client.slotBridges.set(1, primaryBridge);
+
+	await client.mountSlot(1, 'test_mod', slotEl, null);
+	assert.equal(budCapFactoryCalls, 0, 'mountSlot must skip instantiating a duplicate bud capability bridge on slotRoot');
+
+	// Verify that clicking childBtn dispatches once to onDispatch and never recurses into _dispatchDomFallback
+	childBtn.dispatchEvent({ type: 'click', bubbles: true });
+	assert.equal(btnDispatchCount, 1, 'DOM click must not trigger recursive node.dispatchEvent');
+	assert.equal(dispatchedToWorker.length, 1, 'Worker onDispatch must receive exactly one click dispatch');
+	assert.equal(dispatchedToWorker[0].nodeId, 42);
+	assert.equal(dispatchedToWorker[0].eventName, 'click');
+
+	// Also verify that even an unconfigured BudWasmBridge (no onDispatch, no wasm) ignores physical DOM events cleanly
+	// and guards programmatic dispatch() against recursive _dispatchDomFallback
+	const unconfiguredBridge = createBudWasmBridge(slotEl);
+	btnDispatchCount = 0;
+	childBtn.dispatchEvent({ type: 'click', bubbles: true });
+	assert.equal(btnDispatchCount, 1, 'Unconfigured BudWasmBridge must never enter recursive _dispatchDomFallback on DOM events');
+	btnDispatchCount = 0;
+	assert.equal(unconfiguredBridge.dispatch(42, 'click', true), true);
+	assert.equal(btnDispatchCount, 1, 'Programmatic fallback dispatch must fire DOM event at most once without recursion');
+
+	// Verify localStorage user settings persistence:
+	// 1) Initial mount seeds default Medium settings into localStorage when no saved entry exists
+	// 2) Subsequent mount with saved localStorage settings posts stele:mount_slot BEFORE stele:dispatch (restore-persist)
+	const store = new Map();
+	window.localStorage = {
+		getItem(k) { return store.has(k) ? store.get(k) : null; },
+		setItem(k, v) { store.set(k, String(v)); },
+		removeItem(k) { store.delete(k); }
+	};
+	const defaultMediumStyle = '--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:100;';
+	const settingsCard = {
+		nodeType: 1,
+		tagName: 'DIV',
+		id: 'settings',
+		attributes: new Map([
+			['id', 'settings'],
+			['data-bud-id', '99'],
+			['data-bud-persist-key', 'nd-settings-quality'],
+			['class', 'rpg-modal-card settings-card select-none'],
+			['style', defaultMediumStyle]
+		]),
+		childNodes: [],
+		getAttribute(k) { return this.attributes.get(k) || null; },
+		setAttribute(k, v) { this.attributes.set(k, String(v)); },
+		removeAttribute(k) { this.attributes.delete(k); },
+		hasAttribute(k) { return this.attributes.has(k); },
+		addEventListener() {}
+	};
+	slotEl.querySelectorAll = (sel) => {
+		if (sel === '[data-bud-persist-key]') return [settingsCard];
+		return [childBtn, settingsCard];
+	};
+
+	const firstLoadBridge = createBudWasmBridge(slotEl);
+	firstLoadBridge.mount();
+	const seededRaw = window.localStorage.getItem('bud:layout:nd-settings-quality');
+	assert.ok(seededRaw, 'First mount must seed default Medium settings into localStorage');
+	assert.equal(JSON.parse(seededRaw).style, defaultMediumStyle);
+
+	// Now simulate user saving custom settings in localStorage and reloading the page in Worker mode
+	const customSavedStyle = '--nd-res:60;--nd-det:90;--nd-cloud:1;--nd-msaa:0;--nd-fps:30;--nd-zoom:120;';
+	window.localStorage.setItem('bud:layout:nd-settings-quality', JSON.stringify({
+		style: customSavedStyle,
+		class: 'rpg-modal-card settings-card select-none'
+	}));
+	settingsCard.setAttribute('style', defaultMediumStyle);
+
+	const workerMessageLog = [];
+	const reloadClient = new SteleWasmClient();
+	reloadClient.workerReady = true;
+	reloadClient._pendingMountPromises = new Map();
+	reloadClient.worker = {
+		postMessage(msg) {
+			workerMessageLog.push(msg);
+			if (msg && msg.type === 'stele:mount_slot') {
+				const resolve = reloadClient._pendingMountPromises.get(msg.slot);
+				if (resolve) resolve(true);
+			}
+		}
+	};
+	const reloadBridge = createBudWasmBridge(slotEl);
+	reloadClient.slotBridges.set(1, reloadBridge);
+	await reloadClient.mountSlot(1, 'nd', slotEl, null);
+
+	const mountIdx = workerMessageLog.findIndex((m) => m.type === 'stele:mount_slot');
+	const restoreIdx = workerMessageLog.findIndex((m) => m.type === 'stele:dispatch' && m.eventName === 'restore-persist');
+	assert.ok(mountIdx >= 0, 'Worker must receive stele:mount_slot');
+	assert.ok(restoreIdx > mountIdx, 'restore-persist dispatch from localStorage must be queued AFTER stele:mount_slot');
+	assert.ok(workerMessageLog[restoreIdx].valueStr.includes(customSavedStyle), 'restore-persist must carry saved localStorage settings');
+	assert.equal(settingsCard.getAttribute('style'), customSavedStyle);
+});
+

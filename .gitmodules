@@ -133,3 +133,6 @@
 [submodule "external/libmm"]
 	path = external/libmm
 	url = git@github.com:tty-pt/libmm.git
+[submodule "external/axil-auren"]
+	path = external/axil-auren
+	url = git@github.com:tty-pt/axil-auren.git

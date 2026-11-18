@@ -1075,7 +1075,6 @@ export class SteleWasmClient {
 			if (bridge) {
 				this._configureBridgeForWorker(slot, bridge);
 				if (typeof bridge.rescan === 'function') bridge.rescan();
-				if (typeof bridge.mount === 'function') bridge.mount();
 			}
 			this._transferSlotCanvases(slot);
 
@@ -1089,13 +1088,16 @@ export class SteleWasmClient {
 			].join(' ');
 			const declaredCaps = [...new Set(capStr.trim().split(/\s+/).filter(Boolean))];
 
+			const slotBridgeNs = bridge?.namespace || 'bud';
 			for (const cap of declaredCaps) {
-				if (cap === 'webgl' || cap === 'lamina') continue;
+				if (cap === 'webgl' || cap === 'lamina' || cap === 'bud' || cap === slotBridgeNs) continue;
+				if (this.activeBridges.some((b) => b && (b.namespace === cap || b.__stele_cap === cap))) continue;
 				const factory = globalScope.__wasm_capability_registry[cap];
 				if (typeof factory === 'function') {
 					try {
 						const capBridge = factory(slotRoot || (hasDoc ? document.body : null), () => null);
 						if (capBridge && !this.activeBridges.includes(capBridge)) {
+							capBridge.__stele_cap = cap;
 							this.activeBridges.push(capBridge);
 							if (typeof window !== 'undefined') window.__active_bridges = this.activeBridges;
 						}
@@ -1116,6 +1118,10 @@ export class SteleWasmClient {
 				state: json,
 				declaredCaps
 			});
+
+			if (bridge && typeof bridge.mount === 'function') {
+				bridge.mount();
+			}
 
 			const ok = await mountPromise;
 			if (ok) {

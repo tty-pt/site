@@ -1408,9 +1408,12 @@ static int on_settings_res_slider(bud_event *ev)
 	if (val_str && val_str[0]) {
 		int pct = atoi(val_str);
 		if (pct >= 25 && pct <= 100) {
+			int cur_pct = (int)(nd_seven_get_res_scale() * 100.0f + 0.5f);
 			nd_seven_set_res_scale((float)pct * 0.01f);
-			seven_stage_redraw();
-			bud_app_set_state();
+			if (pct != cur_pct) {
+				seven_stage_redraw();
+				bud_app_set_state();
+			}
 		}
 	}
 	return 0;
@@ -1468,9 +1471,12 @@ static int on_settings_detail_slider(bud_event *ev)
 	if (val_str && val_str[0]) {
 		int pct = atoi(val_str);
 		if (pct >= 20 && pct <= 250) {
+			int cur_pct = (int)(nd_seven_get_detail_scale() * 100.0f + 0.5f);
 			nd_seven_set_detail_scale((float)pct * 0.01f);
-			seven_stage_redraw();
-			bud_app_set_state();
+			if (pct != cur_pct) {
+				seven_stage_redraw();
+				bud_app_set_state();
+			}
 		}
 	}
 	return 0;
@@ -1501,9 +1507,12 @@ static int on_settings_zoom_slider(bud_event *ev)
 	if (val_str && val_str[0]) {
 		int pct = atoi(val_str);
 		if (pct >= 10 && pct <= 250) {
+			int cur_pct = (int)(nd_seven_get_zoom() * 100.0f + 0.5f);
 			nd_seven_set_zoom((float)pct * 0.01f);
-			seven_stage_redraw();
-			bud_app_set_state();
+			if (pct != cur_pct) {
+				seven_stage_redraw();
+				bud_app_set_state();
+			}
 		}
 	}
 	return 0;
@@ -1590,9 +1599,9 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 	/* 0. Graphics Quality Preset */
 	{
 		int preset = nd_seven_get_quality_preset();
-		const char *preset_label = "✨ High (Default)";
+		const char *preset_label = "✨ High";
 		if (preset == ND_QUALITY_LOW) preset_label = "🔋 Low (Fastest)";
-		else if (preset == ND_QUALITY_MEDIUM) preset_label = "⚖️ Medium (Balanced)";
+		else if (preset == ND_QUALITY_MEDIUM) preset_label = "⚖️ Medium (Default)";
 		else if (preset == ND_QUALITY_CUSTOM) preset_label = "🎛️ Custom";
 
 		bud_node *sec = bud_element("div");
