@@ -20,6 +20,7 @@ function makeGl(log) {
 		blitFramebuffer: (...a) => log.push(['blit', ...a]),
 		stencilFunc: (...a) => log.push(['stencilFunc', ...a]), stencilOp: (...a) => log.push(['stencilOp', ...a]),
 		stencilMask: (...a) => log.push(['stencilMask', ...a]), clearStencil: (...a) => log.push(['clearStencil', ...a]),
+		viewport: (...a) => log.push(['viewport', ...a]),
 		getExtension: () => null, activeTexture: () => {},
 	};
 	return gl;
@@ -87,3 +88,17 @@ assert.ok(restored.some((e) => e[0] === 'rbStorageMS' && e[1] === 4 && e[3] === 
 assert.equal(restored.filter((e) => e[0] === 'fbTex' && e[1] === DEPTH).length, 1, 'depth attachment restored exactly once');
 assert.equal(restored.filter((e) => e[0] === 'fbRb' && e[1] === COLOR0).length, 1, 'color attachment restored exactly once');
 console.log('PASS: render targets are rebuilt after a GL context change');
+
+// Offscreen FBO glViewport must NOT mutate data-bud-canvas-fit canvas swapchain dimensions.
+canvasB.__stele_fit = true;
+canvasB.width = 1400;
+canvasB.height = 836;
+imp.glBindFramebuffer(GL_FRAMEBUFFER, fb);
+imp.glViewport(0, 0, 128, 128);
+assert.equal(canvasB.width, 1400, 'offscreen FBO viewport must not shrink canvas width');
+assert.equal(canvasB.height, 836, 'offscreen FBO viewport must not shrink canvas height');
+imp.glBindFramebuffer(GL_FRAMEBUFFER, 0);
+imp.glViewport(0, 0, 1600, 900);
+assert.equal(canvasB.width, 1600, 'default FBO 0 viewport resizes fit canvas width');
+assert.equal(canvasB.height, 900, 'default FBO 0 viewport resizes fit canvas height');
+console.log('PASS: offscreen FBO glViewport preserves canvas swapchain dimensions');

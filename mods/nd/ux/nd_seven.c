@@ -16,6 +16,7 @@
 /* --- macro chunk hierarchy integration ---------------------------------- */
 
 static ar_system_t *s_seven_chunk_sys = NULL;
+static stl_wq_t *s_seven_wq = NULL;
 static lam_particle_sys_t *s_water_particles = NULL;
 static float s_prev_particle_time = 0.0f;
 static float s_last_splash_emit_time = 0.0f;
@@ -169,6 +170,9 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
+		if (!s_seven_wq) {
+			s_seven_wq = stl_wq_create("nd-seven", 0, 256);
+		}
 		ar_config_t cfg;
 		memset(&cfg, 0, sizeof(cfg));
 		cfg.base_w = NDW_TILE_W;
@@ -181,6 +185,8 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.default_rgba = 0xFF3C804Eu;
 		cfg.period_x = 6.2831853f * 2000000.0f;
 		cfg.period_y = 6.2831853f * 1335000.0f;
+		cfg.max_populates_per_frame = 8;
+		cfg.wq = s_seven_wq;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;
@@ -1393,23 +1399,108 @@ static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, i
 #define BLOCK_BB_CACHE_SLOTS 4096u
 #define BLOCK_BB_ARENA_CAP   131072u
 #define BLOCK_BB_MAX_PER_BLK 192u
+#define BLOCK_BB_STAGING_SLOTS 64u
 
 typedef struct {
-	int32_t  bx0, by0;
-	int32_t  node_ox, node_oy;
-	uint32_t node_rev;
-	uint32_t atlas_ver;
-	uint32_t forget_seq;
-	uint64_t arena_seq;
-	uint32_t arena_off;
-	uint16_t count;
-	int16_t  world, rz, w_level;
-	uint8_t  node_level, valid;
+	int32_t       bx0, by0;
+	int32_t       node_ox, node_oy;
+	uint32_t      node_rev;
+	uint32_t      atlas_ver;
+	uint32_t      forget_seq;
+	uint64_t      arena_seq;
+	uint32_t      arena_off;
+	uint16_t      count;
+	int16_t       world, rz, w_level;
+	uint8_t       node_level, valid;
+	uint8_t       staging_idx;
+	stl_wq_task_t async_task;
+	const ar_node_t *async_node;
 } block_bb_cache_slot_t;
 
 static block_bb_cache_slot_t s_block_bb_cache[BLOCK_BB_CACHE_SLOTS];
 static lam_billboard_gpu_t   s_block_bb_arena[BLOCK_BB_ARENA_CAP];
+static lam_billboard_gpu_t   s_block_bb_staging[BLOCK_BB_STAGING_SLOTS][BLOCK_BB_MAX_PER_BLK];
+static uint16_t              s_block_bb_staging_cnt[BLOCK_BB_STAGING_SLOTS];
+static uint32_t              s_block_bb_staging_cursor = 0;
 static uint64_t              s_block_bb_arena_cursor = 1;
+
+static void seven_async_block_bb_worker(void *ctx)
+{
+	block_bb_cache_slot_t *slot = (block_bb_cache_slot_t *)ctx;
+	const ar_node_t *node = slot ? slot->async_node : NULL;
+	if (!slot || !node || !node->values || slot->staging_idx >= BLOCK_BB_STAGING_SLOTS)
+		return;
+
+	lam_billboard_gpu_t *dst = s_block_bb_staging[slot->staging_idx];
+	uint16_t cnt = 0;
+	int32_t bx0 = slot->bx0;
+	int32_t by0 = slot->by0;
+	int16_t world = slot->world;
+	int16_t rz = slot->rz;
+	int16_t w_level = slot->w_level;
+
+	for (int32_t ry_grid = by0; ry_grid < by0 + 8; ry_grid++) {
+		for (int32_t rx_grid = bx0; rx_grid < bx0 + 8; rx_grid++) {
+			int16_t pos[4] = {
+				(int16_t)rx_grid,
+				(int16_t)(-ry_grid),
+				rz,
+				world
+			};
+			ndw_tile_t tile;
+			ndw_synth_virgin_tile(pos, &tile);
+			if (!tile.glyph[0] && !tile.glyph[1] && !tile.glyph[2])
+				continue;
+			ndw_obj_t raw_objs[NDW_MAX_OBJ];
+			int n_raw = ndw_tile_objects(&tile, pos, 0, raw_objs);
+			if (n_raw <= 0)
+				continue;
+
+			int32_t base_wx = (int32_t)pos[0] * NDW_TILE_W;
+			int32_t base_wy = -(int32_t)pos[1] * NDW_TILE_H;
+			for (int k = 0; k < n_raw; k++) {
+				if (cnt >= BLOCK_BB_MAX_PER_BLK)
+					break;
+				nd_seven_sprite_rect_t sr_val;
+				if (!nd_seven_obj_rect(&raw_objs[k], &sr_val))
+					continue;
+				int32_t wx = base_wx + raw_objs[k].x;
+				int32_t wy = base_wy + raw_objs[k].y;
+				int16_t elev_q = 0, local_wl = w_level;
+				seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
+				int16_t wz = nd_field_elevation_to_block(elev_q);
+				if (wz <= local_wl && node->level >= 2) {
+					int16_t canon_elev = nd_field_sample((uint16_t)world, 0, wx, wy).elevation;
+					if (canon_elev > local_wl)
+						wz = canon_elev;
+				}
+				if (wz <= local_wl &&
+				    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS)
+					continue;
+				float z_f = (float)elev_q / 16.0f;
+				int flip = (raw_objs[k].variant >> 2) & 1;
+				lam_billboard_gpu_t bb;
+				bb.x = (float)wx;
+				bb.y = (float)wy;
+				bb.z = z_f;
+				seven_calc_obj_billboard_dims(&raw_objs[k], &sr_val, &bb.width, &bb.height, &bb.anchor_y);
+				bb.water_z_off = bb.anchor_y;
+				if (flip) {
+					bb.u0 = (float)(sr_val.x + sr_val.w) / (float)ND_SEVEN_ATLAS_W;
+					bb.u1 = (float)sr_val.x / (float)ND_SEVEN_ATLAS_W;
+				} else {
+					bb.u0 = (float)sr_val.x / (float)ND_SEVEN_ATLAS_W;
+					bb.u1 = (float)(sr_val.x + sr_val.w) / (float)ND_SEVEN_ATLAS_W;
+				}
+				bb.v0 = (float)sr_val.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				bb.v1 = (float)(sr_val.y + sr_val.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+				seven_apply_obj_billboard_style(&raw_objs[k], &sr_val, 0xFFFFFFFFu, &bb);
+				dst[cnt++] = bb;
+			}
+		}
+	}
+	s_block_bb_staging_cnt[slot->staging_idx] = cnt;
+}
 
 static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb)
 {
@@ -2638,6 +2729,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 			uint32_t cur_atlas_ver = atlas_rgba_version();
 			uint32_t cur_forget_seq = nd_seven_get_forget_seq();
+			uint32_t sync_block_builds = 0;
 
 			for (int32_t by0 = cy0; by0 < cy1; by0 += 8) {
 				int32_t by1 = (by0 + 8 < cy1) ? (by0 + 8) : cy1;
@@ -2683,6 +2775,37 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 							  (((uint32_t)(by0 >> 3) & 63u) << 6)) ^
 							 (((uint32_t)world & 3u) << 10)) & (BLOCK_BB_CACHE_SLOTS - 1u);
 						block_bb_cache_slot_t *slot = &s_block_bb_cache[slot_idx];
+						if (stl_wq_done(&slot->async_task)) {
+							if (slot->bx0 == bx0 && slot->by0 == by0 &&
+							    slot->world == (int16_t)world && slot->rz == base_rz &&
+							    slot->node_ox == node->ox && slot->node_oy == node->oy &&
+							    slot->staging_idx < BLOCK_BB_STAGING_SLOTS) {
+								uint16_t scnt = s_block_bb_staging_cnt[slot->staging_idx];
+								uint32_t cur_off = (uint32_t)(s_block_bb_arena_cursor & (BLOCK_BB_ARENA_CAP - 1u));
+								if (cur_off + BLOCK_BB_MAX_PER_BLK > BLOCK_BB_ARENA_CAP) {
+									s_block_bb_arena_cursor += (uint64_t)(BLOCK_BB_ARENA_CAP - cur_off);
+									cur_off = 0;
+								}
+								uint64_t start_seq = s_block_bb_arena_cursor;
+								if (scnt > 0) {
+									memcpy(&s_block_bb_arena[cur_off],
+									       s_block_bb_staging[slot->staging_idx],
+									       (size_t)scnt * sizeof(lam_billboard_gpu_t));
+								}
+								s_block_bb_arena_cursor += (uint64_t)scnt;
+								slot->arena_seq = start_seq + (uint64_t)scnt;
+								slot->arena_off = cur_off;
+								slot->count = scnt;
+								slot->node_rev = node->rev;
+								slot->atlas_ver = cur_atlas_ver;
+								slot->forget_seq = cur_forget_seq;
+								slot->valid = 1;
+							}
+							slot->async_task.state = STL_WQ_IDLE;
+						}
+						if (stl_wq_busy(&slot->async_task)) {
+							continue;
+						}
 						if (slot->valid &&
 						    slot->bx0 == bx0 && slot->by0 == by0 &&
 						    slot->world == (int16_t)world && slot->rz == base_rz &&
@@ -2700,6 +2823,28 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 							}
 							continue;
 						}
+
+						if (s_seven_wq && sync_block_builds >= 4u) {
+							uint8_t sidx = (uint8_t)(s_block_bb_staging_cursor++ & (BLOCK_BB_STAGING_SLOTS - 1u));
+							slot->bx0 = bx0;
+							slot->by0 = by0;
+							slot->node_ox = node->ox;
+							slot->node_oy = node->oy;
+							slot->node_rev = node->rev;
+							slot->atlas_ver = cur_atlas_ver;
+							slot->forget_seq = cur_forget_seq;
+							slot->world = (int16_t)world;
+							slot->rz = base_rz;
+							slot->w_level = w_level;
+							slot->node_level = node->level;
+							slot->staging_idx = sidx;
+							slot->async_node = node;
+							slot->valid = 0;
+							if (stl_wq_submit(s_seven_wq, &slot->async_task, seven_async_block_bb_worker, slot) == 0) {
+								continue;
+							}
+						}
+						sync_block_builds++;
 
 						uint32_t cur_off = (uint32_t)(s_block_bb_arena_cursor & (BLOCK_BB_ARENA_CAP - 1u));
 						if (cur_off + BLOCK_BB_MAX_PER_BLK > BLOCK_BB_ARENA_CAP) {

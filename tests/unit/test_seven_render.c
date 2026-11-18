@@ -2714,6 +2714,11 @@ int main(void)
 				assert(sh >= ps);
 				ps = sh;
 			}
+			assert(ND_CSM_RES == 128);
+			assert(strstr(nd_seven_gl_fs_csm(), "eval_synoptic_carrier") != NULL);
+			assert(strstr(nd_seven_gl_fs_terrain(), "uCsm.z < 0.0") != NULL);
+			assert(strstr(nd_seven_gl_fs_water(), "uCsm.z < 0.0") != NULL);
+			assert(strstr(nd_seven_gl_fs_cloud(), "uCsm.z < 0.0") != NULL);
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 

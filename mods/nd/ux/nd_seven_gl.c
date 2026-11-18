@@ -48,20 +48,24 @@
 	"    float sliceFade = mix(smoothstep(zk + 240.0, zk - 120.0, fragZ), 1.0, distFadeZ);\n" \
 	"    float dz = max(0.0, zk - fragZ) + orbitOffset;\n" \
 	"    vec2 projXY = fragXY + sunProj * dz;\n" \
+	"    vec4 synC; vec2 pD; vec2 pZ; vec2 baseG;\n" \
+	"    if (eval_synoptic_carrier(projXY, anim_time, humidity, fw, synC, pD, pZ, baseG)) return 0.0;\n" \
 	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(21.8, -19.8);\n" \
 	"    float atmoGust = 0.65, updraft = 0.50;\n" \
 	"    if (fw < 200.0) chaff_eval_wind_3d(vec3(projXY, zk), zBase, zTop, anim_time, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n" \
-	"    vec4 synCloud = eval_synoptic_macro_cloud_fw(projXY - shearDisp, anim_time, humidity, fw);\n" \
+	"    vec2 dummyG; float dummyC;\n" \
+	"    vec4 synCloud = eval_synoptic_macro_cloud_from_carrier(projXY - shearDisp, anim_time, humidity, fw, false, synC, pZ, baseG, dummyG, dummyC);\n" \
 	"    return clamp(smoothstep(0.05, 0.66, synCloud.x * sliceFade), 0.0, 0.95);\n" \
 	"}\n"
 
-/* Cloud-shadow map (R8, one frame-wide evaluation of the synoptic field on the cloud slice zk = 920):
+/* Cloud-shadow map (R8, one frame-wide evaluation of the synoptic field on the Sun-Pyramid cloud slice zk = 920):
  * Indexed by world/projected slice position, so terrain, water, sprites, and volumetric cloud sun-shadow probes each do ONE texture fetch.
- * uCsm = (window centre x, window centre y, window half-extent); half <= 0 means "no map bound". */
+ * uCsm = (window centre x, window centre y, window half-extent); half < 0 means Sun-Pyramid is 100% clear sky; half == 0 means no map bound. */
 #define ND_GLSL_CSM_LOOKUP_FN \
 	"uniform sampler2D uCloudShadowMap;\n" \
 	"uniform vec3 uCsm;\n" \
 	"float nd_csm_density(vec2 sliceXY) {\n" \
+	"    if (uCsm.z <= 0.0) return 0.0;\n" \
 	"    vec2 uv = (sliceXY - uCsm.xy) / (2.0 * uCsm.z) + 0.5;\n" \
 	"    vec2 e = min(uv, 1.0 - uv);\n" \
 	"    float edge = smoothstep(0.0, 0.04, min(e.x, e.y));\n" \
@@ -78,9 +82,11 @@
 	"    return clamp(smoothstep(0.05, 0.66, nd_csm_density(projXY) * sliceFade), 0.0, 0.95);\n" \
 	"}\n"
 
-/* Terrain / water entry point: one map fetch below 140 km inside the CSM window, smooth crossfade 140..180 km, analytic evaluation above 180 km. */
+/* Terrain / water entry point: zero cost when Sun-Pyramid is clear sky (uCsm.z < 0.0), one map fetch below 140 km inside the CSM window,
+ * smooth crossfade 140..180 km, analytic evaluation above 180 km. */
 #define ND_GLSL_CLOUD_SHADOW_ENTRY_FN \
 	"float nd_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
+	"    if (uCsm.z < 0.0 && dist < 180000.0) return 0.0;\n" \
 	"    if (dist >= 180000.0 || uCsm.z <= 0.0) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
 	"    const float zk = 920.0;\n" \
 	"    float dz = max(0.0, zk - fragZ) + clamp(dist * 0.045, 0.0, 14000.0);\n" \
@@ -88,9 +94,9 @@
 	"    vec2 projXY = fragXY + sunProj * dz;\n" \
 	"    vec2 csmRel = abs(projXY - uCsm.xy) / uCsm.z;\n" \
 	"    float csmBox = max(csmRel.x, csmRel.y);\n" \
+	"    if (dist <= 140000.0 && csmBox <= 0.96) return nd_cloud_shadow_map(fragXY, fragZ, dist);\n" \
 	"    if (csmBox >= 0.96) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
 	"    float csmSh = nd_cloud_shadow_map(fragXY, fragZ, dist);\n" \
-	"    if (dist <= 140000.0 && csmBox <= 0.88) return csmSh;\n" \
 	"    float anaSh = eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
 	"    float blend = max(smoothstep(140000.0, 180000.0, dist), smoothstep(0.88, 0.96, csmBox));\n" \
 	"    return mix(csmSh, anaSh, blend);\n" \
@@ -3444,10 +3450,16 @@ static const char *s_fs_csm =
 	"    float midLatWet = smoothstep(18.0, 0.0, abs(latDeg - 38.0)) * 0.12;\n"
 	"    float subpolarWet = smoothstep(10.0, 0.0, abs(latDeg - 58.0)) * 0.08;\n"
 	"    float humidity = clamp(0.50 + 0.28 * (worldClimate.x - 0.5) + 0.10 * uSeaWet - eqEvapDry + midLatWet + subpolarWet, 0.08, 0.90);\n"
+	"    vec4 synC; vec2 pD; vec2 pZ; vec2 baseG;\n"
+	"    if (eval_synoptic_carrier(projXY, uAnimTime, humidity, fw, synC, pD, pZ, baseG)) {\n"
+	"        FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+	"        return;\n"
+	"    }\n"
 	"    vec2 atmoWindDir = vec2(0.741, -0.671), shearDisp = vec2(21.8, -19.8);\n"
 	"    float atmoGust = 0.65, updraft = 0.50;\n"
 	"    if (fw < 200.0) chaff_eval_wind_3d(vec3(projXY, 920.0), 420.0, 2820.0, uAnimTime, fw, atmoWindDir, shearDisp, atmoGust, updraft);\n"
-	"    vec4 syn = eval_synoptic_macro_cloud_fw(projXY - shearDisp, uAnimTime, humidity, fw);\n"
+	"    vec2 dummyG; float dummyC;\n"
+	"    vec4 syn = eval_synoptic_macro_cloud_from_carrier(projXY - shearDisp, uAnimTime, humidity, fw, false, synC, pZ, baseG, dummyG, dummyC);\n"
 	"    FragColor = vec4(clamp(syn.x, 0.0, 1.0), 0.0, 0.0, 1.0);\n"
 	"}\n";
 
@@ -3649,9 +3661,7 @@ static const char *s_fs_cloud =
 	"    float synFw = upperDeck ? max(fw, 4000.0) : fw;\n"
 	"    vec2 macroGrad = baseMacroGrad;\n"
 	"    float highCirrus = 0.0;\n"
-	"    vec4 synCloud = (upperDeck && dist < 80000.0)\n"
-	"        ? eval_synoptic_macro_cloud_core(synQueryXY, anim_time, humidity, synFw, true, macroGrad, highCirrus)\n"
-	"        : eval_synoptic_macro_cloud_from_carrier(synQueryXY, anim_time, humidity, synFw, upperDeck, synCarrier, pZonalBase, baseMacroGrad, macroGrad, highCirrus);\n"
+	"    vec4 synCloud = eval_synoptic_macro_cloud_from_carrier(synQueryXY, anim_time, humidity, synFw, upperDeck, synCarrier, pZonalBase, baseMacroGrad, macroGrad, highCirrus);\n"
 	"    float macroCoverage = synCloud.x;\n"
 	"    if (macroCoverage <= 0.008 && (!upperDeck || highCirrus <= 0.015)) return vec4(0.0);\n"
 	"    float coreStrength = smoothstep(0.06, 0.75, macroCoverage);\n"
@@ -3896,7 +3906,9 @@ static const char *s_fs_cloud =
 	"            if (!towerReady) {\n"
 	"                vec2 probeXY = entryWorldPos + sunHoriz * sunStepDist;\n"
 	"                float probeDens = 0.0;\n"
-	"                if (uCsm.z > 0.0 && max(abs(probeXY.x - uCsm.x), abs(probeXY.y - uCsm.y)) < uCsm.z * 0.90) {\n"
+	"                if (uCsm.z < 0.0) {\n"
+	"                    probeDens = 0.0;\n"
+	"                } else if (uCsm.z > 0.0 && max(abs(probeXY.x - uCsm.x), abs(probeXY.y - uCsm.y)) < uCsm.z * 0.96) {\n"
 	"                    probeDens = nd_csm_density(probeXY);\n"
 	"                } else {\n"
 	"                    vec4 sunTowerCloud = eval_synoptic_macro_cloud_fw(probeXY, uAnimTime, bioHumidity, max(fw * 1.5, 400.0));\n"
@@ -5320,6 +5332,7 @@ static struct {
 	GLuint csm_fbo;
 	bool csm_failed;
 	bool csm_valid;
+	bool csm_clear_sky;
 	bool csm_has_cache;
 	nd_seven_gl_csm_window_t csm_win;
 	nd_seven_gl_csm_window_t csm_rendered_win;
@@ -5371,6 +5384,7 @@ static struct {
 	double cur_origin[3];
 	float cur_tx;
 	float cur_ty;
+	float cur_tz;
 	float cur_ref_trig[4];
 	float cur_dist;
 	float cur_near;
@@ -5893,14 +5907,159 @@ static bool gl_ensure_csm_target(void)
 	return true;
 }
 
-/* One frame-wide evaluation of the cloud density on the cloud slice (replaces per-pixel shadow evaluation). */
+static inline void gl_chaff_grad_noise2d(float px, float py, uint32_t seed,
+                                         float *out_val, float *out_gx, float *out_gy);
+static inline float gl_smoothstep(float e0, float e1, float x);
+
+static float gl_smoothstep01(float e0, float e1, float x)
+{
+	float t = (x - e0) / (e1 - e0);
+	t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+	return t * t * (3.0f - 2.0f * t);
+}
+
+static bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,
+                                              float sea_wet, float fw,
+                                              bool want_cirrus, float margin)
+{
+	const float prevDirX = 0.741f, prevDirY = -0.671f;
+	const float prevPerpX = 0.671f, prevPerpY = 0.741f;
+	float raw_tFlow = anim_time * 0.005f;
+	float tFlow = raw_tFlow - 1024.0f * floorf(raw_tFlow / 1024.0f);
+
+	float wc_v = 0.5f, wc_gx = 0.0f, wc_gy = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.000045f, wy * 0.000045f, 0x434C494Du, &wc_v, &wc_gx, &wc_gy);
+	float tex_hum = 0.50f + 0.28f * (wc_v - 0.5f) + 0.10f * sea_wet;
+	if (tex_hum < 0.08f) tex_hum = 0.08f;
+	if (tex_hum > 0.95f) tex_hum = 0.95f;
+	float lat_phi = 6.28318530718f * ((64.0f - wy) / 8388608.0f);
+	float abs_sin_lat = fabsf(sinf(lat_phi));
+	if (abs_sin_lat > 1.0f) abs_sin_lat = 1.0f;
+	float lat_deg = asinf(abs_sin_lat) * 57.2957795f;
+	float eq_evap_dry = gl_smoothstep01(24.0f, 0.0f, lat_deg) * 0.18f;
+	float mid_lat_wet = gl_smoothstep01(18.0f, 0.0f, fabsf(lat_deg - 38.0f)) * 0.12f;
+	float subpolar_wet = gl_smoothstep01(10.0f, 0.0f, fabsf(lat_deg - 58.0f)) * 0.08f;
+	float humidity = tex_hum - eq_evap_dry + mid_lat_wet + subpolar_wet;
+	if (humidity < 0.06f) humidity = 0.06f;
+	if (humidity > 0.92f) humidity = 0.92f;
+
+	float psi0_v = 0.5f, psi0_gx = 0.0f, psi0_gy = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.00000042f - prevDirX * (tFlow * 0.40f),
+	                      wy * 0.00000042f - prevDirY * (tFlow * 0.40f),
+	                      0x4359434Cu, &psi0_v, &psi0_gx, &psi0_gy);
+
+	float psi1_v = 0.5f, psi1_gx = 0.0f, psi1_gy = 0.0f;
+	gl_chaff_grad_noise2d(wx * 0.00000180f + (-psi0_gy) * 0.30f - prevDirX * tFlow,
+	                      wy * 0.00000180f + psi0_gx * 0.30f - prevDirY * tFlow,
+	                      0x5354524Du, &psi1_v, &psi1_gx, &psi1_gy);
+
+	float synWarpX = (-psi0_gy) * 260000.0f + (-psi1_gy) * 68000.0f;
+	float synWarpY = psi0_gx * 260000.0f + psi1_gx * 68000.0f;
+
+	float pDispX = wx + synWarpX;
+	float pDispY = wy + synWarpY;
+	float pAlong = pDispX * prevDirX + pDispY * prevDirY;
+	float pCross = pDispX * prevPerpX + pDispY * prevPerpY;
+	float pZonalX = prevDirX * (pAlong * 0.65f) + prevPerpX * (pCross * 1.55f);
+	float pZonalY = prevDirY * (pAlong * 0.65f) + prevPerpY * (pCross * 1.55f);
+
+	float raw_p0 = anim_time * 0.004f;
+	float phase0 = raw_p0 - 1024.0f * floorf(raw_p0 / 1024.0f);
+	float raw_p1 = anim_time * 0.008f;
+	float phase1 = raw_p1 - 1024.0f * floorf(raw_p1 / 1024.0f);
+
+	float oct0_v = 0.5f, oct0_gx = 0.0f, oct0_gy = 0.0f;
+	gl_chaff_grad_noise2d(pZonalX * 0.00000050f - prevDirX * phase0,
+	                      pZonalY * 0.00000050f - prevDirY * phase0,
+	                      0x434C4430u, &oct0_v, &oct0_gx, &oct0_gy);
+
+	float wOct1 = gl_smoothstep01(0.32f, 0.08f, 0.00000240f * fw);
+	float oct1_v = 0.5f, oct1_gx = 0.0f, oct1_gy = 0.0f;
+	if (wOct1 > 0.001f) {
+		float pRotX = 0.8f * pZonalX + 0.6f * pZonalY;
+		float pRotY = -0.6f * pZonalX + 0.8f * pZonalY;
+		gl_chaff_grad_noise2d(pRotX * 0.00000240f - prevDirX * phase1,
+		                      pRotY * 0.00000240f - prevDirY * phase1,
+		                      0x434C4431u, &oct1_v, &oct1_gx, &oct1_gy);
+	}
+
+	float r0 = 1.0f - 2.0f * fabsf(oct0_v - 0.5f);
+	float r1 = 1.0f - 2.0f * fabsf(oct1_v - 0.5f);
+	float front0 = oct0_v + (r0 - 0.68f) * 0.28f;
+	float front1 = oct1_v + (r1 - 0.68f) * 0.24f;
+
+	float synFront = 0.50f + (front0 - 0.50f) * 0.72f + (front1 - 0.50f) * (0.54f * wOct1) + (psi0_v - 0.50f) * 0.34f;
+	float wReg2 = gl_smoothstep01(0.26f, 0.07f, 0.00001150f * fw);
+	float wReg3 = gl_smoothstep01(0.24f, 0.06f, 0.00005500f * fw);
+	float thresh = 0.555f - 0.105f * humidity;
+	float cir_thresh = 0.56f - 0.08f * humidity;
+	if (want_cirrus && (synFront + 0.118f + margin) > cir_thresh)
+		return false;
+	if (synFront + 0.116f * wReg2 + 0.070f * wReg3 + margin <= thresh)
+		return true;
+	if (wReg2 > 0.001f) {
+		float raw_p2 = anim_time * 0.015f;
+		float phase2 = raw_p2 - 1024.0f * floorf(raw_p2 / 1024.0f);
+		/* rot^2 = mat2(0.28, -0.96, 0.96, 0.28); column-majorrot * (rot * worldXY) */
+		float r1x = 0.8f * wx + 0.6f * wy;
+		float r1y = -0.6f * wx + 0.8f * wy;
+		float p2x = 0.8f * r1x + 0.6f * r1y + synWarpX * 0.14f;
+		float p2y = -0.6f * r1x + 0.8f * r1y + synWarpY * 0.14f;
+		float oct2_v = 0.5f, oct2_gx = 0.0f, oct2_gy = 0.0f;
+		gl_chaff_grad_noise2d(p2x * 0.00001150f - prevDirX * phase2,
+		                      p2y * 0.00001150f - prevDirY * phase2,
+		                      0x434C4432u, &oct2_v, &oct2_gx, &oct2_gy);
+		float r2 = 1.0f - 2.0f * fabsf(oct2_v - 0.5f);
+		float squall2 = (oct2_v - 0.50f) + (r2 - 0.68f) * 0.25f;
+		synFront += squall2 * 0.20f * wReg2;
+	}
+	return (synFront + 0.070f * wReg3 + margin) <= thresh;
+}
+
+/* Sun-Pyramid Cloud Shadow Map:
+ * Forms the pyramid with apex at the sun and base covering the visible ground frustum around (tx, ty, tz),
+ * intersects that pyramid with the cloud slice zk = 920 at (pyr_cx, pyr_cy), and:
+ * 1) Pre-culls the entire CSM pass on the CPU when the Sun-Pyramid slice intersects 100% clear sky (~65-75% of planet),
+ *    setting csm_clear_sky = true (uCsm.z = -1) so terrain/water/clouds skip all shadow texture fetches and procedural noise.
+ * 2) Otherwise renders the 128x128 R8 map centered directly on the Sun-Pyramid cloud-deck intersection. */
 static void gl_render_cloud_shadow_map(void)
 {
 	s_gl.csm_valid = false;
-	if (!s_gl.csm_pipe.prog || !nd_seven_gl_csm_window(s_gl.cur_dist, s_gl.cur_tx, s_gl.cur_ty, &s_gl.csm_win))
+	s_gl.csm_clear_sky = false;
+	if (!s_gl.csm_pipe.prog || s_gl.cur_dist > 180000.0f)
 		return;
-	if (!gl_ensure_csm_target()) return;
+
+	float sun_xy_len = sqrtf(s_gl.cur_sun_dir[0] * s_gl.cur_sun_dir[0] + s_gl.cur_sun_dir[1] * s_gl.cur_sun_dir[1]);
+	float sun_px = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[0] / sun_xy_len) : -0.70710678f;
+	float sun_py = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[1] / sun_xy_len) : -0.70710678f;
+	float orbit_off = fminf(14000.0f, fmaxf(0.0f, s_gl.cur_dist * 0.045f));
+	float dz_ref = fmaxf(0.0f, 920.0f - fmaxf(0.0f, s_gl.cur_tz)) + orbit_off;
+	float pyr_cx = s_gl.cur_tx + sun_px * dz_ref;
+	float pyr_cy = s_gl.cur_ty + sun_py * dz_ref;
+
+	if (!nd_seven_gl_csm_window(s_gl.cur_dist, pyr_cx, pyr_cy, &s_gl.csm_win))
+		return;
+
 	float sea_wet = (s_gl.cur_sea_level > -900.0f) ? 1.0f : 0.0f;
+	float fw_csm = (2.0f * s_gl.csm_win.half) / (float)ND_CSM_RES;
+	float pyr_half = fminf(s_gl.csm_win.half, fmaxf(1200.0f, s_gl.cur_dist * 1.8f + 800.0f));
+	bool pyr_clear = true;
+	for (int gy = -1; gy <= 1 && pyr_clear; gy++) {
+		float sy = pyr_cy + (float)gy * pyr_half;
+		for (int gx = -1; gx <= 1; gx++) {
+			float sx = pyr_cx + (float)gx * pyr_half;
+			if (!gl_eval_synoptic_is_clear_sky_cpu(sx, sy, s_gl.cur_anim_time, sea_wet, fw_csm, false, 0.028f)) {
+				pyr_clear = false;
+				break;
+			}
+		}
+	}
+	if (pyr_clear) {
+		s_gl.csm_clear_sky = true;
+		return;
+	}
+
+	if (!gl_ensure_csm_target()) return;
 	if (s_gl.csm_has_cache &&
 	    s_gl.csm_rendered_win.cx == s_gl.csm_win.cx &&
 	    s_gl.csm_rendered_win.cy == s_gl.csm_win.cy &&
@@ -5929,7 +6088,7 @@ static void gl_render_cloud_shadow_map(void)
 	s_gl.csm_valid = true;
 }
 
-/* Bind the cloud-shadow map (texture unit 7) and window to a program; half = 0 tells the shader no map is available. */
+/* Bind the cloud-shadow map (texture unit 7) and window to a program; half < 0 means Sun-Pyramid is clear sky; half = 0 means no map is available. */
 static void gl_bind_csm(GLint loc_tex, GLint loc_csm)
 {
 	glActiveTexture(GL_TEXTURE0 + 7);
@@ -5937,16 +6096,11 @@ static void gl_bind_csm(GLint loc_tex, GLint loc_csm)
 	glUniform1i(loc_tex, 7);
 	if (s_gl.csm_valid)
 		glUniform3f(loc_csm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
+	else if (s_gl.csm_clear_sky)
+		glUniform3f(loc_csm, 0.0f, 0.0f, -1.0f);
 	else
 		glUniform3f(loc_csm, 0.0f, 0.0f, 0.0f);
 	glActiveTexture(GL_TEXTURE0);
-}
-
-static float gl_smoothstep01(float e0, float e1, float x)
-{
-	float t = (x - e0) / (e1 - e0);
-	t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-	return t * t * (3.0f - 2.0f * t);
 }
 
 float nd_seven_gl_cloud_shadow_from_density(float density, float frag_z)
@@ -5988,6 +6142,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.cur_anim_time = anim_time;
 	s_gl.cur_tx = tx;
 	s_gl.cur_ty = ty;
+	s_gl.cur_tz = tz;
 	s_grass_anim_time = anim_time;
 	s_grass_lamb_wx = tx;
 	s_grass_lamb_wy = ty;
@@ -6050,6 +6205,8 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.stage_w = stage_w;
 	s_gl.stage_h = stage_h;
 	s_gl.frame_open = true;
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, (GLsizei)stage_w, (GLsizei)stage_h);
 	if (s_gl.pipelines_ready)
 		gl_ensure_scene_targets(stage_w, stage_h);
 	gl_bind_scene_target();
@@ -6070,8 +6227,10 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 
 	if (s_gl.pipelines_ready)
 		gl_render_cloud_shadow_map();
-	else
+	else {
 		s_gl.csm_valid = false;
+		s_gl.csm_clear_sky = false;
+	}
 }
 
 static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
@@ -6101,68 +6260,6 @@ static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t s
 		*out_ibo = s_gl.grid_ibo_macro;
 		*out_indices = GL_TOTAL_INDICES_MACRO;
 	}
-}
-
-static inline void gl_chaff_grad_noise2d(float px, float py, uint32_t seed,
-                                         float *out_val, float *out_gx, float *out_gy);
-static inline float gl_smoothstep(float e0, float e1, float x);
-
-static bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time)
-{
-	const float prevDirX = 0.741f, prevDirY = -0.671f;
-	const float prevPerpX = 0.671f, prevPerpY = 0.741f;
-	float raw_tFlow = anim_time * 0.005f;
-	float tFlow = raw_tFlow - 1024.0f * floorf(raw_tFlow / 1024.0f);
-
-	float psi0_v = 0.5f, psi0_gx = 0.0f, psi0_gy = 0.0f;
-	gl_chaff_grad_noise2d(wx * 0.00000042f - prevDirX * (tFlow * 0.40f),
-	                      wy * 0.00000042f - prevDirY * (tFlow * 0.40f),
-	                      0x4359434Cu, &psi0_v, &psi0_gx, &psi0_gy);
-
-	float psi1_v = 0.5f, psi1_gx = 0.0f, psi1_gy = 0.0f;
-	gl_chaff_grad_noise2d(wx * 0.00000180f + (-psi0_gy) * 0.30f - prevDirX * tFlow,
-	                      wy * 0.00000180f + psi0_gx * 0.30f - prevDirY * tFlow,
-	                      0x5354524Du, &psi1_v, &psi1_gx, &psi1_gy);
-
-	float synWarpX = (-psi0_gy) * 260000.0f + (-psi1_gy) * 68000.0f;
-	float synWarpY = psi0_gx * 260000.0f + psi1_gx * 68000.0f;
-
-	float pDispX = wx + synWarpX;
-	float pDispY = wy + synWarpY;
-	float pAlong = pDispX * prevDirX + pDispY * prevDirY;
-	float pCross = pDispX * prevPerpX + pDispY * prevPerpY;
-	float pZonalX = prevDirX * (pAlong * 0.65f) + prevPerpX * (pCross * 1.55f);
-	float pZonalY = prevDirY * (pAlong * 0.65f) + prevPerpY * (pCross * 1.55f);
-
-	float raw_p0 = anim_time * 0.004f;
-	float phase0 = raw_p0 - 1024.0f * floorf(raw_p0 / 1024.0f);
-	float raw_p1 = anim_time * 0.008f;
-	float phase1 = raw_p1 - 1024.0f * floorf(raw_p1 / 1024.0f);
-
-	float oct0_v = 0.5f, oct0_gx = 0.0f, oct0_gy = 0.0f;
-	gl_chaff_grad_noise2d(pZonalX * 0.00000050f - prevDirX * phase0,
-	                      pZonalY * 0.00000050f - prevDirY * phase0,
-	                      0x434C4430u, &oct0_v, &oct0_gx, &oct0_gy);
-
-	float pRotX = 0.8f * pZonalX + 0.6f * pZonalY;
-	float pRotY = -0.6f * pZonalX + 0.8f * pZonalY;
-	float oct1_v = 0.5f, oct1_gx = 0.0f, oct1_gy = 0.0f;
-	gl_chaff_grad_noise2d(pRotX * 0.00000240f - prevDirX * phase1,
-	                      pRotY * 0.00000240f - prevDirY * phase1,
-	                      0x434C4431u, &oct1_v, &oct1_gx, &oct1_gy);
-
-	float r0 = 1.0f - 2.0f * fabsf(oct0_v - 0.5f);
-	float r1 = 1.0f - 2.0f * fabsf(oct1_v - 0.5f);
-	float front0 = oct0_v + (r0 - 0.68f) * 0.28f;
-	float front1 = oct1_v + (r1 - 0.68f) * 0.24f;
-
-	/* Conservative upper bound across wOct1 in [0, 1] and wReg2, wReg3 in [0, 1]
-	 * with max bioHumidity = 0.95 (threshold = 0.555 - 0.105*0.95 = 0.45525,
-	 * cirrus threshold = 0.56 - 0.08*0.95 = 0.484) plus parallax safety margin. */
-	float f1_pos = (front1 - 0.50f) > 0.0f ? (front1 - 0.50f) : 0.0f;
-	float synFrontMax = 0.50f + (front0 - 0.50f) * 0.72f + f1_pos * 0.54f + (psi0_v - 0.50f) * 0.34f;
-	float maxFront = synFrontMax + 0.116f + 0.070f + 0.055f;
-	return (maxFront <= 0.440f) && ((synFrontMax + 0.173f) <= 0.468f);
 }
 
 bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
@@ -6248,19 +6345,22 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 
 	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks up to 262,144 wu */
 	if (span_w <= 262144 && span_h <= 262144) {
-		float pad = 6400.0f;
+		float sea_wet = (s_gl.cur_sea_level > -900.0f) ? 1.0f : 0.0f;
+		float fw_est = fmaxf(0.18f, s_gl.cur_dist * 0.0014f);
+		float pad = fminf(4800.0f, fmaxf(1200.0f, s_gl.cur_dist * 0.25f));
 		float x0 = (float)ox - pad;
 		float y0 = (float)oy - pad;
 		float w_pad = (float)span_w + 2.0f * pad;
 		float h_pad = (float)span_h + 2.0f * pad;
-		int steps = (span_w > 65536 || span_h > 65536) ? 4 : 3;
+		int steps = (span_w > 65536 || span_h > 65536) ? 4 : ((span_w > 8192 || span_h > 8192) ? 3 : 2);
 		float inv_steps = 1.0f / (float)steps;
+		float margin = (span_w > 65536 || span_h > 65536) ? 0.040f : 0.024f;
 		bool all_clear = true;
 		for (int gy = 0; gy <= steps && all_clear; gy++) {
 			float wy = y0 + ((float)gy * inv_steps) * h_pad;
 			for (int gx = 0; gx <= steps; gx++) {
 				float wx = x0 + ((float)gx * inv_steps) * w_pad;
-				if (!gl_eval_synoptic_is_clear_sky_cpu(wx, wy, s_gl.cur_anim_time)) {
+				if (!gl_eval_synoptic_is_clear_sky_cpu(wx, wy, s_gl.cur_anim_time, sea_wet, fw_est, true, margin)) {
 					all_clear = false;
 					break;
 				}

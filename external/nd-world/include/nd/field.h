@@ -1034,7 +1034,7 @@ nd_field_elevation_to_block(int16_t elev_q12_4)
 static inline int32_t
 nd_field_eval_coarse_unwrapped_q12_4(uint32_t seed, int32_t rx, int32_t ry)
 {
-	static noise_wcache_t s_coarse_wc[9];
+	static _CHAFF_TLS noise_wcache_t s_coarse_wc[9];
 	int32_t cur_rx = rx, cur_ry = ry, coarse_q12_4 = 0;
 
 	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_CONTINENT_MIN; s--) {
@@ -1081,7 +1081,7 @@ nd_field_eval_coarse_torus_x_q12_4(uint32_t seed, int16_t rx, int32_t ry_unwrapp
 static inline uint16_t
 nd_field_ruggedness_q8(uint16_t world, int32_t wx, int32_t wy)
 {
-	static noise_wcache_t s_rug_c10, s_rug_c8;
+	static _CHAFF_TLS noise_wcache_t s_rug_c10, s_rug_c8;
 	uint32_t rug_seed = 0x52554747u ^ ((uint32_t)world * 0x9E3779B1u);
 	int16_t p0[2] = { (int16_t)wy, (int16_t)wx };
 	uint32_t raw_macro = noise_wpoint_c(&s_rug_c10, p0, 10, 8, rug_seed ^ 0xA531u, 2, NOISE_FADE5) >> 16;
@@ -1128,8 +1128,8 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 			coarse_q12_4 = nd_field_eval_coarse_torus_x_q12_4(seed, rx, (int32_t)ry);
 		}
 
-		static uint16_t s_cached_world = 0xFFFFu;
-		static int32_t s_cached_origin_bias = 0;
+		static _CHAFF_TLS uint16_t s_cached_world = 0xFFFFu;
+		static _CHAFF_TLS int32_t s_cached_origin_bias = 0;
 		if (world != s_cached_world) {
 			s_cached_origin_bias = nd_field_eval_coarse_unwrapped_q12_4(seed, 0, 0) >> 2;
 			s_cached_world = world;
@@ -1463,7 +1463,7 @@ nd_field_eval_river(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
                     int32_t *inout_coarse_q12_4, int16_t *inout_water_level,
                     uint8_t *out_river_carve_q4, uint16_t *out_fine_damp_q8)
 {
-	static noise_wcache_t s_riv_c12, s_riv_c10, s_riv_c8, s_riv_c7, s_riv_c6;
+	static _CHAFF_TLS noise_wcache_t s_riv_c12, s_riv_c10, s_riv_c8, s_riv_c7, s_riv_c6;
 	*out_river_carve_q4 = 0;
 	*out_fine_damp_q8 = 0;
 

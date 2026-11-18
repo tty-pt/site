@@ -65,7 +65,7 @@ WASM_LDFLAGS := -mexec-model=reactor \
 # No --allow-undefined: host imports must be declared with an explicit
 # import_module (ISO_IMPORT); anything else is a link error instead of a
 # silent `env.*` import the browser host would have to stub.
-WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libstele/src/stele_wasm_kernel.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/mods/common/ux/site_ui.c
+WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libstele/src/stele_wasm_kernel.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/external/libstele/src/stele_wq.c $(REPO_ROOT)/mods/common/ux/site_ui.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
 
 # BSD/GNU portable: keep `all` as first target
@@ -95,7 +95,7 @@ $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
 		done; \
 		extra_allowed=""; \
-		for f in $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
+		for f in $(REPO_ROOT)/external/libstele/wasm-allowed-imports.lst $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
 			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
 		done; \
 		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) $($*-ldflags) $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $($*-src) $(WASM_COMMON_SRC) || exit 1; \

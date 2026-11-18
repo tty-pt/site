@@ -474,6 +474,19 @@ export class SteleWasmClient {
 			}
 		};
 
+		const hostCpuCount = () => {
+			if (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) {
+				return Math.max(1, Math.min(8, navigator.hardwareConcurrency | 0));
+			}
+			return 1;
+		};
+
+		const hostSpawnWorker = (_wqPtr, _workerIdx) => {
+			/* When WASM memory is not a SharedArrayBuffer, return -1 so stl_wq falls back
+			 * cleanly to cooperative stl_wq_step draining during idle worker tick time. */
+			return -1;
+		};
+
 		const steleImports = {
 			stl_host_emit_patch: hostEmitPatch,
 			stl_host_log: hostLog,
@@ -481,12 +494,16 @@ export class SteleWasmClient {
 			stl_host_set_location: hostSetLocation,
 			stl_host_invalidate: hostInvalidate,
 			stl_host_event_emit: hostEventEmit,
+			stl_host_cpu_count: hostCpuCount,
+			stl_host_spawn_worker: hostSpawnWorker,
 			stele_host_emit_patch: hostEmitPatch,
 			stele_host_log: hostLog,
 			stele_host_fetch: hostFetch,
 			stele_host_set_location: hostSetLocation,
 			stele_host_invalidate: hostInvalidate,
-			stele_host_event_emit: hostEventEmit
+			stele_host_event_emit: hostEventEmit,
+			stele_host_cpu_count: hostCpuCount,
+			stele_host_spawn_worker: hostSpawnWorker
 		};
 
 		const imports = {
@@ -808,7 +825,18 @@ export class SteleWasmClient {
 				(fit ? (rect?.height || c.clientHeight) : (parseInt(c.getAttribute('height') || '0', 10) || rect?.height || c.clientHeight)) ||
 				window.innerHeight || 600
 			);
-			this.worker.postMessage({
+			let offscreen = null;
+			if (webgl && !c.__stele_bmp_ctx && typeof c.transferControlToOffscreen === 'function') {
+				try {
+					if (c.width !== width) c.width = width;
+					if (c.height !== height) c.height = height;
+					offscreen = c.transferControlToOffscreen();
+					c.__stele_offscreen_transferred = true;
+				} catch (_) {
+					offscreen = null;
+				}
+			}
+			const attachMsg = {
 				type: 'stele:canvas_attach',
 				slot,
 				id,
@@ -817,8 +845,14 @@ export class SteleWasmClient {
 				fit,
 				webgl,
 				width,
-				height
-			});
+				height,
+				canvas: offscreen
+			};
+			if (offscreen) {
+				this.worker.postMessage(attachMsg, [offscreen]);
+			} else {
+				this.worker.postMessage(attachMsg);
+			}
 		}
 	}
 
@@ -1056,6 +1090,7 @@ export class SteleWasmClient {
 			const declaredCaps = [...new Set(capStr.trim().split(/\s+/).filter(Boolean))];
 
 			for (const cap of declaredCaps) {
+				if (cap === 'webgl' || cap === 'lamina') continue;
 				const factory = globalScope.__wasm_capability_registry[cap];
 				if (typeof factory === 'function') {
 					try {
@@ -1719,12 +1754,18 @@ if (isWorkerContext) {
 	let workerTickScheduled = false;
 	let workerLastTickTime = 0;
 	let workerTickBusy = false;
+	let pendingUiDispatches = 0;
 
 	function flushWorkerCanvases(defaultSlot = 1) {
 		for (const entry of globalScope.__stele_worker_canvases.values()) {
 			const c = entry?.canvas;
-			if (c && c.__stele_dirty && typeof c.transferToImageBitmap === 'function') {
-				c.__stele_dirty = false;
+			if (!c || !c.__stele_dirty) continue;
+			c.__stele_dirty = false;
+			if (entry.transferred) {
+				/* Transferred OffscreenCanvas presents directly to the browser compositor */
+				continue;
+			}
+			if (typeof c.transferToImageBitmap === 'function') {
 				try {
 					const bmp = c.transferToImageBitmap();
 					self.postMessage({
@@ -1743,7 +1784,7 @@ if (isWorkerContext) {
 	}
 
 	function runWorkerTick(now) {
-		if (workerClient._hidden || workerTickBusy) return;
+		if (workerClient._hidden || workerTickBusy || pendingUiDispatches > 0) return;
 		let anyActive = false;
 		for (const comp of workerClient.slotInstances.values()) {
 			if (comp.hasTick) {
@@ -1765,6 +1806,9 @@ if (isWorkerContext) {
 						comp.instance.exports.wasm_tick(dt, dims.w, dims.h);
 					} else if (typeof comp.instance.exports.stl_kernel_tick === 'function') {
 						comp.instance.exports.stl_kernel_tick(dt, dims.w, dims.h);
+					}
+					if (typeof comp.instance.exports.stl_wq_step === 'function') {
+						comp.instance.exports.stl_wq_step(0, 2);
 					}
 				} catch (e) {
 					console.error('[stele-worker] wasm_tick error:', e);
@@ -1796,7 +1840,7 @@ if (isWorkerContext) {
 				scheduleWorkerTick();
 			}
 		};
-		if (typeof self.requestAnimationFrame === 'function') {
+		if (pendingUiDispatches === 0 && typeof self.requestAnimationFrame === 'function') {
 			self.requestAnimationFrame(tickCallback);
 		} else {
 			setTimeout(() => tickCallback(typeof performance !== 'undefined' ? performance.now() : Date.now()), 16);
@@ -1834,6 +1878,7 @@ if (isWorkerContext) {
 		case 'stele:canvas_attach': {
 			const w = msg.width || 800;
 			const h = msg.height || 600;
+			const transferred = !!msg.canvas;
 			let c = msg.canvas || null;
 			if (!c && typeof OffscreenCanvas !== 'undefined') {
 				const key = msg.id || msg.budId || `slot-${msg.slot}`;
@@ -1848,9 +1893,11 @@ if (isWorkerContext) {
 				c.__stele_fit = !!msg.fit;
 				c.__stele_webgl = !!msg.webgl;
 				c.__stele_id = msg.id || '';
+				c.__stele_transferred = transferred;
 				const key = msg.id || msg.budId || `slot-${msg.slot}`;
 				globalScope.__stele_worker_canvases.set(key, {
 					canvas: c,
+					transferred,
 					id: msg.id || '',
 					budId: msg.budId || '',
 					fit: !!msg.fit,
@@ -1864,10 +1911,20 @@ if (isWorkerContext) {
 		}
 		case 'stele:resize': {
 			if (typeof msg.slot === 'number') {
+				const rw = msg.width || 1400;
+				const rh = msg.height || 900;
 				workerClient._slotDimensions.set(msg.slot, {
-					w: msg.width || 1400,
-					h: msg.height || 900
+					w: rw,
+					h: rh
 				});
+				for (const entry of globalScope.__stele_worker_canvases.values()) {
+					if (entry.slot === msg.slot && entry.fit && entry.canvas) {
+						entry.width = rw;
+						entry.height = rh;
+						if (entry.canvas.width !== rw) entry.canvas.width = rw;
+						if (entry.canvas.height !== rh) entry.canvas.height = rh;
+					}
+				}
 			}
 			if (typeof msg.hidden === 'boolean') {
 				const wasHidden = workerClient._hidden;
@@ -1900,23 +1957,47 @@ if (isWorkerContext) {
 			break;
 		}
 		case 'stele:dispatch': {
+			pendingUiDispatches++;
 			initChain = initChain.then(() => {
-				workerClient.dispatchToSlot(msg.slot, msg.nodeId, msg.eventName, msg.bubbles, msg.valueStr);
-				flushWorkerCanvases(msg.slot);
+				try {
+					workerClient.dispatchToSlot(msg.slot, msg.nodeId, msg.eventName, msg.bubbles, msg.valueStr);
+					flushWorkerCanvases(msg.slot);
+				} finally {
+					pendingUiDispatches = Math.max(0, pendingUiDispatches - 1);
+					if (pendingUiDispatches === 0 && workerRafRunning && !workerClient._hidden) {
+						scheduleWorkerTick();
+					}
+				}
 			});
 			break;
 		}
 		case 'stele:action': {
+			pendingUiDispatches++;
 			initChain = initChain.then(() => {
-				workerClient.invokeSlotAction(msg.slot, msg.actionId, msg.actionData || '');
-				flushWorkerCanvases(msg.slot);
+				try {
+					workerClient.invokeSlotAction(msg.slot, msg.actionId, msg.actionData || '');
+					flushWorkerCanvases(msg.slot);
+				} finally {
+					pendingUiDispatches = Math.max(0, pendingUiDispatches - 1);
+					if (pendingUiDispatches === 0 && workerRafRunning && !workerClient._hidden) {
+						scheduleWorkerTick();
+					}
+				}
 			});
 			break;
 		}
 		case 'stele:update_slot': {
+			pendingUiDispatches++;
 			initChain = initChain.then(() => {
-				workerClient.updateSlot(msg.slot);
-				flushWorkerCanvases(msg.slot);
+				try {
+					workerClient.updateSlot(msg.slot);
+					flushWorkerCanvases(msg.slot);
+				} finally {
+					pendingUiDispatches = Math.max(0, pendingUiDispatches - 1);
+					if (pendingUiDispatches === 0 && workerRafRunning && !workerClient._hidden) {
+						scheduleWorkerTick();
+					}
+				}
 			});
 			break;
 		}
