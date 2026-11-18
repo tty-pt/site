@@ -54,17 +54,11 @@ static inline uint32_t macro_blend_rgb(uint32_t c1, uint32_t c2, int alpha)
 	return rb | g;
 }
 
-static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t level,
-                                     int32_t wx, int32_t wy, ar_sample_t *out)
+static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
+                                           int32_t wx, int32_t wy, int16_t base_wl,
+                                           const nd_field_sample_t *pfs, ar_sample_t *out)
 {
-	(void)user_ctx;
-	/* Evaluate canonical field band-limited by the chunk's vertex stride step_q16 so
-	 * fine chunks (level <= 2) resolve full sub-room octaves while coarse chunks
-	 * automatically skip sub-Nyquist fine octaves, mountain lakes, and river channels. */
-	int32_t step_q16 = (level <= 2)
-		? 0
-		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
-	nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
+	nd_field_sample_t fs = *pfs;
 	uint8_t water_depth = fs.is_water ? (uint8_t)(fs.depth > 255 ? 255 : fs.depth) : 0;
 
 	out->val = fs.elevation_q12_4;
@@ -80,7 +74,6 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	 * where sub-texel shoreline relief or capillary wet sand can reach sea level sets flag bit 0.
 	 * On coarse chunks (level >= 2), ignore perched mountain-lake water overrides (fs.water_level > base_wl)
 	 * so a single isolated mountain lake sample does not raise the sea level of an entire continental chunk. */
-	int16_t base_wl = nd_field_water_level(world);
 	uint8_t river_carve_q4 = (level <= 8) ? fs.river_carve_q4 : 0;
 	int16_t eff_wl = (level <= 4 || river_carve_q4 > 0) ? fs.water_level : base_wl;
 	bool eff_is_water = (level <= 4 || river_carve_q4 > 0) ? fs.is_water : ((fs.elevation_q12_4 >> 4) < base_wl);
@@ -171,6 +164,45 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	out->rgba = col;
 }
 
+static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t level,
+                                     int32_t wx, int32_t wy, ar_sample_t *out)
+{
+	(void)user_ctx;
+	int32_t step_q16 = (level <= 2)
+		? 0
+		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
+	nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
+	seven_pack_field_sample(world, level, wx, wy, nd_field_water_level(world), &fs, out);
+}
+
+static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_t level,
+                                          int32_t wy, int32_t ox, int32_t span_w,
+                                          uint32_t count, ar_sample_t *out_row)
+{
+	(void)user_ctx;
+	if (!out_row || count == 0)
+		return;
+	int32_t step_q16 = (level <= 2)
+		? 0
+		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
+	int16_t base_wl = nd_field_water_level(world);
+	int32_t gdim = (count > 1u) ? (int32_t)(count - 1u) : 1;
+	nd_field_sample_t row_fs[64];
+	if (count <= 64u) {
+		nd_field_sample_row_step(world, step_q16, wy, ox, span_w, count, row_fs);
+		for (uint32_t c = 0; c < count; c++) {
+			int32_t wx = ox + (int32_t)(((int64_t)c * span_w) / gdim);
+			seven_pack_field_sample(world, level, wx, wy, base_wl, &row_fs[c], &out_row[c]);
+		}
+	} else {
+		for (uint32_t c = 0; c < count; c++) {
+			int32_t wx = ox + (int32_t)(((int64_t)c * span_w) / gdim);
+			nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
+			seven_pack_field_sample(world, level, wx, wy, base_wl, &fs, &out_row[c]);
+		}
+	}
+}
+
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
@@ -183,6 +215,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.base_h = NDW_TILE_H;
 		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
+		cfg.row_sampler = seven_macro_chunk_row_sampler;
 		cfg.max_active = 160;
 		cfg.pool_capacity = 384;
 		cfg.max_levels = 17;
@@ -1509,6 +1542,7 @@ static void seven_async_block_bb_worker(void *ctx)
 			}
 		}
 	}
+	nd_seven_sort_billboards_by_size(dst, cnt);
 	s_block_bb_staging_cnt[slot->staging_idx] = cnt;
 	s_block_bb_staging_max_dim[slot->staging_idx] = max_dim;
 }
@@ -2448,7 +2482,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	 * Spread out on a 26-unit lattice with natural jitter so tufts are less frequent and never cluttered,
 	 * evaluated by the universal size/distance billboard fade & cull law with zero special cases. */
 	float max_meadow_cull = seven_billboard_cull_dist(18.0f, 18.0f);
-	if (s_cam_dist < max_meadow_cull && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
+	int32_t meadow_step = nd_seven_meadow_lattice_step(s_cam_dist, max_meadow_cull);
+	if (meadow_step > 0 && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
 		uint16_t m_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t base_wl = nd_field_water_level(m_world);
 		int64_t lwx64 = 0, lwy64 = 0;
@@ -2458,7 +2493,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float lwx_f = (float)lwx;
 		float lwy_f = (float)lwy;
 
-		const int32_t step = 26;
+		const int32_t step = meadow_step;
 		float max_meadow_horiz = 2.88f * sqrtf(max_meadow_cull * max_meadow_cull - s_cam_dist * s_cam_dist);
 		int32_t dyn_rad = (int32_t)(s_cam_dist * 1.65f);
 		if (dyn_rad < 624) dyn_rad = 624;
@@ -2502,21 +2537,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				                           lwx_f, lwy_f, -256.0f, 320.0f))
 					continue;
 
-				/* Resolve biome at (wx, wy) with room-level caching */
-				int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-				int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-				if (ti != cached_ti || tj != cached_tj) {
-					cached_ti = ti;
-					cached_tj = tj;
-					cached_bio = 10u;
-					ndw_tile_t mt;
-					int16_t mpos[4];
-					if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-						cached_bio = mt.biome;
-				}
-				unsigned bio = cached_bio;
-
-				/* Fast O(1) active leaf node lookup for elevation, slope, and water level */
+				/* Fast O(1) active leaf node lookup for elevation, slope, water level, and LOD level gate */
 				if (!m_node || wx < m_node->ox || wx >= m_node->ox + m_node->w ||
 				    wy < m_node->oy || wy >= m_node->oy + m_node->h) {
 					m_node = NULL;
@@ -2530,6 +2551,22 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						}
 					}
 				}
+				if (m_node && m_node->level > 1)
+					continue;
+
+				/* Resolve biome at (wx, wy) with room-level caching */
+				int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
+				int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
+				if (ti != cached_ti || tj != cached_tj) {
+					cached_ti = ti;
+					cached_tj = tj;
+					cached_bio = 10u;
+					ndw_tile_t mt;
+					int16_t mpos[4];
+					if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
+						cached_bio = mt.biome;
+				}
+				unsigned bio = cached_bio;
 
 				int16_t elev_q = 0, eq_x = 0, eq_y = 0;
 				int16_t local_wl = base_wl;
@@ -2873,7 +2910,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 							for (uint16_t ci = 0; ci < cnt; ci++) {
 								float bsz = (cached[ci].width > cached[ci].height) ? cached[ci].width : cached[ci].height;
 								if (bsz <= min_vis_sz)
-									continue;
+									break;
 								seven_stream_faded_billboard(&cached[ci]);
 							}
 							continue;
@@ -2926,6 +2963,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 							}
 						}
 
+						nd_seven_sort_billboards_by_size(arena_dst, arena_cnt);
 						s_block_bb_arena_cursor += (uint64_t)arena_cnt;
 						slot->bx0 = bx0;
 						slot->by0 = by0;

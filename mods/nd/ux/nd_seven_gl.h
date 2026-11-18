@@ -41,7 +41,7 @@ bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_wind
 #define ND_BB_STYLE_GRASS     5u  /* Ground-pinned reactive grass / reed / flower tuft */
 #define ND_BB_STYLE_PARTICLE  6u  /* Volumetric sunlit water droplet / sea-spray mist particle */
 
-typedef struct {
+typedef struct lam_billboard_gpu {
 	float x, y, z;
 	float width, height;
 	float anchor_y;     /* downward screen-Y shift from bottom of quad (0 = bottom at world pos) */
@@ -355,6 +355,18 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
                                  float anim_time,
                                  float *out_grad_x, float *out_grad_y,
                                  float *out_foam);
+
+/* Analytical Ray-Cloud-Shell Intersection via <ttypt/corolla.h> (corolla_ray_hit):
+ * Evaluates exact quartic ray-torus intersection against the concentric atmospheric cloud shell
+ * at altitude `shell_z` above `pdef->minor_r`, returning world coordinates (out_wx, out_wy)
+ * and hit distance `out_t` when the ray intersects the front hull of the cloud shell. */
+bool nd_seven_gl_cloud_shell_ray_hit(const float ray_orig[3],
+                                     const float ray_dir[3],
+                                     float shell_z,
+                                     const nd_planet_def_t *pdef,
+                                     float *out_wx,
+                                     float *out_wy,
+                                     float *out_t);
 
 #ifdef __cplusplus
 }

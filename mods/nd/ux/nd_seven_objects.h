@@ -125,4 +125,11 @@ int nd_seven_action(const nd_client_state_t *st, char *out, size_t sz);
 int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz);
 void nd_seven_action_cooldown_reset(void);
 
+struct lam_billboard_gpu;
+
+/* Sort a block of GPU billboards by descending effective dimension max(width, height)
+ * so mid-altitude scenery streaming can break out of the block loop in O(k) as soon as
+ * max(width, height) <= min_vis_sz. Preserves painter back-to-front Y order for ties. */
+void nd_seven_sort_billboards_by_size(struct lam_billboard_gpu *bbs, uint16_t count);
+
 #endif /* ND_SEVEN_OBJECTS_H */

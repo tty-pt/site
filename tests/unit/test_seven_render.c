@@ -3932,7 +3932,8 @@ int main(void)
 				prev_d2 = d2;
 			}
 
-			/* 13e. Stride-Aware Canonical Field Sampling & Sub-Texel Band-Pass Encapsulation */
+			/* 13e. Stride-Aware Canonical Field Sampling, Row Batching, Sub-Texel Band-Pass,
+			 *      Scenery Size-Descending Sort, Adaptive Meadow Stride, and Corolla Cloud Shell Hit */
 			{
 				nd_field_sample_t s_exact = nd_field_sample(0, 3, 12800, -9600);
 				nd_field_sample_t s_step0 = nd_field_sample_step(0, 0, 12800, -9600);
@@ -3941,11 +3942,54 @@ int main(void)
 				assert(s_exact.water_level == s_step0.water_level);
 
 				/* At coarse orbital chunk step (level 10 -> step = 5120 * 1024 / 48 = 109,226 wu),
-				 * sub-Nyquist fine octaves/rivers/lakes are band-limited out while macro elevation & biome remain valid */
+				 * sub-Nyquist fine and coarse room octaves/rivers/lakes are band-limited out */
 				int32_t coarse_step_q16 = (int32_t)(((int64_t)(5120 << 10) << 16) / 48);
 				nd_field_sample_t s_coarse = nd_field_sample_step(0, coarse_step_q16, 12800, -9600);
 				assert(s_coarse.bio < BIOME_MAX);
+
+				/* Row batching (nd_field_sample_row_step) must match point-by-point nd_field_sample_step */
+				nd_field_sample_t row_out[8];
+				nd_field_sample_row_step(0, coarse_step_q16, -9600, 12800, 7000, 8, row_out);
+				for (int k = 0; k < 8; k++) {
+					int32_t wx_k = 12800 + (k * 7000) / 7;
+					nd_field_sample_t pt_k = nd_field_sample_step(0, coarse_step_q16, wx_k, -9600);
+					assert(row_out[k].elevation_q12_4 == pt_k.elevation_q12_4);
+					assert(row_out[k].bio == pt_k.bio);
+				}
+
+				/* Verify sub-texel band-pass and Nyquist-gated cloud noises in shaders */
 				assert(strstr(nd_seven_gl_fs_terrain(), "chaff_band_weight") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "wPsi1") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "wCir0") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "wAlto0") != NULL);
+
+				/* Verify nd_seven_sort_billboards_by_size sorts by descending max(width, height) and painter Y tie-break */
+				lam_billboard_gpu_t test_bbs[4] = {
+					{ .x = 10.0f, .y = 50.0f, .width = 16.0f, .height = 16.0f },
+					{ .x = 20.0f, .y = 80.0f, .width = 64.0f, .height = 96.0f },
+					{ .x = 30.0f, .y = 20.0f, .width = 96.0f, .height = 48.0f },
+					{ .x = 40.0f, .y = 10.0f, .width = 32.0f, .height = 40.0f }
+				};
+				nd_seven_sort_billboards_by_size(test_bbs, 4);
+				assert(fmaxf(test_bbs[0].width, test_bbs[0].height) == 96.0f && test_bbs[0].y == 20.0f);
+				assert(fmaxf(test_bbs[1].width, test_bbs[1].height) == 96.0f && test_bbs[1].y == 80.0f);
+				assert(fmaxf(test_bbs[2].width, test_bbs[2].height) == 40.0f);
+				assert(fmaxf(test_bbs[3].width, test_bbs[3].height) == 16.0f);
+
+				/* Verify nd_seven_meadow_lattice_step scales lattice stride with camera distance */
+				assert(nd_seven_meadow_lattice_step(400.0f, 3800.0f) == 26);
+				assert(nd_seven_meadow_lattice_step(1600.0f, 3800.0f) == 52);
+				assert(nd_seven_meadow_lattice_step(2800.0f, 3800.0f) == 78);
+				assert(nd_seven_meadow_lattice_step(4000.0f, 3800.0f) == 0);
+
+				/* Verify libcorolla analytical ray-cloud-shell intersection (nd_seven_gl_cloud_shell_ray_hit) */
+				float hit_wx = 0.0f, hit_wy = 0.0f, hit_t = 0.0f;
+				float orig_out[3] = { 3340000.0f, 0.0f, 0.0f };
+				float dir_in[3]   = { -1.0f, 0.0f, 0.0f };
+				float dir_out[3]  = {  1.0f, 0.0f, 0.0f };
+				assert(nd_seven_gl_cloud_shell_ray_hit(orig_out, dir_in, 1620.0f, p1, &hit_wx, &hit_wy, &hit_t) == true);
+				assert(hit_t > 3000.0f && hit_t < 4000.0f);
+				assert(nd_seven_gl_cloud_shell_ray_hit(orig_out, dir_out, 1620.0f, p1, &hit_wx, &hit_wy, &hit_t) == false);
 			}
 
 			nd_seven_set_zoom(1.0f);

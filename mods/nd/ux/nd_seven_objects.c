@@ -1,4 +1,5 @@
 #include "nd_seven_objects.h"
+#include "nd_seven_gl.h"
 #include "nd_seven_motion.h"
 #include "nd_seven_atlas.h"
 #include <stdio.h>
@@ -1116,3 +1117,30 @@ int nd_spatial_tile_resolve_map(const nd_map_data_t *map, int col, int row, nd_s
 
 	return 1;
 }
+
+void nd_seven_sort_billboards_by_size(lam_billboard_gpu_t *bbs, uint16_t count)
+{
+	if (!bbs || count <= 1u)
+		return;
+	static const uint16_t gaps[5] = { 57, 23, 10, 4, 1 };
+	for (int gi = 0; gi < 5; gi++) {
+		uint16_t gap = gaps[gi];
+		if (gap >= count)
+			continue;
+		for (uint16_t a = gap; a < count; a++) {
+			lam_billboard_gpu_t k = bbs[a];
+			float k_dim = (k.width > k.height) ? k.width : k.height;
+			uint16_t b = a;
+			while (b >= gap) {
+				const lam_billboard_gpu_t *prev = &bbs[b - gap];
+				float p_dim = (prev->width > prev->height) ? prev->width : prev->height;
+				if (p_dim > k_dim || (p_dim == k_dim && (prev->y < k.y || (prev->y == k.y && prev->x <= k.x))))
+					break;
+				bbs[b] = *prev;
+				b = (uint16_t)(b - gap);
+			}
+			bbs[b] = k;
+		}
+	}
+}
+

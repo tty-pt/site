@@ -58,4 +58,8 @@ void nd_seven_detail_out(void);
 #define ND_SEVEN_ZOOM_MAX           8.0f
 #endif
 
+/* Returns the adaptive Living Meadow lattice stride (in world units, multiple of 26)
+ * for a given camera distance and detail scale, or 0 when outside the meadow cull range. */
+int32_t nd_seven_meadow_lattice_step(float cam_dist, float max_meadow_cull);
+
 #endif /* ND_SEVEN_GROUND_H */

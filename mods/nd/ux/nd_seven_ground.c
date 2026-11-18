@@ -287,3 +287,15 @@ float nd_seven_ground_elevation_f(int32_t wx, int32_t wy)
 	int16_t q = nd_seven_ground_elevation_q12_4(wx, wy);
 	return (float)q / 16.0f;
 }
+
+int32_t nd_seven_meadow_lattice_step(float cam_dist, float max_meadow_cull)
+{
+	if (cam_dist >= max_meadow_cull || max_meadow_cull <= 1.0f)
+		return 0;
+	if (cam_dist >= max_meadow_cull * 0.68f)
+		return 78; /* 3x sub-lattice (26 * 3) */
+	if (cam_dist >= max_meadow_cull * 0.42f)
+		return 52; /* 2x sub-lattice (26 * 2) */
+	return 26;
+}
+

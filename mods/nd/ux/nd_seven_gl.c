@@ -14,6 +14,7 @@
 #include <ttypt/areole.h>
 #include <ttypt/chaff_glsl.h>
 #include <nd/field.h>
+#include <nd/field_glsl.h>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -140,8 +141,9 @@
 	"    const vec2 prevPerp = vec2(0.671, 0.741);\n" \
 	"    float tFlow = mod(anim_time * 0.005, 1024.0);\n" \
 	"    vec3 psi0 = chaff_grad_noise2d(worldXY * 0.00000042 - prevDir * (tFlow * 0.40), 0x4359434Cu);\n" \
-	"    vec3 psi1 = chaff_grad_noise2d(worldXY * 0.00000180 + vec2(-psi0.z, psi0.y) * 0.30 - prevDir * tFlow, 0x5354524Du);\n" \
-	"    vec2 synWarp = vec2(-psi0.z, psi0.y) * 260000.0 + vec2(-psi1.z, psi1.y) * 68000.0;\n" \
+	"    float wPsi1 = smoothstep(0.32, 0.08, 0.00000180 * fw);\n" \
+	"    vec3 psi1 = (wPsi1 > 0.001) ? chaff_grad_noise2d(worldXY * 0.00000180 + vec2(-psi0.z, psi0.y) * 0.30 - prevDir * tFlow, 0x5354524Du) : vec3(0.5, 0.0, 0.0);\n" \
+	"    vec2 synWarp = vec2(-psi0.z, psi0.y) * 260000.0 + vec2(-psi1.z, psi1.y) * (68000.0 * wPsi1);\n" \
 	"    vec2 pDisp = worldXY + synWarp;\n" \
 	"    float pAlong = dot(pDisp, prevDir);\n" \
 	"    float pCross = dot(pDisp, prevPerp);\n" \
@@ -193,7 +195,8 @@
 	"        return vec4(0.0, synFront, synWarp);\n" \
 	"    }\n" \
 	"    outHighCirrus = 0.0;\n" \
-	"    if (wantCirrus) {\n" \
+	"    float wCir0 = smoothstep(0.32, 0.08, 0.00000115 * fw);\n" \
+	"    if (wantCirrus && wCir0 > 0.001) {\n" \
 	"        float phase1 = mod(anim_time * 0.008, 1024.0);\n" \
 	"        /* High-troposphere jet-stream cirrus & frontal outflow shield (confined to baroclinic fronts) */\n" \
 	"        vec2 pJet = irot * pZonal + vec2(38000.0, -52000.0);\n" \
@@ -203,7 +206,7 @@
 	"        float cirStreak0 = 1.0 - 2.0 * abs(cir0.x - 0.5);\n" \
 	"        float cirStreak1 = 1.0 - 2.0 * abs(cirN.x - 0.5);\n" \
 	"        float cirStreak  = mix(cirStreak0, 0.55 * cirStreak0 + 0.45 * cirStreak1, wCir);\n" \
-	"        outHighCirrus = smoothstep(0.56 - 0.08 * humidity, 0.78 - 0.06 * humidity, synFront + (cirStreak - 0.56) * 0.26)\n" \
+	"        outHighCirrus = wCir0 * smoothstep(0.56 - 0.08 * humidity, 0.78 - 0.06 * humidity, synFront + (cirStreak - 0.56) * 0.26)\n" \
 	"                      * smoothstep(0.42, 0.84, cirStreak);\n" \
 	"    }\n" \
 	"    /* Regional squall bands (87 km & 18 km) band-limited strictly by screen-space Nyquist fw (>= 4..14 px per wavelength) */\n" \
@@ -641,188 +644,7 @@ static const char *s_fs_terrain =
 	CHAFF_GLSL_FLOW_FN
 	ND_GLSL_SYNOPTIC_CLOUD_FN
 	ND_GLSL_TORUS_ECLIPSE_FN
-	"int chaff_octave_amplitude_ex(int shift, int min_shift, int base_amp) {\n"
-	"    if (shift < min_shift || base_amp <= 0) return 0;\n"
-	"    int k = shift - min_shift;\n"
-	"    int base = base_amp << (k >> 1);\n"
-	"    if ((k & 1) != 0) {\n"
-	"        base += (base >> 1);\n"
-	"    }\n"
-	"    return base;\n"
-	"}\n"
-	"float chaff_wpoint_coarse_2d_f(int x, int y, int shift, uint seed) {\n"
-	"    uint ushift = uint(shift);\n"
-	"    uint cell_count_mask = (1u << (16u - ushift)) - 1u;\n"
-	"    uint mask_frac = (1u << ushift) - 1u;\n"
-	"    uint cshift = (shift >= 9) ? 0u : ushift;\n"
-	"    uint ux = uint(x) & 0xFFFFu;\n"
-	"    uint uy = uint(y) & 0xFFFFu;\n"
-	"    uint kx0 = ux >> ushift;\n"
-	"    uint ky0 = uy >> ushift;\n"
-	"    uint kx1 = (kx0 + 1u) & cell_count_mask;\n"
-	"    uint ky1 = (ky0 + 1u) & cell_count_mask;\n"
-	"    int cx0 = int(kx0 << cshift);\n"
-	"    int cy0 = int(ky0 << cshift);\n"
-	"    int cx1 = int(kx1 << cshift);\n"
-	"    int cy1 = int(ky1 << cshift);\n"
-	"    float inv_step = 1.0 / float(1 << shift);\n"
-	"    float fx = float(ux & mask_frac) * inv_step;\n"
-	"    float fy = float(uy & mask_frac) * inv_step;\n"
-	"    float u = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0);\n"
-	"    float v = fy * fy * fy * (fy * (fy * 6.0 - 15.0) + 10.0);\n"
-	"    float v00 = float(chaff_hash2(ivec2(cx0, cy0), seed) >> 24u);\n"
-	"    float v10 = float(chaff_hash2(ivec2(cx1, cy0), seed) >> 24u);\n"
-	"    float v01 = float(chaff_hash2(ivec2(cx0, cy1), seed) >> 24u);\n"
-	"    float v11 = float(chaff_hash2(ivec2(cx1, cy1), seed) >> 24u);\n"
-	"    return mix(mix(v00, v10, u), mix(v01, v11, u), v);\n"
-	"}\n"
-	"vec3 chaff_wpoint_2d_grad_f(vec2 p, int shift, uint seed) {\n"
-	"    float step_f = float(1 << shift);\n"
-	"    vec2 q = p / step_f;\n"
-	"    vec2 iq = floor(q);\n"
-	"    vec2 f = q - iq;\n"
-	"    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
-	"    vec2 du = (30.0 * f * f * (f * (f - 2.0) + 1.0)) / step_f;\n"
-	"    uint step_u = 1u << uint(shift);\n"
-	"    uint sx0 = (uint(int(iq.x)) << uint(shift)) & 0xFFFFu;\n"
-	"    uint sy0 = (uint(int(iq.y)) << uint(shift)) & 0xFFFFu;\n"
-	"    uint sx1 = (sx0 + step_u) & 0xFFFFu;\n"
-	"    uint sy1 = (sy0 + step_u) & 0xFFFFu;\n"
-	"    float v00 = float(chaff_hash2(ivec2(int(sx0), int(sy0)), seed) >> 24u);\n"
-	"    float v10 = float(chaff_hash2(ivec2(int(sx1), int(sy0)), seed) >> 24u);\n"
-	"    float v01 = float(chaff_hash2(ivec2(int(sx0), int(sy1)), seed) >> 24u);\n"
-	"    float v11 = float(chaff_hash2(ivec2(int(sx1), int(sy1)), seed) >> 24u);\n"
-	"    float k0 = v10 - v00;\n"
-	"    float k1 = v01 - v00;\n"
-	"    float k2 = v11 - v01 - k0;\n"
-	"    float val = v00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n"
-	"    vec2 grad = vec2((k0 + k2 * u.y) * du.x, (k1 + k2 * u.x) * du.y);\n"
-	"    return vec3(val, grad.x, grad.y);\n"
-	"}\n"
-	"/* Unified Scale-Space Filter Function:\n"
-	" * Replaces discrete octave switch-cases and premature camera-distance cutoffs with a single\n"
-	" * continuous function of world wavelength and pixel footprint fw. Every feature (lake, island,\n"
-	" * peninsula, fjord, archipelago, mountain chain) remains at 100% strength down to OCTAVE_FULL_PX\n"
-	" * pixels on screen, and smoothly fades to 0% at the Nyquist limit OCTAVE_MIN_PX. */\n"
-	"const float OCTAVE_MIN_PX  = 1.35;\n"
-	"const float OCTAVE_FULL_PX = 4.50;\n"
-	"float nd_octave_weight(float wavelength, float fw) {\n"
-	"    return smoothstep(OCTAVE_MIN_PX, OCTAVE_FULL_PX, wavelength / max(fw, 1e-4));\n"
-	"}\n"
-	"float nd_gpu_eval_coarse_unwrapped(uint seed, int rx, int ry, float fw) {\n"
-	"    int cur_rx = rx;\n"
-	"    int cur_ry = ry;\n"
-	"    float coarse_q12_4 = 0.0;\n"
-	"    for (int s = 15; s >= 2; s--) {\n"
-	"        float cell_w = float(1 << s) * 144.0;\n"
-	"        float w_oct = nd_octave_weight(cell_w, fw);\n"
-	"        if (w_oct <= 0.001) break;\n"
-	"        int amp = chaff_octave_amplitude_ex(s, 2, 1);\n"
-	"        uint oct_seed = seed ^ (uint(s) * 0x85EBCA77u + 1u);\n"
-	"        float raw = chaff_wpoint_coarse_2d_f(cur_rx, cur_ry, s, oct_seed) - 128.0;\n"
-	"        coarse_q12_4 += (raw * float(amp)) * 0.125 * w_oct;\n"
-	"        int nx = (cur_rx * 29304 - cur_ry * 14652) >> 15;\n"
-	"        int ny = (cur_rx * 14652 + cur_ry * 29304) >> 15;\n"
-	"        cur_rx = nx;\n"
-	"        cur_ry = ny;\n"
-	"    }\n"
-	"    return coarse_q12_4;\n"
-	"}\n"
-	"vec3 nd_gpu_eval_canonical_field(vec2 worldPos, float fw, float texelSpan, float texZ, vec2 texGrad, out float out_fine_elev) {\n"
-	"    /* Always retain uHeightTex (texZ, texGrad) as the low-pass coarse hypsometry carrier,\n"
-	"     * and only evaluate canonical rotated fBm fine octaves (s = 9..3) inside the sub-texel\n"
-	"     * scale-space gap [fw, texelSpan] via chaff_band_weight. */\n"
-	"    float coarseH = texZ;\n"
-	"    vec2 coarseGrad = texGrad;\n"
-	"    if (chaff_band_weight(512.0, fw, texelSpan) <= 0.001) {\n"
-	"        out_fine_elev = 0.0;\n"
-	"        return vec3(coarseH, coarseGrad.x, coarseGrad.y);\n"
-	"    }\n"
-	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n"
-	"    uint rug_seed = 0x52554747u ^ (uint(uWorldId) * 0x9E3779B1u);\n"
-	"    const mat2 rotAtan = mat2(0.8942871, 0.44714355, -0.44714355, 0.8942871);\n"
-	"    const mat2 irotAtan = mat2(0.8942871, -0.44714355, 0.44714355, 0.8942871);\n"
-	"    float raw_macro = chaff_wpoint_2d_grad_f(worldPos, 10, rug_seed ^ 0xA531u).x;\n"
-	"    vec2 p_rug_rot = rotAtan * worldPos;\n"
-	"    float raw_meso = chaff_wpoint_2d_grad_f(p_rug_rot, 8, rug_seed ^ 0x5CA9u).x;\n"
-	"    float raw_rug = (raw_macro * 5.0 + raw_meso * 3.0) * 0.125;\n"
-	"    float rug_env = smoothstep(120.0, 168.0, raw_rug);\n"
-	"    vec2 cur_p = worldPos;\n"
-	"    mat2 cur_inv = mat2(1.0, 0.0, 0.0, 1.0);\n"
-	"    float base_fine = 0.0;\n"
-	"    vec2 base_grad = vec2(0.0);\n"
-	"    float meso_ridge = 0.0;\n"
-	"    vec2 meso_grad = vec2(0.0);\n"
-	"    for (int s = 9; s >= 3; s--) {\n"
-	"        float oct_wl = float(1 << s);\n"
-	"        float wNyq = nd_octave_weight(oct_wl, fw);\n"
-	"        if (wNyq <= 0.001) break;\n"
-	"        float wSubTex = smoothstep(texelSpan * 3.2, texelSpan * 1.2, oct_wl);\n"
-	"        if (wSubTex <= 0.001) {\n"
-	"            cur_p = rotAtan * cur_p;\n"
-	"            cur_inv = cur_inv * irotAtan;\n"
-	"            continue;\n"
-	"        }\n"
-	"        wNyq *= wSubTex;\n"
-	"        int amp_b = chaff_octave_amplitude_ex(s, 3, 1);\n"
-	"        uint b_seed = seed ^ (uint(s) * 0x85EBCA77u + 0xBEEFu);\n"
-	"        vec3 gb = chaff_wpoint_2d_grad_f(cur_p, s, b_seed);\n"
-	"        float vb = gb.x - 128.0;\n"
-	"        vec2 db = cur_inv * gb.yz;\n"
-	"        if (s >= 7) {\n"
-	"            float av = abs(vb);\n"
-	"            float r = 64.0 - (av * av) / (av + 16.0);\n"
-	"            float sgn = (vb >= 0.0) ? -1.0 : 1.0;\n"
-	"            float dr = (av * (av + 32.0)) / ((av + 16.0) * (av + 16.0));\n"
-	"            db = db * (sgn * dr);\n"
-	"            vb = r;\n"
-	"        }\n"
-	"        float g2_b = dot(base_grad, base_grad);\n"
-	"        float erosion_b = 1.0 / (1.0 + g2_b * 1.4);\n"
-	"        float scale_b = (float(amp_b) / 128.0) * wNyq * erosion_b;\n"
-	"        base_fine += vb * scale_b;\n"
-	"        base_grad += db * scale_b;\n"
-	"        if (s >= 5 && rug_env > 0.001) {\n"
-	"            int amp_m = chaff_octave_amplitude_ex(s, 5, 10);\n"
-	"            uint m_seed = (seed ^ 0x7F4A7C15u) ^ (uint(s) * 0x85EBCA77u + 0xCAFEu);\n"
-	"            vec3 gm = chaff_wpoint_2d_grad_f(cur_p, s, m_seed);\n"
-	"            float vm = gm.x - 128.0;\n"
-	"            vec2 dm = cur_inv * gm.yz;\n"
-	"            if (s >= 6) {\n"
-	"                float av = abs(vm);\n"
-	"                float r = 64.0 - (av * av) / (av + 16.0);\n"
-	"                float sgn = (vm >= 0.0) ? -1.0 : 1.0;\n"
-	"                float dr = (av * (av + 32.0)) / ((av + 16.0) * (av + 16.0));\n"
-	"                dm = dm * (sgn * dr);\n"
-	"                vm = r;\n"
-	"            }\n"
-	"            float g2_m = dot(meso_grad, meso_grad);\n"
-	"            float erosion_m = 1.0 / (1.0 + g2_m * 1.4);\n"
-	"            float scale_m = (float(amp_m) / 128.0) * wNyq * erosion_m;\n"
-	"            meso_ridge += vm * scale_m;\n"
-	"            meso_grad += dm * scale_m;\n"
-	"        }\n"
-	"        cur_p = rotAtan * cur_p;\n"
-	"        cur_inv = cur_inv * irotAtan;\n"
-	"    }\n"
-	"    float b_scale = 0.5 + 1.5 * rug_env;\n"
-	"    float fineH = base_fine * b_scale + meso_ridge * rug_env;\n"
-	"    vec2 fineGrad = base_grad * b_scale + meso_grad * rug_env;\n"
-	"    /* Coastal/bathymetric ramp relative to uSeaLevel */\n"
-	"    float rel_water = coarseH - uSeaLevel;\n"
-	"    float coast_w = 1.0;\n"
-	"    if (rel_water <= -8.0) {\n"
-	"        coast_w = 0.5;\n"
-	"    } else if (rel_water <= 0.0) {\n"
-	"        coast_w = 0.25 + (-rel_water / 8.0) * 0.25;\n"
-	"    } else if (rel_water < 6.0) {\n"
-	"        coast_w = 0.25 + (rel_water / 6.0) * 0.75;\n"
-	"    }\n"
-	"    fineH = clamp(fineH * coast_w, -127.0, 127.0);\n"
-	"    fineGrad *= coast_w;\n"
-	"    out_fine_elev = fineH;\n"
-	"    return vec3(coarseH + fineH, coarseGrad.x + fineGrad.x, coarseGrad.y + fineGrad.y);\n"
-	"}\n"
+	ND_FIELD_GLSL_CANONICAL_FN
 	"/* 3D Value Noise for dancing water caustics: dual-octave 3D interference reproduces the crossing web of sunlight */\n"
 	"float chaff_sample_3d(vec3 pos, uint shift, uint seed) {\n"
 	"    float cell_size = float(1u << shift);\n"
@@ -872,7 +694,11 @@ static const char *s_fs_terrain =
 	"    vec2 gTotal = (g1.yz * (0.18 * 0.38 * wNyq1) + g2.yz * (0.52 * 0.16 * wNyq2)) * env;\n"
 	"    return vec3(disp, gTotal.x, gTotal.y);\n"
 	"}\n"
-	"vec4 eval_zoom_terrain_detail(vec2 pos, float dist, float fw, out vec4 out_octaves) {\n"
+	"vec4 eval_zoom_terrain_detail(vec2 pos, float dist, float fw, float texelSpan, out vec4 out_octaves) {\n"
+	"    if (dist >= 9500.0 || fw * OCTAVE_MIN_PX >= 6.25) {\n"
+	"        out_octaves = vec4(0.5);\n"
+	"        return vec4(0.0);\n"
+	"    }\n"
 	"    const float freqs[4] = float[4](0.16, 0.68, 1.85, 6.20);\n"
 	"    const float amps[4]  = float[4](0.32, 0.28, 0.24, 0.18);\n"
 	"    const float dFar[4]  = float[4](9500.0, 4200.0, 1850.0, 780.0);\n"
@@ -886,13 +712,13 @@ static const char *s_fs_terrain =
 	"    vec2 pRot = pos;\n"
 	"    mat2 curInvRot = mat2(1.0, 0.0, 0.0, 1.0);\n"
 	"    float oct[4] = float[4](0.5, 0.5, 0.5, 0.5);\n"
-	"    /* All 4 octaves active, governed by continuous distance and Nyquist scale-space weighting (down to 0.16 wu grit) */\n"
+	"    /* All 4 octaves active, governed by continuous distance and sub-texel band-pass weighting (down to 0.16 wu grit) */\n"
 	"    int maxDetailOct = (dist < 780.0) ? 4 : ((dist < 1850.0) ? 3 : 2);\n"
 	"    for (int i = 0; i < 4; i++) {\n"
 	"        if (i >= maxDetailOct) break;\n"
 	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
-	"        float wNyq  = nd_octave_weight(1.0 / freqs[i], fw);\n"
-	"        float w = wDist * wNyq;\n"
+	"        float wBand = chaff_band_weight(1.0 / freqs[i], fw, texelSpan);\n"
+	"        float w = wDist * wBand;\n"
 	"        if (w <= 0.001) break;\n"
 	"        vec3 g = chaff_grad_noise2d(pRot * freqs[i], seeds[i]);\n"
 	"        oct[i] = mix(0.5, g.x, w);\n"
@@ -916,7 +742,7 @@ static const char *s_fs_terrain =
 	" * so only sub-texel octaves above the Nyquist limit are evaluated per pixel. */\n"
 	"vec4 eval_macro_planetary_detail(vec2 pos, float dist, float fw, float texelSpan, out vec4 out_macro_oct) {\n"
 	"    float highAltWeight = smoothstep(450.0, 2600.0, dist);\n"
-	"    if (highAltWeight <= 0.001) {\n"
+	"    if (highAltWeight <= 0.001 || texelSpan * 4.5 <= 100.0) {\n"
 	"        out_macro_oct = vec4(0.5);\n"
 	"        return vec4(0.0);\n"
 	"    }\n"
@@ -935,7 +761,7 @@ static const char *s_fs_terrain =
 	"        float wl = 1.0 / freqs[i];\n"
 	"        float wNyq = nd_octave_weight(wl, fw) * highAltWeight;\n"
 	"        if (wNyq <= 0.001) break;\n"
-	"        float wSubTex = smoothstep(texelSpan * 4.5, texelSpan * 1.4, wl);\n"
+	"        float wSubTex = smoothstep(texelSpan * 3.2, texelSpan * 1.2, wl);\n"
 	"        if (wSubTex <= 0.001) {\n"
 	"            pRot = rot * pRot;\n"
 	"            curInvRot = curInvRot * irot;\n"
@@ -1380,7 +1206,7 @@ static const char *s_fs_terrain =
 	"    float highWaterZ   = swashState.y;\n"
 	"    float fragWaterDepth = (effSeaLevel > -900.0) ? (liveSeaLevel - fragZ) : -999.0;\n"
 	"    vec4 octaves = vec4(0.5);\n"
-	"    vec4 detail = (fragWaterDepth <= 18.0 && vDistance < 12000.0) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, octaves) : vec4(0.0);\n"
+	"    vec4 detail = (fragWaterDepth <= 18.0 && vDistance < 9500.0) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, texelSpan, octaves) : vec4(0.0);\n"
 	"    vec2 edgeMask = 4.0 * vUV * (1.0 - vUV);\n"
 	"    vec2 worldToUV = 1.0 / max(uChunkSpan, vec2(160.0));\n"
 	"    vec2 macroUVWarp = vec2(macroOct.z - 0.5, macroOct.w - 0.5) * (2.8 * worldToUV * edgeMask * smoothstep(2000.0, 8000.0, vDistance) * smoothstep(90000.0, 28000.0, vDistance));\n"
@@ -3549,6 +3375,7 @@ static const char *s_fs_cloud =
 	CHAFF_GLSL_HASH_FN
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
+	CHAFF_GLSL_BAND_FN
 	ND_GLSL_SYNOPTIC_CLOUD_FN
 	ND_GLSL_CSM_LOOKUP_FN
 	ND_GLSL_TORUS_ECLIPSE_FN
@@ -3607,8 +3434,9 @@ static const char *s_fs_cloud =
 	"    float deepCore      = smoothstep(0.62, 0.92, coreStrength);\n"
 	"    float towerTopH     = mix(0.24, 0.86, deepCore * (0.45 + 0.55 * updraft));\n"
 	"    float altoGate      = smoothstep(0.18, 0.56, synCloud.y - (0.44 - 0.06 * humidity));\n"
+	"    float wAlto0        = smoothstep(0.32, 0.08, 0.00000145 * fw);\n"
 	"    float altoShelf     = 0.0;\n"
-	"    if (altoGate > 0.001) {\n"
+	"    if (altoGate > 0.001 && wAlto0 > 0.001) {\n"
 	"        float wAlto = smoothstep(0.30, 0.08, 0.00001600 * fw);\n"
 	"        float altoPhase = mod(anim_time * 0.018, 1024.0);\n"
 	"        vec2 altoPos = vec2(0.60 * synQueryXY.x - 0.80 * synQueryXY.y, 0.80 * synQueryXY.x + 0.60 * synQueryXY.y)\n"
@@ -3617,7 +3445,7 @@ static const char *s_fs_cloud =
 	"        vec3 altoN = (wAlto > 0.001) ? chaff_grad_noise2d(altoPos * 0.00001600 - windMidDir * altoPhase, 0x414C544Fu) : vec3(0.55, 0.0, 0.0);\n"
 	"        float altoWave0 = smoothstep(0.36, 0.78, 1.0 - 2.0 * abs(alto0.x - 0.5));\n"
 	"        float altoWave1 = smoothstep(0.34, 0.74, 1.0 - 2.0 * abs(altoN.x - 0.5));\n"
-	"        altoShelf = altoGate * mix(altoWave0, 0.52 * altoWave0 + 0.48 * altoWave1, wAlto) * 0.72;\n"
+	"        altoShelf = altoGate * wAlto0 * mix(altoWave0, 0.52 * altoWave0 + 0.48 * altoWave1, wAlto) * 0.72;\n"
 	"    }\n"
 	"    float anvilCov = smoothstep(0.42, 0.80, macroCoverage) * (0.50 + 0.50 * updraft) * 0.74;\n"
 	"    float covDeck3 = max(anvilCov, highCirrus * 0.70);\n"
@@ -4050,6 +3878,67 @@ void nd_seven_gl_torus_frame(float wx, float wy, float wz,
 		out_pos[1] = (float)pos_d[1];
 		out_pos[2] = (float)pos_d[2];
 	}
+}
+
+bool nd_seven_gl_cloud_shell_ray_hit(const float ray_orig[3],
+                                     const float ray_dir[3],
+                                     float shell_z,
+                                     const nd_planet_def_t *pdef,
+                                     float *out_wx,
+                                     float *out_wy,
+                                     float *out_t)
+{
+	if (!ray_orig || !ray_dir)
+		return false;
+
+	double R = (pdef && pdef->major_r > 0.0f) ? (double)pdef->major_r : 2000000.0;
+	double r0 = (pdef && pdef->minor_r > 0.0f) ? (double)pdef->minor_r : 1335000.0;
+	double cx = pdef ? (double)pdef->center[0] : 0.0;
+	double cy = pdef ? (double)pdef->center[1] : 0.0;
+	double cz = pdef ? (double)pdef->center[2] : 0.0;
+	double ox = (double)ray_orig[0] - cx;
+	double oy = (double)ray_orig[1] - cy;
+	double oz = (double)ray_orig[2] - cz;
+	double dx = (double)ray_dir[0];
+	double dy = (double)ray_dir[1];
+	double dz = (double)ray_dir[2];
+
+	bool has_rot = pdef && (pdef->rot[0] != 0.0f || pdef->rot[4] != 0.0f || pdef->rot[8] != 0.0f);
+	double orig_b[3] = { ox, oy, oz };
+	double dir_b[3]  = { dx, dy, dz };
+	if (has_rot) {
+		/* Transform inertial ray into body frame via transpose of pdef->rot */
+		double r00 = (double)pdef->rot[0], r01 = (double)pdef->rot[1], r02 = (double)pdef->rot[2];
+		double r10 = (double)pdef->rot[3], r11 = (double)pdef->rot[4], r12 = (double)pdef->rot[5];
+		double r20 = (double)pdef->rot[6], r21 = (double)pdef->rot[7], r22 = (double)pdef->rot[8];
+		orig_b[0] = r00 * ox + r10 * oy + r20 * oz;
+		orig_b[1] = r01 * ox + r11 * oy + r21 * oz;
+		orig_b[2] = r02 * ox + r12 * oy + r22 * oz;
+		dir_b[0]  = r00 * dx + r10 * dy + r20 * dz;
+		dir_b[1]  = r01 * dx + r11 * dy + r21 * dz;
+		dir_b[2]  = r02 * dx + r12 * dy + r22 * dz;
+	}
+
+	corolla_surface_t surf = corolla_torus(R, r0 + (double)shell_z);
+	corolla_hit_t hit = {0};
+	if (!corolla_ray_hit(&surf, orig_b, dir_b, 1.0, 200000000.0, &hit) || !hit.hit)
+		return false;
+
+	/* Front-hull test: ray must enter the cloud shell from outside (dir . norm < 0) */
+	double ndotd = hit.norm[0] * dir_b[0] + hit.norm[1] * dir_b[1] + hit.norm[2] * dir_b[2];
+	if (ndotd >= -0.01)
+		return false;
+
+	double wdim_x = (double)ND_SEVEN_WORLD_DIM_W;
+	double wdim_y = (double)ND_SEVEN_WORLD_DIM_H;
+	double v_shift = hit.v - 0.5;
+	if (v_shift < 0.0)
+		v_shift += 1.0;
+
+	if (out_wx) *out_wx = (float)(hit.u * wdim_x);
+	if (out_wy) *out_wy = (float)(v_shift * wdim_y);
+	if (out_t)  *out_t  = (float)hit.t;
+	return true;
 }
 
 void nd_seven_gl_compute_mvp(uint32_t vp_w, uint32_t vp_h,
