@@ -130,3 +130,6 @@
 [submodule "external/libhyle-react"]
 	path = external/libhyle-react
 	url = git@github.com:tty-pt/libhyle-react.git
+[submodule "external/libmm"]
+	path = external/libmm
+	url = git@github.com:tty-pt/libmm.git

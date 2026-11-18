@@ -244,20 +244,20 @@ prebuilds) wherever supported:
 | `@tty-pt/chaff` (`external/libchaff`) | `1.1.0` (03:50 on 2026-11-16), first npm & 7-OS publish | `deb, apk, rpm, pacman, brew, openbsd, winget` | Migrated `Makefile` to `include ../mk/include.mk` (`SONAME-libchaff := libnoise`), inlined `XXH32` in `tests/test_glsl.c` via `<ttypt/noise.h>`, added `repository` metadata to `npm/package.json`, and added `.github/workflows/ci.yml` (`publish_to: "deb,apk,rpm,pacman,brew,openbsd,winget"`) |
 | `@tty-pt/areole` (`external/libareole`) | `1.1.0` (03:50 on 2026-11-16), first npm & 7-OS publish | `deb, apk, rpm, pacman, brew, openbsd, winget` | Migrated `Makefile` to `include ../mk/include.mk`, added `src/libareole.c` and `npm/native/areole_napi.c` (shipping `linux-x64`, `darwin-arm64`, `darwin-x64`, `win32-x64` N-API prebuilds alongside `areole.wasm`), added `repository` metadata to `npm/package.json`, and added `.github/workflows/ci.yml` (`publish_to: "deb,apk,rpm,pacman,brew,openbsd,winget"`) |
 
-### OS Package & npm Prebuild Matrix Across Repositories (Post-Expansion)
+### OS Package & npm Prebuild Matrix Across Repositories (Post-Expansion & `tty-pt/ci` `11b426e`)
 
-Every repository pushed through `tty-pt/ci/.github/workflows/all-in-one.yml` builds up to **7 OS package formats** (`deb`, `apk`, `rpm`, `pacman`, `brew` [arm64 + x86_64], `openbsd`, `winget`) plus **1 unified `@tty-pt/*` npm tarball** containing WebAssembly (`*.wasm`), C headers (`include/`), and per-platform Node-API prebuilds (`prebuilds/<os>-<cpu>/`).
+Every repository pushed through `tty-pt/ci/.github/workflows/all-in-one.yml` builds up to **7 OS package formats** (`deb`, `apk`, `rpm`, `pacman`, `brew` [arm64 + x86_64], `openbsd`, `winget`) plus **1 unified `@tty-pt/*` npm tarball** containing WebAssembly (`*.wasm`), C headers (`include/`), and up to **6 per-platform Node-API prebuilds** (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `darwin-arm64`, `darwin-x64`, `win32-x64`).
 
 | Tier / `publish_to` Configuration | Published OS Formats | npm Prebuilds & Runtimes | Skipped OS Formats & Reason | Repositories |
 |---|---|---|---|---|
-| **Tier A**: `"deb,apk,rpm,pacman,brew,openbsd,winget"` | All 7 (`deb`, `apk`, `rpm`, `pacman`, `brew`, `openbsd`, `winget`) | `linux-x64`, `darwin-arm64`, `darwin-x64`, `win32-x64` + WASM *(except `axil-hyle`, which is a server/client HTTP bridge without WASM, and `libhyle-bud`, which is WASM + JS without N-API)* | None *(all 7 supported OS package managers enabled)* | **`libstele`**, **`libcorm`**, **`libjoint`**, **`libislet`**, **`liblemma`**, **`libsepal`**, **`libhyle`**, **`libbud`**, **`libxylem`**, **`liblamina`**, **`libhyle-source`**, **`libhyle-bud`**, **`axil`**, **`axil-hyle`**, **`axil-auren`**, **`libpitch`**, **`libchaff`**, **`libareole`** (18 repos) |
-| **Tier B**: `"deb,apk,rpm,pacman,brew,openbsd"` | All 6 Unix formats (`deb`, `apk`, `rpm`, `pacman`, `brew`, `openbsd`) | `linux-x64`, `darwin-arm64`, `darwin-x64` (`axil-auth`); ESM/CJS browser+Node (`axil-tty`) | `winget` *(POSIX-only daemons using `fork`/`pty`/`termios`/`sys/un.h`/`sys/wait.h`)* | **`axil-auth`**, **`axil-tty`** |
+| **Tier A**: `"deb,apk,rpm,pacman,brew,openbsd,winget"` | All 7 (`deb`, `apk`, `rpm`, `pacman`, `brew`, `openbsd`, `winget`) | `linux-x64`, `linux-arm64`, `linux-x64-musl`, `darwin-arm64`, `darwin-x64`, `win32-x64` + WASM *(except `libmm` and `axil-hyle`, which are native N-API + CLI/HTTP bridges without WASM, and `libhyle-bud`, which is WASM + JS without N-API)* | None *(all 7 supported OS package managers enabled)* | **`libstele`**, **`libcorm`**, **`libjoint`**, **`libislet`**, **`liblemma`**, **`libsepal`**, **`libmm`**, **`libhyle`**, **`libbud`**, **`libxylem`**, **`liblamina`**, **`libhyle-source`**, **`libhyle-bud`**, **`axil`**, **`axil-hyle`**, **`axil-auren`**, **`libpitch`**, **`libchaff`**, **`libareole`** (19 repos) |
+| **Tier B**: `"deb,apk,rpm,pacman,brew,openbsd"` | All 6 Unix formats (`deb`, `apk`, `rpm`, `pacman`, `brew`, `openbsd`) | `linux-x64`, `linux-arm64`, `linux-x64-musl`, `darwin-arm64`, `darwin-x64` (`axil-auth`); ESM/CJS browser+Node (`axil-tty`) | `winget` *(POSIX-only daemons using `fork`/`pty`/`termios`/`sys/un.h`/`sys/wait.h`)* | **`axil-auth`**, **`axil-tty`** |
 | **Tier C**: `"deb,apk,rpm,brew,openbsd"` | `deb`, `apk`, `rpm`, `brew`, `openbsd` | None *(no `npm/` package)* | `pacman`, `winget` *(unreleased game modules / server)* | **`axil-nd`** and all **17 `nd-*` modules** |
 | **Tier D**: Pure JS / TS / Build (`npm.yml`) | None *(npm only)* | Universal ESM/TS | All OS formats | **`@tty-pt/hyle-react`**, **`@tty-pt/pi-mm`**, **`@tty-pt/pi-quest`**, **`@tty-pt/mk`** |
 
 ### GitHub Releases & Git Tags Consolidation (`2026-11-16`)
 
-All 24 library, daemon, and extension repositories under `tty-pt/*` were consolidated so that each repository carries **at most two GitHub Release pages**:
+All 25 released library, daemon, and extension repositories under `tty-pt/*` were consolidated so that each repository carries **at most two GitHub Release pages**:
 1. **Release 1 (First Branded Release)**: The initial release from the 2026-10-20 / 2026-10-21 branded wave (with `logo.png` / `cover.png`).
 2. **Release 2 (Latest Release)**: The latest release page, updated via `tty-pt/ci/scripts/release-notes.sh <CHANGELOG.md> <latest_tag> [first_tag]` so its body joins every intermediate `CHANGELOG.md` entry strictly after Release 1 up to Release 2 (plus the `CHECKSUMS` verification block where applicable).
 
@@ -271,6 +271,7 @@ All intermediate and draft GitHub Release pages and all intermediate git tags st
 | `libislet` (`external/libislet`) | `v1.2.0` | `v1.6.2` | `[1.6.2]`, `[1.6.1]`, `[1.6.0]`, `[1.5.2]`, `[1.5.1]`, `[1.5.0]`, `[1.4.1]`, `[1.4.0]`, `[1.3.2]`, `[1.3.0]` |
 | `liblemma` (`external/liblemma`) | `v1.0.0` | `v1.4.2` | `[1.4.2]`, `[1.4.1]`, `[1.4.0]`, `[1.3.2]`, `[1.3.1]`, `[1.3.0]`, `[1.2.2]` |
 | `libsepal` (`external/libsepal`) | `v1.1.0` | `v1.5.2` | `[1.5.2]`, `[1.5.1]`, `[1.5.0]`, `[1.4.2]`, `[1.4.1]`, `[1.4.0]`, `[1.3.2]` |
+| `libmm` (`external/libmm`) | — | `v1.0.0` | `[1.0.0]` |
 | `libhyle` (`external/libhyle`) | `v1.4.0` | `v1.7.4` | `[1.7.4]`, `[1.7.3]`, `[1.7.2]`, `[1.7.1]`, `[1.7.0]`, `[1.6.1]` |
 | `libbud` (`external/libbud`) | `v1.0.1` | `v1.3.2` | `[1.3.2]`, `[1.3.1]`, `[1.3.0]`, `[1.2.2]`, `[1.1.0]` |
 | `libxylem` (`external/libxylem`) | `v1.5.0` | `v1.8.1` | `[1.8.1]`, `[1.8.0]`, `[1.7.2]` |
@@ -292,55 +293,80 @@ All intermediate and draft GitHub Release pages and all intermediate git tags st
 
 ---
 
-## Ecosystem Platform & Distribution Holes
+## 2026-11-17 / 2026-11-18
 
-After porting `libpitch` (`1.0.1`), `libchaff` (`1.1.0`), `libareole` (`1.1.0`), `axil-hyle` (`1.1.4`), and `axil-auren` (`1.5.3`) to all 7 OS formats + 4-platform N-API prebuilds (`linux-x64`, `darwin-arm64`, `darwin-x64`, `win32-x64`), the remaining structural holes across the ecosystem are:
+### First Full 7-OS & 6-Prebuild Release of `@tty-pt/mm` (`external/libmm` `v1.0.0`)
 
-1. **Missing `linux-arm64` and `linux-x64-musl` (`apk`) Node-API Prebuilds in `tty-pt/ci`**:
-   - Runtime detection for `linux-x64-musl` and `linux-arm64` is already implemented in `@tty-pt/stele` (`1.7.0+`) and `tty-pt/ci/scripts/build-node-addon.sh`.
-   - However, `tty-pt/ci/.github/workflows/all-in-one.yml` and `tty-pt/ci/package/action.yml` only build/upload Node-API prebuilds in the `rpm` (`linux-x64`), `brew` (`darwin-arm64`, `darwin-x64`), and `winget` (`win32-x64`) jobs.
-   - **Impact**: Alpine/musl containers (`linux-x64-musl`) and Linux ARM64 hosts (`linux-arm64`, e.g., AWS Graviton, Raspberry Pi, Apple Silicon Docker containers) have no prebuilt `.node` binaries in npm packages and fall back to WASM (or fail for native-only CLI/Xylem modules like `axil`, `axil-auth`, `axil-hyle`, `axil-auren`).
-
-2. **`axil-auth` Missing Windows (`winget` / `win32-x64`) & `axil-tty` Missing Colocated Xylem Prebuild**:
-   - **`axil-auth` on Windows**: `@tty-pt/axil` (`1.8.4`), `@tty-pt/axil-hyle` (`1.1.4`), and `@tty-pt/auren` (`1.5.3`) now ship `win32-x64` (`axil.exe`, `libaxil.dll`, `libaxil-hyle.dll`, `libaxil-auren.dll`), so `npx @tty-pt/axil -m hyle` and `npx @tty-pt/axil -m auren` work on Windows, macOS, and Linux. However, `axil-auth` (`src/axil-authd.c`) uses POSIX `sys/un.h`, `fork`, `pwd.h`, and `grp.h`, so `npx @tty-pt/axil -m auth` is still POSIX-only (`linux-x64`, `darwin-arm64`, `darwin-x64`).
-   - **`axil-tty` Xylem `.so`/`.dylib` prebuild**: `@tty-pt/axil-tty` ships its `package.json` at the repo root (`dir: .`) with client-side JS (`axil-tty.js` + `xterm.js`), but does not have `npm/native/axil_tty_napi.c` or `getModulePath()`, so `npx @tty-pt/axil -m tty` cannot load `libaxil-tty` from `node_modules` unless the OS package is installed system-wide.
-
-3. **In-Tree Libraries Without Standalone Repositories or CI Pipelines (`libcorolla`, `nd-*`)**:
-   - `external/libcorolla` (`0.1.0`) and 10 newer NeverDark directories (`nd-bus`, `nd-mcp`, `nd-obj`, `nd-region`, `nd-session`, `nd-seven`, `nd-speech`, `nd-view`, `nd-world`, `axil-nd-testprobe`, plus legacy dirs `libchunk`, `libnoise`, `libstoma`, `libtransp`) are in-tree directories with no `.gitmodules` entry, no `npm/` package, and no `.github/workflows/ci.yml`.
-   - The 18 existing NeverDark submodule repos (`axil-nd` + 17 `nd-*` modules) have unreleased commits on `main`, use explicit secret lists instead of `secrets: inherit`, omit `pacman` and `winget` from `publish_to`, and have no `npm/` packaging (`getModulePath()`).
-
-4. **`tty-pt/ci` Arch Linux (`pacman`) Partial-Upgrade Footgun & Windows `libxxhash.dll` Propagation**:
-   - `tty-pt/ci/package/action.yml` runs `pacman -Sy` + `pacman -S $deps_pacman` (without `-u`) inside `ghcr.io/tty-pt/arch-builder:latest`, risking `GLIBC_2.44` / `libssl.so.3` partial-upgrade mismatches when rolling system packages are pulled. Updating `package/action.yml` to run `pacman -Syu --noconfirm` will eliminate this class of failure.
-   - `libcorm`'s OS `winget` `.msix` package does not bundle `libxxhash.dll`, requiring every downstream Windows repo that links `libcorm` to declare `mingw-w64-x86_64-xxhash` in `deps_winget`.
+| Package (`Repository`) | Published Version & Time (UTC) | OS Package Formats (`publish_to`) | Changes & Release Notes |
+|---|---|---|---|
+| `@tty-pt/mm` (`external/libmm`) | `1.0.0` (GitHub Release & 7 OS repos at 17:23 on 2026-11-17; npm `@tty-pt/mm@1.0.0` at 09:20 on 2026-11-18) | `deb, apk, rpm, pacman, brew, openbsd, winget` | Initial public release of the pure-C Two-Tier Multi-Axis Memory Engine, Codebase Symbol/Call-Graph Indexer, Universal `mm` CLI (`recall`, `record`, `observe`, `verify`, `ingest`, `index`, `search`, `query`, `trace`, `snippet`, `arch`, `adr`, `status`, `mcp`), and N-API bindings (`npm/native/mm_napi.c`) with all 6 platform prebuilds (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `darwin-arm64`, `darwin-x64`, `win32-x64`), `getBinaryPath()`, `runCli()`, and `spawnMcpServer()`. Scoped runtime axis plugins (`libjoint,liblemma,libsepal,libislet`) to `deps_deb` to avoid OpenBSD chroot `pkg_add` conflicts while linking only against `libstele,libcorm`, and omitted the generic `"build"` npm script so `tty-pt/ci`'s `npm.yml` `pack` step preserves downloaded multi-arch `prebuilds/*/mm.node` binaries without requiring `libmm.so` on the bare pack runner. |
 
 ---
 
-## Remaining Unreleased Repositories on `main`
+## Ecosystem Platform & Distribution Holes (Updated `2026-11-18`)
 
-### 1. Pi Extensions & Build System
-- **`@tty-pt/pi-quest`** (`.pi/extensions/pi-quest`, published `1.12.0` $\rightarrow$ next target **`1.12.1`**):
-  - Tree diff vs `v1.12.0` (24 files): scratch workspace pool, worktree isolation, referential invariant evals + `80231db` (background post-quest reversion/correction checks) + `e8dff1a` (pass `-d` for detached `axil`, pad download icon, sync late `onUpdate`).
-- **`@tty-pt/mk`** (`external/mk`, published `0.1.18` / tag `v0.2.0` $\rightarrow$ staged at **`0.4.0`**):
-  - Centralized WASM toolchain, `wasm_alloc_shim.c`, `<ttypt/stele.h>`, `<ttypt/stele_wasm.h>`, `wasm-audit.sh`, local worktree prefix priority.
+### Resolved in `tty-pt/ci` (`11b426e` — `2026-11-16T23:38:55Z` & `093ad4e` — `2026-11-17T17:17:04Z`)
+- **RESOLVED — `linux-arm64` and `linux-x64-musl` (`apk`) Node-API Prebuilds**:
+  - `tty-pt/ci/.github/workflows/all-in-one.yml` now includes a dedicated `node-arm64` job (`ubuntu-24.04-arm`) and `tty-pt/ci/package/action.yml` builds the Node-API addon on `apk` (`linux-x64-musl`).
+  - `npm-detect` now requires all 6 platform prebuilds (`linux-x64,linux-arm64,linux-x64-musl,darwin-arm64,darwin-x64,win32-x64`) when `rpm`, `apk`, `brew`, and `winget` are enabled, and `npm.yml` verifies native loading on `ubuntu-24.04-arm` (`linux-arm64`) as well.
+  - `@tty-pt/mm` `1.0.0` is the first package published with all 6 Node-API prebuilds (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `darwin-arm64`, `darwin-x64`, `win32-x64`) verified and bundled in its npm tarball.
+- **RESOLVED — Arch Linux (`pacman -Syu` & HTTP Repo Fix `093ad4e`) & Windows `.msix` DLL Bundling**:
+  - `tty-pt/ci/package/action.yml` now runs `pacman -Syu --noconfirm --overwrite "*"` inside `ghcr.io/tty-pt/arch-builder:latest` (eliminating `GLIBC_2.44` / `libssl.so.3` partial-upgrade mismatches), uses `http://${{ inputs.host }}/${{ env.REPO }}` for the custom `pacman` repo (`093ad4e`, avoiding OpenSSL post-quantum TLS ClientHello `tlsv1 alert decode error` after `pacman -Syu`), removes the unused `pacman_mingw` job, and bundles dependent MinGW DLLs into `winget` `.msix` packages.
 
-### 2. NeverDark Server / Game Modules & In-Tree Libraries
-- **`libcorolla`**: In-tree library at `0.1.0` without a standalone repository or CI pipeline yet.
+### Remaining Structural Holes
+1. **`axil-auth` Missing Windows (`winget` / `win32-x64`) & `axil-tty` Missing Colocated Xylem Prebuild**:
+   - **`axil-auth` on Windows**: `axil-auth` (`src/axil-authd.c`) uses POSIX `sys/un.h`, `fork`, `pwd.h`, and `grp.h`, so `npx @tty-pt/axil -m auth` remains POSIX-only (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `darwin-arm64`, `darwin-x64`).
+   - **`axil-tty` Xylem `.so`/`.dylib` prebuild**: `@tty-pt/axil-tty` ships its `package.json` at the repo root (`dir: .`) with client-side JS (`axil-tty.js` + `xterm.js`), but does not have `npm/native/axil_tty_napi.c` or `getModulePath()`.
+2. **In-Tree Libraries Without Standalone Repositories or CI Pipelines (`libcorolla`, `nd-*`)**:
+   - `external/libcorolla` (`0.1.0`) and 10 newer NeverDark directories (`nd-bus`, `nd-mcp`, `nd-obj`, `nd-region`, `nd-session`, `nd-seven`, `nd-speech`, `nd-view`, `nd-world`, `axil-nd-testprobe`, plus legacy dirs `libchunk`, `libnoise`, `libstoma`, `libtransp`) are in-tree directories with no `.gitmodules` entry, no `npm/` package, and no `.github/workflows/ci.yml`.
+   - The 18 existing NeverDark submodule repos (`axil-nd` + 17 `nd-*` modules) have unreleased commits on `main`, use explicit secret lists instead of `secrets: inherit`, omit `pacman` and `winget` from `publish_to`, and have no `npm/` packaging (`getModulePath()`).
+
+---
+
+## Remaining Unreleased Repositories & Post-Tag Commits (`2026-11-18` Audit)
+
+### 1. Released Libraries with Functional Commits Ahead of Latest Tag
+- **`@tty-pt/stele`** (`external/libstele`, tag `v1.7.1` +3 commits at `4cbeb1d` $\rightarrow$ next target **`v1.8.0`**):
+  - `4cbeb1d`: `feat(wq): add isomorphic work queue and skip redundant main-thread worker caps` (`<ttypt/wq.h>`, `src/stele_wq.c`, `stl_wq_*` / `stele_wq_*` APIs, `STL_THREAD_LOCAL`, and worker capability deduplication in `stele-client.js`).
+- **`@tty-pt/areole`** (`external/libareole`, tag `v1.1.0` +5 commits at `38b07f7` $\rightarrow$ next target **`v1.2.0`**):
+  - `a471a93`: `feat(areole): add row_sampler scanline callback and max_populates_per_frame cap`
+  - `b561c4d`: `fix(areole): pass exact span_w coordinates to row_sampler for watertight cross-LOD seam welding`
+  - `01f2bf8`: `feat(areole): add ar_cull_3d_fn callback for manifold normal-cone and horizon culling`
+  - `38b07f7`: `feat(areole): support async work-queue chunk population` (`struct stl_wq *wq`, `AR_NODE_FLAG_DEFERRED`)
+- **`@tty-pt/lamina`** (`external/liblamina`, tag `v1.1.1` +6 commits at `ce8a3f5` $\rightarrow$ next target **`v1.2.0`**):
+  - `5cc6c73`: `feat(lamina): add glDrawArraysInstanced and glVertexAttribDivisor for GPU hardware instancing`
+  - `6a91d5f`: `feat(lamina): add 3D texture array, glDrawElementsInstanced, and KHR_parallel_shader_compile support`
+  - `0046661`: `feat(lamina): sync instancing and 3D texture array bindings to webgl-cap.js and npm header`
+  - `84087d4`: `fix(webgl): guard pixel unpack alignment on texImage3D and texSubImage3D`
+  - `ce8a3f5`: `fix(webgl): guard offscreen FBO glViewport against resizing canvas swapchain`
+- **`@tty-pt/chaff`** (`external/libchaff`, tag `v1.1.0` +3 commits at `9db6f12` $\rightarrow$ next target **`v1.1.1`**):
+  - `d910dad`: `perf(noise): add 4-corner cell caching to periodic and rotated FBM noise`
+  - `9db6f12`: `fix(chaff): use thread-local storage for noise cell caches` (`CHAFF_TLS` / `_Thread_local`)
+- **`@tty-pt/bud`** (`external/libbud`, tag `v1.3.2` +2 commits at `5a5710c` $\rightarrow$ next target **`v1.3.3`**):
+  - `5a5710c`: `fix(hydrate): sync DOM value property when patching value attribute on inactive inputs`
+- **`@tty-pt/pi-mm`** (`.pi/extensions/pi-mm`, tag `v0.8.0` +4 commits at `00b9901` $\rightarrow$ next target **`v0.9.0`** now that `@tty-pt/mm` `1.0.0` is published):
+  - `3aa956e`: `fix(pi-mm): natural remember capture, anchor preservation, and directive recall`
+  - `00b9901`: `feat(mm): integrate @tty-pt/mm native N-API addon and update docs for v0.9.0` (`src/mm_native.ts`, `tests/mm_native.test.ts`, in-process RRF/ranking/window/payload/scanner/intent acceleration, and lock/classifier hardening).
+- **Metadata-only commits (`docs(npm)` + `docs(changelog)`) since latest tag**:
+  - `libcorm`, `libjoint`, `libislet`, `liblemma`, `libsepal`, `libhyle`, `libxylem`, `libhyle-source`, `libhyle-bud`, `libhyle-react`, `libpitch`, `axil`, `axil-auren`, `axil-auth`, `axil-hyle`, `axil-tty` all have 2–3 documentation/changelog commits ahead of their latest tag with no C/JS code changes.
+
+### 2. Pi Extensions, Build System & NeverDark Modules
+- **`@tty-pt/pi-quest`** (`.pi/extensions/pi-quest`, published `1.12.0` +3 commits at `c563465` $\rightarrow$ next target **`1.12.1`**):
+  - `80231db` (background post-quest reversion/correction checks), `e8dff1a` (pass `-d` for detached `axil`, pad download icon, sync late `onUpdate`), `c563465` (`CHANGELOG.md` consolidation).
+- **`@tty-pt/mk`** (`external/mk`, published `0.1.18` / tag `v0.2.0` +4 commits at `c6c28ec` $\rightarrow$ staged at **`0.4.0`**):
+  - `44c2461` (centralized WASM toolchain, `wasm_alloc_shim.c`, `<ttypt/stele.h>`, `<ttypt/stele_wasm.h>`, `wasm-audit.sh`, local worktree prefix priority), `bc43bc7` (`fix(iso): probe clang-18 for WASI_CC when available`), and `c6c28ec` (`feat(wasm): allow stele_wq exports in wasm-allowed-exports.lst`).
 - **NeverDark C repositories with unreleased commits on `main`**:
-  - **`axil-nd`** (`external/axil-nd`, tag `v1.3.2` → target **`v1.4.0`**): BCP macro view and sparsity packets (`include/nd/bcp-meta.h`), water map flag, and fallback UI scripts.
-  - **`nd-plant`** (`external/nd-plant`, tag `v1.0.3` → target **`v1.0.4`**): `+4` commits adding 16 flora species (`include/nd/plant.h`), coastal water transitions, physical scale ladder (`docs/SPEC.md`), full-scale *Acacia senegal* diffuse & tangent-space normal maps, and §7.3 procedural canopy occupation & moisture competition.
-  - **`nd-stone`** (`external/nd-stone`, tag `v1.0.2` → target **`v1.0.3`**): Extracted `include/nd/stone.h` and cleaned dependencies.
-  - **`nd-biome`** (`external/nd-biome`, tag `v1.0.2` → target **`v1.0.3`**): Added alpine meadow, mediterranean, and wetland biomes and cleaned dependencies.
-  - **14 other `external/nd-*` modules** (`nd-attr` → `v1.0.3`, `nd-class` → `v1.0.4`, `nd-core` → `v1.0.4`, `nd-drink` → `v1.0.9`, `nd-equip` → `v1.0.4`, `nd-fight` → `v1.0.4`, `nd-level` → `v1.0.3`, `nd-mob` → `v1.0.4`, `nd-mortal` → `v1.0.4`, `nd-other` → `v1.0.3`, `nd-race` → `v1.0.3`, `nd-seat` → `v1.0.4`, `nd-shop` → `v1.0.3`, `nd-spell` → `v1.0.9`, `nd-vanilla` → `v1.0.3`, `nd-wts` → `v1.0.3`): `+1` commit each updating `stllog` comments, removing `add-prefix` paths, and cleaning dependencies.
-  - **`pi-instruct`** (`external/pi-instruct`, tag `v1.0.0`): `+1` commit (`f59d8e0`) adding BSD-2-Clause `LICENSE` and updating templates.
+  - **`axil-nd`** (`external/axil-nd`, tag `v1.3.0` +2 commits at `b4fc8bb` $\rightarrow$ target **`v1.4.0`**): BCP macro view and sparsity packets (`include/nd/bcp-meta.h`), water map flag, and fallback UI scripts.
+  - **`nd-plant`** (`external/nd-plant`, +8 commits at `e92c3c8` $\rightarrow$ target **`v1.0.4`**): 16 botanical species, §7.3 canopy competition, and biologically height-classified (`small`/`medium`/`big`) world-map sprites (`1.png`) and normal maps (`1_n.png`) across desert, swamp, tundra, mediterranean, alpine meadow, and shrubland specimens (`2703491..e92c3c8`).
+  - **`nd-stone`** (`+2` commits $\rightarrow$ **`v1.0.3`**), **`nd-biome`** (`+2` commits $\rightarrow$ **`v1.0.3`**), **`nd-core`** (`+2` commits $\rightarrow$ **`v1.0.4`**), and **15 other `external/nd-*` modules** (`+2` commits each).
+  - **`pi-instruct`** (`external/pi-instruct`, tag `v1.0.0` +1 commit `f59d8e0`).
 
 ### Open work
 
-- Bump, tag, and publish `@tty-pt/pi-quest` (`1.12.1`) and `@tty-pt/mk` (`0.4.0`).
+- Tag and release functional updates for `libstele` (`v1.8.0`), `libareole` (`v1.2.0`), `liblamina` (`v1.2.0`), `libchaff` (`v1.1.1`), `libbud` (`v1.3.3`), `pi-mm` (`v0.9.0`), `pi-quest` (`v1.12.1`), and `mk` (`v0.4.0`), plus integrate `@tty-pt/mm` into `dwm-jarvis` (`~/.local/src/dwm`).
 - Stand up a repository and CI pipeline for `libcorolla` (`0.1.0`).
 - Add `pacman` and `secrets: inherit` to `axil-nd` (`v1.4.0`) and the 17 `nd-*` modules when cutting the next NeverDark wave.
-- Update `tty-pt/ci/package/action.yml` to use `pacman -Syu` (or refresh `arch-builder:latest`) and wire `linux-arm64` / `linux-x64-musl` (`apk`) Node-API prebuilds into `all-in-one.yml`.
 - `libjoint`: per-timeline state in the WebAssembly build.
-- `duna`'s `package.json` and `package-lock.json` are still uncommitted in `../duna` and still target the 2026-11-13 versions (`2.3.3` / `1.7.3` / `1.5.2` / `1.3.2` / `1.4.2` / `1.6.2`) rather than the latest wave.
 
 
 
