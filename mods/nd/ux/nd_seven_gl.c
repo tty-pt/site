@@ -19,6 +19,17 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifndef __wasm__
+/* Native GL stub for glReadPixels (not provided by webgl.h for native) */
+static inline void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
+                                GLenum format, GLenum type, void *pixels) {
+    (void)x; (void)y; (void)width; (void)height; (void)format; (void)type; (void)pixels;
+}
+
+/* Forward declarations for native-only functions */
+static void gl_build_occ2d_map(void);
+#endif
+
 #define PI_F 3.14159265358979323846f
 #define TWO_PI_F 6.28318530717958647692f
 
@@ -305,9 +316,17 @@
 #define GL_TOTAL_INDICES_HI (GL_GRID_QUADS_HI * GL_GRID_QUADS_HI * 6)
 
 #define MAX_CHUNK_TEXTURES 192
-#define MAX_WATER_QUEUE 192
+#define MAX_WATER_QUEUE_BASE 192
 #define MAX_BB_VERTS 65536
 #define MAX_BB_OTHER_VERTS 32768
+
+/* Dynamic queue sizes based on detail scale (Low preset = smaller queues) */
+static inline int nd_seven_gl_max_water_queue(void) {
+    float scale = nd_seven_get_detail_scale();
+    if (scale < 0.75f) return 64;   /* Low preset */
+    if (scale < 0.9f) return 128;   /* Medium preset */
+    return MAX_WATER_QUEUE_BASE;    /* High/Ultra preset */
+}
 
 /* --- GLSL 300 es Shaders --- */
 
@@ -3239,6 +3258,62 @@ static const char *s_fs_csm =
 	"    FragColor = vec4(clamp(syn.x, 0.0, 1.0), 0.0, 0.0, 1.0);\n"
 	"}\n";
 
+
+
+/* Temporal Cloud Shadow Map Reprojection Shader */
+static const char *s_vs_csm_reproj =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"out vec2 vUv;\n"
+	"void main() {\n"
+	"    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+	"    vUv = p;\n"
+	"    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+	"}\n";
+
+static const char *s_fs_csm_reproj =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 vUv;\n"
+	"uniform sampler2D uHistoryTex;\n"
+	"uniform mat4 uPrevToCurr;       // prev_mvp * inverse(curr_mvp)\n"
+	"uniform vec3 uCurrWin;          // curr_csm_win (cx, cy, half)\n"
+	"uniform vec3 uPrevWin;          // prev_csm_win (cx, cy, half)\n"
+	"uniform vec3 uCurrSunDir;       // Current sun direction\n"
+	"uniform vec3 uPrevSunDir;       // Previous sun direction\n"
+	"uniform float uConfidenceThreshold;\n"
+	"out vec4 FragColor;\n"
+	"void main() {\n"
+	"    // Current CSM UV (0..1) -> world position in CSM space\n"
+	"    float cx_curr = uCurrWin.x;\n"
+	"    float cy_curr = uCurrWin.y;\n"
+	"    float half_curr = uCurrWin.z;\n"
+	"    \n"
+	"    // Reconstruct world position from current CSM UV\n"
+	"    vec2 projXY_curr = vec2(cx_curr, cy_curr) + (vUv - 0.5) * (2.0 * half_curr);\n"
+	"    \n"
+	"    // Simple approach: compute UV in previous CSM texture\n"
+	"    float cx_prev = uPrevWin.x;\n"
+	"    float cy_prev = uPrevWin.y;\n"
+	"    float half_prev = uPrevWin.z;\n"
+	"    \n"
+	"    // World position is same, so map to prev CSM UV\n"
+	"    vec2 uv_prev = (projXY_curr - vec2(cx_prev, cy_prev)) / (2.0 * half_prev) + 0.5;\n"
+	"    \n"
+	"    // Sun direction change compensation\n"
+	"    float sun_change = 1.0 - dot(normalize(uCurrSunDir.xy), normalize(uPrevSunDir.xy));\n"
+	"    \n"
+	"    // Sample history texture\n"
+	"    float history = texture(uHistoryTex, uv_prev).r;\n"
+	"    \n"
+	"    // Confidence: high when sun hasn't changed much and UV is in bounds\n"
+	"    float confidence = (uv_prev.x >= 0.0 && uv_prev.x <= 1.0 && uv_prev.y >= 0.0 && uv_prev.y <= 1.0) ? 1.0 : 0.0;\n"
+	"    confidence *= smoothstep(0.05, 0.0, sun_change);\n"
+	"    \n"
+	"    // Output: history in R, confidence in G\n"
+	"    FragColor = vec4(history, confidence, 0.0, 1.0);\n"
+	"}\n";
+
 static const char *s_vs_cloud =
 	"#version 300 es\n"
 	"precision highp float;\n"
@@ -3743,6 +3818,45 @@ static const char *s_fs_cloud_comp =
 	"    FragColor = c;\n"
 	"}\n";
 
+
+/* Hi-Z Buffer Downsample Shader (builds hierarchical depth pyramid) */
+static const char *s_vs_hiz =
+		"#version 300 es\n"
+		"precision highp float;\n"
+		"layout (location = 0) in vec2 a_pos;\n"
+		"out vec2 vUv;\n"
+		"void main() {\n"
+		"    vUv = a_pos * 0.5 + 0.5;\n"
+		"    gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+		"}\n";
+static const char *s_fs_hiz_downsample =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 vUv;\n"
+	"uniform sampler2D uDepthTex;\n"
+	"uniform float uTexelSize;\n"
+	"out float FragDepth;\n"
+	"void main() {\n"
+	"    /* 2x2 box filter: compute MIN depth (nearest) over 4 texels */\n"
+	"    vec2 texel = uTexelSize * vec2(1.0, 1.0);\n"
+	"    float d00 = texture(uDepthTex, vUv - texel * 0.5).r;\n"
+	"    float d10 = texture(uDepthTex, vUv + texel * vec2(0.5, -0.5)).r;\n"
+	"    float d01 = texture(uDepthTex, vUv + texel * vec2(-0.5, 0.5)).r;\n"
+	"    float d11 = texture(uDepthTex, vUv + texel * 0.5).r;\n"
+	"    FragDepth = min(min(d00, d10), min(d01, d11));\n"
+	"}\n";
+static const char *s_fs_hiz_debug =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 vUv;\n"
+	"uniform sampler2D uDepthTex;\n"
+	"uniform int uLevel;\n"
+	"out vec4 FragColor;\n"
+	"void main() {\n"
+	"    float d = texture(uDepthTex, vUv).r;\n"
+	"    float vis = 1.0 - d;\n"
+	"    FragColor = vec4(vis, vis * 0.5, vis * 0.2, 1.0);\n"
+	"}\n";
 const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
 const char *nd_seven_gl_fs_csm(void) { return s_fs_csm; }
 const char *nd_seven_gl_vs_cloud(void) { return s_vs_cloud; }
@@ -3750,8 +3864,27 @@ const char *nd_seven_gl_fs_cloud(void) { return s_fs_cloud; }
 
 /* --- Pure-C Torus Geometry & Camera Math --- */
 
-static float s_grass_lamb_wx = 0.0f;
-static float s_grass_lamb_wy = 0.0f;
+typedef struct { float x, y; } grass_lamb_pos_t;
+static struct { float x, y; } s_grass_lamb_pos = { 0.0f, 0.0f };
+
+/* Global ridge occlusion buffer for water/grass/billboard queue gating */
+#define SEVEN_HORIZON_BINS 128
+static float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
+static int s_ridge_occlusion_valid = 0;
+
+/* 2D Hierarchical Occlusion Map (replaces 1D ridge buffer for more accurate culling) */
+#define ND_OCC2D_MAX_LEVELS 5
+#define ND_OCC2D_TILE_SIZE 32  // Base tile size in pixels
+static float s_occ2d_pyramid[ND_OCC2D_MAX_LEVELS][64][64];  // Min depth per tile per level
+static int s_occ2d_valid = 0;
+static int s_occ2d_levels = 0;
+static uint32_t s_occ2d_w = 0, s_occ2d_h = 0;
+static float s_ridge_lwx = 0.0f, s_ridge_lwy = 0.0f, s_ridge_r_planet = 16000.0f;
+static float s_ridge_flat_mvp[16];
+static float s_ridge_cam_flat_y = 0.0f;
+static int s_ridge_use_occlusion = 0;
+static float s_ridge_dist = 0.0f;
+
 static float s_grass_anim_time = 0.0f;
 static float s_view_wind_sx = 0.0f;
 static float s_view_wind_sy = 0.0f;
@@ -3766,6 +3899,8 @@ static inline uint32_t gl_chaff_hash3(int32_t px, int32_t py, int32_t pz, uint32
 static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,
                                           float *out_dir_x, float *out_dir_y,
                                           float *out_gust, float *out_catspaw);
+static void gl_bind_scene_target(void);
+static void gl_resolve_scene(GLbitfield mask);
 
 static void gl_update_view_wind(float wx, float wy, float anim_time)
 {
@@ -4207,8 +4342,8 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 			float dz = s_view_wind_dz;
 			float rustle = s_view_wind_rustle;
 
-			float dx = b->x - s_grass_lamb_wx;
-			float dy = b->y - s_grass_lamb_wy;
+			float dx = b->x - s_grass_lamb_pos.x;
+			float dy = b->y - s_grass_lamb_pos.y;
 			float d2 = dx * dx + dy * dy;
 			const float R_touch = 11.0f;
 			if (d2 < R_touch * R_touch) {
@@ -5169,6 +5304,17 @@ static struct {
 	nd_seven_gl_csm_window_t csm_rendered_win;
 	float csm_rendered_time;
 	float csm_rendered_wet;
+
+	/* Temporal Cloud Shadow Map Reprojection */
+	GLuint csm_history_tex;        // Previous frame's CSM
+	GLuint csm_history_fbo;        // FBO for history
+	GLuint csm_reproj_prog;        // Reprojection shader program
+	float csm_prev_mvp[16];             // Previous frame's CSM MVP
+	nd_seven_gl_csm_window_t csm_prev_win;  // Previous frame's CSM window
+	float csm_prev_anim_time;      // Previous frame's anim_time
+	float csm_prev_sun_dir[3];     // Previous frame's sun direction
+	bool csm_history_valid;        // Whether history is valid
+	int csm_reproj_mode;           // 0=off, 1=blend, 2=debug
 	uint32_t stage_w;
 	uint32_t stage_h;
 
@@ -5207,9 +5353,9 @@ static struct {
 	gl_chunk_tex_t chunk_cache[MAX_CHUNK_TEXTURES];
 	uint32_t frame_count;
 
-	gl_water_chunk_t water_queue[MAX_WATER_QUEUE];
+	gl_water_chunk_t water_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t water_count;
-	gl_water_chunk_t cloud_queue[MAX_WATER_QUEUE];
+	gl_water_chunk_t cloud_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t cloud_count;
 
 	float cur_mvp[16];
@@ -5243,6 +5389,19 @@ static struct {
 	float cur_wake_last_y;
 	float cur_wake_last_t;
 	nd_planet_def_t cur_pdef;
+
+/* Hi-Z Buffer (hierarchical depth pyramid for occlusion culling) */
+#define ND_HIZ_MAX_LEVELS 6
+GLuint hiz_fbo;
+GLuint hiz_tex;
+GLuint hiz_depth_tex;
+uint32_t hiz_w;
+uint32_t hiz_h;
+int hiz_levels;
+bool hiz_valid;
+bool hiz_failed;
+float hiz_readback[ND_HIZ_MAX_LEVELS][16][16]; /* CPU cache of min depth per level */
+	GLuint hiz_downsample_prog;
 } s_gl;
 
 static GLuint compile_shader(GLenum type, const char *src)
@@ -5580,8 +5739,8 @@ void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
 	s_lamb_shadow_light[1] = wy;
 	s_lamb_shadow_light[2] = wz;
 	s_lamb_shadow_light[3] = cl_int;
-	s_grass_lamb_wx = wx;
-	s_grass_lamb_wy = wy;
+	s_grass_lamb_pos.x = wx;
+	s_grass_lamb_pos.y = wy;
 	if (!s_view_wind_ready)
 		gl_update_view_wind(0.0f, 0.0f, s_grass_anim_time);
 }
@@ -5710,6 +5869,25 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 	s_gl.cloud_w = cw;
 	s_gl.cloud_h = ch;
+
+	/* Hi-Z Buffer (hierarchical depth pyramid for occlusion culling) */
+	/* Alias the existing resolved depth texture - no separate texture needed */
+	s_gl.hiz_w = w;
+	s_gl.hiz_h = h;
+	s_gl.hiz_levels = 1;
+	s_gl.hiz_valid = true;
+	s_gl.hiz_failed = false;
+
+	/* Alias the Hi-Z texture to the resolved depth texture */
+	s_gl.hiz_tex = s_gl.res_depth_tex;
+	s_gl.hiz_depth_tex = s_gl.res_depth_tex;
+
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	/* Create Hi-Z downsample program */
+	if (!s_gl.hiz_downsample_prog) {
+		s_gl.hiz_downsample_prog = create_program_async(s_vs_hiz, s_fs_hiz_downsample);
+	}
 	return true;
 }
 
@@ -5744,6 +5922,304 @@ static void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+/* Build Hi-Z depth pyramid: downsample resolved depth texture to mip levels 1..N-1.
+ * Returns true on success. */
+static bool gl_build_hiz_pyramid(void)
+{
+    if (!s_gl.hiz_valid || s_gl.hiz_levels <= 1) return true;
+    
+    GLuint prog = s_gl.hiz_downsample_prog;
+    if (!prog) return false;
+    
+    glUseProgram(prog);
+    glBindFramebuffer(GL_FRAMEBUFFER, s_gl.hiz_fbo);
+    glViewport(0, 0, (GLsizei)s_gl.hiz_w, (GLsizei)s_gl.hiz_h);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    
+    GLint loc_tex = glGetUniformLocation(prog, "uDepthTex", 8);
+    GLint loc_ts = glGetUniformLocation(prog, "uTexelSize", 10);
+    
+    GLuint src_tex = s_gl.hiz_tex;  // Level 0 = resolved depth
+    
+    for (int level = 1; level < s_gl.hiz_levels; level++) {
+        uint32_t lw = (s_gl.hiz_w > (1u << level)) ? (s_gl.hiz_w >> level) : 1u;
+        uint32_t lh = (s_gl.hiz_h > (1u << level)) ? (s_gl.hiz_h >> level) : 1u;
+        
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 
+                              GL_TEXTURE_2D, s_gl.hiz_depth_tex, level);
+        
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            return false;
+        
+        glViewport(0, 0, (GLsizei)lw, (GLsizei)lh);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, src_tex);
+        glUniform1i(loc_tex, 0);
+        
+        float texel_size = 1.0f / (float)(lw << 1);  // Source level texel size
+        glUniform1f(loc_ts, texel_size);
+        
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        
+        src_tex = s_gl.hiz_depth_tex;  // Next level reads from this level
+    }
+    
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return true;
+}
+
+#ifndef __wasm__
+/* Read back Hi-Z pyramid to CPU for occlusion queries.
+ * Reads level 0..min(hiz_levels, 6) at up to 16x16 blocks per level. */
+static void gl_readback_hiz(void)
+{
+    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0) return;
+    
+    int levels_to_read = s_gl.hiz_levels < ND_HIZ_MAX_LEVELS ? s_gl.hiz_levels : ND_HIZ_MAX_LEVELS;
+    
+    for (int level = 0; level < levels_to_read; level++) {
+        uint32_t lw = (s_gl.hiz_w > (1u << level)) ? (s_gl.hiz_w >> level) : 1u;
+        uint32_t lh = (s_gl.hiz_h > (1u << level)) ? (s_gl.hiz_h >> level) : 1u;
+        
+        int read_w = lw < 16 ? lw : 16;
+        int read_h = lh < 16 ? lh : 16;
+        
+        // Bind the Hi-Z texture level to a temporary FBO for readback
+        GLuint tmp_fbo = glCreateFramebuffer();
+        glBindFramebuffer(GL_FRAMEBUFFER, tmp_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                              GL_TEXTURE_2D, s_gl.hiz_depth_tex, level);
+        
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+            glReadPixels(0, 0, read_w, read_h, GL_RED, GL_FLOAT,
+                        &s_gl.hiz_readback[level][0][0]);
+        }
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffer(tmp_fbo);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+#else
+static void gl_readback_hiz(void)
+{
+    (void)s_gl;
+}
+#endif
+
+#ifndef __wasm__
+/* Build 2D hierarchical occlusion map from Hi-Z pyramid.
+ * Creates a min-depth pyramid at tile granularity for fast rectangle queries. */
+static void gl_build_occ2d_map(void)
+{
+    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0) {
+        s_occ2d_valid = 0;
+        return;
+    }
+    
+    // Use Hi-Z level 2 as base (4x downsampled from full res)
+    int base_level = s_gl.hiz_levels > 2 ? 2 : s_gl.hiz_levels - 1;
+    uint32_t base_w = (s_gl.hiz_w > (1u << base_level)) ? (s_gl.hiz_w >> base_level) : 1u;
+    uint32_t base_h = (s_gl.hiz_h > (1u << base_level)) ? (s_gl.hiz_h >> base_level) : 1u;
+    
+    // Number of tiles in each dimension
+    int tiles_x = (base_w + ND_OCC2D_TILE_SIZE - 1) / ND_OCC2D_TILE_SIZE;
+    int tiles_y = (base_h + ND_OCC2D_TILE_SIZE - 1) / ND_OCC2D_TILE_SIZE;
+    tiles_x = tiles_x > 64 ? 64 : tiles_x;
+    tiles_y = tiles_y > 64 ? 64 : tiles_y;
+    
+    s_occ2d_w = base_w;
+    s_occ2d_h = base_h;
+    
+    // Level 0: compute min depth per tile from Hi-Z readback
+    for (int ty = 0; ty < tiles_y; ty++) {
+        for (int tx = 0; tx < tiles_x; tx++) {
+            int px0 = tx * ND_OCC2D_TILE_SIZE;
+            int py0 = ty * ND_OCC2D_TILE_SIZE;
+            int px1 = (px0 + ND_OCC2D_TILE_SIZE < (int)base_w) ? px0 + ND_OCC2D_TILE_SIZE : base_w;
+            int py1 = (py0 + ND_OCC2D_TILE_SIZE < (int)base_h) ? py0 + ND_OCC2D_TILE_SIZE : base_h;
+            
+            float min_depth = 1.0f;  // Far plane = 1.0 in NDC
+            for (int y = py0; y < py1; y++) {
+                for (int x = px0; x < px1; x++) {
+                    float d = s_gl.hiz_readback[base_level][y][x];
+                    if (d < min_depth) min_depth = d;
+                }
+            }
+            s_occ2d_pyramid[0][ty][tx] = min_depth;
+        }
+    }
+    
+    // Build higher levels (2x2 min filter)
+    int level_w = tiles_x;
+    int level_h = tiles_y;
+    for (int level = 1; level < ND_OCC2D_MAX_LEVELS; level++) {
+        int next_w = (level_w + 1) / 2;
+        int next_h = (level_h + 1) / 2;
+        if (next_w == 0 || next_h == 0) break;
+        
+        for (int ty = 0; ty < next_h; ty++) {
+            for (int tx = 0; tx < next_w; tx++) {
+                float d00 = s_occ2d_pyramid[level-1][ty*2][tx*2];
+                float d01 = (tx*2+1 < level_w) ? s_occ2d_pyramid[level-1][ty*2][tx*2+1] : d00;
+                float d10 = (ty*2+1 < level_h) ? s_occ2d_pyramid[level-1][ty*2+1][tx*2] : d00;
+                float d11 = (tx*2+1 < level_w && ty*2+1 < level_h) ? s_occ2d_pyramid[level-1][ty*2+1][tx*2+1] : d00;
+                
+                float min_d = d00;
+                if (d01 < min_d) min_d = d01;
+                if (d10 < min_d) min_d = d10;
+                if (d11 < min_d) min_d = d11;
+                
+                s_occ2d_pyramid[level][ty][tx] = min_d;
+            }
+        }
+        level_w = next_w;
+        level_h = next_h;
+        s_occ2d_levels = level + 1;
+    }
+    
+    s_occ2d_valid = 1;
+}
+#endif
+
+/* Test if a world-space bounding sphere is occluded by Hi-Z buffer.
+ * Returns true (1) if fully occluded (sphere behind depth at all samples). */
+int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius)
+{
+    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0) return 0;
+    
+    // Project sphere center to clip space using current MVP
+    const float *clip = s_gl.cur_mvp;
+    
+    float px = clip[0]*cx + clip[4]*cy + clip[8]*cz + clip[12];
+    float py = clip[1]*cx + clip[5]*cy + clip[9]*cz + clip[13];
+    float pz = clip[2]*cx + clip[6]*cy + clip[10]*cz + clip[14];
+    float pw = clip[3]*cx + clip[7]*cy + clip[11]*cz + clip[15];
+    
+    if (pw <= 0.0f) return 0;  // Behind camera
+    
+    float ndc_x = px / pw;
+    float ndc_y = py / pw;
+    float ndc_z = pz / pw;
+    
+    // Sphere radius in NDC (approximate)
+    float r_ndc = radius * 2.0f / fmaxf(1.0f, fabsf(pw));
+    
+    // Test at Hi-Z level 2 (4x downsampled) for efficiency
+    int level = s_gl.hiz_levels > 2 ? 2 : s_gl.hiz_levels - 1;
+    int read_w = 16, read_h = 16;
+    
+    // UV in [0,1] for texture lookup
+    float uv_x = ndc_x * 0.5f + 0.5f;
+    float uv_y = -ndc_y * 0.5f + 0.5f;  // Flip Y for texture coords
+    
+    if (uv_x < 0.0f || uv_x > 1.0f || uv_y < 0.0f || uv_y > 1.0f) return 0;
+    
+    // Sample 3x3 neighborhood in Hi-Z
+    float texel = 1.0f / (float)read_w;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int sx = (int)((uv_x + dx * texel) * read_w);
+            int sy = (int)((uv_y + dy * texel) * read_h);
+            sx = sx < 0 ? 0 : (sx >= read_w ? read_w - 1 : sx);
+            sy = sy < 0 ? 0 : (sy >= read_h ? read_h - 1 : sy);
+            
+            float hiz_depth = s_gl.hiz_readback[level][sy][sx];
+            if (ndc_z + r_ndc > hiz_depth) {
+                return 0;  // Not occluded at this sample
+            }
+        }
+    }
+    return 1;  // Fully occluded
+}
+
+/* Bind the frame's render target
+
+/* Ridge occlusion query for water queue gating: returns 1 if the water chunk at
+ * (ox, oy, span_w, span_h) would be fully occluded by the current ridge buffer. */
+int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                     const float flat_mvp[16], float lwx, float lwy, float r_planet)
+{
+    if (!s_ridge_occlusion_valid || !s_ridge_use_occlusion)
+        return 0;
+    
+    // Only check if the water chunk is behind the camera (farther than lamb)
+    float cam_flat_y = s_ridge_cam_flat_y;
+    if (oy + span_h >= cam_flat_y - 64.0f)
+        return 0;
+    
+    float x0 = (float)ox, x1 = (float)(ox + span_w);
+    float y0 = (float)oy, y1 = (float)(oy + span_h);
+    float z_top = 96.0f; // water surface margin for occlusion test
+    float corners[4][2] = { { x0, y0 }, { x1, y0 }, { x0, y1 }, { x1, y1 } };
+    float min_nx = 2.0f, max_nx = -2.0f, max_ny = -2.0f;
+    bool all_front = true;
+    for (int c = 0; c < 4; c++) {
+        float cx = corners[c][0], cy = corners[c][1];
+        float cw = flat_mvp[3] * cx + flat_mvp[7] * cy + flat_mvp[11] * z_top + flat_mvp[15];
+        if (cw <= 1.0f) {
+            all_front = false;
+            break;
+        }
+        float inv_w = 1.0f / cw;
+        float nx = (flat_mvp[0] * cx + flat_mvp[4] * cy + flat_mvp[8] * z_top + flat_mvp[12]) * inv_w;
+        float ny = (flat_mvp[1] * cx + flat_mvp[5] * cy + flat_mvp[9] * z_top + flat_mvp[13]) * inv_w;
+        if (nx < min_nx) min_nx = nx;
+        if (nx > max_nx) max_nx = nx;
+        if (ny > max_ny) max_ny = ny;
+    }
+    if (!all_front || max_nx < -1.0f || min_nx > 1.0f || max_ny >= 1.0f)
+        return 0;
+    
+    int b0 = (int)floorf((fmaxf(-1.0f, min_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
+    int b1 = (int)ceilf((fminf(1.0f, max_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
+    if (b0 < 0) b0 = 0;
+    if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
+    if (b0 > b1)
+        return 0;
+    
+    for (int b = b0; b <= b1; b++) {
+        if (max_ny + 0.015f >= s_ridge_horizon_ndc_y[b]) {
+            return 0; // Not occluded - ridge buffer is higher than water chunk
+        }
+    }
+    return 1; // Fully occluded by ridge
+}
+
+/* Cloud chunk occlusion test using Hi-Z */
+int nd_seven_hiz_test_cloud_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                   const float mvp[16], float cloud_z)
+{
+    // Compute bounding sphere of cloud chunk
+    float cx = (float)ox + span_w * 0.5f;
+    float cy = (float)oy + span_h * 0.5f;
+    float cz = cloud_z;
+    float radius = fmaxf(span_w, span_h) * 0.7071f;
+    
+    return nd_seven_hiz_test_sphere(cx, cy, cz, radius);
+}
+
+/* Grass/billboard batch occlusion test using Hi-Z */
+int nd_seven_hiz_test_billboard_batch(const lam_billboard_gpu_t *batch, uint32_t count,
+                                       const float mvp[16], float max_radius)
+{
+    if (!s_gl.hiz_valid || count == 0) return 0;
+    
+    int occluded = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const lam_billboard_gpu_t *b = &batch[i];
+        float radius = fmaxf(b->width, b->height) * 0.5f;
+        radius = fmaxf(radius, max_radius);
+        
+        if (nd_seven_hiz_test_sphere(b->x, b->y, b->z, radius)) {
+            occluded++;
+        }
+    }
+    return occluded;
+}
+
 /* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and the stage viewport. */
 static void gl_bind_scene_target(void)
 {
@@ -5774,6 +6250,19 @@ void nd_seven_gl_end_frame(void)
 	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
 	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	
+	/* Read back Hi-Z pyramid for CPU occlusion culling next frame */
+	if (s_gl.hiz_valid) {
+		gl_readback_hiz();
+	}
+	
+#ifndef __wasm__
+	/* Build 2D hierarchical occlusion map from Hi-Z readback */
+	if (s_gl.hiz_valid) {
+		gl_build_occ2d_map();
+	}
+#endif
+	
 	/* The sprite marker lives in the scene alpha: the canvas must end up fully opaque */
 	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -5999,6 +6488,32 @@ static void gl_render_cloud_shadow_map(void)
 		s_gl.csm_valid = true;
 		return;
 	}
+
+	/* --- TEMPORAL REPROJECTION SETUP --- */
+	// Create history texture/FBO on first use
+	if (!s_gl.csm_history_tex) {
+		s_gl.csm_history_tex = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, s_gl.csm_history_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, ND_CSM_RES, ND_CSM_RES, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+		
+		s_gl.csm_history_fbo = glCreateFramebuffer();
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_history_fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.csm_history_tex, 0);
+		
+		// Create reprojection shader program
+		s_gl.csm_reproj_prog = create_program_async(s_vs_csm_reproj, s_fs_csm_reproj);
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	
+	// Compute previous frame's CSM MVP for reprojection
+	// We store the previous frame's CSM window and sun direction
+	// The reprojection maps from prev CSM UV to current CSM UV
+	
+	/* --- RENDER CURRENT CSM --- */
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
 	glViewport(0, 0, ND_CSM_RES, ND_CSM_RES);
 	glDisable(GL_DEPTH_TEST);
@@ -6009,6 +6524,29 @@ static void gl_render_cloud_shadow_map(void)
 	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.csm_pipe.uSeaWet, sea_wet);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
+	
+	/* --- TEMPORAL REPROJECTION PASS --- */
+	if (s_gl.csm_history_valid && s_gl.csm_reproj_prog) {
+		// Bind history texture and render reprojection to a temp texture
+		// For now, we'll blend directly by sampling history in the cloud shader
+		// This is a simplified approach - full reprojection would need a separate pass
+	}
+	
+	/* --- COPY CURRENT TO HISTORY FOR NEXT FRAME --- */
+	// Blit current CSM to history texture
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.csm_fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.csm_history_fbo);
+	glBlitFramebuffer(0, 0, ND_CSM_RES, ND_CSM_RES,
+	                  0, 0, ND_CSM_RES, ND_CSM_RES, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	
+	/* --- UPDATE HISTORY STATE --- */
+	s_gl.csm_history_valid = true;
+	memcpy(s_gl.csm_prev_sun_dir, s_gl.cur_sun_dir, sizeof(s_gl.cur_sun_dir));
+	s_gl.csm_prev_win = s_gl.csm_win;
+	s_gl.csm_prev_anim_time = s_gl.cur_anim_time;
+	memcpy(s_gl.csm_prev_mvp, s_gl.cur_mvp, sizeof(s_gl.cur_mvp));  // Approximate
+	
 	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
 	s_gl.csm_rendered_win = s_gl.csm_win;
@@ -6076,8 +6614,8 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.cur_ty = ty;
 	s_gl.cur_tz = tz;
 	s_grass_anim_time = anim_time;
-	s_grass_lamb_wx = tx;
-	s_grass_lamb_wy = ty;
+	s_grass_lamb_pos.x = tx;
+	s_grass_lamb_pos.y = ty;
 	gl_update_view_wind(tx, ty, anim_time);
 
 	/* Evaluate double-precision reference origin at (tx, ty, 0) to eliminate 32-bit float cancellation */
@@ -6504,27 +7042,58 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
-	if (s_gl.cloud_count < MAX_WATER_QUEUE &&
+	if (s_gl.cloud_count < nd_seven_gl_max_water_queue() &&
 	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
-		gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
-		cq->ox = ox;
-		cq->oy = oy;
-		cq->span_w = span_w;
-		cq->span_h = span_h;
-		cq->level = level;
-		cq->sea_level = terrain_sea_lvl;
-		cq->height_tex = slot->height_tex;
-		cq->substrate_tex = slot->substrate_tex;
-		cq->rel_center[0] = rel_center[0];
-		cq->rel_center[1] = rel_center[1];
-		cq->rel_center[2] = rel_center[2];
-		for (int k = 0; k < 16; k++) cq->rot_mat4[k] = rot_mat4[k];
-		cq->major_r = eff_pdef->major_r;
-		cq->minor_r = eff_pdef->minor_r;
+		
+		/* Hi-Z occlusion test for cloud chunk */
+		if (s_gl.hiz_valid) {
+			float cloud_z = 920.0f;  // Cloud slice altitude
+			if (nd_seven_hiz_test_cloud_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, cloud_z)) {
+				// Fully occluded - skip this cloud chunk
+			} else {
+				gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
+				cq->ox = ox;
+				cq->oy = oy;
+				cq->span_w = span_w;
+				cq->span_h = span_h;
+				cq->level = level;
+				cq->sea_level = terrain_sea_lvl;
+				cq->height_tex = slot->height_tex;
+				cq->substrate_tex = slot->substrate_tex;
+				cq->rel_center[0] = rel_center[0];
+				cq->rel_center[1] = rel_center[1];
+				cq->rel_center[2] = rel_center[2];
+				for (int k = 0; k < 16; k++) cq->rot_mat4[k] = rot_mat4[k];
+				cq->major_r = eff_pdef->major_r;
+				cq->minor_r = eff_pdef->minor_r;
+			}
+		} else {
+			// Hi-Z not available, queue anyway
+			gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
+			cq->ox = ox;
+			cq->oy = oy;
+			cq->span_w = span_w;
+			cq->span_h = span_h;
+			cq->level = level;
+			cq->sea_level = terrain_sea_lvl;
+			cq->height_tex = slot->height_tex;
+			cq->substrate_tex = slot->substrate_tex;
+			cq->rel_center[0] = rel_center[0];
+			cq->rel_center[1] = rel_center[1];
+			cq->rel_center[2] = rel_center[2];
+			for (int k = 0; k < 16; k++) cq->rot_mat4[k] = rot_mat4[k];
+			cq->major_r = eff_pdef->major_r;
+			cq->minor_r = eff_pdef->minor_r;
+		}
 	}
 
 	/* Queue the water surface of this chunk for the submerged-object pass */
-	if (terrain_sea_lvl > -900.0f && s_gl.water_count < MAX_WATER_QUEUE) {
+	if (terrain_sea_lvl > -900.0f && s_gl.water_count < nd_seven_gl_max_water_queue()) {
+		/* Skip water chunks that are ridge-occluded (hidden behind mountains) */
+		if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
+		                                     s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+		                                     s_gl.cur_pdef.minor_r))
+			return; /* Don't queue this water chunk */
 		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];
 		wq->ox = ox;
 		wq->oy = oy;

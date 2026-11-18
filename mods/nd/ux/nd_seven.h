@@ -189,6 +189,11 @@ int nd_seven_is_alt_planet_occluded(const float eye_3d[3], float dist,
                                     const nd_planet_def_t *alt_pdef,
                                     float alt_body_rad);
 
+/* Ridge occlusion query for water queue gating: returns 1 if the water chunk at
+ * (ox, oy, span_w, span_h) would be fully occluded by the current ridge buffer. */
+int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                     const float flat_mvp[16], float lwx, float lwy, float r_planet);
+
 /* Botanical Micro-Ecology & Living Meadow Classifier:
  * Evaluates deterministic multi-octave noise + land-coupled botanical placement for (wx, wy).
  * Returns 1 if a meadow swatch/reed/flower is placed and populates out_zone, out_scale, and out_flip.

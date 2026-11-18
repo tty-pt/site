@@ -589,6 +589,16 @@ static ar_frustum_t s_frame_frustum;
 static float s_frame_sag_radius = 16000.0f;
 static int s_frame_frustum_valid = 0;
 
+/* Global ridge occlusion buffer for water queue gating */
+#define SEVEN_HORIZON_BINS 128
+static float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
+static int s_ridge_occlusion_valid = 0;
+static float s_ridge_lwx = 0.0f, s_ridge_lwy = 0.0f, s_ridge_r_planet = 16000.0f;
+static float s_ridge_flat_mvp[16];
+static float s_ridge_cam_flat_y = 0.0f;
+static int s_ridge_use_occlusion = 0;
+static float s_ridge_dist = 0.0f;
+
 static inline bool seven_test_frustum_xy(float min_x, float min_y, float max_x, float max_y,
                                          float fx, float fy, float base_z_min, float base_z_max)
 {
@@ -1060,11 +1070,21 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	/* 1D Screen-Space Ridge-Line Horizon Occlusion Buffer (128 columns across NDC [-1, 1]):
 	 * Tracks the guaranteed solid terrain ridge height in NDC Y as chunks are drawn front-to-back. */
 	#define SEVEN_HORIZON_BINS 128
-	float horizon_ndc_y[SEVEN_HORIZON_BINS];
 	bool use_ridge_occlusion = (!use_3d_primary && dist < 12000.0f);
 	if (use_ridge_occlusion) {
 		for (int hb = 0; hb < SEVEN_HORIZON_BINS; hb++)
-			horizon_ndc_y[hb] = -1.0f;
+			s_ridge_horizon_ndc_y[hb] = -1.0f;
+		s_ridge_occlusion_valid = 1;
+		s_ridge_lwx = (float)lwx;
+		s_ridge_lwy = (float)lwy;
+		s_ridge_r_planet = r_planet;
+		s_ridge_cam_flat_y = cam_flat_y;
+		s_ridge_use_occlusion = 1;
+		s_ridge_dist = dist;
+		memcpy(s_ridge_flat_mvp, flat_mvp, sizeof(flat_mvp));
+	} else {
+		s_ridge_occlusion_valid = 0;
+		s_ridge_use_occlusion = 0;
 	}
 
 	size_t kept_count = 0;
@@ -1103,7 +1123,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 				if (b0 <= b1) {
 					bool occluded = true;
 					for (int b = b0; b <= b1; b++) {
-						if (max_ny + 0.015f >= horizon_ndc_y[b]) {
+						if (max_ny + 0.015f >= s_ridge_horizon_ndc_y[b]) {
 							occluded = false;
 							break;
 						}
@@ -1184,8 +1204,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 						int b0 = (int)ceilf((fmaxf(-1.0f, lx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
 						int b1 = (int)floorf((fminf(1.0f, rx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS)) - 1;
 						for (int b = b0; b <= b1; b++) {
-							if (b >= 0 && b < SEVEN_HORIZON_BINS && min_seg_y > horizon_ndc_y[b])
-								horizon_ndc_y[b] = min_seg_y;
+							if (b >= 0 && b < SEVEN_HORIZON_BINS && min_seg_y > s_ridge_horizon_ndc_y[b])
+								s_ridge_horizon_ndc_y[b] = min_seg_y;
 						}
 					}
 				}
