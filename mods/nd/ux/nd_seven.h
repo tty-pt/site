@@ -194,6 +194,13 @@ int nd_seven_is_alt_planet_occluded(const float eye_3d[3], float dist,
 int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                      const float flat_mvp[16], float lwx, float lwy, float r_planet);
 
+/* Occlusion stats for HUD/debugging */
+void nd_seven_gl_get_occlusion_stats(uint32_t *out_water_culled,
+                                     uint32_t *out_cloud_culled,
+                                     uint32_t *out_billboard_culled,
+                                     uint32_t *out_water_queued,
+                                     uint32_t *out_cloud_queued);
+
 /* Botanical Micro-Ecology & Living Meadow Classifier:
  * Evaluates deterministic multi-octave noise + land-coupled botanical placement for (wx, wy).
  * Returns 1 if a meadow swatch/reed/flower is placed and populates out_zone, out_scale, and out_flip.

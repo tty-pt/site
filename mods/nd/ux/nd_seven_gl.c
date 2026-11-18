@@ -5243,7 +5243,11 @@ typedef struct {
 	GLint uCloudDeck;
 	GLint uSunDir;
 	GLint uCloudShadowMap;
+	GLint uCloudShadowMapHistory;
 	GLint uCsm;
+	GLint uPrevCsm;
+	GLint uPrevSunDir;
+	GLint uCsmConfidence;
 	GLint aGridUV;
 } gl_cloud_pipe_t;
 
@@ -5357,6 +5361,11 @@ static struct {
 	uint32_t water_count;
 	gl_water_chunk_t cloud_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t cloud_count;
+
+	/* Occlusion stats for HUD/debugging */
+	uint32_t water_culled_occ2d;
+	uint32_t cloud_culled_hiz;
+	uint32_t billboard_culled_hiz;
 
 	float cur_mvp[16];
 	ar_frustum_t cur_frustum;
@@ -5677,10 +5686,14 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
 			s_gl.cloud_pipe.uCamDist        = glGetUniformLocation(p, "uCamDist", 8);
 			s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
-			s_gl.cloud_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.cloud_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.cloud_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.cloud_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+			s_gl.cloud_pipe.uSunDir               = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.cloud_pipe.uCloudShadowMap       = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.cloud_pipe.uCloudShadowMapHistory = glGetUniformLocation(p, "uCloudShadowMapHistory", 20);
+			s_gl.cloud_pipe.uCsm                  = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.cloud_pipe.uPrevCsm              = glGetUniformLocation(p, "uPrevCsm", 8);
+			s_gl.cloud_pipe.uPrevSunDir           = glGetUniformLocation(p, "uPrevSunDir", 11);
+			s_gl.cloud_pipe.uCsmConfidence        = glGetUniformLocation(p, "uCsmConfidence", 14);
+			s_gl.cloud_pipe.aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
 
@@ -6220,6 +6233,129 @@ int nd_seven_hiz_test_billboard_batch(const lam_billboard_gpu_t *batch, uint32_t
     return occluded;
 }
 
+/* Query 2D occlusion map for a screen-space rectangle.
+ * Returns true if the rectangle is fully occluded (min depth <= near_z). */
+int nd_seven_occ2d_test_rect(float ndc_x0, float ndc_y0, float ndc_x1, float ndc_y1, float near_z)
+{
+    if (!s_occ2d_valid || s_occ2d_levels == 0) return 0;
+    
+    // Convert NDC [-1,1] to texture coordinates [0,1]
+    float u0 = ndc_x0 * 0.5f + 0.5f;
+    float v0 = -ndc_y0 * 0.5f + 0.5f;
+    float u1 = ndc_x1 * 0.5f + 0.5f;
+    float v1 = -ndc_y1 * 0.5f + 0.5f;
+    
+    if (u0 > u1) { float t = u0; u0 = u1; u1 = t; }
+    if (v0 > v1) { float t = v0; v0 = v1; v1 = t; }
+    
+    // Clamp to [0,1]
+    if (u0 < 0.0f) u0 = 0.0f;
+    if (v0 < 0.0f) v0 = 0.0f;
+    if (u1 > 1.0f) u1 = 1.0f;
+    if (v1 > 1.0f) v1 = 1.0f;
+    if (u0 >= u1 || v0 >= v1) return 0;
+    
+    // Choose appropriate pyramid level based on rectangle size
+    float rect_w = u1 - u0;
+    float rect_h = v1 - v0;
+    float tile_w = (float)ND_OCC2D_TILE_SIZE / (float)s_occ2d_w;
+    float tile_h = (float)ND_OCC2D_TILE_SIZE / (float)s_occ2d_h;
+    
+    int level = 0;
+    while (level + 1 < s_occ2d_levels && rect_w > tile_w * 4.0f && rect_h > tile_h * 4.0f) {
+        level++;
+        tile_w *= 2.0f;
+        tile_h *= 2.0f;
+    }
+    
+    // Compute tile range
+    int tx0 = (int)(u0 / tile_w);
+    int ty0 = (int)(v0 / tile_h);
+    int tx1 = (int)(u1 / tile_w);
+    int ty1 = (int)(v1 / tile_h);
+    
+    int level_w = (s_occ2d_w + (ND_OCC2D_TILE_SIZE << level) - 1) / (ND_OCC2D_TILE_SIZE << level);
+    int level_h = (s_occ2d_h + (ND_OCC2D_TILE_SIZE << level) - 1) / (ND_OCC2D_TILE_SIZE << level);
+    
+    if (tx0 < 0) tx0 = 0;
+    if (ty0 < 0) ty0 = 0;
+    if (tx1 >= level_w) tx1 = level_w - 1;
+    if (ty1 >= level_h) ty1 = level_h - 1;
+    
+    // Test min depth in rectangle
+    float min_depth = 1.0f;
+    for (int ty = ty0; ty <= ty1; ty++) {
+        for (int tx = tx0; tx <= tx1; tx++) {
+            float d = s_occ2d_pyramid[level][ty][tx];
+            if (d < min_depth) min_depth = d;
+        }
+    }
+    
+    // Occluded if min depth in rectangle is in front of our near_z
+    return (min_depth <= near_z) ? 1 : 0;
+}
+
+/* Water chunk 2D occ map test - projects water chunk to NDC and tests against occ map. */
+int nd_seven_occ2d_test_water_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                     const float mvp[16], float water_z)
+{
+    if (!s_occ2d_valid || s_occ2d_levels == 0) return 0;
+    
+    // Project 4 corners of water chunk to clip space
+    float x0 = (float)ox, x1 = (float)(ox + span_w);
+    float y0 = (float)oy, y1 = (float)(oy + span_h);
+    
+    float in_corners[4][4] = {
+        { x0, y0, water_z, 1.0f },
+        { x1, y0, water_z, 1.0f },
+        { x0, y1, water_z, 1.0f },
+        { x1, y1, water_z, 1.0f }
+    };
+    
+    float min_nx = 2.0f, max_nx = -2.0f;
+    float min_ny = 2.0f, max_ny = -2.0f;
+    bool all_front = true;
+    
+    for (int c = 0; c < 4; c++) {
+        float cx = in_corners[c][0];
+        float cy = in_corners[c][1];
+        float cz = in_corners[c][2];
+        float cw = in_corners[c][3];
+        
+        float px = mvp[0]*cx + mvp[4]*cy + mvp[8]*cz + mvp[12]*cw;
+        float py = mvp[1]*cx + mvp[5]*cy + mvp[9]*cz + mvp[13]*cw;
+        float pz = mvp[2]*cx + mvp[6]*cy + mvp[10]*cz + mvp[14]*cw;
+        float pw = mvp[3]*cx + mvp[7]*cy + mvp[11]*cz + mvp[15]*cw;
+        
+        if (pw <= 0.0f) {
+            all_front = false;
+            break;
+        }
+        
+        float nx = px / pw;
+        float ny = py / pw;
+        
+        if (nx < min_nx) min_nx = nx;
+        if (nx > max_nx) max_nx = nx;
+        if (ny < min_ny) min_ny = ny;
+        if (ny > max_ny) max_ny = ny;
+    }
+    
+    if (!all_front || max_nx < -1.0f || min_nx > 1.0f || max_ny < -1.0f || min_ny > 1.0f)
+        return 0;  // Off screen or behind camera
+    
+    // Clamp to NDC bounds
+    if (min_nx < -1.0f) min_nx = -1.0f;
+    if (max_nx > 1.0f) max_nx = 1.0f;
+    if (min_ny < -1.0f) min_ny = -1.0f;
+    if (max_ny > 1.0f) max_ny = 1.0f;
+    
+    // Near Z for water (slightly in front to be conservative)
+    float near_z = 0.0f;
+    
+    return nd_seven_occ2d_test_rect(min_nx, min_ny, max_nx, max_ny, near_z);
+}
+
 /* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and the stage viewport. */
 static void gl_bind_scene_target(void)
 {
@@ -6289,6 +6425,20 @@ void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,
 uint32_t nd_seven_gl_get_frame_count(void)
 {
 	return s_gl.frame_count;
+}
+
+/* Occlusion stats for HUD/debugging */
+void nd_seven_gl_get_occlusion_stats(uint32_t *out_water_culled,
+                                     uint32_t *out_cloud_culled,
+                                     uint32_t *out_billboard_culled,
+                                     uint32_t *out_water_queued,
+                                     uint32_t *out_cloud_queued)
+{
+	if (out_water_culled) *out_water_culled = s_gl.water_culled_occ2d;
+	if (out_cloud_culled) *out_cloud_culled = s_gl.cloud_culled_hiz;
+	if (out_billboard_culled) *out_billboard_culled = s_gl.billboard_culled_hiz;
+	if (out_water_queued) *out_water_queued = s_gl.water_count;
+	if (out_cloud_queued) *out_cloud_queued = s_gl.cloud_count;
 }
 
 static bool gl_ensure_csm_target(void)
@@ -6599,6 +6749,9 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.water_count = 0;
 	s_gl.cloud_count = 0;
 	s_gl.sprites_in_water = false;
+	s_gl.water_culled_occ2d = 0;
+	s_gl.cloud_culled_hiz = 0;
+	s_gl.billboard_culled_hiz = 0;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_base_sea_level = s_gl.cur_sea_level;
 	s_gl.focal_sea_level = -999.0f;
@@ -7049,6 +7202,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		if (s_gl.hiz_valid) {
 			float cloud_z = 920.0f;  // Cloud slice altitude
 			if (nd_seven_hiz_test_cloud_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, cloud_z)) {
+				s_gl.cloud_culled_hiz++;
 				// Fully occluded - skip this cloud chunk
 			} else {
 				gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
@@ -7089,11 +7243,21 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue the water surface of this chunk for the submerged-object pass */
 	if (terrain_sea_lvl > -900.0f && s_gl.water_count < nd_seven_gl_max_water_queue()) {
-		/* Skip water chunks that are ridge-occluded (hidden behind mountains) */
+		/* Skip water chunks that are occluded (2D hierarchical occlusion map) */
+#ifndef __wasm__
+		if (s_occ2d_valid && s_gl.hiz_valid) {
+			if (nd_seven_occ2d_test_water_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, terrain_sea_lvl)) {
+				s_gl.water_culled_occ2d++;
+				return; /* Don't queue this water chunk */
+			}
+		}
+#else
+		/* WASM: fall back to 1D ridge test */
 		if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
 		                                     s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
 		                                     s_gl.cur_pdef.minor_r))
 			return; /* Don't queue this water chunk */
+#endif
 		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];
 		wq->ox = ox;
 		wq->oy = oy;
@@ -7267,6 +7431,27 @@ void nd_seven_gl_flush_clouds(void)
 
 	glUseProgram(s_gl.cloud_pipe.prog);
 	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap, s_gl.cloud_pipe.uCsm);
+
+	/* Temporal CSM reprojection: bind history texture and set previous frame uniforms */
+	if (s_gl.csm_history_valid && s_gl.cloud_pipe.uCloudShadowMapHistory >= 0) {
+		glActiveTexture(GL_TEXTURE0 + 8);
+		glBindTexture(GL_TEXTURE_2D, s_gl.csm_history_tex);
+		glUniform1i(s_gl.cloud_pipe.uCloudShadowMapHistory, 8);
+		glActiveTexture(GL_TEXTURE0);
+		glUniform3f(s_gl.cloud_pipe.uPrevCsm,
+		            s_gl.csm_prev_win.cx, s_gl.csm_prev_win.cy, s_gl.csm_prev_win.half);
+		glUniform3fv(s_gl.cloud_pipe.uPrevSunDir, 1, s_gl.csm_prev_sun_dir);
+		/* Confidence based on camera motion and sun change */
+		float cam_motion = sqrtf((s_gl.cur_tx - s_gl.csm_prev_win.cx) * (s_gl.cur_tx - s_gl.csm_prev_win.cx) +
+		                         (s_gl.cur_ty - s_gl.csm_prev_win.cy) * (s_gl.cur_ty - s_gl.csm_prev_win.cy)) / fmaxf(1.0f, s_gl.cur_dist * 0.01f);
+		float sun_change = 1.0f - (s_gl.cur_sun_dir[0] * s_gl.csm_prev_sun_dir[0] +
+		                            s_gl.cur_sun_dir[1] * s_gl.csm_prev_sun_dir[1] +
+		                            s_gl.cur_sun_dir[2] * s_gl.csm_prev_sun_dir[2]);
+		float confidence = fmaxf(0.0f, 1.0f - cam_motion - sun_change * 2.0f);
+		glUniform1f(s_gl.cloud_pipe.uCsmConfidence, confidence);
+	} else {
+		glUniform1f(s_gl.cloud_pipe.uCsmConfidence, 0.0f);
+	}
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
 	glUniformMatrix4fv(s_gl.cloud_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
@@ -7455,11 +7640,22 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	 *   pass 2 (other)  ground contact shadows, glow auras and spray particles, blended, no depth write.
 	 * Core and "other" quads are streamed as instanced triangle strips via glDrawArraysInstanced. */
 	uint32_t core_n = 0, other_n = 0;
+	uint32_t bb_culled = 0;
 	for (uint32_t i = 0; i <= count; i++) {
 		bool last = (i == count);
 		bool is_other = false, want_shadow = false, want_lamb_shadow = false;
 		uint32_t need_core = 0, need_other = 0;
 		if (!last) {
+			/* Hi-Z occlusion culling for billboards (native build) */
+#ifndef __wasm__
+			if (s_gl.hiz_valid && s_occ2d_valid) {
+				float radius = fmaxf(batch[i].width, batch[i].height) * 0.5f;
+				if (nd_seven_hiz_test_sphere(batch[i].x, batch[i].y, batch[i].z, radius)) {
+					s_gl.billboard_culled_hiz++;
+					continue;  // Skip this billboard
+				}
+			}
+#endif
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
 			if (!is_other && (batch[i].tint_rgba & 0xFFu) >= 90u) {
