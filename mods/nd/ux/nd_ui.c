@@ -2362,9 +2362,10 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 		float min_dt = (fps_cap == 30) ? 0.031f : (fps_cap == 60 ? 0.0155f : 0.0f);
 		s_render_accum_dt += (dt > 0.0f ? dt : 0.016f);
 		if (min_dt <= 0.0f || s_render_accum_dt >= min_dt || g_map_dirty) {
+			float sim_dt = (s_render_accum_dt > 0.0f) ? s_render_accum_dt : (dt > 0.0f ? dt : 0.016f);
 			s_render_accum_dt = 0.0f;
 			/* Run simulation tick at the capped frame rate */
-			int mv = nd_seven_tick(&client_state, min_dt <= 0.0f ? dt : min_dt);
+			int mv = nd_seven_tick(&client_state, sim_dt);
 			if (mv) {
 				char m[2] = { (char)mv, '\n' };
 				ws_send(m, 2);

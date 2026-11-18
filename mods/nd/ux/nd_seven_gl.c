@@ -6202,7 +6202,7 @@ static void gl_build_occ2d_map(void)
  * Returns true (1) if fully occluded (sphere behind depth at all samples). */
 int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius)
 {
-    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0) return 0;
+    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0 || !s_occ2d_valid) return 0;
     
     // Project sphere center to clip space using current MVP
     const float *clip = s_gl.cur_mvp;
@@ -6960,43 +6960,12 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
 	float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
 	ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
-	
-	/* Temporal AA jitter: apply sub-pixel offset to projection matrix */
-	/* Halton sequence base 2,3 for jitter */
-	static uint32_t s_halton_idx = 0;
-	s_halton_idx++;
-	uint32_t idx = s_halton_idx;
-	float halton_x = 0.0f, halton_y = 0.0f;
-	float f = 0.5f;
-	while (idx > 0) {
-		halton_x += (idx & 1) * f;
-		idx >>= 1;
-		f *= 0.5f;
-	}
-	idx = s_halton_idx;
-	f = 1.0f / 3.0f;
-	while (idx > 0) {
-		halton_y += (idx % 3) * f;
-		idx /= 3;
-		f *= (1.0f / 3.0f);
-	}
-	// Map to [-0.5, 0.5] pixel range
-	float jitter_x = (halton_x - 0.5f) * 2.0f;
-	float jitter_y = (halton_y - 0.5f) * 2.0f;
-	
-	// Apply jitter to projection matrix (column-major)
-	// proj[8] = x offset, proj[9] = y offset (in clip space)
-	float px_size_x = 2.0f / stage_w;
-	float px_size_y = 2.0f / stage_h;
-	proj[8] += jitter_x * px_size_x;
-	proj[9] += jitter_y * px_size_y;
-	
-	// Store jitter for temporal reprojection
+
 	s_gl.csm_prev_jitter_x = s_gl.csm_jitter_x;
 	s_gl.csm_prev_jitter_y = s_gl.csm_jitter_y;
-	s_gl.csm_jitter_x = jitter_x;
-	s_gl.csm_jitter_y = jitter_y;
-	
+	s_gl.csm_jitter_x = 0.0f;
+	s_gl.csm_jitter_y = 0.0f;
+
 	s_gl.cur_near = near_z;
 	s_gl.cur_far = far_z;
 	s_gl.cur_tan_half = tanf(fov_rad * 0.5f);
@@ -7380,31 +7349,11 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	if (s_gl.cloud_count < (uint32_t)nd_seven_gl_max_water_queue() &&
 	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
 		
-		/* Hi-Z occlusion test for cloud chunk */
-		if (s_gl.hiz_valid) {
-			float cloud_z = 920.0f;  // Cloud slice altitude
-			if (nd_seven_hiz_test_cloud_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, cloud_z)) {
-				s_gl.cloud_culled_hiz++;
-				// Fully occluded - skip this cloud chunk
-			} else {
-				gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
-				cq->ox = ox;
-				cq->oy = oy;
-				cq->span_w = span_w;
-				cq->span_h = span_h;
-				cq->level = level;
-				cq->sea_level = terrain_sea_lvl;
-				cq->height_tex = slot->height_tex;
-				cq->substrate_tex = slot->substrate_tex;
-				cq->rel_center[0] = rel_center[0];
-				cq->rel_center[1] = rel_center[1];
-				cq->rel_center[2] = rel_center[2];
-				for (int k = 0; k < 16; k++) cq->rot_mat4[k] = rot_mat4[k];
-				cq->major_r = eff_pdef->major_r;
-				cq->minor_r = eff_pdef->minor_r;
-			}
+		/* Hi-Z occlusion test for cloud chunk (when CPU readback is populated) */
+		if (s_gl.hiz_valid && s_occ2d_valid &&
+		    nd_seven_hiz_test_cloud_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, 920.0f)) {
+			s_gl.cloud_culled_hiz++;
 		} else {
-			// Hi-Z not available, queue anyway
 			gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
 			cq->ox = ox;
 			cq->oy = oy;
