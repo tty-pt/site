@@ -376,8 +376,42 @@ bool nd_seven_gl_cloud_shell_ray_hit(const float ray_orig[3],
                                      float *out_wy,
                                      float *out_t);
 
+/* =========================================================================
+ * Clustered Cloud Lighting (16x16x24 Frustum Cluster Grid + Multi-Light Shading)
+ * ========================================================================= */
+#define ND_CLUSTER_GRID_X 16
+#define ND_CLUSTER_GRID_Y 16
+#define ND_CLUSTER_GRID_Z 24
+#define ND_CLUSTER_TOTAL (ND_CLUSTER_GRID_X * ND_CLUSTER_GRID_Y * ND_CLUSTER_GRID_Z)
+#define ND_MAX_LIGHTS_PER_CLUSTER 32
+#define ND_MAX_TOTAL_LIGHTS 256
+
+#define ND_LIGHT_TYPE_DIRECTIONAL 0
+#define ND_LIGHT_TYPE_POINT       1
+#define ND_LIGHT_TYPE_SPOT        2
+
+typedef struct {
+	float pos_x, pos_y, pos_z, pos_w;
+	float dir_x, dir_y, dir_z, dir_w;
+	float color_r, color_g, color_b, intensity;
+	float range, spot_cos_cutoff, spot_exponent, type;
+} nd_cluster_light_t;
+
+void nd_seven_gl_clear_local_lights(void);
+int  nd_seven_gl_add_point_light(float wx, float wy, float wz,
+                                 float r, float g, float b,
+                                 float intensity, float range);
+int  nd_seven_gl_add_spot_light(float wx, float wy, float wz,
+                                float dx, float dy, float dz,
+                                float r, float g, float b,
+                                float intensity, float range,
+                                float cutoff_deg, float exponent);
+uint32_t nd_seven_gl_get_active_light_count(void);
+uint32_t nd_seven_gl_get_active_cluster_count(void);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* ND_SEVEN_GL_H */
+

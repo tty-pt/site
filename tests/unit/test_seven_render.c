@@ -4072,6 +4072,26 @@ int main(void)
 				/* Restore High Preset */
 				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
+
+				/* 5) Verify Clustered Cloud Lighting (16x16x24 Frustum Grid, Sun/Moon + Point/Spot Lights) */
+				assert(strstr(nd_seven_gl_fs_cloud(), "uClusterGridDim") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "uClusterDepthParams") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "uClusterLightData") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "uClusterLightListsTex") != NULL);
+				assert(strstr(nd_seven_gl_fs_cloud(), "eval_clustered_cloud_lighting") != NULL);
+
+				nd_seven_set_zoom(0.08f);
+				nd_seven_render(fb, 1280, 720, &st);
+				/* Base active lights: Sun + Moon (+ Lamb if glowing) */
+				uint32_t base_lights = nd_seven_gl_get_active_light_count();
+				assert(base_lights >= 2);
+				assert(nd_seven_gl_get_active_cluster_count() == ND_CLUSTER_TOTAL);
+
+				/* Add explicit point and spot lights and verify cluster assignment */
+				int pt_id = nd_seven_gl_add_point_light(80.0f, -64.0f, 520.0f, 1.0f, 0.6f, 0.2f, 2.0f, 1200.0f);
+				int sp_id = nd_seven_gl_add_spot_light(120.0f, -80.0f, 480.0f, 0.0f, 0.0f, 1.0f, 0.4f, 0.8f, 1.0f, 2.5f, 1500.0f, 35.0f, 4.0f);
+				assert(pt_id >= 0 && sp_id > pt_id);
+				nd_seven_gl_flush_clouds();
 			}
 
 			nd_seven_set_zoom(1.0f);

@@ -3413,9 +3413,65 @@ static const char *s_fs_cloud =
 	"uniform float uCamDist;\n"
 	"uniform vec4 uCloudDeck;\n"
 	"uniform vec3 uSunDir;\n"
+	"uniform vec3 uMoonDir;\n"
 	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
+	"uniform vec3 uClusterGridDim;\n"
+	"uniform vec4 uClusterDepthParams;\n"
+	"uniform int uClusterLightCount;\n"
+	"uniform sampler2D uClusterLightData;\n"
+	"uniform sampler2D uClusterLightListsTex;\n"
 	"out vec4 FragColor;\n"
+	"/* Clustered Cloud Lighting (16x16x24 Frustum Grid):\n"
+	" * Fetches cluster light list for the fragment's screen tile and logarithmic depth slice,\n"
+	" * and evaluates volumetric in-scattering + Henyey-Greenstein phase + Beer-Lambert self-shadowing\n"
+	" * for every directional, point, and spot light assigned to the cluster. */\n"
+	"vec3 eval_clustered_cloud_lighting(vec2 fragCoord, vec2 vp, vec3 stepWorldXY_Z, float fragDist,\n"
+	"                                   float dens, vec3 cloudGradN, vec3 rayDir, float hFrac, float upperDeckOcc) {\n"
+	"    if (uClusterLightCount <= 0 || vp.x <= 1.0 || vp.y <= 1.0) return vec3(0.0);\n"
+	"    int cx = clamp(int((fragCoord.x / vp.x) * uClusterGridDim.x), 0, int(uClusterGridDim.x) - 1);\n"
+	"    int cy = clamp(int((fragCoord.y / vp.y) * uClusterGridDim.y), 0, int(uClusterGridDim.y) - 1);\n"
+	"    int cz = clamp(int(log(max(fragDist, uClusterDepthParams.x)) * uClusterDepthParams.z + uClusterDepthParams.w), 0, int(uClusterGridDim.z) - 1);\n"
+	"    int clusterIdx = cx + int(uClusterGridDim.x) * (cy + int(uClusterGridDim.y) * cz);\n"
+	"    int listCount = int(texelFetch(uClusterLightListsTex, ivec2(0, clusterIdx), 0).r * 255.0 + 0.5);\n"
+	"    if (listCount <= 0) return vec3(0.0);\n"
+	"    vec3 localContrib = vec3(0.0);\n"
+	"    for (int li = 0; li < 32; li++) {\n"
+	"        if (li >= listCount) break;\n"
+	"        int lightIdx = int(texelFetch(uClusterLightListsTex, ivec2(li + 1, clusterIdx), 0).r * 255.0 + 0.5);\n"
+	"        if (lightIdx >= uClusterLightCount) continue;\n"
+	"        vec4 p0 = texelFetch(uClusterLightData, ivec2(0, lightIdx), 0);\n"
+	"        vec4 p1 = texelFetch(uClusterLightData, ivec2(1, lightIdx), 0);\n"
+	"        vec4 p2 = texelFetch(uClusterLightData, ivec2(2, lightIdx), 0);\n"
+	"        vec4 p3 = texelFetch(uClusterLightData, ivec2(3, lightIdx), 0);\n"
+	"        int lType = int(p3.w * 255.0 + 0.5);\n"
+	"        vec3 lCol = p2.rgb;\n"
+	"        float lInt = p2.a * 4.0;\n"
+	"        if (lType == 0) continue; /* Primary directional lights (sun/moon) handled with full planetary self-eclipse */\n"
+	"        vec3 lightPos = vec3((p0.xy - 0.5) * 65536.0, (p0.z - 0.1) * 8192.0);\n"
+	"        float lRange = max(16.0, p3.x * 8192.0);\n"
+	"        vec3 toLight = lightPos - stepWorldXY_Z;\n"
+	"        float distL = length(toLight);\n"
+	"        if (distL >= lRange) continue;\n"
+	"        vec3 L = toLight / max(1e-3, distL);\n"
+	"        float normD = distL / lRange;\n"
+	"        float atten = pow(clamp(1.0 - normD * normD, 0.0, 1.0), 2.0) / (1.0 + 2.5 * normD * normD);\n"
+	"        if (lType == 2) {\n"
+	"            vec3 spotDir = normalize(p1.xyz * 2.0 - 1.0);\n"
+	"            float cosAngle = dot(-L, spotDir);\n"
+	"            float cosCut = p3.y;\n"
+	"            if (cosAngle <= cosCut) continue;\n"
+	"            atten *= pow(clamp((cosAngle - cosCut) / max(1e-3, 1.0 - cosCut), 0.0, 1.0), max(1.0, p3.z * 16.0));\n"
+	"        }\n"
+	"        float lambert = 0.40 + 0.60 * clamp(dot(cloudGradN, L), 0.0, 1.0);\n"
+	"        float cosL = dot(rayDir, L);\n"
+	"        float hgL = 0.55 + 0.95 * pow(clamp(0.5 + 0.5 * cosL, 0.0, 1.0), 3.0);\n"
+	"        float tauL = dens * 1.45 + (1.0 - hFrac) * 0.25;\n"
+	"        float scatterL = exp(-tauL) * lambert * hgL;\n"
+	"        localContrib += lCol * (lInt * atten * scatterL);\n"
+	"    }\n"
+	"    return localContrib;\n"
+	"}\n"
 	"float getH(ivec2 p, ivec2 maxC) {\n"
 	"    return float(texelFetch(uHeightTex, clamp(p, ivec2(0), maxC), 0).r);\n"
 	"}\n"
@@ -3668,20 +3724,26 @@ static const char *s_fs_cloud =
 	"                            synCarrier, pZonalBase, baseMacroGrad, deckBaseCov, deckH, colMacroGrad);\n"
 	"    if (max(deckBaseCov.x, max(deckBaseCov.y, deckBaseCov.z)) <= 0.002) discard;\n"
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    vec3 mDir = (length(uMoonDir) > 0.001) ? normalize(uMoonDir) : vec3(-sDir.x, -sDir.y, max(0.25, -sDir.z));\n"
 	"    float orbitLight = smoothstep(24000.0, 220000.0, uCamDist);\n"
 	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
 	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
 	"    vec3 sunDir = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
+	"    vec3 moonLocal = vec3(dot(mDir, tangentU), dot(mDir, tangentV), dot(mDir, torusN));\n"
+	"    vec3 moonDir = (moonLocal.z > -0.05) ? normalize(vec3(moonLocal.xy, max(0.15, moonLocal.z))) : L_local;\n"
 	"    float sunDot = dot(torusN, sDir);\n"
+	"    float moonDot = dot(torusN, mDir);\n"
 	"    vec3 P_torus = (uCameraPos - vViewDir) - uPlanetCenter;\n"
 	"    float R_torus = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
 	"    float r0_torus = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
 	"    float innerEclipse = (sunDot > 0.0 && innerHole > 0.001) ? eval_torus_self_eclipse(P_torus, sDir, R_torus, r0_torus) : 1.0;\n"
 	"    float effSun = sunDot * innerEclipse;\n"
+	"    float effMoon = max(0.0, moonDot) * (1.0 - smoothstep(-0.10, 0.15, effSun));\n"
 	"    float cloudDayFactor = clamp(0.16 + 0.84 * smoothstep(-0.16, 0.22, effSun), 0.16, 1.0);\n"
 	"    float cloudTwilight = smoothstep(0.32, -0.06, effSun) * smoothstep(-0.16, 0.12, effSun);\n"
 	"    vec3 cloudSunCol = mix(vec3(1.06, 1.00, 0.91), vec3(1.14, 0.62, 0.32), cloudTwilight);\n"
+	"    vec3 cloudMoonCol = vec3(0.52, 0.68, 0.96);\n"
 	"    vec2 sunHoriz = vec2(-0.7071, -0.7071);\n"
 	"    const float bFreqs[4] = float[4](0.00026000, 0.00160000, 0.00960000, 0.05800000);\n"
 	"    const float bFar[4]   = float[4](650000.0, 95000.0, 14000.0, 2200.0);\n"
@@ -3703,6 +3765,8 @@ static const char *s_fs_cloud =
 	"    float hgForward = 0.62 + 1.55 * pow(clamp(0.5 + 0.5 * cosTheta, 0.0, 1.0), 5.0);\n"
 	"    float hgBack    = 0.28 * pow(clamp(0.5 - 0.5 * cosTheta, 0.0, 1.0), 2.2);\n"
 	"    float hgPhase   = hgForward + hgBack;\n"
+	"    float cosThetaMoon = dot(rayDir, moonDir);\n"
+	"    float hgMoon = 0.55 + 1.15 * pow(clamp(0.5 + 0.5 * cosThetaMoon, 0.0, 1.0), 4.0);\n"
 	"    float ign       = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
 	"    float jitter    = 0.5 + (ign - 0.5) * 0.22;\n"
 	"    float sunStepDist = clamp(max(90.0, fw * 3.2), 90.0, 24000.0);\n"
@@ -3759,11 +3823,13 @@ static const char *s_fs_cloud =
 	"                (0.32 + 0.58 * hFrac - grad.z * 16.0) * torusN\n"
 	"            );\n"
 	"            float sunLambert = clamp(dot(cloudGradN, sunDir), 0.0, 1.0);\n"
+	"            float moonLambert = clamp(dot(cloudGradN, moonDir), 0.0, 1.0);\n"
 	"            float hLocalS = clamp((hFrac - hBotD) / max(1e-3, hTopD - hBotD), 0.0, 1.0);\n"
 	"            float sunSlopeOcc = clamp(dot(grad.xy, sunHoriz) * 24.0 + grad.z * 14.0, -0.55, 1.10);\n"
 	"            float selfOcc = smoothstep(0.08, 0.75, dens) * (1.0 - 0.72 * hLocalS);\n"
 	"            float tauSun = max(0.05, selfOcc * 1.15 + max(0.0, sunSlopeOcc) * 1.65 + towerOcc * 1.35 + upperDeckOcc * 2.60 + (1.0 - hFrac) * 0.55);\n"
 	"            float directSun    = exp(-tauSun * 0.95) * (0.35 + 0.65 * sunLambert);\n"
+	"            float directMoon   = exp(-tauSun * 0.85) * (0.30 + 0.70 * moonLambert) * effMoon * 0.42;\n"
 	"            float multiScatter = exp(-tauSun * 0.35) * (1.0 - exp(-dens * 3.2));\n"
 	"            float thinEdge   = smoothstep(0.02, 0.14, dens) * (1.0 - smoothstep(0.22, 0.52, dens));\n"
 	"            float silverLining = thinEdge * directSun * clamp(hgPhase, 0.0, 2.2) * 0.38;\n"
@@ -3778,6 +3844,12 @@ static const char *s_fs_cloud =
 	"            vec3 stepCol = mix(shadowCol, scatterCol * (1.0 - 0.30 * clamp(upperDeckOcc, 0.0, 1.0)), clamp(multiScatter * 0.85, 0.0, 1.0));\n"
 	"            stepCol = mix(stepCol, sunLitCol * (0.88 + 0.12 * clamp(hgPhase, 0.0, 2.0)), clamp(directSun * 1.20, 0.0, 1.0));\n"
 	"            stepCol += sunLitCol * silverLining;\n"
+	"            stepCol += cloudMoonCol * (directMoon * (0.85 + 0.15 * clamp(hgMoon, 0.0, 2.0)));\n"
+	"            if (uClusterLightCount > 0 && uCamDist < 18000.0) {\n"
+	"                vec2 relStepXY = vRelXY + dxy * sStep;\n"
+	"                stepCol += eval_clustered_cloud_lighting(gl_FragCoord.xy, uViewport, vec3(relStepXY, z), fragDist,\n"
+	"                                                         dens, cloudGradN, rayDir, hFrac, upperDeckOcc);\n"
+	"            }\n"
 	"            float deckExt     = (deckIdx == 0) ? 0.0052 : ((deckIdx == 1) ? 0.0076 : (0.0095 + 0.0030 * rainCore));\n"
 	"            float stepTau     = pow(dens, 1.08) * (stepLen * deckExt);\n"
 	"            float stepAlpha   = 1.0 - exp(-stepTau);\n"
@@ -3845,18 +3917,6 @@ static const char *s_fs_hiz_downsample =
 	"    float d11 = texture(uDepthTex, vUv + texel * 0.5).r;\n"
 	"    FragDepth = min(min(d00, d10), min(d01, d11));\n"
 	"}\n";
-static const char *s_fs_hiz_debug =
-	"#version 300 es\n"
-	"precision highp float;\n"
-	"in vec2 vUv;\n"
-	"uniform sampler2D uDepthTex;\n"
-	"uniform int uLevel;\n"
-	"out vec4 FragColor;\n"
-	"void main() {\n"
-	"    float d = texture(uDepthTex, vUv).r;\n"
-	"    float vis = 1.0 - d;\n"
-	"    FragColor = vec4(vis, vis * 0.5, vis * 0.2, 1.0);\n"
-	"}\n";
 const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
 const char *nd_seven_gl_fs_csm(void) { return s_fs_csm; }
 const char *nd_seven_gl_vs_cloud(void) { return s_vs_cloud; }
@@ -3879,11 +3939,8 @@ static float s_occ2d_pyramid[ND_OCC2D_MAX_LEVELS][64][64];  // Min depth per til
 static int s_occ2d_valid = 0;
 static int s_occ2d_levels = 0;
 static uint32_t s_occ2d_w = 0, s_occ2d_h = 0;
-static float s_ridge_lwx = 0.0f, s_ridge_lwy = 0.0f, s_ridge_r_planet = 16000.0f;
-static float s_ridge_flat_mvp[16];
 static float s_ridge_cam_flat_y = 0.0f;
 static int s_ridge_use_occlusion = 0;
-static float s_ridge_dist = 0.0f;
 
 static float s_grass_anim_time = 0.0f;
 static float s_view_wind_sx = 0.0f;
@@ -5250,7 +5307,22 @@ typedef struct {
 	GLint uCsmConfidence;
 	GLint uCsmJitterDelta;
 	GLint aGridUV;
+	
+	/* Clustered Lighting */
+	GLint uMoonDir;              /* vec3 celestial moon direction */
+	GLint uViewport;             /* vec2 active cloud render target resolution */
+	GLint uClusterGridDim;       /* vec3(16.0, 16.0, 24.0) */
+	GLint uClusterDepthParams;   /* vec4(near, far, log_scale, log_bias) */
+	GLint uClusterLightCount;    /* Number of active lights */
+	GLint uClusterLightData;     /* Texture unit for light data (4x256 RGBA8) */
+	GLint uClusterLightListsTex; /* Texture unit for cluster light lists (33x6144 R8) */
 } gl_cloud_pipe_t;
+
+/* Cluster light list entry (packed) */
+typedef struct {
+	uint8_t count;
+	uint8_t light_indices[ND_MAX_LIGHTS_PER_CLUSTER];
+} nd_cluster_light_list_t;
 
 typedef struct {
 	GLuint prog;
@@ -5314,6 +5386,18 @@ static struct {
 	GLuint csm_history_tex;        // Previous frame's CSM
 	GLuint csm_history_fbo;        // FBO for history
 	GLuint csm_reproj_prog;        // Reprojection shader program
+	
+	/* Clustered Lighting Buffers & Textures */
+	GLuint cluster_light_tex;      // 2D data texture for light records (4 x ND_MAX_TOTAL_LIGHTS RGBA8)
+	GLuint cluster_list_tex;       // 2D data texture for cluster light index lists (33 x ND_CLUSTER_TOTAL R8)
+	int cluster_ssbo_valid;        // Whether cluster textures are initialized
+	nd_cluster_light_t local_lights[ND_MAX_TOTAL_LIGHTS];
+	uint32_t local_light_count;
+	nd_cluster_light_t active_lights[ND_MAX_TOTAL_LIGHTS];
+	uint32_t active_light_count;
+	uint32_t active_cluster_count;
+	uint8_t cluster_light_tex_data[ND_MAX_TOTAL_LIGHTS * 4 * 4];
+	uint8_t cluster_list_tex_data[ND_CLUSTER_TOTAL * (ND_MAX_LIGHTS_PER_CLUSTER + 1)];
 	float csm_prev_mvp[16];             // Previous frame's CSM MVP
 	nd_seven_gl_csm_window_t csm_prev_win;  // Previous frame's CSM window
 	float csm_prev_anim_time;      // Previous frame's anim_time
@@ -5703,6 +5787,13 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uPrevSunDir           = glGetUniformLocation(p, "uPrevSunDir", 11);
 			s_gl.cloud_pipe.uCsmConfidence        = glGetUniformLocation(p, "uCsmConfidence", 14);
 			s_gl.cloud_pipe.uCsmJitterDelta       = glGetUniformLocation(p, "uCsmJitterDelta", 15);
+			s_gl.cloud_pipe.uMoonDir              = glGetUniformLocation(p, "uMoonDir", 8);
+			s_gl.cloud_pipe.uViewport             = glGetUniformLocation(p, "uViewport", 9);
+			s_gl.cloud_pipe.uClusterGridDim       = glGetUniformLocation(p, "uClusterGridDim", 15);
+			s_gl.cloud_pipe.uClusterDepthParams   = glGetUniformLocation(p, "uClusterDepthParams", 19);
+			s_gl.cloud_pipe.uClusterLightCount    = glGetUniformLocation(p, "uClusterLightCount", 18);
+			s_gl.cloud_pipe.uClusterLightData     = glGetUniformLocation(p, "uClusterLightData", 17);
+			s_gl.cloud_pipe.uClusterLightListsTex = glGetUniformLocation(p, "uClusterLightListsTex", 21);
 			s_gl.cloud_pipe.aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
@@ -5947,7 +6038,7 @@ static void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 
 /* Build Hi-Z depth pyramid: downsample resolved depth texture to mip levels 1..N-1.
  * Returns true on success. */
-static bool gl_build_hiz_pyramid(void)
+static inline bool gl_build_hiz_pyramid(void)
 {
     if (!s_gl.hiz_valid || s_gl.hiz_levels <= 1) return true;
     
@@ -6061,8 +6152,8 @@ static void gl_build_occ2d_map(void)
         for (int tx = 0; tx < tiles_x; tx++) {
             int px0 = tx * ND_OCC2D_TILE_SIZE;
             int py0 = ty * ND_OCC2D_TILE_SIZE;
-            int px1 = (px0 + ND_OCC2D_TILE_SIZE < (int)base_w) ? px0 + ND_OCC2D_TILE_SIZE : base_w;
-            int py1 = (py0 + ND_OCC2D_TILE_SIZE < (int)base_h) ? py0 + ND_OCC2D_TILE_SIZE : base_h;
+            int px1 = (px0 + ND_OCC2D_TILE_SIZE < (int)base_w) ? (px0 + ND_OCC2D_TILE_SIZE) : (int)base_w;
+            int py1 = (py0 + ND_OCC2D_TILE_SIZE < (int)base_h) ? (py0 + ND_OCC2D_TILE_SIZE) : (int)base_h;
             
             float min_depth = 1.0f;  // Far plane = 1.0 in NDC
             for (int y = py0; y < py1; y++) {
@@ -6158,13 +6249,14 @@ int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius)
     return 1;  // Fully occluded
 }
 
-/* Bind the frame's render target
-
 /* Ridge occlusion query for water queue gating: returns 1 if the water chunk at
  * (ox, oy, span_w, span_h) would be fully occluded by the current ridge buffer. */
 int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                      const float flat_mvp[16], float lwx, float lwy, float r_planet)
 {
+    (void)lwx;
+    (void)lwy;
+    (void)r_planet;
     if (!s_ridge_occlusion_valid || !s_ridge_use_occlusion)
         return 0;
     
@@ -6215,6 +6307,7 @@ int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int
 int nd_seven_hiz_test_cloud_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                    const float mvp[16], float cloud_z)
 {
+    (void)mvp;
     // Compute bounding sphere of cloud chunk
     float cx = (float)ox + span_w * 0.5f;
     float cy = (float)oy + span_h * 0.5f;
@@ -6228,6 +6321,7 @@ int nd_seven_hiz_test_cloud_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_
 int nd_seven_hiz_test_billboard_batch(const lam_billboard_gpu_t *batch, uint32_t count,
                                        const float mvp[16], float max_radius)
 {
+    (void)mvp;
     if (!s_gl.hiz_valid || count == 0) return 0;
     
     int occluded = 0;
@@ -6334,7 +6428,6 @@ int nd_seven_occ2d_test_water_chunk(int32_t ox, int32_t oy, int32_t span_w, int3
         
         float px = mvp[0]*cx + mvp[4]*cy + mvp[8]*cz + mvp[12]*cw;
         float py = mvp[1]*cx + mvp[5]*cy + mvp[9]*cz + mvp[13]*cw;
-        float pz = mvp[2]*cx + mvp[6]*cy + mvp[10]*cz + mvp[14]*cw;
         float pw = mvp[3]*cx + mvp[7]*cy + mvp[11]*cz + mvp[15]*cw;
         
         if (pw <= 0.0f) {
@@ -6803,6 +6896,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_gl.water_culled_occ2d = 0;
 	s_gl.cloud_culled_hiz = 0;
 	s_gl.billboard_culled_hiz = 0;
+	s_gl.local_light_count = 0;
 	s_gl.cur_sea_level = pdef ? (float)nd_field_water_level(pdef->world_id) : -999.0f;
 	s_gl.cur_base_sea_level = s_gl.cur_sea_level;
 	s_gl.focal_sea_level = -999.0f;
@@ -7283,7 +7377,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
-	if (s_gl.cloud_count < nd_seven_gl_max_water_queue() &&
+	if (s_gl.cloud_count < (uint32_t)nd_seven_gl_max_water_queue() &&
 	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
 		
 		/* Hi-Z occlusion test for cloud chunk */
@@ -7330,7 +7424,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	}
 
 	/* Queue the water surface of this chunk for the submerged-object pass */
-	if (terrain_sea_lvl > -900.0f && s_gl.water_count < nd_seven_gl_max_water_queue()) {
+	if (terrain_sea_lvl > -900.0f && s_gl.water_count < (uint32_t)nd_seven_gl_max_water_queue()) {
 		/* Skip water chunks that are occluded (2D hierarchical occlusion map) */
 #ifndef __wasm__
 		if (s_occ2d_valid && s_gl.hiz_valid) {
@@ -7476,6 +7570,314 @@ void nd_seven_gl_flush_water(void)
 	s_gl.water_count = 0;
 }
 
+void nd_seven_gl_clear_local_lights(void)
+{
+	s_gl.local_light_count = 0;
+}
+
+int nd_seven_gl_add_point_light(float wx, float wy, float wz,
+                                float r, float g, float b,
+                                float intensity, float range)
+{
+	if (s_gl.local_light_count >= ND_MAX_TOTAL_LIGHTS || intensity <= 0.001f || range <= 1.0f)
+		return -1;
+	uint32_t idx = s_gl.local_light_count++;
+	nd_cluster_light_t *L = &s_gl.local_lights[idx];
+	memset(L, 0, sizeof(*L));
+	L->pos_x = wx;
+	L->pos_y = wy;
+	L->pos_z = wz;
+	L->pos_w = 1.0f;
+	L->color_r = r;
+	L->color_g = g;
+	L->color_b = b;
+	L->intensity = intensity;
+	L->range = range;
+	L->type = (float)ND_LIGHT_TYPE_POINT;
+	return (int)idx;
+}
+
+int nd_seven_gl_add_spot_light(float wx, float wy, float wz,
+                               float dx, float dy, float dz,
+                               float r, float g, float b,
+                               float intensity, float range,
+                               float cutoff_deg, float exponent)
+{
+	if (s_gl.local_light_count >= ND_MAX_TOTAL_LIGHTS || intensity <= 0.001f || range <= 1.0f)
+		return -1;
+	uint32_t idx = s_gl.local_light_count++;
+	nd_cluster_light_t *L = &s_gl.local_lights[idx];
+	memset(L, 0, sizeof(*L));
+	L->pos_x = wx;
+	L->pos_y = wy;
+	L->pos_z = wz;
+	L->pos_w = 1.0f;
+	float dlen = sqrtf(dx * dx + dy * dy + dz * dz);
+	if (dlen > 1e-4f) {
+		L->dir_x = dx / dlen;
+		L->dir_y = dy / dlen;
+		L->dir_z = dz / dlen;
+	} else {
+		L->dir_z = 1.0f;
+	}
+	L->color_r = r;
+	L->color_g = g;
+	L->color_b = b;
+	L->intensity = intensity;
+	L->range = range;
+	L->spot_cos_cutoff = cosf(cutoff_deg * (PI_F / 180.0f));
+	L->spot_exponent = exponent;
+	L->type = (float)ND_LIGHT_TYPE_SPOT;
+	return (int)idx;
+}
+
+uint32_t nd_seven_gl_get_active_light_count(void)
+{
+	return s_gl.active_light_count;
+}
+
+uint32_t nd_seven_gl_get_active_cluster_count(void)
+{
+	return s_gl.active_cluster_count;
+}
+
+static inline uint8_t gl_quantize_u8(float v)
+{
+	if (v <= 0.0f) return 0u;
+	if (v >= 1.0f) return 255u;
+	return (uint8_t)(v * 255.0f + 0.5f);
+}
+
+static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
+{
+	float near_d = (s_gl.cur_near > 16.0f) ? s_gl.cur_near : 16.0f;
+	float far_d  = (s_gl.cur_dist * 4.5f > near_d * 4.0f) ? (s_gl.cur_dist * 4.5f) : (near_d * 4.0f);
+	if (far_d > 32000.0f) far_d = 32000.0f;
+	float log_ratio = logf(far_d / near_d);
+	if (log_ratio < 1e-3f) log_ratio = 1.0f;
+	float log_scale = (float)ND_CLUSTER_GRID_Z / log_ratio;
+	float log_bias  = -(float)ND_CLUSTER_GRID_Z * logf(near_d) / log_ratio;
+
+	out_depth_params[0] = near_d;
+	out_depth_params[1] = far_d;
+	out_depth_params[2] = log_scale;
+	out_depth_params[3] = log_bias;
+
+	uint32_t count = 0;
+
+	/* Light 0: Primary directional Sun */
+	{
+		nd_cluster_light_t *sun = &s_gl.active_lights[count++];
+		memset(sun, 0, sizeof(*sun));
+		sun->dir_x = s_gl.cur_sun_dir[0];
+		sun->dir_y = s_gl.cur_sun_dir[1];
+		sun->dir_z = s_gl.cur_sun_dir[2];
+		sun->color_r = 1.0f;
+		sun->color_g = 0.96f;
+		sun->color_b = 0.88f;
+		sun->intensity = 1.0f;
+		sun->type = (float)ND_LIGHT_TYPE_DIRECTIONAL;
+	}
+
+	/* Light 1: Secondary directional Moon */
+	{
+		nd_cluster_light_t *moon = &s_gl.active_lights[count++];
+		memset(moon, 0, sizeof(*moon));
+		moon->dir_x = s_gl.cur_moon_dir[0];
+		moon->dir_y = s_gl.cur_moon_dir[1];
+		moon->dir_z = s_gl.cur_moon_dir[2];
+		moon->color_r = 0.52f;
+		moon->color_g = 0.68f;
+		moon->color_b = 0.96f;
+		moon->intensity = 0.42f;
+		moon->type = (float)ND_LIGHT_TYPE_DIRECTIONAL;
+	}
+
+	/* Auto-populate universe-owner glowing Lamb point light if active */
+	if (s_gl.cur_lamb_light[3] > 0.01f && count < ND_MAX_TOTAL_LIGHTS) {
+		nd_cluster_light_t *lamb = &s_gl.active_lights[count++];
+		memset(lamb, 0, sizeof(*lamb));
+		lamb->pos_x = s_gl.cur_lamb_light[0] - s_gl.cur_tx;
+		lamb->pos_y = s_gl.cur_lamb_light[1] - s_gl.cur_ty;
+		lamb->pos_z = s_gl.cur_lamb_light[2] + 380.0f; /* Project upward into low cloud base */
+		lamb->pos_w = 1.0f;
+		lamb->color_r = 1.0f;
+		lamb->color_g = 0.84f;
+		lamb->color_b = 0.46f;
+		lamb->intensity = fminf(4.0f, s_gl.cur_lamb_light[3] * 1.45f);
+		lamb->range = 1600.0f;
+		lamb->type = (float)ND_LIGHT_TYPE_POINT;
+	}
+
+	/* Append user/entity local point & spot lights (converted to camera-relative XY) */
+	for (uint32_t i = 0; i < s_gl.local_light_count && count < ND_MAX_TOTAL_LIGHTS; i++) {
+		nd_cluster_light_t L = s_gl.local_lights[i];
+		if ((int)(L.type + 0.5f) != ND_LIGHT_TYPE_DIRECTIONAL) {
+			L.pos_x -= s_gl.cur_tx;
+			L.pos_y -= s_gl.cur_ty;
+		}
+		if (fabsf(L.pos_x) > 32760.0f || fabsf(L.pos_y) > 32760.0f)
+			continue;
+		s_gl.active_lights[count++] = L;
+	}
+
+	s_gl.active_light_count = count;
+
+	/* Pack active lights into 4 x ND_MAX_TOTAL_LIGHTS RGBA8 texture data */
+	memset(s_gl.cluster_light_tex_data, 0, count * 16);
+	for (uint32_t i = 0; i < count; i++) {
+		const nd_cluster_light_t *L = &s_gl.active_lights[i];
+		uint8_t *dst = &s_gl.cluster_light_tex_data[i * 16];
+		/* Texel 0: encoded camera-relative position */
+		dst[0] = gl_quantize_u8(L->pos_x / 65536.0f + 0.5f);
+		dst[1] = gl_quantize_u8(L->pos_y / 65536.0f + 0.5f);
+		dst[2] = gl_quantize_u8(L->pos_z / 8192.0f + 0.1f);
+		dst[3] = gl_quantize_u8(L->pos_w);
+		/* Texel 1: encoded unit direction */
+		dst[4] = gl_quantize_u8(L->dir_x * 0.5f + 0.5f);
+		dst[5] = gl_quantize_u8(L->dir_y * 0.5f + 0.5f);
+		dst[6] = gl_quantize_u8(L->dir_z * 0.5f + 0.5f);
+		dst[7] = 0u;
+		/* Texel 2: color.rgb and intensity/4.0 */
+		dst[8]  = gl_quantize_u8(L->color_r);
+		dst[9]  = gl_quantize_u8(L->color_g);
+		dst[10] = gl_quantize_u8(L->color_b);
+		dst[11] = gl_quantize_u8(L->intensity * 0.25f);
+		/* Texel 3: range/8192, spot_cos_cutoff, spot_exponent/16, type */
+		dst[12] = gl_quantize_u8(L->range / 8192.0f);
+		dst[13] = gl_quantize_u8(L->spot_cos_cutoff);
+		dst[14] = gl_quantize_u8(L->spot_exponent / 16.0f);
+		dst[15] = (uint8_t)((int)(L->type + 0.5f));
+	}
+
+	/* Clear cluster light lists (stride = 33 bytes per cluster: byte 0 = count, bytes 1..32 = light indices) */
+	const uint32_t stride = ND_MAX_LIGHTS_PER_CLUSTER + 1;
+	for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++)
+		s_gl.cluster_list_tex_data[c * stride] = 0u;
+
+	/* Assign active lights to 16x16x24 clusters */
+	const float *mvp = s_gl.cur_mvp;
+	for (uint32_t li = 0; li < count; li++) {
+		const nd_cluster_light_t *L = &s_gl.active_lights[li];
+		int ltype = (int)(L->type + 0.5f);
+		if (ltype == ND_LIGHT_TYPE_DIRECTIONAL) {
+			/* Directional lights illuminate all clusters */
+			for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
+				uint8_t *entry = &s_gl.cluster_list_tex_data[c * stride];
+				uint8_t n = entry[0];
+				if (n < ND_MAX_LIGHTS_PER_CLUSTER) {
+					entry[1 + n] = (uint8_t)li;
+					entry[0] = n + 1;
+				}
+			}
+			continue;
+		}
+
+		/* Transform point/spot light from tangent-relative coordinates to 3D torus frame relative to cur_origin */
+		double lpos_d[3];
+		torus_frame_double((double)(s_gl.cur_tx + L->pos_x),
+		                   (double)(s_gl.cur_ty + L->pos_y),
+		                   (double)L->pos_z,
+		                   &s_gl.cur_pdef, lpos_d, NULL, NULL, NULL);
+		float rx = (float)(lpos_d[0] - s_gl.cur_origin[0]);
+		float ry = (float)(lpos_d[1] - s_gl.cur_origin[1]);
+		float rz = (float)(lpos_d[2] - s_gl.cur_origin[2]);
+
+		float dx = rx - s_gl.cur_eye[0];
+		float dy = ry - s_gl.cur_eye[1];
+		float dz = rz - s_gl.cur_eye[2];
+		float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+		float rad = L->range;
+
+		if (dist - rad > far_d || dist + rad < near_d)
+			continue;
+
+		float d_min = fmaxf(near_d, dist - rad);
+		float d_max = fminf(far_d, dist + rad);
+		int z0 = (int)floorf(logf(d_min) * log_scale + log_bias);
+		int z1 = (int)floorf(logf(d_max) * log_scale + log_bias);
+		if (z0 < 0) z0 = 0;
+		if (z1 >= ND_CLUSTER_GRID_Z) z1 = ND_CLUSTER_GRID_Z - 1;
+
+		/* Project bounding sphere to screen-space tiles [x0..x1, y0..y1] */
+		int x0 = 0, x1 = ND_CLUSTER_GRID_X - 1;
+		int y0 = 0, y1 = ND_CLUSTER_GRID_Y - 1;
+		float clip_x = mvp[0] * rx + mvp[4] * ry + mvp[8]  * rz + mvp[12];
+		float clip_y = mvp[1] * rx + mvp[5] * ry + mvp[9]  * rz + mvp[13];
+		float clip_w = mvp[3] * rx + mvp[7] * ry + mvp[11] * rz + mvp[15];
+		if (clip_w > rad * 0.5f && s_gl.cur_tan_half > 1e-4f) {
+			float ndc_x = clip_x / clip_w;
+			float ndc_y = clip_y / clip_w;
+			float r_ndc_y = (rad / fmaxf(1.0f, clip_w - rad)) / s_gl.cur_tan_half;
+			float r_ndc_x = r_ndc_y / fmaxf(0.1f, s_gl.cur_aspect);
+			float u_min = (ndc_x - r_ndc_x) * 0.5f + 0.5f;
+			float u_max = (ndc_x + r_ndc_x) * 0.5f + 0.5f;
+			float v_min = (ndc_y - r_ndc_y) * 0.5f + 0.5f;
+			float v_max = (ndc_y + r_ndc_y) * 0.5f + 0.5f;
+			if (u_max < 0.0f || u_min > 1.0f || v_max < 0.0f || v_min > 1.0f)
+				continue;
+			x0 = (int)floorf(u_min * (float)ND_CLUSTER_GRID_X);
+			x1 = (int)floorf(u_max * (float)ND_CLUSTER_GRID_X);
+			y0 = (int)floorf(v_min * (float)ND_CLUSTER_GRID_Y);
+			y1 = (int)floorf(v_max * (float)ND_CLUSTER_GRID_Y);
+			if (x0 < 0) x0 = 0;
+			if (x1 >= ND_CLUSTER_GRID_X) x1 = ND_CLUSTER_GRID_X - 1;
+			if (y0 < 0) y0 = 0;
+			if (y1 >= ND_CLUSTER_GRID_Y) y1 = ND_CLUSTER_GRID_Y - 1;
+		}
+
+		for (int cz = z0; cz <= z1; cz++) {
+			for (int cy = y0; cy <= y1; cy++) {
+				for (int cx = x0; cx <= x1; cx++) {
+					uint32_t c_idx = (uint32_t)(cx + ND_CLUSTER_GRID_X * (cy + ND_CLUSTER_GRID_Y * cz));
+					uint8_t *entry = &s_gl.cluster_list_tex_data[c_idx * stride];
+					uint8_t n = entry[0];
+					if (n < ND_MAX_LIGHTS_PER_CLUSTER) {
+						entry[1 + n] = (uint8_t)li;
+						entry[0] = n + 1;
+					}
+				}
+			}
+		}
+	}
+
+	uint32_t active_clusters = 0;
+	for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
+		if (s_gl.cluster_list_tex_data[c * stride] > 0)
+			active_clusters++;
+	}
+	s_gl.active_cluster_count = active_clusters;
+
+	if (!s_gl.cluster_ssbo_valid) {
+		s_gl.cluster_light_tex = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		s_gl.cluster_list_tex = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		s_gl.cluster_ssbo_valid = 1;
+	}
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, ND_MAX_TOTAL_LIGHTS, 0,
+	             GL_RGBA, GL_UNSIGNED_BYTE, s_gl.cluster_light_tex_data);
+
+	glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)stride, ND_CLUSTER_TOTAL, 0,
+	             GL_RED, GL_UNSIGNED_BYTE, s_gl.cluster_list_tex_data);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void nd_seven_gl_flush_clouds(void)
 {
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0 ||
@@ -7483,6 +7885,9 @@ void nd_seven_gl_flush_clouds(void)
 		s_gl.cloud_count = 0;
 		return;
 	}
+
+	float cluster_depth_params[4] = { 16.0f, 32000.0f, 1.0f, 0.0f };
+	gl_update_clustered_cloud_lighting(cluster_depth_params);
 
 	bool half_res = (s_gl.scene_ok && s_gl.cloud_fbo != 0 && s_gl.cloud_comp_pipe.prog != 0);
 	if (half_res) {
@@ -7519,6 +7924,29 @@ void nd_seven_gl_flush_clouds(void)
 
 	glUseProgram(s_gl.cloud_pipe.prog);
 	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap, s_gl.cloud_pipe.uCsm);
+
+	/* Bind Clustered Cloud Lighting textures and uniforms */
+	{
+		uint32_t vp_w = half_res ? s_gl.cloud_w : s_gl.stage_w;
+		uint32_t vp_h = half_res ? s_gl.cloud_h : s_gl.stage_h;
+		glUniform2f(s_gl.cloud_pipe.uViewport, (float)vp_w, (float)vp_h);
+		glUniform3fv(s_gl.cloud_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
+		glUniform3f(s_gl.cloud_pipe.uClusterGridDim,
+		            (float)ND_CLUSTER_GRID_X, (float)ND_CLUSTER_GRID_Y, (float)ND_CLUSTER_GRID_Z);
+		glUniform4f(s_gl.cloud_pipe.uClusterDepthParams,
+		            cluster_depth_params[0], cluster_depth_params[1],
+		            cluster_depth_params[2], cluster_depth_params[3]);
+		glUniform1i(s_gl.cloud_pipe.uClusterLightCount, (GLint)s_gl.active_light_count);
+
+		glActiveTexture(GL_TEXTURE0 + 9);
+		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);
+		glUniform1i(s_gl.cloud_pipe.uClusterLightData, 9);
+
+		glActiveTexture(GL_TEXTURE0 + 10);
+		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
+		glUniform1i(s_gl.cloud_pipe.uClusterLightListsTex, 10);
+		glActiveTexture(GL_TEXTURE0);
+	}
 
 	/* Temporal CSM reprojection: bind history texture and set previous frame uniforms */
 	if (s_gl.csm_history_valid && s_gl.cloud_pipe.uCloudShadowMapHistory >= 0) {
@@ -7733,7 +8161,6 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	 *   pass 2 (other)  ground contact shadows, glow auras and spray particles, blended, no depth write.
 	 * Core and "other" quads are streamed as instanced triangle strips via glDrawArraysInstanced. */
 	uint32_t core_n = 0, other_n = 0;
-	uint32_t bb_culled = 0;
 	for (uint32_t i = 0; i <= count; i++) {
 		bool last = (i == count);
 		bool is_other = false, want_shadow = false, want_lamb_shadow = false;
@@ -7751,6 +8178,21 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 #endif
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
+			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
+				float gr = (float)(batch[i].tint_rgba & 0xFFu) / 255.0f;
+				float gg = (float)((batch[i].tint_rgba >> 8) & 0xFFu) / 255.0f;
+				float gb = (float)((batch[i].tint_rgba >> 16) & 0xFFu) / 255.0f;
+				float ga = (float)((batch[i].tint_rgba >> 24) & 0xFFu) / 255.0f;
+				if (ga > 0.05f) {
+					float dx_l = batch[i].x - s_gl.cur_lamb_light[0];
+					float dy_l = batch[i].y - s_gl.cur_lamb_light[1];
+					/* Skip duplicate of primary Lamb glow if within 4 world units */
+					if (s_gl.cur_lamb_light[3] <= 0.01f || (dx_l * dx_l + dy_l * dy_l) > 16.0f) {
+						(void)nd_seven_gl_add_point_light(batch[i].x, batch[i].y, batch[i].z + 360.0f,
+						                                  gr, gg, gb, ga * 1.25f, 1200.0f);
+					}
+				}
+			}
 			if (!is_other && (batch[i].tint_rgba & 0xFFu) >= 90u) {
 				if (is_grass)
 					want_shadow = emit_grass_shadows && (batch[i].width >= 4.0f && batch[i].height >= 4.0f);
