@@ -5248,6 +5248,7 @@ typedef struct {
 	GLint uPrevCsm;
 	GLint uPrevSunDir;
 	GLint uCsmConfidence;
+	GLint uCsmJitterDelta;
 	GLint aGridUV;
 } gl_cloud_pipe_t;
 
@@ -5319,6 +5320,14 @@ static struct {
 	float csm_prev_sun_dir[3];     // Previous frame's sun direction
 	bool csm_history_valid;        // Whether history is valid
 	int csm_reproj_mode;           // 0=off, 1=blend, 2=debug
+	/* Temporal AA jitter compensation */
+	float csm_jitter_x;            // Current frame jitter offset X (pixels)
+	float csm_jitter_y;            // Current frame jitter offset Y (pixels)
+	float csm_prev_jitter_x;       // Previous frame jitter offset X
+	float csm_prev_jitter_y;       // Previous frame jitter offset Y
+	int csm_prev_quality;          // Previous frame cloud quality
+	int csm_prev_msaa;             // Previous frame MSAA
+	float csm_prev_res_scale;      // Previous frame render scale
 	uint32_t stage_w;
 	uint32_t stage_h;
 
@@ -5693,6 +5702,7 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uPrevCsm              = glGetUniformLocation(p, "uPrevCsm", 8);
 			s_gl.cloud_pipe.uPrevSunDir           = glGetUniformLocation(p, "uPrevSunDir", 11);
 			s_gl.cloud_pipe.uCsmConfidence        = glGetUniformLocation(p, "uCsmConfidence", 14);
+			s_gl.cloud_pipe.uCsmJitterDelta       = glGetUniformLocation(p, "uCsmJitterDelta", 15);
 			s_gl.cloud_pipe.aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
@@ -6597,6 +6607,47 @@ static void gl_render_cloud_shadow_map(void)
 	if (!s_gl.csm_pipe.prog || s_gl.cur_dist > 180000.0f)
 		return;
 
+	/* Temporal CSM history invalidation */
+	if (s_gl.csm_history_valid) {
+		bool invalidate = false;
+		
+		// Camera teleport / large motion
+		float cam_motion = sqrtf((s_gl.cur_tx - s_gl.csm_prev_win.cx) * (s_gl.cur_tx - s_gl.csm_prev_win.cx) +
+		                         (s_gl.cur_ty - s_gl.csm_prev_win.cy) * (s_gl.cur_ty - s_gl.csm_prev_win.cy));
+		if (cam_motion > 500.0f) {
+			invalidate = true;  // Teleport/cut
+		} else if (s_gl.csm_prev_win.half > 0.0f && cam_motion > 0.1f * s_gl.csm_prev_win.half) {
+			invalidate = true;  // Large motion relative to CSM window
+		}
+		
+		// Quality change
+		if (cq != s_gl.csm_prev_quality) invalidate = true;
+		
+		// MSAA change
+		if (nd_seven_get_msaa() != s_gl.csm_prev_msaa) invalidate = true;
+		
+		// Render scale change
+		float res_scale = nd_seven_get_res_scale();
+		if (fabsf(res_scale - s_gl.csm_prev_res_scale) > 0.01f) invalidate = true;
+		
+		// Sun direction change > 15 degrees
+		float sun_dot = s_gl.cur_sun_dir[0] * s_gl.csm_prev_sun_dir[0] +
+		                s_gl.cur_sun_dir[1] * s_gl.csm_prev_sun_dir[1] +
+		                s_gl.cur_sun_dir[2] * s_gl.csm_prev_sun_dir[2];
+		if (sun_dot < 0.9659258f) {  // cos(15°) = 0.9659258
+			invalidate = true;
+		}
+		
+		if (invalidate) {
+			s_gl.csm_history_valid = false;
+		}
+	}
+	
+	// Store current settings for next frame invalidation check
+	s_gl.csm_prev_quality = cq;
+	s_gl.csm_prev_msaa = nd_seven_get_msaa();
+	s_gl.csm_prev_res_scale = nd_seven_get_res_scale();
+
 	float sun_xy_len = sqrtf(s_gl.cur_sun_dir[0] * s_gl.cur_sun_dir[0] + s_gl.cur_sun_dir[1] * s_gl.cur_sun_dir[1]);
 	float sun_px = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[0] / sun_xy_len) : -0.70710678f;
 	float sun_py = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[1] / sun_xy_len) : -0.70710678f;
@@ -6815,6 +6866,43 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
 	float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
 	ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
+	
+	/* Temporal AA jitter: apply sub-pixel offset to projection matrix */
+	/* Halton sequence base 2,3 for jitter */
+	static uint32_t s_halton_idx = 0;
+	s_halton_idx++;
+	uint32_t idx = s_halton_idx;
+	float halton_x = 0.0f, halton_y = 0.0f;
+	float f = 0.5f;
+	while (idx > 0) {
+		halton_x += (idx & 1) * f;
+		idx >>= 1;
+		f *= 0.5f;
+	}
+	idx = s_halton_idx;
+	f = 1.0f / 3.0f;
+	while (idx > 0) {
+		halton_y += (idx % 3) * f;
+		idx /= 3;
+		f *= (1.0f / 3.0f);
+	}
+	// Map to [-0.5, 0.5] pixel range
+	float jitter_x = (halton_x - 0.5f) * 2.0f;
+	float jitter_y = (halton_y - 0.5f) * 2.0f;
+	
+	// Apply jitter to projection matrix (column-major)
+	// proj[8] = x offset, proj[9] = y offset (in clip space)
+	float px_size_x = 2.0f / stage_w;
+	float px_size_y = 2.0f / stage_h;
+	proj[8] += jitter_x * px_size_x;
+	proj[9] += jitter_y * px_size_y;
+	
+	// Store jitter for temporal reprojection
+	s_gl.csm_prev_jitter_x = s_gl.csm_jitter_x;
+	s_gl.csm_prev_jitter_y = s_gl.csm_jitter_y;
+	s_gl.csm_jitter_x = jitter_x;
+	s_gl.csm_jitter_y = jitter_y;
+	
 	s_gl.cur_near = near_z;
 	s_gl.cur_far = far_z;
 	s_gl.cur_tan_half = tanf(fov_rad * 0.5f);
@@ -7449,8 +7537,13 @@ void nd_seven_gl_flush_clouds(void)
 		                            s_gl.cur_sun_dir[2] * s_gl.csm_prev_sun_dir[2]);
 		float confidence = fmaxf(0.0f, 1.0f - cam_motion - sun_change * 2.0f);
 		glUniform1f(s_gl.cloud_pipe.uCsmConfidence, confidence);
+		/* Jitter delta for temporal reprojection */
+		float jitter_delta_x = s_gl.csm_jitter_x - s_gl.csm_prev_jitter_x;
+		float jitter_delta_y = s_gl.csm_jitter_y - s_gl.csm_prev_jitter_y;
+		glUniform2f(s_gl.cloud_pipe.uCsmJitterDelta, jitter_delta_x, jitter_delta_y);
 	} else {
 		glUniform1f(s_gl.cloud_pipe.uCsmConfidence, 0.0f);
+		glUniform2f(s_gl.cloud_pipe.uCsmJitterDelta, 0.0f, 0.0f);
 	}
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
