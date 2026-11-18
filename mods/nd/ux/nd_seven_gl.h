@@ -179,6 +179,14 @@ float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
 /* Resolve the scene and present it to the canvas. Must follow the last draw of a begin_frame()d frame. */
 void nd_seven_gl_end_frame(void);
 
+/* Query active WebGL2 render target dimensions, MSAA sample count, cloud FBO dimensions, and CSM state */
+void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,
+                                 uint32_t *out_scene_w, uint32_t *out_scene_h,
+                                 int *out_samples,
+                                 uint32_t *out_cloud_w, uint32_t *out_cloud_h,
+                                 bool *out_csm_active);
+uint32_t nd_seven_gl_get_frame_count(void);
+
 void nd_seven_gl_set_focal_water(float water_level);
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
                              float tx, float ty, float tz,

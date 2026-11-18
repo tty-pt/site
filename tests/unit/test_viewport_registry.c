@@ -7,6 +7,7 @@
 #include "nd_viewport.h"
 #include "nd_seven_motion.h"
 #include "nd_seven.h"
+#include "nd_seven_gl.h"
 #include "nd_ui.h"
 
 static bud_node *mock_stage_mount(void)
@@ -315,6 +316,377 @@ int main(void)
 	wasm_tick(0.016f, 640, 480);
 	assert(nd_seven_get_walking() == 0);
 	printf("PASS: driver transition handshake into seven stage resets button and key input state\n");
+
+	/* 8. Comprehensive Settings Modal End-to-End Application & Persistence Tests */
+	{
+		strncpy(client_state.preferred_driver, "lamina-seven", sizeof(client_state.preferred_driver) - 1);
+		client_state.layout_mode = ND_LAYOUT_GAME_2D;
+		nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
+		nd_seven_set_zoom(1.0f);
+		nd_ui_set_active_modal("");
+
+		/* 8a. Open Settings Modal via clicking #dock-settings-btn in the bottom-right dock */
+		root = nd_ui_render(&client_state);
+		bud_runtime *rt = bud_runtime_new(root);
+		assert(rt != NULL);
+		bud_node *modal_overlay = find_by_attr(root, "id", "settings-modal");
+		assert(modal_overlay != NULL);
+		assert(strcmp(bud_get_attr(modal_overlay, "class"), "hidden") == 0);
+
+		bud_node *dock_settings_btn = find_by_attr(root, "id", "dock-settings-btn");
+		assert(dock_settings_btn != NULL);
+		bud_runtime_dispatch(rt, dock_settings_btn, "click", "");
+		assert(strcmp(nd_ui_get_active_modal(), "settings") == 0);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		modal_overlay = find_by_attr(root, "id", "settings-modal");
+		assert(modal_overlay != NULL);
+		assert(strstr(bud_get_attr(modal_overlay, "class"), "modal") != NULL);
+
+		/* Verify initial High (Default) state and persisted style attribute */
+		bud_node *settings_card = find_by_attr(root, "id", "settings");
+		assert(settings_card != NULL);
+		const char *init_style = bud_get_attr(settings_card, "style");
+		assert(init_style != NULL);
+		assert(strcmp(init_style, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") == 0);
+
+		/* 8b. Graphics Quality Preset cycling: High -> Low -> Medium -> High */
+		rt = bud_runtime_new(root);
+		bud_node *preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
+		assert(preset_btn != NULL);
+		bud_runtime_dispatch(rt, preset_btn, "click", "");
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 50);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 50);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_LOW);
+		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_fps_cap() == 30);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "🔋 Low (Fastest)") != NULL);
+		assert(strstr(html, "--nd-res:50;--nd-det:50;--nd-cloud:1;--nd-msaa:0;--nd-fps:30;--nd-zoom:100;") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
+		bud_runtime_dispatch(rt, preset_btn, "click", "");
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 75);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 75);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
+		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_fps_cap() == 60);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "⚖️ Medium (Balanced)") != NULL);
+		assert(strstr(html, "--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:100;") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
+		bud_runtime_dispatch(rt, preset_btn, "click", "");
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 100);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
+		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_fps_cap() == 0);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "✨ High (Default)") != NULL);
+		assert(strstr(html, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") != NULL);
+		bud_free_string(html);
+
+		/* 8c. Render Resolution Scale: slider input/change, - (#settings-res-out), + (#settings-res-in) */
+		rt = bud_runtime_new(root);
+		bud_node *res_slider = find_by_attr(root, "id", "settings-res-slider");
+		bud_node *res_out = find_by_attr(root, "id", "settings-res-out");
+		bud_node *res_in = find_by_attr(root, "id", "settings-res-in");
+		assert(res_slider != NULL && res_out != NULL && res_in != NULL);
+
+		bud_runtime_dispatch(rt, res_slider, "input", "60");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 60);
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
+
+		bud_runtime_dispatch(rt, res_slider, "change", "30");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 30);
+
+		bud_runtime_dispatch(rt, res_out, "click", "");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 25);
+
+		/* Verify lower bound clamp at 25% */
+		bud_runtime_dispatch(rt, res_out, "click", "");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 25);
+
+		bud_runtime_dispatch(rt, res_in, "click", "");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 30);
+		bud_runtime_dispatch(rt, res_in, "click", "");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 35);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "id=\"settings-res-value\" class=\"settings-badge\">35%</span>") != NULL);
+		assert(strstr(html, "🎛️ Custom") != NULL);
+		bud_free_string(html);
+
+		/* 8d. Scenery Detail: slider input/change, - (#settings-detail-out), + (#settings-detail-in), and keyboard ',' / '.' */
+		rt = bud_runtime_new(root);
+		bud_node *det_slider = find_by_attr(root, "id", "settings-detail-slider");
+		bud_node *det_out = find_by_attr(root, "id", "settings-detail-out");
+		bud_node *det_in = find_by_attr(root, "id", "settings-detail-in");
+		assert(det_slider != NULL && det_out != NULL && det_in != NULL);
+
+		bud_runtime_dispatch(rt, det_slider, "input", "80");
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 80);
+
+		bud_runtime_dispatch(rt, det_slider, "change", "100");
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
+
+		bud_runtime_dispatch(rt, det_out, "click", "");
+		int det_after_out = (int)(nd_seven_get_detail_scale() * 100.0f + 0.5f);
+		assert(det_after_out < 100);
+
+		bud_runtime_dispatch(rt, det_in, "click", "");
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
+
+		/* Keyboard shortcuts ',' and '.' */
+		bud_runtime_dispatch(rt, root, "keydown@window", ",");
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == det_after_out);
+		bud_runtime_dispatch(rt, root, "keydown@window", ".");
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
+		free(rt);
+
+		/* 8e. Clouds & Shadows Quality cycling: High (3) -> Off (0) -> Low (1) -> Medium (2) -> High (3) */
+		root = nd_ui_render(&client_state);
+		rt = bud_runtime_new(root);
+		bud_node *cloud_btn = find_by_attr(root, "id", "settings-cloud-toggle");
+		assert(cloud_btn != NULL);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
+
+		bud_runtime_dispatch(rt, cloud_btn, "click", "");
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_OFF);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "🚫 Off") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		cloud_btn = find_by_attr(root, "id", "settings-cloud-toggle");
+		bud_runtime_dispatch(rt, cloud_btn, "click", "");
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_LOW);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "💨 Low (1/4 Res, No CSM)") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		cloud_btn = find_by_attr(root, "id", "settings-cloud-toggle");
+		bud_runtime_dispatch(rt, cloud_btn, "click", "");
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "⛅ Medium (1/3 Res + CSM)") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		cloud_btn = find_by_attr(root, "id", "settings-cloud-toggle");
+		bud_runtime_dispatch(rt, cloud_btn, "click", "");
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "☁️ High (1/2 Res + CSM)") != NULL);
+		bud_free_string(html);
+
+		/* 8f. Anti-Aliasing (4x MSAA) toggle: On (1) -> Off (0) -> On (1) */
+		rt = bud_runtime_new(root);
+		bud_node *msaa_btn = find_by_attr(root, "id", "settings-msaa-toggle");
+		assert(msaa_btn != NULL);
+		assert(nd_seven_get_msaa() == 1);
+
+		bud_runtime_dispatch(rt, msaa_btn, "click", "");
+		assert(nd_seven_get_msaa() == 0);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "Off (1x)") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		msaa_btn = find_by_attr(root, "id", "settings-msaa-toggle");
+		bud_runtime_dispatch(rt, msaa_btn, "click", "");
+		assert(nd_seven_get_msaa() == 1);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "4x MSAA (On)") != NULL);
+		bud_free_string(html);
+
+		/* 8g. Frame Rate Cap cycling: Uncapped (0) -> 30 FPS -> 60 FPS -> Uncapped (0) + wasm_tick pacing verification */
+		rt = bud_runtime_new(root);
+		bud_node *fps_btn = find_by_attr(root, "id", "settings-fps-toggle");
+		assert(fps_btn != NULL);
+		assert(nd_seven_get_fps_cap() == 0);
+
+		/* Under 30 FPS cap (min_dt = 0.031s), a 12ms tick after a redraw is skipped until accumulated dt >= 31ms */
+		bud_runtime_dispatch(rt, fps_btn, "click", "");
+		assert(nd_seven_get_fps_cap() == 30);
+		{
+			extern int g_map_dirty;
+			g_map_dirty = 0;
+			wasm_tick(0.035f, 640, 480); /* flushes accum */
+			uint32_t fc0 = nd_seven_gl_get_frame_count();
+			wasm_tick(0.012f, 640, 480); /* 12ms < 31ms: skipped */
+			assert(nd_seven_gl_get_frame_count() == fc0);
+			wasm_tick(0.020f, 640, 480); /* 12+20 = 32ms >= 31ms: renders */
+			assert(nd_seven_gl_get_frame_count() == fc0 + 1);
+		}
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "30 FPS (Battery)") != NULL);
+		bud_free_string(html);
+
+		/* Under 60 FPS cap (min_dt = 0.0155s), a 8ms tick is skipped until accumulated dt >= 15.5ms */
+		rt = bud_runtime_new(root);
+		fps_btn = find_by_attr(root, "id", "settings-fps-toggle");
+		bud_runtime_dispatch(rt, fps_btn, "click", "");
+		assert(nd_seven_get_fps_cap() == 60);
+		{
+			extern int g_map_dirty;
+			g_map_dirty = 0;
+			wasm_tick(0.020f, 640, 480); /* flushes accum */
+			uint32_t fc0 = nd_seven_gl_get_frame_count();
+			wasm_tick(0.008f, 640, 480); /* 8ms < 15.5ms: skipped */
+			assert(nd_seven_gl_get_frame_count() == fc0);
+			wasm_tick(0.008f, 640, 480); /* 8+8 = 16ms >= 15.5ms: renders */
+			assert(nd_seven_gl_get_frame_count() == fc0 + 1);
+		}
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "60 FPS") != NULL);
+		bud_free_string(html);
+
+		/* Under Uncapped (0), every tick renders immediately even at 4ms (240 Hz) */
+		rt = bud_runtime_new(root);
+		fps_btn = find_by_attr(root, "id", "settings-fps-toggle");
+		bud_runtime_dispatch(rt, fps_btn, "click", "");
+		assert(nd_seven_get_fps_cap() == 0);
+		{
+			uint32_t fc0 = nd_seven_gl_get_frame_count();
+			wasm_tick(0.004f, 640, 480);
+			assert(nd_seven_gl_get_frame_count() == fc0 + 1);
+			wasm_tick(0.004f, 640, 480);
+			assert(nd_seven_gl_get_frame_count() == fc0 + 2);
+		}
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "Uncapped (VSync)") != NULL);
+		bud_free_string(html);
+
+		/* 8h. Camera Zoom: slider input/change, - (#settings-zoom-out), + (#settings-zoom-in), 100% (#settings-zoom-reset), and keyboard '-', '+', '0' */
+		rt = bud_runtime_new(root);
+		bud_node *zoom_slider = find_by_attr(root, "id", "settings-zoom-slider");
+		bud_node *zoom_out = find_by_attr(root, "id", "settings-zoom-out");
+		bud_node *zoom_in = find_by_attr(root, "id", "settings-zoom-in");
+		bud_node *zoom_reset = find_by_attr(root, "id", "settings-zoom-reset");
+		assert(zoom_slider != NULL && zoom_out != NULL && zoom_in != NULL && zoom_reset != NULL);
+
+		bud_runtime_dispatch(rt, zoom_slider, "input", "150");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 150);
+
+		bud_runtime_dispatch(rt, zoom_slider, "change", "200");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 200);
+
+		bud_runtime_dispatch(rt, zoom_out, "click", "");
+		int zoom_after_out = (int)(nd_seven_get_zoom() * 100.0f + 0.5f);
+		assert(zoom_after_out < 200);
+
+		bud_runtime_dispatch(rt, zoom_in, "click", "");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 200);
+
+		bud_runtime_dispatch(rt, zoom_reset, "click", "");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 100);
+
+		/* Keyboard shortcuts '-', '+', '0' */
+		bud_runtime_dispatch(rt, root, "keydown@window", "+");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 115);
+		bud_runtime_dispatch(rt, root, "keydown@window", "-");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 100);
+		bud_runtime_dispatch(rt, root, "keydown@window", "+");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 115);
+		bud_runtime_dispatch(rt, root, "keydown@window", "0");
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 100);
+		free(rt);
+
+		/* 8i. 3D Viewport Toggle (#settings-viewport-toggle) */
+		root = nd_ui_render(&client_state);
+		rt = bud_runtime_new(root);
+		bud_node *vp_tog = find_by_attr(root, "id", "settings-viewport-toggle");
+		assert(vp_tog != NULL);
+		bud_runtime_dispatch(rt, vp_tog, "click", "");
+		assert(strcmp(client_state.preferred_driver, "tty") == 0);
+		assert(client_state.layout_mode == ND_LAYOUT_STANDARD_HYBRID);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "📺 Terminal (Off)") != NULL);
+		bud_free_string(html);
+
+		/* 8j. Persistence restore-persist in Terminal Mode AND Seven 3D Mode */
+		rt = bud_runtime_new(root);
+		bud_runtime_dispatch(rt, root, "restore-persist",
+		                     "nd-settings-quality|--nd-res:65;--nd-det:120;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:140;|rpg-modal-card");
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 65);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 120);
+		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
+		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_fps_cap() == 60);
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 140);
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
+
+		/* Switch back to Seven 3D via #settings-viewport-toggle */
+		vp_tog = find_by_attr(root, "id", "settings-viewport-toggle");
+		assert(vp_tog != NULL);
+		bud_runtime_dispatch(rt, vp_tog, "click", "");
+		assert(strcmp(client_state.preferred_driver, "lamina-seven") == 0);
+		assert(client_state.layout_mode == ND_LAYOUT_GAME_2D);
+		free(rt);
+
+		/* Verify restore-persist in Seven 3D mode back to High (Default) */
+		root = nd_ui_render(&client_state);
+		rt = bud_runtime_new(root);
+		bud_runtime_dispatch(rt, root, "restore-persist",
+		                     "nd-settings-quality|--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;|rpg-modal-card");
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
+		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 100);
+
+		/* 8k. Close Settings Modal via #settings-close-btn */
+		bud_node *close_btn = find_by_attr(root, "id", "settings-close-btn");
+		assert(close_btn != NULL);
+		bud_runtime_dispatch(rt, close_btn, "click", "");
+		assert(strcmp(nd_ui_get_active_modal(), "") == 0);
+		free(rt);
+
+		root = nd_ui_render(&client_state);
+		modal_overlay = find_by_attr(root, "id", "settings-modal");
+		assert(strcmp(bud_get_attr(modal_overlay, "class"), "hidden") == 0);
+		printf("PASS: all Settings modal controls, presets, sliders, buttons, keyboard shortcuts, and persistence verified\n");
+	}
 
 	printf("ALL VIEWPORT REGISTRY & CLEAN UI TESTS PASSED\n");
 	return 0;

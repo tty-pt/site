@@ -318,6 +318,7 @@ void nd_ui_restore_persist(const char *key, const char *val)
 		int cq = parse_style_px(val, "--nd-cloud:", -1);
 		int msaa = parse_style_px(val, "--nd-msaa:", -1);
 		int fps = parse_style_px(val, "--nd-fps:", -1);
+		int zoom_pct = parse_style_px(val, "--nd-zoom:", -1);
 		if (res_pct >= 25 && res_pct <= 100)
 			nd_seven_set_res_scale((float)res_pct * 0.01f);
 		if (det_pct >= 20 && det_pct <= 250)
@@ -328,6 +329,9 @@ void nd_ui_restore_persist(const char *key, const char *val)
 			nd_seven_set_msaa(msaa);
 		if (fps >= 0)
 			nd_seven_set_fps_cap(fps);
+		if (zoom_pct >= 10 && zoom_pct <= 250)
+			nd_seven_set_zoom((float)zoom_pct * 0.01f);
+		seven_stage_redraw();
 		bud_app_set_state();
 		return;
 	}
@@ -1073,7 +1077,15 @@ static bud_node *render_item_popper(const nd_client_state_t *st)
 		return NULL;
 
 	int is_inventory = (st->target_ref && st->me && st->target_ref == st->me);
-	uint32_t container_target = (st->target_ref && !is_inventory) ? st->target_ref : 0;
+	uint32_t container_target = 0;
+	if (st->target_ref && !is_inventory) {
+		for (size_t i = 0; i < st->entity_count; i++) {
+			if (st->entities[i].location == st->target_ref && st->entities[i].ref != st->target_ref) {
+				container_target = st->target_ref;
+				break;
+			}
+		}
+	}
 
 	const nd_entity_desc_t *e = NULL;
 	for (size_t i = 0; i < st->entity_count; i++) {
@@ -1164,7 +1176,15 @@ static bud_node *render_room_contents(const nd_client_state_t *st)
 	bud_set_attr(wrap, "class", "nd-contents w-full");
 
 	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
-	uint32_t container_target = (st && st->target_ref && !is_inventory) ? st->target_ref : 0;
+	uint32_t container_target = 0;
+	if (st && st->target_ref && !is_inventory) {
+		for (size_t i = 0; i < st->entity_count; i++) {
+			if (st->entities[i].location == st->target_ref && st->entities[i].ref != st->target_ref) {
+				container_target = st->target_ref;
+				break;
+			}
+		}
+	}
 
 	int any = 0;
 	if (st) {
@@ -1538,13 +1558,12 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 		int cq = nd_seven_get_cloud_quality();
 		int msaa = nd_seven_get_msaa();
 		int fps = nd_seven_get_fps_cap();
-		if (nd_seven_get_quality_preset() != ND_QUALITY_HIGH) {
-			char qstyle[128];
-			snprintf(qstyle, sizeof(qstyle),
-			         "--nd-res:%d;--nd-det:%d;--nd-cloud:%d;--nd-msaa:%d;--nd-fps:%d;",
-			         res_pct, det_pct, cq, msaa, fps);
-			bud_set_attr(card, "style", qstyle);
-		}
+		int zoom_pct = (int)(nd_seven_get_zoom() * 100.0f + 0.5f);
+		char qstyle[160];
+		snprintf(qstyle, sizeof(qstyle),
+		         "--nd-res:%d;--nd-det:%d;--nd-cloud:%d;--nd-msaa:%d;--nd-fps:%d;--nd-zoom:%d;",
+		         res_pct, det_pct, cq, msaa, fps, zoom_pct);
+		bud_set_attr(card, "style", qstyle);
 	}
 	bud_bind(card, "click", 1, on_settings_card_click);
 
@@ -1556,6 +1575,7 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 	bud_append(hdr, title);
 
 	bud_node *close_btn = bud_element("button");
+	bud_set_attr(close_btn, "id", "settings-close-btn");
 	bud_set_attr(close_btn, "type", "button");
 	bud_set_attr(close_btn, "class", "btn round");
 	bud_set_attr(close_btn, "title", "Close Settings");
@@ -1621,7 +1641,9 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 
 		bud_node *ctrl_row = bud_element("div");
 		bud_set_attr(ctrl_row, "class", "settings-slider-wrap");
-		bud_append(ctrl_row, make_btn("−", "Lower Render Resolution", on_settings_res_out));
+		bud_node *btn_res_out = make_btn("−", "Lower Render Resolution", on_settings_res_out);
+		bud_set_attr(btn_res_out, "id", "settings-res-out");
+		bud_append(ctrl_row, btn_res_out);
 
 		bud_node *slider = bud_element("input");
 		bud_set_attr(slider, "id", "settings-res-slider");
@@ -1635,7 +1657,9 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 		bud_bind(slider, "change", 1, on_settings_res_slider);
 		bud_append(ctrl_row, slider);
 
-		bud_append(ctrl_row, make_btn("+", "Higher Render Resolution", on_settings_res_in));
+		bud_node *btn_res_in = make_btn("+", "Higher Render Resolution", on_settings_res_in);
+		bud_set_attr(btn_res_in, "id", "settings-res-in");
+		bud_append(ctrl_row, btn_res_in);
 		bud_append(sec, ctrl_row);
 		bud_append(body, sec);
 	}
@@ -1668,7 +1692,9 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 
 		bud_node *ctrl_row = bud_element("div");
 		bud_set_attr(ctrl_row, "class", "settings-slider-wrap");
-		bud_append(ctrl_row, make_btn("−", "Less Scenery Detail (,)", on_settings_detail_out));
+		bud_node *btn_det_out = make_btn("−", "Less Scenery Detail (,)", on_settings_detail_out);
+		bud_set_attr(btn_det_out, "id", "settings-detail-out");
+		bud_append(ctrl_row, btn_det_out);
 
 		bud_node *slider = bud_element("input");
 		bud_set_attr(slider, "id", "settings-detail-slider");
@@ -1682,7 +1708,9 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 		bud_bind(slider, "change", 1, on_settings_detail_slider);
 		bud_append(ctrl_row, slider);
 
-		bud_append(ctrl_row, make_btn("+", "More Scenery Detail (.)", on_settings_detail_in));
+		bud_node *btn_det_in = make_btn("+", "More Scenery Detail (.)", on_settings_detail_in);
+		bud_set_attr(btn_det_in, "id", "settings-detail-in");
+		bud_append(ctrl_row, btn_det_in);
 		bud_append(sec, ctrl_row);
 		bud_append(body, sec);
 	}
@@ -1786,7 +1814,9 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 
 		bud_node *ctrl_row = bud_element("div");
 		bud_set_attr(ctrl_row, "class", "settings-slider-wrap");
-		bud_append(ctrl_row, make_btn("−", "Zoom Out (-)", on_settings_zoom_out));
+		bud_node *btn_zoom_out = make_btn("−", "Zoom Out (-)", on_settings_zoom_out);
+		bud_set_attr(btn_zoom_out, "id", "settings-zoom-out");
+		bud_append(ctrl_row, btn_zoom_out);
 
 		bud_node *slider = bud_element("input");
 		bud_set_attr(slider, "id", "settings-zoom-slider");
@@ -1800,8 +1830,12 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 		bud_bind(slider, "change", 1, on_settings_zoom_slider);
 		bud_append(ctrl_row, slider);
 
-		bud_append(ctrl_row, make_btn("+", "Zoom In (+)", on_settings_zoom_in));
-		bud_append(ctrl_row, make_btn("100%", "Reset Zoom (0)", on_settings_zoom_reset));
+		bud_node *btn_zoom_in = make_btn("+", "Zoom In (+)", on_settings_zoom_in);
+		bud_set_attr(btn_zoom_in, "id", "settings-zoom-in");
+		bud_append(ctrl_row, btn_zoom_in);
+		bud_node *btn_zoom_reset = make_btn("100%", "Reset Zoom (0)", on_settings_zoom_reset);
+		bud_set_attr(btn_zoom_reset, "id", "settings-zoom-reset");
+		bud_append(ctrl_row, btn_zoom_reset);
 		bud_append(sec, ctrl_row);
 		bud_append(body, sec);
 	}
@@ -1871,22 +1905,27 @@ static int on_key_down(bud_event *e)
 		if (strcmp(key, "+") == 0 || strcmp(key, "=") == 0 || strcmp(key, "]") == 0 || strcmp(key, "PageUp") == 0) {
 			nd_seven_zoom_in();
 			seven_stage_redraw();
+			bud_app_set_state();
 			return 1;
 		} else if (strcmp(key, "-") == 0 || strcmp(key, "_") == 0 || strcmp(key, "[") == 0 || strcmp(key, "PageDown") == 0) {
 			nd_seven_zoom_out();
 			seven_stage_redraw();
+			bud_app_set_state();
 			return 1;
 		} else if (strcmp(key, "0") == 0 || strcmp(key, ")") == 0) {
 			nd_seven_set_zoom(1.0f);
 			seven_stage_redraw();
+			bud_app_set_state();
 			return 1;
 		} else if (strcmp(key, ",") == 0 || strcmp(key, "<") == 0) {
 			nd_seven_detail_out();
 			seven_stage_redraw();
+			bud_app_set_state();
 			return 1;
 		} else if (strcmp(key, ".") == 0 || strcmp(key, ">") == 0) {
 			nd_seven_detail_in();
 			seven_stage_redraw();
+			bud_app_set_state();
 			return 1;
 		}
 		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
@@ -2180,6 +2219,11 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 		bud_append(cb, map);
 	bud_append(cb, keypad);
 	bud_append(cb, contents);
+	{
+		bud_node *popper = render_item_popper(st);
+		if (popper)
+			bud_append(cb, popper);
+	}
 
 	bud_node *rp_bottom = bud_element("div");
 	bud_set_attr(rp_bottom, "class", "w-full flex-shrink-0 flex flex-col gap-2 pt-2 border-t border-neutral-700/40 items-center");
@@ -2231,6 +2275,7 @@ bud_node *nd_ui_render(const nd_client_state_t *st)
 
 	bud_bind(root, "cmd", 1, on_cmd_action);
 	bud_bind(root, "cycle-viewport", 1, on_cycle_viewport);
+	bud_bind(root, "restore-persist", 1, on_restore_persist);
 	bud_bind(root, "keydown@window", 1, on_key_down);
 	bud_bind(root, "keyup@window", 1, on_key_up);
 	return root;

@@ -1921,8 +1921,10 @@ if (isWorkerContext) {
 					if (entry.slot === msg.slot && entry.fit && entry.canvas) {
 						entry.width = rw;
 						entry.height = rh;
-						if (entry.canvas.width !== rw) entry.canvas.width = rw;
-						if (entry.canvas.height !== rh) entry.canvas.height = rh;
+						if (!entry.webgl) {
+							if (entry.canvas.width !== rw) entry.canvas.width = rw;
+							if (entry.canvas.height !== rh) entry.canvas.height = rh;
+						}
 					}
 				}
 			}

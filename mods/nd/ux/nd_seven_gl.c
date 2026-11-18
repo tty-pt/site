@@ -5768,6 +5768,27 @@ void nd_seven_gl_end_frame(void)
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 }
 
+void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,
+                                 uint32_t *out_scene_w, uint32_t *out_scene_h,
+                                 int *out_samples,
+                                 uint32_t *out_cloud_w, uint32_t *out_cloud_h,
+                                 bool *out_csm_active)
+{
+	if (out_stage_w) *out_stage_w = s_gl.stage_w;
+	if (out_stage_h) *out_stage_h = s_gl.stage_h;
+	if (out_scene_w) *out_scene_w = s_gl.scene_w;
+	if (out_scene_h) *out_scene_h = s_gl.scene_h;
+	if (out_samples) *out_samples = s_gl.scene_samples;
+	if (out_cloud_w) *out_cloud_w = s_gl.cloud_w;
+	if (out_cloud_h) *out_cloud_h = s_gl.cloud_h;
+	if (out_csm_active) *out_csm_active = (nd_seven_get_cloud_quality() >= ND_CLOUD_QUALITY_MEDIUM);
+}
+
+uint32_t nd_seven_gl_get_frame_count(void)
+{
+	return s_gl.frame_count;
+}
+
 static bool gl_ensure_csm_target(void)
 {
 	if (s_gl.csm_fbo) return true;

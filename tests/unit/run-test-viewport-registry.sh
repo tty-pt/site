@@ -16,6 +16,7 @@ gcc -g -O0 \
 	-I"$REPO_ROOT/external/nd-fight/include" \
 	-I"$REPO_ROOT/external/nd-mortal/include" \
 	-I"$REPO_ROOT/external/libareole/include" \
+	-I"$REPO_ROOT/external/libcorolla/include" \
 	-I"$REPO_ROOT/external/nd-world/include" \
 	-I"$REPO_ROOT/external/libxylem/include" \
 	-I"$REPO_ROOT/external/libchaff/include" \
@@ -31,6 +32,7 @@ gcc -g -O0 \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
 	mods/nd/ux/nd_seven.c \
+	mods/nd/ux/nd_seven_gl.c \
 	external/libareole/src/areole.c external/liblamina/src/particle.c \
 	mods/nd/ux/nd_seven_atlas_draw.c \
 	mods/nd/ux/nd_seven_ground.c \

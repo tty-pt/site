@@ -234,15 +234,15 @@ int main(void)
 	assert(gov_rehydrated->layout_mode == ND_LAYOUT_STANDARD_HYBRID);
 	printf("PASS: presentation governance state rehydrated from JSON\n");
 
-	/* In an ALLOW_CHOICE region, Switch Viewport button must be rendered */
+	/* Viewport toggle lives inside the Settings modal (#settings-viewport-toggle) opened via #dock-settings-btn */
 	html = bud_render_html(nd_ui_render(gov_rehydrated));
-	assert(html && strstr(html, "data-bud-action=\"cycle-viewport\""));
-	assert(strstr(html, "Switch Viewport"));
+	assert(html && strstr(html, "id=\"dock-settings-btn\""));
+	assert(strstr(html, "id=\"settings-viewport-toggle\""));
 	assert(strstr(html, "<nd-map id=\"room-map\""));
 	assert(!strstr(html, "<canvas id=\"room-map-canvas\""));
 	assert(strstr(html, "id=\"right-panel\""));
 	bud_free_string(html);
-	printf("PASS: ALLOW_CHOICE region renders Switch Viewport button and ascii map\n");
+	printf("PASS: ALLOW_CHOICE region renders Settings viewport toggle and ascii map\n");
 
 	/* In a lamina region, Switch Viewport button is NOT rendered and room-map-canvas IS rendered */
 	gov.pres_flags = ND_REGION_LOCKED;

@@ -102,7 +102,9 @@ bud_node *render_action_bar(const nd_client_state_t *st)
 
 	bud_append(dock, make_btn("📦", "Inventory", on_action_inv));
 	bud_append(dock, make_btn("👁️", "Look", on_action_look));
-	bud_append(dock, make_btn("⚙️", "Settings", on_action_settings));
+	bud_node *settings_btn = make_btn("⚙️", "Settings", on_action_settings);
+	bud_set_attr(settings_btn, "id", "dock-settings-btn");
+	bud_append(dock, settings_btn);
 
 	return dock;
 }

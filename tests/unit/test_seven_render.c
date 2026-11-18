@@ -3991,12 +3991,29 @@ int main(void)
 				assert(hit_t > 3000.0f && hit_t < 4000.0f);
 				assert(nd_seven_gl_cloud_shell_ray_hit(orig_out, dir_out, 1620.0f, p1, &hit_wx, &hit_wy, &hit_t) == false);
 
-				/* Verify configurable graphics quality presets & render resolution scaling */
+				/* Verify configurable graphics quality presets & render resolution scaling across full nd_seven_render pipeline */
 				uint32_t rw = 0, rh = 0;
+				uint32_t st_w = 0, st_h = 0, sc_w = 0, sc_h = 0, cl_w = 0, cl_h = 0;
+				int sc_samples = -1;
+				bool csm_act = false;
+
+				/* 1) High Preset (100% res, 100% detail, High 1/2 clouds + CSM, 4x MSAA, Uncapped FPS) */
+				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
+				nd_seven_set_zoom(0.08f);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1920 && rh == 1080);
+				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+				assert(st_w == 1920 && st_h == 1080);
+				assert(sc_w == 1920 && sc_h == 1080);
+				assert(sc_samples == 4);
+				assert(cl_w == 960 && cl_h == 540);
+				assert(csm_act == true);
+				uint32_t bbs_detail_100 = nd_seven_last_mid_billboard_count();
+				assert(bbs_detail_100 > 10);
 
+				/* 2) Low Preset (50% res, 50% detail, Low 1/4 clouds, No CSM, 1x Off MSAA, 30 FPS) */
 				nd_seven_apply_quality_preset(ND_QUALITY_LOW);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
 				assert(fabsf(nd_seven_get_res_scale() - 0.50f) < 1e-4f);
@@ -4006,7 +4023,17 @@ int main(void)
 				assert(nd_seven_get_fps_cap() == 30);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 960 && rh == 540);
+				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+				assert(st_w == 960 && st_h == 540);
+				assert(sc_w == 960 && sc_h == 540);
+				assert(sc_samples == 0);
+				assert(cl_w == 240 && cl_h == 135);
+				assert(csm_act == false);
+				uint32_t bbs_detail_50 = nd_seven_last_mid_billboard_count();
+				assert(bbs_detail_50 > 0 && bbs_detail_50 < bbs_detail_100);
 
+				/* 3) Medium Preset (75% res, 75% detail, Medium 1/3 clouds + CSM, 1x Off MSAA, 60 FPS) */
 				nd_seven_apply_quality_preset(ND_QUALITY_MEDIUM);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
 				assert(fabsf(nd_seven_get_res_scale() - 0.75f) < 1e-4f);
@@ -4016,12 +4043,33 @@ int main(void)
 				assert(nd_seven_get_fps_cap() == 60);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1440 && rh == 810);
+				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+				assert(st_w == 1440 && st_h == 810);
+				assert(sc_w == 1440 && sc_h == 810);
+				assert(sc_samples == 0);
+				assert(cl_w == 480 && cl_h == 270);
+				assert(csm_act == true);
+				uint32_t bbs_detail_75 = nd_seven_last_mid_billboard_count();
+				assert(bbs_detail_75 > bbs_detail_50 && bbs_detail_75 < bbs_detail_100);
 
-				nd_seven_set_res_scale(0.60f);
-				assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
+				/* 4) Custom Settings: 25% resolution scale, 200% scenery detail, Clouds Off, MSAA On */
+				nd_seven_set_res_scale(0.25f);
+				nd_seven_set_detail_scale(2.00f);
 				nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_OFF);
+				nd_seven_set_msaa(1);
+				assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
 				assert(nd_seven_gl_should_queue_cloud_chunk(0, 0, 5120, 5120, p1) == false);
+				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+				assert(st_w == 480 && st_h == 270);
+				assert(sc_w == 480 && sc_h == 270);
+				assert(sc_samples == 4);
+				assert(csm_act == false);
+				uint32_t bbs_detail_200 = nd_seven_last_mid_billboard_count();
+				assert(bbs_detail_200 > bbs_detail_100);
 
+				/* Restore High Preset */
 				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
 			}
