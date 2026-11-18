@@ -312,6 +312,25 @@ static int parse_style_px(const char *style, const char *prop, int def_val)
 void nd_ui_restore_persist(const char *key, const char *val)
 {
 	if (!key || !val) return;
+	if (strcmp(key, "nd-settings-quality") == 0) {
+		int res_pct = parse_style_px(val, "--nd-res:", -1);
+		int det_pct = parse_style_px(val, "--nd-det:", -1);
+		int cq = parse_style_px(val, "--nd-cloud:", -1);
+		int msaa = parse_style_px(val, "--nd-msaa:", -1);
+		int fps = parse_style_px(val, "--nd-fps:", -1);
+		if (res_pct >= 25 && res_pct <= 100)
+			nd_seven_set_res_scale((float)res_pct * 0.01f);
+		if (det_pct >= 20 && det_pct <= 250)
+			nd_seven_set_detail_scale((float)det_pct * 0.01f);
+		if (cq >= ND_CLOUD_QUALITY_OFF && cq <= ND_CLOUD_QUALITY_HIGH)
+			nd_seven_set_cloud_quality(cq);
+		if (msaa == 0 || msaa == 1)
+			nd_seven_set_msaa(msaa);
+		if (fps >= 0)
+			nd_seven_set_fps_cap(fps);
+		bud_app_set_state();
+		return;
+	}
 	for (int i = 0; i < ND_WIN_COUNT; i++) {
 		if (strcmp(key, s_win_persist_keys[i]) == 0) {
 			int min_w, min_h, def_w, def_h;
@@ -1353,6 +1372,75 @@ static const char *settings_event_value(bud_event *ev)
 	return NULL;
 }
 
+static int on_settings_preset_cycle(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_cycle_quality_preset();
+	seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_settings_res_slider(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	const char *val_str = settings_event_value(ev);
+	if (val_str && val_str[0]) {
+		int pct = atoi(val_str);
+		if (pct >= 25 && pct <= 100) {
+			nd_seven_set_res_scale((float)pct * 0.01f);
+			seven_stage_redraw();
+			bud_app_set_state();
+		}
+	}
+	return 0;
+}
+
+static int on_settings_res_out(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_res_out();
+	seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_settings_res_in(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_res_in();
+	seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_settings_cloud_cycle(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_cycle_cloud_quality();
+	seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_settings_msaa_toggle(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_toggle_msaa();
+	seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_settings_fps_cycle(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_cycle_fps_cap();
+	seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
 static int on_settings_detail_slider(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
@@ -1443,6 +1531,21 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 	bud_node *card = bud_element("div");
 	bud_set_attr(card, "id", "settings");
 	bud_set_attr(card, "class", "rpg-modal-card settings-card select-none");
+	bud_set_attr(card, "data-bud-persist-key", "nd-settings-quality");
+	{
+		int res_pct = (int)(nd_seven_get_res_scale() * 100.0f + 0.5f);
+		int det_pct = (int)(nd_seven_get_detail_scale() * 100.0f + 0.5f);
+		int cq = nd_seven_get_cloud_quality();
+		int msaa = nd_seven_get_msaa();
+		int fps = nd_seven_get_fps_cap();
+		if (nd_seven_get_quality_preset() != ND_QUALITY_HIGH) {
+			char qstyle[128];
+			snprintf(qstyle, sizeof(qstyle),
+			         "--nd-res:%d;--nd-det:%d;--nd-cloud:%d;--nd-msaa:%d;--nd-fps:%d;",
+			         res_pct, det_pct, cq, msaa, fps);
+			bud_set_attr(card, "style", qstyle);
+		}
+	}
 	bud_bind(card, "click", 1, on_settings_card_click);
 
 	bud_node *hdr = bud_element("div");
@@ -1464,7 +1567,80 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 	bud_node *body = bud_element("div");
 	bud_set_attr(body, "class", "settings-body");
 
-	/* 1. Scenery Detail / Draw Distance Slider */
+	/* 0. Graphics Quality Preset */
+	{
+		int preset = nd_seven_get_quality_preset();
+		const char *preset_label = "✨ High (Default)";
+		if (preset == ND_QUALITY_LOW) preset_label = "🔋 Low (Fastest)";
+		else if (preset == ND_QUALITY_MEDIUM) preset_label = "⚖️ Medium (Balanced)";
+		else if (preset == ND_QUALITY_CUSTOM) preset_label = "🎛️ Custom";
+
+		bud_node *sec = bud_element("div");
+		bud_set_attr(sec, "class", "settings-row-inline");
+		bud_node *lbl = bud_element("span");
+		bud_set_attr(lbl, "class", "settings-label");
+		bud_append(lbl, bud_text("⚡ Graphics Preset"));
+		bud_append(sec, lbl);
+
+		bud_node *tog = bud_element("button");
+		bud_set_attr(tog, "id", "settings-preset-toggle");
+		bud_set_attr(tog, "type", "button");
+		bud_set_attr(tog, "class", "settings-toggle");
+		bud_set_attr(tog, "title", "Cycle graphics preset (Low / Medium / High)");
+		bud_append(tog, bud_text(preset_label));
+		bud_bind(tog, "click", 1, on_settings_preset_cycle);
+		bud_append(sec, tog);
+		bud_append(body, sec);
+	}
+
+	/* 1. Render Resolution Scale Slider (25%..100%) */
+	{
+		float res = nd_seven_get_res_scale();
+		int res_pct = (int)(res * 100.0f + 0.5f);
+		if (res_pct < 25) res_pct = 25;
+		if (res_pct > 100) res_pct = 100;
+		char res_val[32], res_num[16];
+		snprintf(res_val, sizeof(res_val), "%d%%", res_pct);
+		snprintf(res_num, sizeof(res_num), "%d", res_pct);
+
+		bud_node *sec = bud_element("div");
+		bud_set_attr(sec, "class", "settings-row");
+
+		bud_node *top_row = bud_element("div");
+		bud_set_attr(top_row, "class", "settings-row-top");
+		bud_node *lbl = bud_element("span");
+		bud_set_attr(lbl, "class", "settings-label");
+		bud_append(lbl, bud_text("📐 Render Resolution"));
+		bud_node *val = bud_element("span");
+		bud_set_attr(val, "id", "settings-res-value");
+		bud_set_attr(val, "class", "settings-badge");
+		bud_append(val, bud_text(res_val));
+		bud_append(top_row, lbl);
+		bud_append(top_row, val);
+		bud_append(sec, top_row);
+
+		bud_node *ctrl_row = bud_element("div");
+		bud_set_attr(ctrl_row, "class", "settings-slider-wrap");
+		bud_append(ctrl_row, make_btn("−", "Lower Render Resolution", on_settings_res_out));
+
+		bud_node *slider = bud_element("input");
+		bud_set_attr(slider, "id", "settings-res-slider");
+		bud_set_attr(slider, "type", "range");
+		bud_set_attr(slider, "class", "settings-slider");
+		bud_set_attr(slider, "min", "25");
+		bud_set_attr(slider, "max", "100");
+		bud_set_attr(slider, "step", "5");
+		bud_set_attr(slider, "value", res_num);
+		bud_bind(slider, "input", 1, on_settings_res_slider);
+		bud_bind(slider, "change", 1, on_settings_res_slider);
+		bud_append(ctrl_row, slider);
+
+		bud_append(ctrl_row, make_btn("+", "Higher Render Resolution", on_settings_res_in));
+		bud_append(sec, ctrl_row);
+		bud_append(body, sec);
+	}
+
+	/* 2. Scenery Detail / Draw Distance Slider */
 	{
 		float det = nd_seven_get_detail_scale();
 		int det_pct = (int)(det * 100.0f + 0.5f);
@@ -1511,7 +1687,77 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 		bud_append(body, sec);
 	}
 
-	/* 2. Camera Zoom Slider */
+	/* 3. Clouds & Cloud Shadows Quality */
+	{
+		int cq = nd_seven_get_cloud_quality();
+		const char *cq_label = "☁️ High (1/2 Res + CSM)";
+		if (cq == ND_CLOUD_QUALITY_OFF) cq_label = "🚫 Off";
+		else if (cq == ND_CLOUD_QUALITY_LOW) cq_label = "💨 Low (1/4 Res, No CSM)";
+		else if (cq == ND_CLOUD_QUALITY_MEDIUM) cq_label = "⛅ Medium (1/3 Res + CSM)";
+
+		bud_node *sec = bud_element("div");
+		bud_set_attr(sec, "class", "settings-row-inline");
+		bud_node *lbl = bud_element("span");
+		bud_set_attr(lbl, "class", "settings-label");
+		bud_append(lbl, bud_text("☁️ Clouds & Shadows"));
+		bud_append(sec, lbl);
+
+		bud_node *tog = bud_element("button");
+		bud_set_attr(tog, "id", "settings-cloud-toggle");
+		bud_set_attr(tog, "type", "button");
+		bud_set_attr(tog, "class", "settings-toggle");
+		bud_set_attr(tog, "title", "Cycle volumetric cloud & shadow map quality");
+		bud_append(tog, bud_text(cq_label));
+		bud_bind(tog, "click", 1, on_settings_cloud_cycle);
+		bud_append(sec, tog);
+		bud_append(body, sec);
+	}
+
+	/* 4. Anti-Aliasing (4x MSAA) & Frame Rate Cap */
+	{
+		int msaa = nd_seven_get_msaa();
+		bud_node *sec = bud_element("div");
+		bud_set_attr(sec, "class", "settings-row-inline");
+		bud_node *lbl = bud_element("span");
+		bud_set_attr(lbl, "class", "settings-label");
+		bud_append(lbl, bud_text("✨ Anti-Aliasing"));
+		bud_append(sec, lbl);
+
+		bud_node *tog = bud_element("button");
+		bud_set_attr(tog, "id", "settings-msaa-toggle");
+		bud_set_attr(tog, "type", "button");
+		bud_set_attr(tog, "class", "settings-toggle");
+		bud_set_attr(tog, "title", "Toggle 4x MSAA multisample anti-aliasing");
+		bud_append(tog, bud_text(msaa ? "4x MSAA (On)" : "Off (1x)"));
+		bud_bind(tog, "click", 1, on_settings_msaa_toggle);
+		bud_append(sec, tog);
+		bud_append(body, sec);
+	}
+	{
+		int fps = nd_seven_get_fps_cap();
+		const char *fps_label = "Uncapped (VSync)";
+		if (fps == 30) fps_label = "30 FPS (Battery)";
+		else if (fps == 60) fps_label = "60 FPS";
+
+		bud_node *sec = bud_element("div");
+		bud_set_attr(sec, "class", "settings-row-inline");
+		bud_node *lbl = bud_element("span");
+		bud_set_attr(lbl, "class", "settings-label");
+		bud_append(lbl, bud_text("⏱️ Frame Rate Cap"));
+		bud_append(sec, lbl);
+
+		bud_node *tog = bud_element("button");
+		bud_set_attr(tog, "id", "settings-fps-toggle");
+		bud_set_attr(tog, "type", "button");
+		bud_set_attr(tog, "class", "settings-toggle");
+		bud_set_attr(tog, "title", "Cycle 3D rendering frame rate cap");
+		bud_append(tog, bud_text(fps_label));
+		bud_bind(tog, "click", 1, on_settings_fps_cycle);
+		bud_append(sec, tog);
+		bud_append(body, sec);
+	}
+
+	/* 5. Camera Zoom Slider */
 	{
 		float zoom = nd_seven_get_zoom();
 		int zoom_pct = (int)(zoom * 100.0f + 0.5f);
@@ -1560,7 +1806,7 @@ static bud_node *render_settings_modal(const nd_client_state_t *st)
 		bud_append(body, sec);
 	}
 
-	/* 3. Viewport Mode Toggle */
+	/* 6. Viewport Mode Toggle */
 	{
 		const char *req_drv = (st && st->preferred_driver[0]) ? st->preferred_driver : "tty";
 		int is_seven_drv = (strcmp(req_drv, "lamina-seven") == 0);
@@ -2063,8 +2309,17 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 			ws_send(m, 2);
 		}
 		/* Phase 4: Presentation (Pure drawing without state mutation)
-		 * Seven stage redraws every tick at native display refresh (60Hz / 120Hz). */
-		seven_stage_redraw();
+		 * Seven stage redraws at native display refresh or configured FPS cap. */
+		{
+			static float s_render_accum_dt = 0.0f;
+			int fps_cap = nd_seven_get_fps_cap();
+			float min_dt = (fps_cap == 30) ? 0.031f : (fps_cap == 60 ? 0.0155f : 0.0f);
+			s_render_accum_dt += (dt > 0.0f ? dt : 0.016f);
+			if (min_dt <= 0.0f || s_render_accum_dt >= min_dt || mv || g_map_dirty) {
+				s_render_accum_dt = 0.0f;
+				seven_stage_redraw();
+			}
+		}
 		int map_vis = map_on && !s_win[ND_WIN_MAP].minimized &&
 		              client_state.target_ref == 0;
 		if (map_vis) {

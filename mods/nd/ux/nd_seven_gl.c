@@ -87,7 +87,7 @@
  * smooth crossfade 140..180 km, analytic evaluation above 180 km. */
 #define ND_GLSL_CLOUD_SHADOW_ENTRY_FN \
 	"float nd_cloud_shadow(vec2 fragXY, float fragZ, float anim_time, float humidity, float dist, float fw) {\n" \
-	"    if (uCsm.z < 0.0 && dist < 180000.0) return 0.0;\n" \
+	"    if (uCsm.z < -1.5 || (uCsm.z < 0.0 && dist < 180000.0)) return 0.0;\n" \
 	"    if (dist >= 180000.0 || uCsm.z <= 0.0) return eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
 	"    const float zk = 920.0;\n" \
 	"    float dz = max(0.0, zk - fragZ) + clamp(dist * 0.045, 0.0, 14000.0);\n" \
@@ -3502,7 +3502,7 @@ static const char *s_fs_cloud =
 	"    vec2 sliceDir = vec2(cos(sliceAngle), sin(sliceAngle));\n"
 	"    vec2 pRot = synQueryXY;\n"
 	"    mat2 cur_rot = mat2(1.0, 0.0, 0.0, 1.0);\n"
-	"    bool singleOct = (dist > 6000.0 || deckIdx > 0.5);\n"
+	"    bool singleOct = (dist > 6000.0 || deckIdx > 0.5 || (uCloudDeck.z > 0.5 && uCloudDeck.z <= 2.5));\n"
 	"    int bestJ = (wBand4.y > wBand4.x) ? 1 : 0;\n"
 	"    float bestW = max(wBand4.x, wBand4.y);\n"
 	"    if (wBand4.z > bestW) { bestJ = 2; bestW = wBand4.z; }\n"
@@ -3634,15 +3634,17 @@ static const char *s_fs_cloud =
 	"    float baseTowerOcc = 0.0;\n"
 	"    bool towerReady = false;\n"
 	"    float baseTerrZ = sampleHeightCloud(vUV);\n"
+	"    int maxSteps = (uCloudDeck.z >= 1.0 && uCloudDeck.z <= 4.0) ? int(uCloudDeck.z + 0.5) : 4;\n"
 	"    for (int s = 0; s < 4; s++) {\n"
+	"        if (s >= maxSteps) break;\n"
 	"        if (trans < 0.008 || rayGroundVis < 0.005) break;\n"
 	"        if (s == 3 && uCamDist > 6000.0) break;\n"
 	"        if (s == 2 && uCamDist > 28000.0) break;\n"
 	"        int deckIdx = (s < 2) ? s : 2;\n"
 	"        float deckCovS = (deckIdx == 0) ? deckBaseCov.x : ((deckIdx == 1) ? deckBaseCov.y : deckBaseCov.z);\n"
 	"        if (deckCovS <= 0.002) continue;\n"
-	"        float uSub  = (s < 2) ? jitter : ((uCamDist > 6000.0) ? (0.25 + 0.50 * jitter) : ((s == 2) ? (0.45 * jitter) : (0.50 + 0.45 * jitter)));\n"
-	"        float stepLen = (s < 2 || uCamDist > 6000.0) ? baseStepLen : (baseStepLen * 0.5);\n"
+	"        float uSub  = (s < 2) ? jitter : ((uCamDist > 6000.0 || maxSteps <= 3) ? (0.25 + 0.50 * jitter) : ((s == 2) ? (0.45 * jitter) : (0.50 + 0.45 * jitter)));\n"
+	"        float stepLen = (s < 2 || uCamDist > 6000.0 || maxSteps <= 3) ? baseStepLen : (baseStepLen * 0.5);\n"
 	"        float hTopD = (deckIdx == 0) ? 1.00 : ((deckIdx == 1) ? 0.64 : 0.27);\n"
 	"        float hBotD = (deckIdx == 0) ? 0.72 : ((deckIdx == 1) ? 0.35 : 0.00);\n"
 	"        float hFrac = mix(hTopD, hBotD, uSub);\n"
@@ -5673,9 +5675,11 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_gl.res_depth_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
 
-	/* Half-resolution volumetric cloud pass FBO (1/4 pixels, single-sampled RGBA8 + hardware depth renderbuffer) */
-	uint32_t cw = (w > 1) ? (w / 2) : 1;
-	uint32_t ch = (h > 1) ? (h / 2) : 1;
+	/* Volumetric cloud pass FBO (1/2 res for High, 1/3 res for Medium, 1/4 res for Low; single-sampled RGBA8 + depth/stencil) */
+	int cq = nd_seven_get_cloud_quality();
+	uint32_t cdiv = (cq <= ND_CLOUD_QUALITY_LOW) ? 4u : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3u : 2u);
+	uint32_t cw = (w > cdiv) ? (w / cdiv) : 1u;
+	uint32_t ch = (h > cdiv) ? (h / cdiv) : 1u;
 	s_gl.cloud_tex = glCreateTexture();
 	glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -5700,10 +5704,19 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 static void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 {
 	if (s_gl.scene_failed || w == 0 || h == 0) return;
-	if (s_gl.scene_ok && s_gl.scene_w == w && s_gl.scene_h == h) return;
+	int want_samples = nd_seven_get_msaa() ? ND_SCENE_MSAA_SAMPLES : 0;
+	int cq = nd_seven_get_cloud_quality();
+	uint32_t cdiv = (cq <= ND_CLOUD_QUALITY_LOW) ? 4u : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3u : 2u);
+	uint32_t want_cw = (w > cdiv) ? (w / cdiv) : 1u;
+	uint32_t want_ch = (h > cdiv) ? (h / cdiv) : 1u;
+	if (s_gl.scene_ok && s_gl.scene_w == w && s_gl.scene_h == h &&
+	    s_gl.scene_samples == want_samples &&
+	    s_gl.cloud_w == want_cw && s_gl.cloud_h == want_ch)
+		return;
 	if (s_gl.scene_fbo || s_gl.res_fbo) gl_free_scene_targets();
-	static const int try_samples[2] = { ND_SCENE_MSAA_SAMPLES, 0 };
-	for (int i = 0; i < 2; i++) {
+	int try_samples[2] = { want_samples, 0 };
+	int num_tries = (want_samples > 0) ? 2 : 1;
+	for (int i = 0; i < num_tries; i++) {
 		if (gl_alloc_scene_targets(w, h, try_samples[i])) {
 			s_gl.scene_ok = true;
 			s_gl.scene_w = w;
@@ -5903,6 +5916,11 @@ static void gl_render_cloud_shadow_map(void)
 {
 	s_gl.csm_valid = false;
 	s_gl.csm_clear_sky = false;
+	int cq = nd_seven_get_cloud_quality();
+	if (cq <= ND_CLOUD_QUALITY_LOW) {
+		s_gl.csm_clear_sky = true;
+		return;
+	}
 	if (!s_gl.csm_pipe.prog || s_gl.cur_dist > 180000.0f)
 		return;
 
@@ -5937,12 +5955,13 @@ static void gl_render_cloud_shadow_map(void)
 	}
 
 	if (!gl_ensure_csm_target()) return;
+	float csm_cache_dt = (cq == ND_CLOUD_QUALITY_MEDIUM) ? 0.35f : 0.10f;
 	if (s_gl.csm_has_cache &&
 	    s_gl.csm_rendered_win.cx == s_gl.csm_win.cx &&
 	    s_gl.csm_rendered_win.cy == s_gl.csm_win.cy &&
 	    s_gl.csm_rendered_win.half == s_gl.csm_win.half &&
 	    s_gl.csm_rendered_wet == sea_wet &&
-	    fabsf(s_gl.cur_anim_time - s_gl.csm_rendered_time) < 0.10f) {
+	    fabsf(s_gl.cur_anim_time - s_gl.csm_rendered_time) < csm_cache_dt) {
 		s_gl.csm_valid = true;
 		return;
 	}
@@ -5973,6 +5992,8 @@ static void gl_bind_csm(GLint loc_tex, GLint loc_csm)
 	glUniform1i(loc_tex, 7);
 	if (s_gl.csm_valid)
 		glUniform3f(loc_csm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
+	else if (nd_seven_get_cloud_quality() <= ND_CLOUD_QUALITY_LOW)
+		glUniform3f(loc_csm, 0.0f, 0.0f, -2.0f);
 	else if (s_gl.csm_clear_sky)
 		glUniform3f(loc_csm, 0.0f, 0.0f, -1.0f);
 	else
@@ -6143,6 +6164,9 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
                                           int32_t span_w, int32_t span_h,
                                           const nd_planet_def_t *pdef)
 {
+	if (nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_OFF)
+		return false;
+
 	const nd_planet_def_t *eff_pdef = pdef ? pdef : &s_gl.cur_pdef;
 
 	/* Gate 1: Cloud zoom ramp is 0.0 at camera distances <= 480.0f */
@@ -6661,13 +6685,15 @@ void nd_seven_gl_flush_clouds(void)
 	{
 		/* Place proxy shell at the exact vertical midpoint of [zBase, zTopProj] (1,620 wu + 0.5 * eff_orbit_lift)
 		 * so sMidSlab = 0.5 * (sEnter + sExit) is identically 0 and entryWorldPos == vWorldPos! */
+		int cq = nd_seven_get_cloud_quality();
+		float max_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f : 4.0f);
 		float deck_base = 420.0f;
 		float deck_span = 2400.0f;
 		float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
 		float target_shell_z = 1620.0f + eff_orbit_lift * 0.50f;
 		float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
 		float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
-		glUniform4f(s_gl.cloud_pipe.uCloudDeck, deck_base, deck_span, s_gl.cur_dist, eff_shell_z);
+		glUniform4f(s_gl.cloud_pipe.uCloudDeck, deck_base, deck_span, max_steps, eff_shell_z);
 	}
 
 	glUniform3f(s_gl.cloud_pipe.uSkyColor,

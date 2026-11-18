@@ -777,6 +777,14 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	bool use_3d_primary = (dist >= 250000.0f);
 	bool use_horizon_cull = (dist >= 8000.0f);
 
+	s_frame_detail_scale = nd_seven_get_detail_scale();
+	if (s_frame_detail_scale < 0.99f) {
+		target_quad_px /= fmaxf(0.35f, s_frame_detail_scale);
+	}
+	uint32_t max_pop = (s_frame_detail_scale < 0.99f)
+		? (uint32_t)(48.0f * fmaxf(0.25f, s_frame_detail_scale))
+		: 48u;
+
 	ar_cull_opts_t opts = {
 		.z_min = z_min_cull,
 		.z_max = z_max_cull,
@@ -793,7 +801,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.min_level = min_lvl,
 		.max_level = 14,
 		.view_id = 0,
-		.max_populates_per_query = 48,
+		.max_populates_per_query = max_pop,
 		.split_hysteresis = 0.14f
 	};
 
@@ -809,7 +817,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_cam_focal_y = (float)lwy;
 	s_cam_focal_z = lwz;
 	s_cam_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
-	s_frame_detail_scale = nd_seven_get_detail_scale();
 
 	/* Begin 3D WebGL frame in pure C */
 	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z,
@@ -2226,7 +2233,9 @@ int nd_seven_shaders_ready(void)
 
 void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
-	int w = (int)wu, h = (int)hu;
+	uint32_t eff_wu = wu, eff_hu = hu;
+	nd_seven_scaled_dims(wu, hu, &eff_wu, &eff_hu);
+	int w = (int)eff_wu, h = (int)eff_hu;
 	static drawable_3d_t dr[MAX_DRAW];
 	static lam_billboard_gpu_t s_all_gpu_batch[ALL_GPU_MAX_DRAW];
 

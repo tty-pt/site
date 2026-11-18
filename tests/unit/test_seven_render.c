@@ -3990,6 +3990,40 @@ int main(void)
 				assert(nd_seven_gl_cloud_shell_ray_hit(orig_out, dir_in, 1620.0f, p1, &hit_wx, &hit_wy, &hit_t) == true);
 				assert(hit_t > 3000.0f && hit_t < 4000.0f);
 				assert(nd_seven_gl_cloud_shell_ray_hit(orig_out, dir_out, 1620.0f, p1, &hit_wx, &hit_wy, &hit_t) == false);
+
+				/* Verify configurable graphics quality presets & render resolution scaling */
+				uint32_t rw = 0, rh = 0;
+				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
+				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
+				assert(rw == 1920 && rh == 1080);
+
+				nd_seven_apply_quality_preset(ND_QUALITY_LOW);
+				assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
+				assert(fabsf(nd_seven_get_res_scale() - 0.50f) < 1e-4f);
+				assert(fabsf(nd_seven_get_detail_scale() - 0.50f) < 1e-4f);
+				assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_LOW);
+				assert(nd_seven_get_msaa() == 0);
+				assert(nd_seven_get_fps_cap() == 30);
+				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
+				assert(rw == 960 && rh == 540);
+
+				nd_seven_apply_quality_preset(ND_QUALITY_MEDIUM);
+				assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
+				assert(fabsf(nd_seven_get_res_scale() - 0.75f) < 1e-4f);
+				assert(fabsf(nd_seven_get_detail_scale() - 0.75f) < 1e-4f);
+				assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
+				assert(nd_seven_get_msaa() == 0);
+				assert(nd_seven_get_fps_cap() == 60);
+				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
+				assert(rw == 1440 && rh == 810);
+
+				nd_seven_set_res_scale(0.60f);
+				assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
+				nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_OFF);
+				assert(nd_seven_gl_should_queue_cloud_chunk(0, 0, 5120, 5120, p1) == false);
+
+				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
+				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
 			}
 
 			nd_seven_set_zoom(1.0f);

@@ -87,6 +87,56 @@ void nd_seven_detail_out(void);
 #define ND_SEVEN_DETAIL_STEP        1.25f
 #endif
 
+/* Cloud & volumetric shadow quality levels */
+enum {
+	ND_CLOUD_QUALITY_OFF    = 0,
+	ND_CLOUD_QUALITY_LOW    = 1,
+	ND_CLOUD_QUALITY_MEDIUM = 2,
+	ND_CLOUD_QUALITY_HIGH   = 3
+};
+
+/* Overall graphics quality presets */
+enum {
+	ND_QUALITY_LOW    = 0,
+	ND_QUALITY_MEDIUM = 1,
+	ND_QUALITY_HIGH   = 2,
+	ND_QUALITY_CUSTOM = 3
+};
+
+#ifndef ND_SEVEN_RES_MIN
+#define ND_SEVEN_RES_MIN            0.25f
+#endif
+#ifndef ND_SEVEN_RES_MAX
+#define ND_SEVEN_RES_MAX            1.00f
+#endif
+#ifndef ND_SEVEN_RES_STEP
+#define ND_SEVEN_RES_STEP           0.05f
+#endif
+
+/* User-adjustable render resolution scale (0.25f .. 1.00f, default 1.00f) */
+void nd_seven_set_res_scale(float scale);
+float nd_seven_get_res_scale(void);
+void nd_seven_res_in(void);
+void nd_seven_res_out(void);
+void nd_seven_scaled_dims(uint32_t w, uint32_t h, uint32_t *out_w, uint32_t *out_h);
+
+/* Configurable cloud quality (ND_CLOUD_QUALITY_OFF .. ND_CLOUD_QUALITY_HIGH), MSAA (0/1), and FPS cap (0/30/60) */
+void nd_seven_set_cloud_quality(int quality);
+int nd_seven_get_cloud_quality(void);
+void nd_seven_cycle_cloud_quality(void);
+
+void nd_seven_set_msaa(int enabled);
+int nd_seven_get_msaa(void);
+void nd_seven_toggle_msaa(void);
+
+void nd_seven_set_fps_cap(int fps);
+int nd_seven_get_fps_cap(void);
+void nd_seven_cycle_fps_cap(void);
+
+void nd_seven_apply_quality_preset(int preset);
+int nd_seven_get_quality_preset(void);
+void nd_seven_cycle_quality_preset(void);
+
 /* Diorama 2.5D & camera rendering constants (zero magic numbers) */
 #define ND_SEVEN_SCALE              2
 #ifndef ND_SEVEN_ZOOM_MIN
