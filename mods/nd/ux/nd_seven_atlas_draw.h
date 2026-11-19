@@ -37,6 +37,9 @@ const uint32_t *atlas_norm_rgba(void);
 uint32_t atlas_rgba_version(void);
 int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect);
 int nd_seven_plant_has_normal(uint8_t plant_id);
+int nd_seven_stone_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect);
+int nd_seven_stone_has_normal(const ndw_obj_t *o);
+const char *nd_seven_stone_name(const ndw_obj_t *o);
 int nd_seven_obj_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect);
 int nd_seven_botanical_rect(int kind, nd_seven_sprite_rect_t *out_rect);
 

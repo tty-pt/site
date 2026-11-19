@@ -380,19 +380,6 @@ static const char *s_vs_terrain =
 	"    ivec2 iCoord = ivec2(floor(pixelCoord));\n"
 	"    vec2 f = pixelCoord - vec2(iCoord);\n"
 	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
-	"    if (uChunkSpan.x > 5120.0) {\n"
-	"        float h00 = getH(iCoord, maxCoord);\n"
-	"        float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
-	"        float h01 = getH(iCoord + ivec2(0, 1), maxCoord);\n"
-	"        float h11 = getH(iCoord + ivec2(1, 1), maxCoord);\n"
-	"        vec2 u5 = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
-	"        vec2 du5 = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n"
-	"        float hQuint = mix(mix(h00, h10, u5.x), mix(h01, h11, u5.x), u5.y);\n"
-	"        vec2 gradQuint = vec2(mix(h10 - h00, h11 - h01, u5.y) * du5.x, mix(h01 - h00, h11 - h10, u5.x) * du5.y);\n"
-	"        out_grad.x = gradQuint.x * (maxCoordF.x / max(1.0, uChunkSpan.x));\n"
-	"        out_grad.y = gradQuint.y * (maxCoordF.y / max(1.0, uChunkSpan.y));\n"
-	"        return hQuint;\n"
-	"    }\n"
 	"    vec4 wx = vec4(\n"
 	"        f.x * (-0.5 + f.x * (1.0 - 0.5 * f.x)),\n"
 	"        1.0 + f.x * f.x * (-2.5 + 1.5 * f.x),\n"
@@ -433,36 +420,21 @@ static const char *s_vs_terrain =
 	"        gradBicubic.x += rowDx * wy[j];\n"
 	"        gradBicubic.y += rowH * dwy[j];\n"
 	"    }\n"
-	"    /* Watertight chunk seam: use smooth quintic weights on the outer 1.25-texel perimeter */\n"
-	"    float borderDist = min(min(pixelCoord.x, maxCoordF.x - pixelCoord.x), min(pixelCoord.y, maxCoordF.y - pixelCoord.y));\n"
-	"    float borderBlend = smoothstep(0.0, 1.25, borderDist);\n"
-	"    float finalH = hBicubic;\n"
-	"    vec2 finalGrad = gradBicubic;\n"
-	"    if (borderBlend < 1.0) {\n"
-	"        float h00 = getH(iCoord, maxCoord);\n"
-	"        float h10 = getH(iCoord + ivec2(1, 0), maxCoord);\n"
-	"        float h01 = getH(iCoord + ivec2(0, 1), maxCoord);\n"
-	"        float h11 = getH(iCoord + ivec2(1, 1), maxCoord);\n"
-	"        vec2 u5 = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
-	"        vec2 du5 = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n"
-	"        float hQuint = mix(mix(h00, h10, u5.x), mix(h01, h11, u5.x), u5.y);\n"
-	"        vec2 gradQuint = vec2(mix(h10 - h00, h11 - h01, u5.y) * du5.x, mix(h01 - h00, h11 - h10, u5.x) * du5.y);\n"
-	"        finalH = mix(hQuint, hBicubic, borderBlend);\n"
-	"        finalGrad = mix(gradQuint, gradBicubic, borderBlend);\n"
-	"    }\n"
-	"    out_grad.x = finalGrad.x * (maxCoordF.x / max(1.0, uChunkSpan.x));\n"
-	"    out_grad.y = finalGrad.y * (maxCoordF.y / max(1.0, uChunkSpan.y));\n"
-	"    return finalH;\n"
+	"    out_grad.x = gradBicubic.x * (maxCoordF.x / max(1.0, uChunkSpan.x));\n"
+	"    out_grad.y = gradBicubic.y * (maxCoordF.y / max(1.0, uChunkSpan.y));\n"
+	"    return hBicubic;\n"
 	"}\n"
 	"void main() {\n"
-	"    vUV = a_grid_uv;\n"
+	"    bool isSkirt = (a_grid_uv.x < -0.5);\n"
+	"    vec2 gridUV = isSkirt ? clamp(a_grid_uv + vec2(2.0, 0.0), 0.0, 1.0) : a_grid_uv;\n"
+	"    vUV = gridUV;\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
 	"    float effectiveScale = scale * 0.0625;\n"
 	"    vec2 grad;\n"
-	"    float raw_h = sampleHeightSmooth(a_grid_uv, grad);\n"
+	"    float raw_h = sampleHeightSmooth(gridUV, grad);\n"
 	"    float wz = raw_h * effectiveScale;\n"
-	"    vec2 worldXY = vec2(uChunkOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
-	"    vec2 relXY = vec2(uChunkRelOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkRelOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
+	"    vec2 worldXY = vec2(uChunkOrigin.x + gridUV.x * uChunkSpan.x, uChunkOrigin.y + gridUV.y * uChunkSpan.y);\n"
+	"    vec2 relXY = vec2(uChunkRelOrigin.x + gridUV.x * uChunkSpan.x, uChunkRelOrigin.y + gridUV.y * uChunkSpan.y);\n"
 	"    const float TWO_PI = 6.28318530718;\n"
 	"    float R = (uTorusRadii.x > 0.0) ? uTorusRadii.x : 2000000.0;\n"
 	"    float r0 = (uTorusRadii.y > 0.0) ? uTorusRadii.y : 1335000.0;\n"
@@ -494,8 +466,9 @@ static const char *s_vs_terrain =
 	"        grad *= vertKeep;\n"
 	"    }\n"
 	"    vZ = wz;\n"
-	"    float dRv = r0 * dcv + wz * cv;\n"
-	"    vec3 worldPos = uPlanetCenter + bodyR * vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + wz * sv);\n"
+	"    float geomWz = isSkirt ? (wz - max(6.0, min(640.0, uChunkSpan.x * 0.035))) : wz;\n"
+	"    float dRv = r0 * dcv + geomWz * cv;\n"
+	"    vec3 worldPos = uPlanetCenter + bodyR * vec3(Rv0 * dcu + dRv * cu, Rv0 * dsu + dRv * su, r0 * dsv + geomWz * sv);\n"
 	"    vec3 torusN = bodyR * vec3(cv * cu, cv * su, sv);\n"
 	"    vec3 tangentU = bodyR * vec3(-su, cu, 0.0);\n"
 	"    vec3 tangentV = bodyR * vec3(-sv * cu, -sv * su, cv);\n"
@@ -576,18 +549,6 @@ static const char *s_fs_terrain =
 	"    ivec2 maxCoord = ivec2(maxCoordF);\n"
 	"    vec2 texToWorld = maxCoordF / max(vec2(1.0), uChunkSpan);\n"
 	"    vec2 u5 = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n"
-	"    if (vDistance > 8400.0 || uChunkSpan.x > 5120.0) {\n"
-	"        float h00 = getH(iCoord,                 maxCoord);\n"
-	"        float h10 = getH(iCoord + ivec2(1, 0),   maxCoord);\n"
-	"        float h01 = getH(iCoord + ivec2(0, 1),   maxCoord);\n"
-	"        float h11 = getH(iCoord + ivec2(1, 1),   maxCoord);\n"
-	"        vec2 du5 = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n"
-	"        float hQuint = mix(mix(h00, h10, u5.x), mix(h01, h11, u5.x), u5.y);\n"
-	"        vec2 gradQuint = vec2(mix(h10 - h00, h11 - h01, u5.y) * du5.x, mix(h01 - h00, h11 - h10, u5.x) * du5.y);\n"
-	"        out_grad = gradQuint * texToWorld;\n"
-	"        g_bicubicCurv = 0.0;\n"
-	"        return hQuint;\n"
-	"    }\n"
 	"    vec4 wx = vec4(\n"
 	"        f.x * (-0.5 + f.x * (1.0 - 0.5 * f.x)),\n"
 	"        1.0 + f.x * f.x * (-2.5 + 1.5 * f.x),\n"
@@ -636,26 +597,10 @@ static const char *s_fs_terrain =
 	"    float lap01 = (gridH[8] + gridH[10] + gridH[5] + gridH[13] - 4.0 * gridH[9]);\n"
 	"    float lap11 = (gridH[9] + gridH[11] + gridH[6] + gridH[14] - 4.0 * gridH[10]);\n"
 	"    float lapSmooth = mix(mix(lap00, lap10, u5.x), mix(lap01, lap11, u5.x), u5.y);\n"
-	"    /* Watertight chunk seam: use smooth quintic weights on the outer 1.25-texel perimeter */\n"
-	"    float borderDist = min(min(pixelCoord.x, maxCoordF.x - pixelCoord.x), min(pixelCoord.y, maxCoordF.y - pixelCoord.y));\n"
-	"    float borderBlend = smoothstep(0.0, 1.25, borderDist);\n"
-	"    float finalH = hBicubic;\n"
-	"    vec2 finalGrad = gradBicubic;\n"
-	"    if (borderBlend < 1.0) {\n"
-	"        float h00 = gridH[5];\n"
-	"        float h10 = gridH[6];\n"
-	"        float h01 = gridH[9];\n"
-	"        float h11 = gridH[10];\n"
-	"        vec2 du5 = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n"
-	"        float hQuint = mix(mix(h00, h10, u5.x), mix(h01, h11, u5.x), u5.y);\n"
-	"        vec2 gradQuint = vec2(mix(h10 - h00, h11 - h01, u5.y) * du5.x, mix(h01 - h00, h11 - h10, u5.x) * du5.y);\n"
-	"        finalH = mix(hQuint, hBicubic, borderBlend);\n"
-	"        finalGrad = mix(gradQuint, gradBicubic, borderBlend);\n"
-	"    }\n"
-	"    out_grad.x = finalGrad.x * texToWorld.x;\n"
-	"    out_grad.y = finalGrad.y * texToWorld.y;\n"
-	"    g_bicubicCurv = clamp(lapSmooth * 0.5 * (texToWorld.x * texToWorld.x + texToWorld.y * texToWorld.y) * smoothstep(1.5, 3.0, borderDist), -0.025, 0.025);\n"
-	"    return finalH;\n"
+	"    out_grad.x = gradBicubic.x * texToWorld.x;\n"
+	"    out_grad.y = gradBicubic.y * texToWorld.y;\n"
+	"    g_bicubicCurv = clamp(lapSmooth * 0.16 * (texToWorld.x + texToWorld.y), -0.025, 0.025);\n"
+	"    return hBicubic;\n"
 	"}\n"
 	CHAFF_GLSL_HASH_FN
 	CHAFF_GLSL_GRAD_NOISE_FN
@@ -1126,14 +1071,16 @@ static const char *s_fs_terrain =
 	"    float sumW = 0.0;\n"
 	"    float sumZ = 0.0;\n"
 	"    float maxC_nb = 0.0;\n"
+	"    float borderDist = min(min(p.x, maxCoordF.x - p.x), min(p.y, maxCoordF.y - p.y));\n"
+	"    float rTap = mix(1.0, 1.5, clamp(borderDist, 0.0, 1.0));\n"
 	"    for (int j = -1; j <= 2; j++) {\n"
-	"        float wy = max(0.0, 1.5 - abs(float(j) - fp.y));\n"
+	"        float wy = max(0.0, rTap - abs(float(j) - fp.y));\n"
 	"        for (int i = -1; i <= 2; i++) {\n"
 	"            ivec2 tc = clamp(ip + ivec2(i, j), ivec2(0), maxC);\n"
 	"            float a_i = texelFetch(uSubstrateTex, tc, 0).a;\n"
 	"            float c_i = (1.0 - a_i) * 15.9375;\n"
 	"            if (c_i > 0.05) {\n"
-	"                float wx = max(0.0, 1.5 - abs(float(i) - fp.x));\n"
+	"                float wx = max(0.0, rTap - abs(float(i) - fp.x));\n"
 	"                float w = wx * wy * c_i;\n"
 	"                float h_i = float(texelFetch(uHeightTex, tc, 0).r) * effectiveScale;\n"
 	"                float w_surf_i = max(baseSeaLevel, h_i + c_i - 3.0);\n"
@@ -1162,12 +1109,10 @@ static const char *s_fs_terrain =
 	"    vec2 worldSlopeGrad = fragGrad * effectiveScale;\n"
 	"    float fw = clamp(max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos))), 1e-4, max(uChunkSpan.x, uChunkSpan.y) * 0.25);\n"
 	"    /* Option A: Per-pixel canonical GPU terrain field evaluation with continuous cross-LOD fading.\n"
-	"     * Blending by both continuous vDistance and fw/texelSpan ensures adjacent chunks of different\n"
+	"     * Blending purely by continuous vDistance ensures adjacent chunks of different\n"
 	"     * quadtree levels fade seamlessly with zero LOD boundary seam or pop. */\n"
-	"    float texelSpan = uChunkSpan.x / 48.0;\n"
-	"    float spanBlend = smoothstep(12.0, 28.0, texelSpan);\n"
-	"    float distBlend = smoothstep(3200.0, 8400.0, vDistance);\n"
-	"    float gpuFieldBlend = clamp(max(spanBlend, distBlend), 0.0, 1.0);\n"
+	"    float texelSpan = max(3.333333, vDistance * 0.0085);\n"
+	"    float gpuFieldBlend = smoothstep(3200.0, 9600.0, vDistance);\n"
 	"    float texZ = fragZ;\n"
 	"    float riverProx = 0.0;\n"
 	"    float riverCarve = 0.0;\n"
@@ -1225,8 +1170,8 @@ static const char *s_fs_terrain =
 	"    float highWaterZ   = swashState.y;\n"
 	"    float fragWaterDepth = (effSeaLevel > -900.0) ? (liveSeaLevel - fragZ) : -999.0;\n"
 	"    vec4 octaves = vec4(0.5);\n"
-	"    vec4 detail = (fragWaterDepth <= 18.0 && vDistance < 9500.0) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, texelSpan, octaves) : vec4(0.0);\n"
-	"    vec2 edgeMask = 4.0 * vUV * (1.0 - vUV);\n"
+	"    vec4 detail = (fragWaterDepth <= 18.0 && vDistance < 9500.0) ? eval_zoom_terrain_detail(vWorldPos, vDistance, fw, 3.333333, octaves) : vec4(0.0);\n"
+	"    float edgeMask = 16.0 * vUV.x * (1.0 - vUV.x) * vUV.y * (1.0 - vUV.y);\n"
 	"    vec2 worldToUV = 1.0 / max(uChunkSpan, vec2(160.0));\n"
 	"    vec2 macroUVWarp = vec2(macroOct.z - 0.5, macroOct.w - 0.5) * (2.8 * worldToUV * edgeMask * smoothstep(2000.0, 8000.0, vDistance) * smoothstep(90000.0, 28000.0, vDistance));\n"
 	"    vec2 sampleUV = clamp(vUV + detail.yz * (1.6 * worldToUV * edgeMask) + macroUVWarp, 0.0, 1.0);\n"
@@ -1308,8 +1253,10 @@ static const char *s_fs_terrain =
 	"    vec3 dryCol = baseCol.rgb;\n"
 	"    float dryLighting = effLighting;\n"
 	"    float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
-	"    float elevAboveWater = (effSeaLevel > -900.0) ? max(0.0, fragZ - liveSeaLevel) : max(0.0, fragZ);\n"
-	"    float elevAboveHighTide = (effSeaLevel > -900.0) ? max(0.0, fragZ - highWaterZ) : max(0.0, fragZ);\n"
+	"    float refWaterZ = (effSeaLevel > -900.0) ? liveSeaLevel : uBaseSeaLevel;\n"
+	"    float refHighWaterZ = (effSeaLevel > -900.0) ? highWaterZ : uBaseSeaLevel;\n"
+	"    float elevAboveWater = max(0.0, fragZ - refWaterZ);\n"
+	"    float elevAboveHighTide = max(0.0, fragZ - refHighWaterZ);\n"
 	"    float h0 = detail.x;\n"
 	"    vec2 microGrad = detail.yz;\n"
 	"    float microCavity = detail.w;\n"
@@ -1931,6 +1878,8 @@ static const char *s_vs_water =
 	"    return mix(hLinear, hBicubic, borderBlend);\n"
 	"}\n"
 	"float eval_river_surface_vs(vec2 uv, float baseSeaLevel, float effectiveScale) {\n"
+	"    float centerCarve = (1.0 - texture(uSubstrateTex, uv).a) * 15.9375;\n"
+	"    if (centerCarve < 0.05) return baseSeaLevel;\n"
 	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
 	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
 	"    vec2 p = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
@@ -2408,6 +2357,11 @@ static const char *s_fs_water =
 	"    return (dist < 276.0) ? dist / 0.92 : dist + 24.0;\n"
 	"}\n"
 	"float eval_river_surface_fs(vec2 uv, float baseSeaLevel, float effectiveScale, out float outRiverProx) {\n"
+	"    float centerCarve = (1.0 - texture(uSubstrateTex, uv).a) * 15.9375;\n"
+	"    if (centerCarve < 0.05) {\n"
+	"        outRiverProx = 0.0;\n"
+	"        return baseSeaLevel;\n"
+	"    }\n"
 	"    vec2 texSize = vec2(textureSize(uSubstrateTex, 0));\n"
 	"    vec2 maxCoordF = max(vec2(1.0), texSize - 1.0);\n"
 	"    vec2 p = clamp(uv, 0.0, 1.0) * maxCoordF;\n"
@@ -2417,13 +2371,15 @@ static const char *s_fs_water =
 	"    float sumW = 0.0;\n"
 	"    float sumZ = 0.0;\n"
 	"    float maxC_nb = 0.0;\n"
+	"    float borderDist = min(min(p.x, maxCoordF.x - p.x), min(p.y, maxCoordF.y - p.y));\n"
+	"    float rTap = mix(1.0, 1.5, clamp(borderDist, 0.0, 1.0));\n"
 	"    for (int j = -1; j <= 2; j++) {\n"
-	"        float wy = max(0.0, 1.5 - abs(float(j) - fp.y));\n"
+	"        float wy = max(0.0, rTap - abs(float(j) - fp.y));\n"
 	"        for (int i = -1; i <= 2; i++) {\n"
 	"            ivec2 tc = clamp(ip + ivec2(i, j), ivec2(0), maxC);\n"
 	"            float c_i = (1.0 - texelFetch(uSubstrateTex, tc, 0).a) * 15.9375;\n"
 	"            if (c_i > 0.05) {\n"
-	"                float wx = max(0.0, 1.5 - abs(float(i) - fp.x));\n"
+	"                float wx = max(0.0, rTap - abs(float(i) - fp.x));\n"
 	"                float w = wx * wy * c_i;\n"
 	"                float h_i = float(texelFetch(uHeightTex, tc, 0).r) * effectiveScale;\n"
 	"                sumW += w;\n"
@@ -2432,12 +2388,13 @@ static const char *s_fs_water =
 	"            }\n"
 	"        }\n"
 	"    }\n"
-	"    outRiverProx = smoothstep(0.02, 1.25, maxC_nb);\n"
+	"    outRiverProx = smoothstep(0.02, 1.25, max(centerCarve, maxC_nb));\n"
 	"    return (sumW > 1e-4) ? mix(baseSeaLevel, sumZ / sumW, smoothstep(0.0, 0.35, outRiverProx)) : baseSeaLevel;\n"
 	"}\n"
 	"void main() {\n"
 	"    /* Only sprite pixels (stencil-marked) that lie BELOW the water surface reach this point */\n"
 	"    vec2 sUV = gl_FragCoord.xy / uViewport;\n"
+	"    if (texture(uSceneColor, sUV).a > 0.5) discard;\n"
 	"    float objPath1 = nd_object_dist(sUV) - vDistance;\n"
 	"    if (objPath1 <= 0.02) discard;\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
@@ -2703,7 +2660,8 @@ static const char *s_vs_billboard =
 	"    vUV = uv_coord;\n"
 	"    vTint = a_tint;\n"
 	"    vWorldPos = p.xyz;\n"
-	"    vec3 a_local_pos = vec3(a_param.x + p.w, a_param.y + ((q_uv.y > 0.0) ? (p.y - a_pos0.y) : 0.0), a_param.z);\n"
+	"    float quadH = (q_uv.y > 0.0) ? length(0.5 * (a_pos2.xyz + a_pos3.xyz) - 0.5 * (a_pos0.xyz + a_pos1.xyz)) : 0.0;\n"
+	"    vec3 a_local_pos = vec3(a_param.x + p.w, a_param.y + ((q_uv.y > 0.0) ? (p.y - a_pos0.y) : 0.0), a_param.z + quadH * max(0.0, q_uv.y));\n"
 	"    vec4 a_quad_uv = vec4(q_uv.x, q_uv.y, a_param.z, a_param.w);\n"
 	"    vec4 a_sprite_bounds = vec4(min(a_uv.x, a_uv.z), min(a_uv.y, a_uv.w), max(a_uv.x, a_uv.z), max(a_uv.y, a_uv.w));\n"
 	"    vLocalPos = a_local_pos;\n"
@@ -2938,16 +2896,6 @@ static const char *s_fs_billboard =
 	"}\n"	"void main() {\n"
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
 	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
-	"    float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
-	"    float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
-	"    vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
-	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
-	"    float sunDot = dot(torusN, sDir);\n"
-	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
-	"    float directSun = smoothstep(-0.06, 0.16, sunDot);\n"
-	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
-	"    /* Same cloud shadow as terrain and water: one fetch from the shared cloud-shadow map at the sprite's ground position */\n"
-	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vQuadUV.z, vDist);\n"
 	"    /* Exact horizontal water-plane (Z = uSeaLevel) intersection of the camera ray through this billboard pixel */\n"
 	"    vec2 waterSurfPos = vec2(vLocalPos.x, vLocalPos.y - (uSeaLevel - vQuadUV.z) * 0.7002075);\n"
 	"    float waterFw = max(1e-4, max(length(dFdx(waterSurfPos)), length(dFdy(waterSurfPos))));\n"
@@ -2959,12 +2907,14 @@ static const char *s_fs_billboard =
 	"    vec2 waveRefGrad = vec2(0.0);\n"
 	"    float waveSurfZ = uSeaLevel;\n"
 	"    float effSpriteZ = vQuadUV.z + (vLocalPos.z - vQuadUV.z) * 0.35;\n"
-	"    bool canSubmerge = (vQuadUV.w < 0.5 || vQuadUV.w > 2.5);\n"
-	"    if (uSeaLevel > -900.0 && canSubmerge && vQuadUV.z < uSeaLevel + 0.85) {\n"
+	"    bool inWaterTile = (vQuadUV.w >= 15.5);\n"
+	"    float style = inWaterTile ? (vQuadUV.w - 16.0) : vQuadUV.w;\n"
+	"    bool canSubmerge = inWaterTile && (style < 0.5 || (style > 2.5 && style < 4.5));\n"
+	"    if (uSeaLevel > -900.0 && canSubmerge && vQuadUV.z < uSeaLevel + 0.25) {\n"
 	"        wind = eval_recursive_wind(waterSurfPos, uAnimTime);\n"
 	"        waves = eval_zoom_water_waves(waterSurfPos, wind, uAnimTime, vDist, waterFw);\n"
 	"        waveSurfZ = uSeaLevel + waves.x * 0.35 * smoothstep(2600.0, 400.0, vDist);\n"
-	"        if (vQuadUV.z < waveSurfZ + 0.35 && effSpriteZ < waveSurfZ) {\n"
+	"        if (vQuadUV.z < waveSurfZ + 0.15 && effSpriteZ < waveSurfZ) {\n"
 	"            d = waveSurfZ - effSpriteZ;\n"
 	"            isSubmerged = true;\n"
 	"            capGrad = eval_wind_capillary_facets(waterSurfPos, uAnimTime, wind, vDist, waterFw);\n"
@@ -2999,6 +2949,13 @@ static const char *s_fs_billboard =
 	"        float heightFade = 1.0 - (isLambShadow ? 0.45 : 0.32) * hFrac * hFrac;\n"
 	"        float castMask = (vSpriteBounds.z > vSpriteBounds.x) ? max(silAlpha * heightFade * 0.44, contactUmbra) : (radialPenumbra * 0.36 + contactUmbra * 0.45);\n"
 	"        if (castMask <= 0.008) discard;\n"
+	"        float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
+	"        float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
+	"        vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
+	"        vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"        float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, dot(torusN, sDir)), 0.12, 1.0);\n"
+	"        vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
+	"        float cloudSh = isLambShadow ? 0.0 : nd_cloud_shadow_map(vLocalPos.xy, vQuadUV.z, vDist);\n"
 	"        vec3 shNoise = chaff_grad_noise2d(vLocalPos.xy * 0.28, 0x53484457u);\n"
 	"        float dapple = 0.88 + 0.24 * shNoise.x;\n"
 	"        float waterAtten = isSubmerged ? clamp(1.0 - d * 0.25, 0.0, 1.0) : 1.0;\n"
@@ -3011,7 +2968,6 @@ static const char *s_fs_billboard =
 	"        return;\n"
 	"    }\n"
 	"    /* 2. Crisp Sub-Texel Anti-Aliased & Snell-Refracted Sprite Sampling */\n"
-	"    float style = vQuadUV.w;\n"
 	"    if (style > 5.5) {\n"
 	"        /* ND_BB_STYLE_PARTICLE (6.0): Subtle, fine sunlit water droplet / mist bead with per-droplet color variation */\n"
 	"        vec2 qc = vec2(vQuadUV.x, (vQuadUV.y - 0.5) * 2.0) * 1.18;\n"
@@ -3064,6 +3020,21 @@ static const char *s_fs_billboard =
 	"        auraAlpha = exp(-r2 * 2.8) * 0.16 * (1.0 - edgeAlpha);\n"
 	"    }\n"
 	"    if (edgeAlpha <= 0.01 && auraAlpha <= 0.005) discard;\n"
+	"    float outAlpha = clamp(edgeAlpha + auraAlpha, 0.0, 1.0) * vTint.a;\n"
+	"    if (outAlpha <= 0.001) discard;\n"
+	"    /* Pass 0 draws only the opaque core (depth + stencil), pass 1 only the anti-aliased fringe, pass 2 everything else */\n"
+	"    if (uPass == 0 && outAlpha < 0.5) discard;\n"
+	"    if (uPass == 1 && outAlpha >= 0.5) discard;\n"
+	"    float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
+	"    float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
+	"    vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
+	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    float sunDot = dot(torusN, sDir);\n"
+	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
+	"    float directSun = smoothstep(-0.06, 0.16, sunDot);\n"
+	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
+	"    /* Same cloud shadow as terrain and water: one fetch from the shared cloud-shadow map at the sprite's ground position */\n"
+	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vQuadUV.z, vDist);\n"
 	"    if (subSample.a < 0.12) subSample = baseCol;\n"
 	"    /* 3. Leaf-Selective Plant Tinting & Natural Palette Harmonization */\n"
 	"    vec3 albedo = subSample.rgb;\n"
@@ -3075,11 +3046,6 @@ static const char *s_fs_billboard =
 	"    } else {\n"
 	"        albedo *= vTint.rgb;\n"
 	"    }\n"
-	"    float outAlpha = clamp(edgeAlpha + auraAlpha, 0.0, 1.0) * vTint.a;\n"
-	"    if (outAlpha <= 0.001) discard;\n"
-	"    /* Pass 0 draws only the opaque core (depth + stencil), pass 1 only the anti-aliased fringe, pass 2 everything else */\n"
-	"    if (uPass == 0 && outAlpha < 0.5) discard;\n"
-	"    if (uPass == 1 && outAlpha >= 0.5) discard;\n"
 	"    float rawLuma = dot(albedo, vec3(0.299, 0.587, 0.114));\n"
 	"    /* 4. Gentle Scene Lighting & Biome-Root Grass Harmonization (preserves crisp painted pixel-art contrast) */\n"
 	"    float qx = clamp(vQuadUV.x, -1.0, 1.0);\n"
@@ -3239,8 +3205,8 @@ static const char *s_fs_billboard =
 	"    /* Atmospheric Distance Fog & Planetary Limb Scattering Parity with Terrain */\n"
 	"    vec3 surfaceLit = mix(lit, vec3(0.35, 0.65, 0.95), 0.22 * uAtmoIntensity);\n"
 	"    vec3 finalRgb = mix(surfaceLit, sky, fogFactor * uAtmoIntensity);\n"
-	"    /* Core pass marks sprite pixels with alpha 0 (the water pass tells them from already water-shaded seabed by it) */\n"
-	"    FragColor = vec4(finalRgb, (uPass == 0) ? 0.0 : outAlpha);\n"
+	"    /* Core pass marks submerged sprite pixels with alpha 0 (the water pass tells them from dry-land sprites & seabed by it) */\n"
+	"    FragColor = vec4(finalRgb, (uPass == 0) ? (isSubmerged ? 0.0 : 1.0) : outAlpha);\n"
 	"}\n";
 
 const char *nd_seven_gl_vs_terrain(void) { return s_vs_terrain; }
@@ -4294,6 +4260,17 @@ static float s_bb_ty = 0.0f;
 static float s_bb_dist = 0.0f;
 static float s_bb_ref_trig[4] = { 1.0f, 0.0f, 1.0f, 0.0f };
 
+typedef struct {
+	float wx, wy;
+	float decay;
+	float vnx_reb;
+	float vny_reb;
+} bb_cached_wake_t;
+
+static bb_cached_wake_t s_bb_wake_cache[16];
+static int s_bb_wake_cache_n = 0;
+static float s_bb_wake_cache_time = -99999.0f;
+
 static void eval_billboard_basis(const lam_billboard_gpu_t *b,
                                  const nd_planet_def_t *pdef,
                                  const double ref_origin[3],
@@ -4307,64 +4284,72 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 		float rel_y = b->y - s_bb_ty;
 		float du = TWO_PI_F * (rel_x * (1.0f / (float)ND_SEVEN_WORLD_DIM_W));
 		float dv = TWO_PI_F * (rel_y * (1.0f / (float)ND_SEVEN_WORLD_DIM_H));
+		float dcu, sdu, dcv, sdv;
 		if (fabsf(du) <= 0.10f && fabsf(dv) <= 0.10f) {
 			float du2 = du * du;
 			float dv2 = dv * dv;
-			float dcu = du2 * (-0.5f + du2 * (1.0f / 24.0f));
-			float sdu = du * (1.0f - du2 * (1.0f / 6.0f));
-			float dcv = dv2 * (-0.5f + dv2 * (1.0f / 24.0f));
-			float sdv = dv * (1.0f - dv2 * (1.0f / 6.0f));
-
-			float cu0 = s_bb_ref_trig[0];
-			float su0 = s_bb_ref_trig[1];
-			float cv0 = s_bb_ref_trig[2];
-			float sv0 = s_bb_ref_trig[3];
-
-			float d_cu = cu0 * dcu - su0 * sdu;
-			float d_su = su0 * dcu + cu0 * sdu;
-			float d_cv = cv0 * dcv - sv0 * sdv;
-			float d_sv = sv0 * dcv + cv0 * sdv;
-
-			float cu = cu0 + d_cu;
-			float su = su0 + d_su;
-			float cv = cv0 + d_cv;
-			float sv = sv0 + d_sv;
-
-			float R = (pdef->major_r > 0.0f) ? pdef->major_r : 2000000.0f;
-			float r0 = (pdef->minor_r > 0.0f) ? pdef->minor_r : 1335000.0f;
-			float r_eff0 = R + r0 * cv0;
-			float d_r = r0 * d_cv + b->z * cv;
-
-			float px = r_eff0 * d_cu + d_r * cu;
-			float py = r_eff0 * d_su + d_r * su;
-			float pz = r0 * d_sv + b->z * sv;
-
-			float ex = -su, ey = cu, ez = 0.0f;
-			float sx = -sv * cu, sy = -sv * su, sz = cv;
-			float nx = cv * cu, ny = cv * su, nz = sv;
-
-			if (pdef->rot[0] != 0.0f || pdef->rot[4] != 0.0f || pdef->rot[8] != 0.0f) {
-				const float *r = pdef->rot;
-				out->base_pos[0] = r[0] * px + r[1] * py + r[2] * pz;
-				out->base_pos[1] = r[3] * px + r[4] * py + r[5] * pz;
-				out->base_pos[2] = r[6] * px + r[7] * py + r[8] * pz;
-				out->E[0] = r[0] * ex + r[1] * ey + r[2] * ez;
-				out->E[1] = r[3] * ex + r[4] * ey + r[5] * ez;
-				out->E[2] = r[6] * ex + r[7] * ey + r[8] * ez;
-				out->S[0] = r[0] * sx + r[1] * sy + r[2] * sz;
-				out->S[1] = r[3] * sx + r[4] * sy + r[5] * sz;
-				out->S[2] = r[6] * sx + r[7] * sy + r[8] * sz;
-				out->N[0] = r[0] * nx + r[1] * ny + r[2] * nz;
-				out->N[1] = r[3] * nx + r[4] * ny + r[5] * nz;
-				out->N[2] = r[6] * nx + r[7] * ny + r[8] * nz;
-			} else {
-				out->base_pos[0] = px; out->base_pos[1] = py; out->base_pos[2] = pz;
-				out->E[0] = ex; out->E[1] = ey; out->E[2] = ez;
-				out->S[0] = sx; out->S[1] = sy; out->S[2] = sz;
-				out->N[0] = nx; out->N[1] = ny; out->N[2] = nz;
-			}
-			did_fast = true;
+			dcu = du2 * (-0.5f + du2 * (1.0f / 24.0f));
+			sdu = du * (1.0f - du2 * (1.0f / 6.0f));
+			dcv = dv2 * (-0.5f + dv2 * (1.0f / 24.0f));
+			sdv = dv * (1.0f - dv2 * (1.0f / 6.0f));
+		} else {
+			float shdu = sinf(0.5f * du);
+			float shdv = sinf(0.5f * dv);
+			dcu = -2.0f * shdu * shdu;
+			sdu = sinf(du);
+			dcv = -2.0f * shdv * shdv;
+			sdv = sinf(dv);
 		}
+
+		float cu0 = s_bb_ref_trig[0];
+		float su0 = s_bb_ref_trig[1];
+		float cv0 = s_bb_ref_trig[2];
+		float sv0 = s_bb_ref_trig[3];
+
+		float d_cu = cu0 * dcu - su0 * sdu;
+		float d_su = su0 * dcu + cu0 * sdu;
+		float d_cv = cv0 * dcv - sv0 * sdv;
+		float d_sv = sv0 * dcv + cv0 * sdv;
+
+		float cu = cu0 + d_cu;
+		float su = su0 + d_su;
+		float cv = cv0 + d_cv;
+		float sv = sv0 + d_sv;
+
+		float R = (pdef->major_r > 0.0f) ? pdef->major_r : 2000000.0f;
+		float r0 = (pdef->minor_r > 0.0f) ? pdef->minor_r : 1335000.0f;
+		float r_eff0 = R + r0 * cv0;
+		float d_r = r0 * d_cv + b->z * cv;
+
+		float px = r_eff0 * d_cu + d_r * cu;
+		float py = r_eff0 * d_su + d_r * su;
+		float pz = r0 * d_sv + b->z * sv;
+
+		float ex = -su, ey = cu, ez = 0.0f;
+		float sx = -sv * cu, sy = -sv * su, sz = cv;
+		float nx = cv * cu, ny = cv * su, nz = sv;
+
+		if (pdef->rot[0] != 0.0f || pdef->rot[4] != 0.0f || pdef->rot[8] != 0.0f) {
+			const float *r = pdef->rot;
+			out->base_pos[0] = r[0] * px + r[1] * py + r[2] * pz;
+			out->base_pos[1] = r[3] * px + r[4] * py + r[5] * pz;
+			out->base_pos[2] = r[6] * px + r[7] * py + r[8] * pz;
+			out->E[0] = r[0] * ex + r[1] * ey + r[2] * ez;
+			out->E[1] = r[3] * ex + r[4] * ey + r[5] * ez;
+			out->E[2] = r[6] * ex + r[7] * ey + r[8] * ez;
+			out->S[0] = r[0] * sx + r[1] * sy + r[2] * sz;
+			out->S[1] = r[3] * sx + r[4] * sy + r[5] * sz;
+			out->S[2] = r[6] * sx + r[7] * sy + r[8] * sz;
+			out->N[0] = r[0] * nx + r[1] * ny + r[2] * nz;
+			out->N[1] = r[3] * nx + r[4] * ny + r[5] * nz;
+			out->N[2] = r[6] * nx + r[7] * ny + r[8] * nz;
+		} else {
+			out->base_pos[0] = px; out->base_pos[1] = py; out->base_pos[2] = pz;
+			out->E[0] = ex; out->E[1] = ey; out->E[2] = ez;
+			out->S[0] = sx; out->S[1] = sy; out->S[2] = sz;
+			out->N[0] = nx; out->N[1] = ny; out->N[2] = nz;
+		}
+		did_fast = true;
 	}
 
 	if (!did_fast) {
@@ -4393,15 +4378,16 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 		                        ? fmaxf(0.36f, b->height * (1.0f / 14.0f))
 		                        : 1.0f;
 	} else if (b->style == ND_BB_STYLE_LEAF_TINT || b->style == ND_BB_STYLE_FLORA) {
-		if (b->pad0 == 1u && b->height > 0.0f) {
+		uint8_t pad_kind = b->pad0 & 0x7Fu;
+		if (pad_kind == 1u && b->height > 0.0f) {
 			float h_norm = fminf(1.25f, fmaxf(0.55f, b->height * (1.0f / 26.0f)));
 			out->flora_sway_scale = 0.92f * h_norm;
-		} else if (b->pad0 == 0u && b->height > 0.0f && b->height <= 30.0f) {
+		} else if (pad_kind == 0u && b->height > 0.0f && b->height <= 30.0f) {
 			float size_t = (30.0f - b->height) * (1.0f / 18.0f);
 			if (size_t < 0.0f) size_t = 0.0f;
 			if (size_t > 1.0f) size_t = 1.0f;
 			out->flora_sway_scale = 0.52f + 0.33f * size_t;
-		} else if (b->pad0 == 2u && b->height > 0.0f) {
+		} else if (pad_kind == 2u && b->height > 0.0f) {
 			float h_norm = fminf(1.30f, fmaxf(0.75f, b->height * (1.0f / 80.0f)));
 			out->flora_sway_scale = 1.05f * h_norm;
 			is_woody_tree = 1;
@@ -4449,38 +4435,50 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 					sy = 0.35f;
 			}
 			if (d2 < 64.0f * 64.0f) {
-				int wake_n = 0;
-				const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
-				if (wake && wake_n > 0) {
-					const float R_wake = 11.5f;
-					const float tau_max = 1.40f;
-					for (int i = 0; i < wake_n; i++) {
-						if (!wake[i].valid)
-							continue;
-						float tau = s_grass_anim_time - wake[i].t_sec;
-						if (tau < 0.0f || tau > tau_max)
-							continue;
-						float wdx = b->x - wake[i].wx;
-						float wdy = b->y - wake[i].wy;
-						float wd2 = wdx * wdx + wdy * wdy;
-						if (wd2 >= R_wake * R_wake)
-							continue;
-						float wdist = sqrtf(wd2);
-						float wt = 1.0f - (wdist / R_wake);
-						float w_spatial = wt * wt * (3.0f - 2.0f * wt);
-						float decay = expf(-2.2f * tau) * (1.0f - (tau / tau_max));
-						float rebound = expf(-1.6f * tau);
-						float wrx = (wdist > 0.25f) ? (wdx / wdist) : 1.0f;
-						float wry = (wdist > 0.25f) ? (wdy / wdist) : 0.0f;
-						float vlen = sqrtf(wake[i].vx * wake[i].vx + wake[i].vy * wake[i].vy);
-						float vnx = (vlen > 1.0f) ? (wake[i].vx / vlen) : 0.0f;
-						float vny = (vlen > 1.0f) ? (wake[i].vy / vlen) : 0.0f;
-						float env = w_spatial * decay;
-						sx += (wrx * 1.45f + vnx * 0.65f * rebound) * env;
-						sy += (wry * 0.85f + vny * 0.45f * rebound) * env;
-						dz += 1.85f * env;
-						rustle += 0.40f * env;
+				if (s_bb_wake_cache_time != s_grass_anim_time) {
+					s_bb_wake_cache_time = s_grass_anim_time;
+					s_bb_wake_cache_n = 0;
+					int wake_n = 0;
+					const nd_grass_wake_step_t *wake = nd_seven_get_wake_steps(&wake_n);
+					if (wake && wake_n > 0) {
+						const float tau_max = 1.40f;
+						for (int i = 0; i < wake_n && s_bb_wake_cache_n < 16; i++) {
+							if (!wake[i].valid)
+								continue;
+							float tau = s_grass_anim_time - wake[i].t_sec;
+							if (tau < 0.0f || tau > tau_max)
+								continue;
+							float decay = expf(-2.2f * tau) * (1.0f - (tau / tau_max));
+							float rebound = expf(-1.6f * tau);
+							float vlen = sqrtf(wake[i].vx * wake[i].vx + wake[i].vy * wake[i].vy);
+							float vnx = (vlen > 1.0f) ? (wake[i].vx / vlen) : 0.0f;
+							float vny = (vlen > 1.0f) ? (wake[i].vy / vlen) : 0.0f;
+							s_bb_wake_cache[s_bb_wake_cache_n].wx = wake[i].wx;
+							s_bb_wake_cache[s_bb_wake_cache_n].wy = wake[i].wy;
+							s_bb_wake_cache[s_bb_wake_cache_n].decay = decay;
+							s_bb_wake_cache[s_bb_wake_cache_n].vnx_reb = vnx * 0.65f * rebound;
+							s_bb_wake_cache[s_bb_wake_cache_n].vny_reb = vny * 0.45f * rebound;
+							s_bb_wake_cache_n++;
+						}
 					}
+				}
+				const float R_wake = 11.5f;
+				for (int i = 0; i < s_bb_wake_cache_n; i++) {
+					float wdx = b->x - s_bb_wake_cache[i].wx;
+					float wdy = b->y - s_bb_wake_cache[i].wy;
+					float wd2 = wdx * wdx + wdy * wdy;
+					if (wd2 >= R_wake * R_wake)
+						continue;
+					float wdist = sqrtf(wd2);
+					float wt = 1.0f - (wdist / R_wake);
+					float w_spatial = wt * wt * (3.0f - 2.0f * wt);
+					float wrx = (wdist > 0.25f) ? (wdx / wdist) : 1.0f;
+					float wry = (wdist > 0.25f) ? (wdy / wdist) : 0.0f;
+					float env = w_spatial * s_bb_wake_cache[i].decay;
+					sx += (wrx * 1.45f + s_bb_wake_cache[i].vnx_reb) * env;
+					sy += (wry * 0.85f + s_bb_wake_cache[i].vny_reb) * env;
+					dz += 1.85f * env;
+					rustle += 0.40f * env;
 				}
 			}
 			if (sx < -4.2f) sx = -4.2f;
@@ -4528,7 +4526,7 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 		(float)(b->tint_rgba & 0xFF) / 255.0f
 	};
 
-	float style_f = (float)b->style;
+	float style_f = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f);
 
 	struct { float dx, dy, u, v, loc_z, qx, qy; } c[4] = {
 		{ -half_w, -ay,     b->u0, b->v1, b->z - wz_off,     -1.0f, 0.0f }, /* BL (0) */
@@ -4572,7 +4570,7 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
 
-		float sheen = (b->style == ND_BB_STYLE_GRASS || b->pad0 == 1u) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
+		float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x7Fu) == 1u) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
 		out_verts[i].tint[0] = fminf(1.0f, tint[0] + sheen);
 		out_verts[i].tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
 		out_verts[i].tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
@@ -4897,7 +4895,7 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 	out->uv[2] = b->u1;
 	out->uv[3] = b->v1;
 
-	float sheen = (b->style == ND_BB_STYLE_GRASS || b->pad0 == 1u) ? (grass_rustle * 0.14f) : 0.0f;
+	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x7Fu) == 1u) ? (grass_rustle * 0.14f) : 0.0f;
 	out->tint[0] = fminf(1.0f, tint[0] + sheen);
 	out->tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
 	out->tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
@@ -4906,7 +4904,7 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 	out->param[0] = b->x;
 	out->param[1] = b->y;
 	out->param[2] = b->z;
-	out->param[3] = (float)b->style;
+	out->param[3] = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f);
 }
 
 static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
@@ -5425,6 +5423,7 @@ static struct {
 	GLuint cluster_light_tex;      // 2D data texture for light records (4 x ND_MAX_TOTAL_LIGHTS RGBA8)
 	GLuint cluster_list_tex;       // 2D data texture for cluster light index lists (33 x ND_CLUSTER_TOTAL R8)
 	int cluster_ssbo_valid;        // Whether cluster textures are initialized
+	bool cluster_dirs_only_cached; // Whether cluster_list_tex already holds the 2-directional-lights-only layout
 	nd_cluster_light_t local_lights[ND_MAX_TOTAL_LIGHTS];
 	uint32_t local_light_count;
 	nd_cluster_light_t active_lights[ND_MAX_TOTAL_LIGHTS];
@@ -5583,6 +5582,7 @@ static void create_static_grid(int quads, float *uv_buf, uint16_t *idx_buf,
                                GLuint *out_vbo, GLuint *out_ibo)
 {
 	int verts = quads + 1;
+	int base_verts = verts * verts;
 	for (int y = 0; y < verts; y++) {
 		for (int x = 0; x < verts; x++) {
 			int idx = (y * verts + x) * 2;
@@ -5617,19 +5617,48 @@ static void create_static_grid(int quads, float *uv_buf, uint16_t *idx_buf,
 		}
 	}
 
+	/* Append perimeter skirt vertices (u shifted by -2.0f) to seal any 2:1 LOD T-junctions */
+	int s_vert = base_verts;
+	for (int e = 0; e < 4; e++) {
+		int e_base = s_vert;
+		for (int k = 0; k <= quads; k++) {
+			int bx = (e == 0) ? k : ((e == 1) ? quads : ((e == 2) ? (quads - k) : 0));
+			int by = (e == 0) ? 0 : ((e == 1) ? k : ((e == 2) ? quads : (quads - k)));
+			uv_buf[s_vert * 2]     = ((float)bx / (float)quads) - 2.0f;
+			uv_buf[s_vert * 2 + 1] = (float)by / (float)quads;
+			s_vert++;
+		}
+		for (int k = 0; k < quads; k++) {
+			int bx0 = (e == 0) ? k : ((e == 1) ? quads : ((e == 2) ? (quads - k) : 0));
+			int by0 = (e == 0) ? 0 : ((e == 1) ? k : ((e == 2) ? quads : (quads - k)));
+			int bx1 = (e == 0) ? (k + 1) : ((e == 1) ? quads : ((e == 2) ? (quads - k - 1) : 0));
+			int by1 = (e == 0) ? 0 : ((e == 1) ? (k + 1) : ((e == 2) ? quads : (quads - k - 1)));
+			uint16_t t0 = (uint16_t)(by0 * verts + bx0);
+			uint16_t t1 = (uint16_t)(by1 * verts + bx1);
+			uint16_t b0 = (uint16_t)(e_base + k);
+			uint16_t b1 = (uint16_t)(e_base + k + 1);
+			idx_buf[i_idx++] = t0;
+			idx_buf[i_idx++] = t1;
+			idx_buf[i_idx++] = b0;
+			idx_buf[i_idx++] = t1;
+			idx_buf[i_idx++] = b1;
+			idx_buf[i_idx++] = b0;
+		}
+	}
+
 	*out_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, *out_vbo);
-	glBufferData(GL_ARRAY_BUFFER, uv_buf, (GLsizei)((size_t)verts * (size_t)verts * 2 * sizeof(float)), GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, uv_buf, (GLsizei)((size_t)s_vert * 2 * sizeof(float)), GL_STATIC_DRAW);
 
 	*out_ibo = glCreateBuffer();
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *out_ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_buf, (GLsizei)((size_t)quads * (size_t)quads * 6 * sizeof(uint16_t)), GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_buf, (GLsizei)((size_t)i_idx * sizeof(uint16_t)), GL_STATIC_DRAW);
 }
 
 static void init_grid_buffers(void)
 {
-	static float grid_uv_scratch[GL_TOTAL_VERTS_HI * 2];
-	static uint16_t indices_scratch[GL_TOTAL_INDICES_HI];
+	static float grid_uv_scratch[(GL_TOTAL_VERTS_HI + 4 * (GL_GRID_QUADS_HI + 1)) * 2];
+	static uint16_t indices_scratch[GL_TOTAL_INDICES_HI + 4 * GL_GRID_QUADS_HI * 6];
 
 	create_static_grid(GL_GRID_QUADS_MACRO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_macro, &s_gl.grid_ibo_macro);
 	create_static_grid(GL_GRID_QUADS_LO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo, &s_gl.grid_ibo);
@@ -7106,14 +7135,12 @@ static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t s
 	float eff_dist = sqrtf(s_gl.cur_dist * s_gl.cur_dist + dx * dx + dy * dy);
 
 	uint32_t quads = nd_seven_gl_grid_quads_for_zoom(level, eff_dist);
-	if (quads >= GL_GRID_QUADS_HI) {
+	if (quads >= GL_GRID_QUADS_LO) {
+		/* Always use the 48x48 grid (exact 1:1 texel alignment with 49x49 chunk heightmaps)
+		 * for all near/mid chunks (Level 0..2), so 2:1 LOD borders share exact vertex stations. */
 		*out_vbo = s_gl.grid_vbo_hi;
 		*out_ibo = s_gl.grid_ibo_hi;
 		*out_indices = GL_TOTAL_INDICES_HI;
-	} else if (quads >= GL_GRID_QUADS_LO) {
-		*out_vbo = s_gl.grid_vbo;
-		*out_ibo = s_gl.grid_ibo;
-		*out_indices = GL_TOTAL_INDICES;
 	} else {
 		*out_vbo = s_gl.grid_vbo_macro;
 		*out_ibo = s_gl.grid_ibo_macro;
@@ -7249,12 +7276,16 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	float terrain_sea_lvl = sea_level;
 	if (world == s_gl.cur_pdef.world_id && terrain_sea_lvl > -900.0f) {
-		bool contains_focal = (s_gl.cur_tx >= (float)ox && s_gl.cur_tx <= (float)(ox + span_w) &&
-		                       s_gl.cur_ty >= (float)oy && s_gl.cur_ty <= (float)(oy + span_h));
-		if (contains_focal && (level == 0 || terrain_sea_lvl > s_gl.cur_sea_level)) {
-			s_gl.cur_sea_level = terrain_sea_lvl;
-		} else if (s_gl.cur_sea_level <= -900.0f) {
-			s_gl.cur_sea_level = terrain_sea_lvl;
+		if (s_gl.focal_sea_level > -900.0f) {
+			s_gl.cur_sea_level = s_gl.focal_sea_level;
+		} else {
+			bool contains_focal = (s_gl.cur_tx >= (float)ox && s_gl.cur_tx <= (float)(ox + span_w) &&
+			                       s_gl.cur_ty >= (float)oy && s_gl.cur_ty <= (float)(oy + span_h));
+			if (contains_focal && level == 0) {
+				s_gl.cur_sea_level = terrain_sea_lvl;
+			} else if (s_gl.cur_sea_level <= -900.0f) {
+				s_gl.cur_sea_level = terrain_sea_lvl;
+			}
 		}
 	}
 
@@ -7421,16 +7452,19 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	GLuint active_vbo = 0, active_ibo = 0;
 	GLsizei active_indices = 0;
 	select_grid_buffers(level, ox, oy, span_w, span_h, &active_vbo, &active_ibo, &active_indices);
+	GLsizei draw_indices = active_indices + ((active_indices == GL_TOTAL_INDICES_HI)
+	                                         ? (4 * GL_GRID_QUADS_HI * 6)
+	                                         : (4 * GL_GRID_QUADS_MACRO * 6));
 
 	glBindBuffer(GL_ARRAY_BUFFER, active_vbo);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, active_ibo);
-	glDrawElements(GL_TRIANGLES, active_indices, GL_UNSIGNED_SHORT, 0);
+	glDrawElements(GL_TRIANGLES, draw_indices, GL_UNSIGNED_SHORT, 0);
 	if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
 		nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
-		cmd->count = (uint32_t)active_indices;
+		cmd->count = (uint32_t)draw_indices;
 		cmd->instance_count = 1u;
 		cmd->first_index = 0u;
 		cmd->base_vertex = 0;
@@ -7800,103 +7834,110 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 		dst[15] = (uint8_t)((int)(L->type + 0.5f));
 	}
 
-	/* Clear cluster light lists (stride = 33 bytes per cluster: byte 0 = count, bytes 1..32 = light indices) */
 	const uint32_t stride = ND_MAX_LIGHTS_PER_CLUSTER + 1;
-	for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++)
-		s_gl.cluster_list_tex_data[c * stride] = 0u;
+	bool need_list_upload = true;
+	if (count == 2 && s_gl.cluster_ssbo_valid && s_gl.cluster_dirs_only_cached) {
+		need_list_upload = false;
+		s_gl.active_cluster_count = ND_CLUSTER_TOTAL;
+	} else {
+		/* Clear cluster light lists (stride = 33 bytes per cluster: byte 0 = count, bytes 1..32 = light indices) */
+		for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++)
+			s_gl.cluster_list_tex_data[c * stride] = 0u;
 
-	/* Assign active lights to 16x16x24 clusters */
-	const float *mvp = s_gl.cur_mvp;
-	for (uint32_t li = 0; li < count; li++) {
-		const nd_cluster_light_t *L = &s_gl.active_lights[li];
-		int ltype = (int)(L->type + 0.5f);
-		if (ltype == ND_LIGHT_TYPE_DIRECTIONAL) {
-			/* Directional lights illuminate all clusters */
-			for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
-				uint8_t *entry = &s_gl.cluster_list_tex_data[c * stride];
-				uint8_t n = entry[0];
-				if (n < ND_MAX_LIGHTS_PER_CLUSTER) {
-					entry[1 + n] = (uint8_t)li;
-					entry[0] = n + 1;
-				}
-			}
-			continue;
-		}
-
-		/* Transform point/spot light from tangent-relative coordinates to 3D torus frame relative to cur_origin */
-		double lpos_d[3];
-		torus_frame_double((double)(s_gl.cur_tx + L->pos_x),
-		                   (double)(s_gl.cur_ty + L->pos_y),
-		                   (double)L->pos_z,
-		                   &s_gl.cur_pdef, lpos_d, NULL, NULL, NULL);
-		float rx = (float)(lpos_d[0] - s_gl.cur_origin[0]);
-		float ry = (float)(lpos_d[1] - s_gl.cur_origin[1]);
-		float rz = (float)(lpos_d[2] - s_gl.cur_origin[2]);
-
-		float dx = rx - s_gl.cur_eye[0];
-		float dy = ry - s_gl.cur_eye[1];
-		float dz = rz - s_gl.cur_eye[2];
-		float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-		float rad = L->range;
-
-		if (dist - rad > far_d || dist + rad < near_d)
-			continue;
-
-		float d_min = fmaxf(near_d, dist - rad);
-		float d_max = fminf(far_d, dist + rad);
-		int z0 = (int)floorf(logf(d_min) * log_scale + log_bias);
-		int z1 = (int)floorf(logf(d_max) * log_scale + log_bias);
-		if (z0 < 0) z0 = 0;
-		if (z1 >= ND_CLUSTER_GRID_Z) z1 = ND_CLUSTER_GRID_Z - 1;
-
-		/* Project bounding sphere to screen-space tiles [x0..x1, y0..y1] */
-		int x0 = 0, x1 = ND_CLUSTER_GRID_X - 1;
-		int y0 = 0, y1 = ND_CLUSTER_GRID_Y - 1;
-		float clip_x = mvp[0] * rx + mvp[4] * ry + mvp[8]  * rz + mvp[12];
-		float clip_y = mvp[1] * rx + mvp[5] * ry + mvp[9]  * rz + mvp[13];
-		float clip_w = mvp[3] * rx + mvp[7] * ry + mvp[11] * rz + mvp[15];
-		if (clip_w > rad * 0.5f && s_gl.cur_tan_half > 1e-4f) {
-			float ndc_x = clip_x / clip_w;
-			float ndc_y = clip_y / clip_w;
-			float r_ndc_y = (rad / fmaxf(1.0f, clip_w - rad)) / s_gl.cur_tan_half;
-			float r_ndc_x = r_ndc_y / fmaxf(0.1f, s_gl.cur_aspect);
-			float u_min = (ndc_x - r_ndc_x) * 0.5f + 0.5f;
-			float u_max = (ndc_x + r_ndc_x) * 0.5f + 0.5f;
-			float v_min = (ndc_y - r_ndc_y) * 0.5f + 0.5f;
-			float v_max = (ndc_y + r_ndc_y) * 0.5f + 0.5f;
-			if (u_max < 0.0f || u_min > 1.0f || v_max < 0.0f || v_min > 1.0f)
-				continue;
-			x0 = (int)floorf(u_min * (float)ND_CLUSTER_GRID_X);
-			x1 = (int)floorf(u_max * (float)ND_CLUSTER_GRID_X);
-			y0 = (int)floorf(v_min * (float)ND_CLUSTER_GRID_Y);
-			y1 = (int)floorf(v_max * (float)ND_CLUSTER_GRID_Y);
-			if (x0 < 0) x0 = 0;
-			if (x1 >= ND_CLUSTER_GRID_X) x1 = ND_CLUSTER_GRID_X - 1;
-			if (y0 < 0) y0 = 0;
-			if (y1 >= ND_CLUSTER_GRID_Y) y1 = ND_CLUSTER_GRID_Y - 1;
-		}
-
-		for (int cz = z0; cz <= z1; cz++) {
-			for (int cy = y0; cy <= y1; cy++) {
-				for (int cx = x0; cx <= x1; cx++) {
-					uint32_t c_idx = (uint32_t)(cx + ND_CLUSTER_GRID_X * (cy + ND_CLUSTER_GRID_Y * cz));
-					uint8_t *entry = &s_gl.cluster_list_tex_data[c_idx * stride];
+		/* Assign active lights to 16x16x24 clusters */
+		const float *mvp = s_gl.cur_mvp;
+		for (uint32_t li = 0; li < count; li++) {
+			const nd_cluster_light_t *L = &s_gl.active_lights[li];
+			int ltype = (int)(L->type + 0.5f);
+			if (ltype == ND_LIGHT_TYPE_DIRECTIONAL) {
+				/* Directional lights illuminate all clusters */
+				for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
+					uint8_t *entry = &s_gl.cluster_list_tex_data[c * stride];
 					uint8_t n = entry[0];
 					if (n < ND_MAX_LIGHTS_PER_CLUSTER) {
 						entry[1 + n] = (uint8_t)li;
 						entry[0] = n + 1;
 					}
 				}
+				continue;
+			}
+
+			/* Transform point/spot light from tangent-relative coordinates to 3D torus frame relative to cur_origin */
+			double lpos_d[3];
+			torus_frame_double((double)(s_gl.cur_tx + L->pos_x),
+			                   (double)(s_gl.cur_ty + L->pos_y),
+			                   (double)L->pos_z,
+			                   &s_gl.cur_pdef, lpos_d, NULL, NULL, NULL);
+			float rx = (float)(lpos_d[0] - s_gl.cur_origin[0]);
+			float ry = (float)(lpos_d[1] - s_gl.cur_origin[1]);
+			float rz = (float)(lpos_d[2] - s_gl.cur_origin[2]);
+
+			float dx = rx - s_gl.cur_eye[0];
+			float dy = ry - s_gl.cur_eye[1];
+			float dz = rz - s_gl.cur_eye[2];
+			float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+			float rad = L->range;
+
+			if (dist - rad > far_d || dist + rad < near_d)
+				continue;
+
+			float d_min = fmaxf(near_d, dist - rad);
+			float d_max = fminf(far_d, dist + rad);
+			int z0 = (int)floorf(logf(d_min) * log_scale + log_bias);
+			int z1 = (int)floorf(logf(d_max) * log_scale + log_bias);
+			if (z0 < 0) z0 = 0;
+			if (z1 >= ND_CLUSTER_GRID_Z) z1 = ND_CLUSTER_GRID_Z - 1;
+
+			/* Project bounding sphere to screen-space tiles [x0..x1, y0..y1] */
+			int x0 = 0, x1 = ND_CLUSTER_GRID_X - 1;
+			int y0 = 0, y1 = ND_CLUSTER_GRID_Y - 1;
+			float clip_x = mvp[0] * rx + mvp[4] * ry + mvp[8]  * rz + mvp[12];
+			float clip_y = mvp[1] * rx + mvp[5] * ry + mvp[9]  * rz + mvp[13];
+			float clip_w = mvp[3] * rx + mvp[7] * ry + mvp[11] * rz + mvp[15];
+			if (clip_w > rad * 0.5f && s_gl.cur_tan_half > 1e-4f) {
+				float ndc_x = clip_x / clip_w;
+				float ndc_y = clip_y / clip_w;
+				float r_ndc_y = (rad / fmaxf(1.0f, clip_w - rad)) / s_gl.cur_tan_half;
+				float r_ndc_x = r_ndc_y / fmaxf(0.1f, s_gl.cur_aspect);
+				float u_min = (ndc_x - r_ndc_x) * 0.5f + 0.5f;
+				float u_max = (ndc_x + r_ndc_x) * 0.5f + 0.5f;
+				float v_min = (ndc_y - r_ndc_y) * 0.5f + 0.5f;
+				float v_max = (ndc_y + r_ndc_y) * 0.5f + 0.5f;
+				if (u_max < 0.0f || u_min > 1.0f || v_max < 0.0f || v_min > 1.0f)
+					continue;
+				x0 = (int)floorf(u_min * (float)ND_CLUSTER_GRID_X);
+				x1 = (int)floorf(u_max * (float)ND_CLUSTER_GRID_X);
+				y0 = (int)floorf(v_min * (float)ND_CLUSTER_GRID_Y);
+				y1 = (int)floorf(v_max * (float)ND_CLUSTER_GRID_Y);
+				if (x0 < 0) x0 = 0;
+				if (x1 >= ND_CLUSTER_GRID_X) x1 = ND_CLUSTER_GRID_X - 1;
+				if (y0 < 0) y0 = 0;
+				if (y1 >= ND_CLUSTER_GRID_Y) y1 = ND_CLUSTER_GRID_Y - 1;
+			}
+
+			for (int cz = z0; cz <= z1; cz++) {
+				for (int cy = y0; cy <= y1; cy++) {
+					for (int cx = x0; cx <= x1; cx++) {
+						uint32_t c_idx = (uint32_t)(cx + ND_CLUSTER_GRID_X * (cy + ND_CLUSTER_GRID_Y * cz));
+						uint8_t *entry = &s_gl.cluster_list_tex_data[c_idx * stride];
+						uint8_t n = entry[0];
+						if (n < ND_MAX_LIGHTS_PER_CLUSTER) {
+							entry[1 + n] = (uint8_t)li;
+							entry[0] = n + 1;
+						}
+					}
+				}
 			}
 		}
-	}
 
-	uint32_t active_clusters = 0;
-	for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
-		if (s_gl.cluster_list_tex_data[c * stride] > 0)
-			active_clusters++;
+		uint32_t active_clusters = 0;
+		for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
+			if (s_gl.cluster_list_tex_data[c * stride] > 0)
+				active_clusters++;
+		}
+		s_gl.active_cluster_count = active_clusters;
+		s_gl.cluster_dirs_only_cached = (count == 2);
 	}
-	s_gl.active_cluster_count = active_clusters;
 
 	if (!s_gl.cluster_ssbo_valid) {
 		s_gl.cluster_light_tex = glCreateTexture();
@@ -7914,6 +7955,7 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		s_gl.cluster_ssbo_valid = 1;
+		need_list_upload = true;
 	}
 
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -7921,9 +7963,11 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, ND_MAX_TOTAL_LIGHTS, 0,
 	             GL_RGBA, GL_UNSIGNED_BYTE, s_gl.cluster_light_tex_data);
 
-	glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)stride, ND_CLUSTER_TOTAL, 0,
-	             GL_RED, GL_UNSIGNED_BYTE, s_gl.cluster_list_tex_data);
+	if (need_list_upload) {
+		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)stride, ND_CLUSTER_TOTAL, 0,
+		             GL_RED, GL_UNSIGNED_BYTE, s_gl.cluster_list_tex_data);
+	}
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
@@ -8344,7 +8388,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_other_instances[other_n++]);
 		} else {
 			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_instances[core_n++]);
-			if (bb_sea_level > -900.0f && batch[i].z < bb_sea_level + 1.0f)
+			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
+			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
+			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
 				s_gl.sprites_in_water = true;
 		}
 	}

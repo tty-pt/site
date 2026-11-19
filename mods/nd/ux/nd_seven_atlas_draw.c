@@ -335,6 +335,52 @@ int nd_seven_plant_has_normal(uint8_t plant_id)
 	return (slot->loaded && slot->norm_loaded) ? 1 : 0;
 }
 
+static int try_pack_slot_image(flora_dyn_slot_t *slot)
+{
+	if (!slot || !slot->img_id)
+		return 0;
+	uint32_t iw = 0, ih = 0;
+	if (lam_image_read(slot->img_id, s_decode_scratch, sizeof(s_decode_scratch), &iw, &ih) &&
+	    iw > 0 && ih > 0 && iw <= 384 && ih <= 384) {
+		/* Pad left/right by 4px and top by 2px of transparent texels (bottom pad = 0 so
+		 * ground root anchor_y is unchanged) so waving canopy leaves never clip at rect edges */
+		const uint32_t pad_x = 4u;
+		const uint32_t pad_top = 2u;
+		uint32_t slot_w = iw + pad_x * 2u;
+		uint32_t slot_h = ih + pad_top;
+		if ((uint32_t)s_shelf_x + slot_w > ND_SEVEN_ATLAS_W) {
+			s_shelf_x = 0;
+			s_shelf_y = (uint16_t)(s_shelf_y + s_shelf_h);
+			s_shelf_h = 0;
+		}
+		if ((uint32_t)s_shelf_y + slot_h <= ND_SEVEN_RUNTIME_ATLAS_H) {
+			for (uint32_t ry = 0; ry < slot_h; ry++) {
+				memset(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
+				       0, slot_w * sizeof(uint32_t));
+			}
+			for (uint32_t ry = 0; ry < ih; ry++) {
+				memcpy(&s_atlas_rgba[(s_shelf_y + pad_top + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + pad_x],
+				       &s_decode_scratch[ry * iw],
+				       iw * sizeof(uint32_t));
+			}
+			slot->raw_w = (uint16_t)iw;
+			slot->raw_h = (uint16_t)ih;
+			slot->rect.x = s_shelf_x;
+			slot->rect.y = s_shelf_y;
+			slot->rect.w = (uint16_t)slot_w;
+			slot->rect.h = (uint16_t)slot_h;
+			s_shelf_x = (uint16_t)(s_shelf_x + slot_w);
+			if (slot_h > s_shelf_h)
+				s_shelf_h = (uint16_t)slot_h;
+			slot->loaded = 1;
+			s_atlas_ver++;
+			try_load_slot_normal(slot);
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
 {
 	if (!ND_PLANT_UNPACK_PRESENT(plant_id))
@@ -366,47 +412,304 @@ int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
 		         var_idx + 1u);
 		slot->img_id = lam_image_request(url);
 	}
-	if (slot->img_id) {
-		uint32_t iw = 0, ih = 0;
-		if (lam_image_read(slot->img_id, s_decode_scratch, sizeof(s_decode_scratch), &iw, &ih) &&
-		    iw > 0 && ih > 0 && iw <= 384 && ih <= 384) {
-			/* Pad left/right by 4px and top by 2px of transparent texels (bottom pad = 0 so
-			 * ground root anchor_y is unchanged) so waving canopy leaves never clip at rect edges */
-			const uint32_t pad_x = 4u;
-			const uint32_t pad_top = 2u;
-			uint32_t slot_w = iw + pad_x * 2u;
-			uint32_t slot_h = ih + pad_top;
-			if ((uint32_t)s_shelf_x + slot_w > ND_SEVEN_ATLAS_W) {
-				s_shelf_x = 0;
-				s_shelf_y = (uint16_t)(s_shelf_y + s_shelf_h);
-				s_shelf_h = 0;
-			}
-			if ((uint32_t)s_shelf_y + slot_h <= ND_SEVEN_RUNTIME_ATLAS_H) {
-				for (uint32_t ry = 0; ry < slot_h; ry++) {
-					memset(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
-					       0, slot_w * sizeof(uint32_t));
-				}
-				for (uint32_t ry = 0; ry < ih; ry++) {
-					memcpy(&s_atlas_rgba[(s_shelf_y + pad_top + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + pad_x],
-					       &s_decode_scratch[ry * iw],
-					       iw * sizeof(uint32_t));
-				}
-				slot->raw_w = (uint16_t)iw;
-				slot->raw_h = (uint16_t)ih;
-				slot->rect.x = s_shelf_x;
-				slot->rect.y = s_shelf_y;
-				slot->rect.w = (uint16_t)slot_w;
-				slot->rect.h = (uint16_t)slot_h;
-				s_shelf_x = (uint16_t)(s_shelf_x + slot_w);
-				if (slot_h > s_shelf_h)
-					s_shelf_h = (uint16_t)slot_h;
-				slot->loaded = 1;
-				s_atlas_ver++;
-				try_load_slot_normal(slot);
-				if (out_rect) *out_rect = slot->rect;
-				return 1;
-			}
-		}
+	if (try_pack_slot_image(slot)) {
+		if (out_rect) *out_rect = slot->rect;
+		return 1;
+	}
+	return 0;
+}
+
+typedef struct {
+	const char *slug;
+	const char *name;
+} nd_stone_spec_t;
+
+enum {
+	/* alpine_tundra (0..4) */
+	NDS_SP_ALPINE_GNEISS = 0,
+	NDS_SP_ALPINE_GLACIAL,
+	NDS_SP_ALPINE_GRANITE,
+	NDS_SP_ALPINE_LICHEN,
+	NDS_SP_ALPINE_MORAINE,
+	/* hot_desert (5..14) */
+	NDS_SP_DESERT_COPPER_CL,
+	NDS_SP_DESERT_IRON_CL,
+	NDS_SP_DESERT_TOURM_CL,
+	NDS_SP_DESERT_QUARTZ_CL,
+	NDS_SP_DESERT_QUARTZ_SO,
+	NDS_SP_DESERT_TOURM_SO,
+	NDS_SP_DESERT_IRON_SO,
+	NDS_SP_DESERT_COPPER_SO,
+	NDS_SP_DESERT_GOLD_SO,
+	NDS_SP_DESERT_GOLD_CL,
+	/* mediterranean (15..18) */
+	NDS_SP_MED_LIMESTONE_BLK,
+	NDS_SP_MED_LATERITE,
+	NDS_SP_MED_DRY_MOSS,
+	NDS_SP_MED_LIMESTONE_PEB,
+	/* minerals (19..29) */
+	NDS_SP_MIN_COAL_CL,
+	NDS_SP_MIN_EMERALD_CL,
+	NDS_SP_MIN_OBSIDIAN_CL,
+	NDS_SP_MIN_SILVER_CL,
+	NDS_SP_MIN_AMBER_SO,
+	NDS_SP_MIN_COAL_SO,
+	NDS_SP_MIN_EMERALD_SO,
+	NDS_SP_MIN_JADE_SO,
+	NDS_SP_MIN_OBSIDIAN_SO,
+	NDS_SP_MIN_SILVER_SO,
+	NDS_SP_MIN_SALT_SO,
+	/* shrubland (30..33) */
+	NDS_SP_SHRUB_QUARTZITE,
+	NDS_SP_SHRUB_PEBBLES,
+	NDS_SP_SHRUB_LICHEN,
+	NDS_SP_SHRUB_GRANITE,
+	/* temperate_rainforest (34..37) */
+	NDS_SP_TEMP_WET_PEBBLES,
+	NDS_SP_TEMP_GRANITE_FRAG,
+	NDS_SP_TEMP_MOSS_ROCK,
+	NDS_SP_TEMP_RIVER_PEBBLE,
+	/* tropical_rainforest (38..42) */
+	NDS_SP_TROP_ROOT_OUTCROP,
+	NDS_SP_TROP_MOSS_CASCADE,
+	NDS_SP_TROP_MOSS_BOULDER,
+	NDS_SP_TROP_ROLLED_ROCK,
+	NDS_SP_TROP_WET_PEBBLES,
+	/* volcanic (43..46) */
+	NDS_SP_VOLC_SCORIA,
+	NDS_SP_VOLC_LAVA_BOULDER,
+	NDS_SP_VOLC_PUMICE_CL,
+	NDS_SP_VOLC_BASALT_FRAG,
+	/* wetland (47..50) */
+	NDS_SP_WET_MUD_OUTCROP,
+	NDS_SP_WET_ALGAE_ROCK,
+	NDS_SP_WET_MOSS_ROCK,
+	NDS_SP_WET_PEBBLE,
+	NDS_SP_COUNT
+};
+
+static const nd_stone_spec_t s_nd_stone_specs[NDS_SP_COUNT] = {
+	[NDS_SP_ALPINE_GNEISS]     = { "alpine_tundra/FragmentoGneiss",             "Gneiss Fragment" },
+	[NDS_SP_ALPINE_GLACIAL]    = { "alpine_tundra/PedraGlacialFendida",         "Split Glacial Boulder" },
+	[NDS_SP_ALPINE_GRANITE]    = { "alpine_tundra/PedraGranitoAlpino",          "Alpine Granite Rock" },
+	[NDS_SP_ALPINE_LICHEN]     = { "alpine_tundra/RochaLiquenAlpino",           "Alpine Lichen Rock" },
+	[NDS_SP_ALPINE_MORAINE]    = { "alpine_tundra/SeixoMorena",                 "Moraine Pebble" },
+	[NDS_SP_DESERT_COPPER_CL]  = { "hot_desert/ClusterCobre",                   "Copper Ore Cluster" },
+	[NDS_SP_DESERT_IRON_CL]    = { "hot_desert/ClusterFerro",                   "Iron Ore Cluster" },
+	[NDS_SP_DESERT_TOURM_CL]   = { "hot_desert/ClusterTurmalina",               "Tourmaline Cluster" },
+	[NDS_SP_DESERT_QUARTZ_CL]  = { "hot_desert/CristaisQuartzo",                "Quartz Crystals" },
+	[NDS_SP_DESERT_QUARTZ_SO]  = { "hot_desert/CristalQuartzo_solo",            "Quartz Crystal" },
+	[NDS_SP_DESERT_TOURM_SO]   = { "hot_desert/CristalTurmalina_solo",          "Tourmaline Crystal" },
+	[NDS_SP_DESERT_IRON_SO]    = { "hot_desert/PedacoFerro_solo",               "Iron Shard" },
+	[NDS_SP_DESERT_COPPER_SO]  = { "hot_desert/PepitaCobre_solo",               "Copper Nugget" },
+	[NDS_SP_DESERT_GOLD_SO]    = { "hot_desert/PepitaOuro_solo",                "Gold Nugget" },
+	[NDS_SP_DESERT_GOLD_CL]    = { "hot_desert/PepitasOuro",                    "Gold Vein Rock" },
+	[NDS_SP_MED_LIMESTONE_BLK] = { "mediterranean/BlocoCalcarioNatural",        "Limestone Outcrop" },
+	[NDS_SP_MED_LATERITE]      = { "mediterranean/PedraLateritica",             "Laterite Rock" },
+	[NDS_SP_MED_DRY_MOSS]      = { "mediterranean/PedraMusgoSeco",              "Dry Moss Boulder" },
+	[NDS_SP_MED_LIMESTONE_PEB] = { "mediterranean/SeixoRioCalcario",            "Limestone Pebble" },
+	[NDS_SP_MIN_COAL_CL]       = { "minerals/ClusterCarvao",                    "Coal Seam Rock" },
+	[NDS_SP_MIN_EMERALD_CL]    = { "minerals/ClusterEsmeralda",                 "Emerald Cluster" },
+	[NDS_SP_MIN_OBSIDIAN_CL]   = { "minerals/ClusterObsidiana",                 "Obsidian Cluster" },
+	[NDS_SP_MIN_SILVER_CL]     = { "minerals/ClusterPrata",                     "Silver Vein Rock" },
+	[NDS_SP_MIN_AMBER_SO]      = { "minerals/SoloAmbar",                        "Amber Piece" },
+	[NDS_SP_MIN_COAL_SO]       = { "minerals/SoloCarvao",                       "Coal Shard" },
+	[NDS_SP_MIN_EMERALD_SO]    = { "minerals/SoloEsmeralda",                    "Emerald Crystal" },
+	[NDS_SP_MIN_JADE_SO]       = { "minerals/SoloJade",                         "Jade Stone" },
+	[NDS_SP_MIN_OBSIDIAN_SO]   = { "minerals/SoloObsidiana",                    "Obsidian Shard" },
+	[NDS_SP_MIN_SILVER_SO]     = { "minerals/SoloPrata",                        "Silver Nugget" },
+	[NDS_SP_MIN_SALT_SO]       = { "minerals/SoloSal",                          "Rock Salt Crystal" },
+	[NDS_SP_SHRUB_QUARTZITE]   = { "shrubland/AfloramentoQuartzito",            "Quartzite Outcrop" },
+	[NDS_SP_SHRUB_PEBBLES]     = { "shrubland/ClusterSeixosSoltos",             "Loose Pebble Cluster" },
+	[NDS_SP_SHRUB_LICHEN]      = { "shrubland/PedraLiquenSeco",                 "Dry Lichen Rock" },
+	[NDS_SP_SHRUB_GRANITE]     = { "shrubland/SeixoGranito",                    "Granite Pebble" },
+	[NDS_SP_TEMP_WET_PEBBLES]  = { "temperate_rainforest/ClusterSeixosMolhados","Wet Pebble Cluster" },
+	[NDS_SP_TEMP_GRANITE_FRAG] = { "temperate_rainforest/FragmentoGranito",     "Granite Fragment" },
+	[NDS_SP_TEMP_MOSS_ROCK]    = { "temperate_rainforest/PedraMusgoHumido",     "Mossy Forest Boulder" },
+	[NDS_SP_TEMP_RIVER_PEBBLE] = { "temperate_rainforest/SeixoRio",             "River Pebble" },
+	[NDS_SP_TROP_ROOT_OUTCROP] = { "tropical_rainforest/AfloramentoRaizes",     "Root-Bound Outcrop" },
+	[NDS_SP_TROP_MOSS_CASCADE] = { "tropical_rainforest/BoulderCascataMusgo",   "Moss Cascade Boulder" },
+	[NDS_SP_TROP_MOSS_BOULDER] = { "tropical_rainforest/BoulderMusgo",          "Jungle Moss Boulder" },
+	[NDS_SP_TROP_ROLLED_ROCK]  = { "tropical_rainforest/PedraRolada",           "Tropical River Rock" },
+	[NDS_SP_TROP_WET_PEBBLES]  = { "tropical_rainforest/SeixosMolhados",        "Wet Jungle Pebbles" },
+	[NDS_SP_VOLC_SCORIA]       = { "volcanic/AfloramentoEscoria",               "Scoria Outcrop" },
+	[NDS_SP_VOLC_LAVA_BOULDER] = { "volcanic/BoulderLavaSolidificada",          "Solidified Lava Boulder" },
+	[NDS_SP_VOLC_PUMICE_CL]    = { "volcanic/ClusterPedraPomes",                "Pumice Cluster" },
+	[NDS_SP_VOLC_BASALT_FRAG]  = { "volcanic/FragmentoBasalto",                 "Basalt Fragment" },
+	[NDS_SP_WET_MUD_OUTCROP]   = { "wetland/AfloramentoLama",                   "Mudstone Outcrop" },
+	[NDS_SP_WET_ALGAE_ROCK]    = { "wetland/PedraAlgas",                        "Algae-Covered Rock" },
+	[NDS_SP_WET_MOSS_ROCK]     = { "wetland/PedraMusgoHumido",                  "Wetland Moss Boulder" },
+	[NDS_SP_WET_PEBBLE]        = { "wetland/SeixoMolhado",                      "Wet Marsh Pebble" },
+};
+
+static flora_dyn_slot_t s_stone_slots[NDS_SP_COUNT];
+
+static int resolve_stone_spec_idx(const ndw_obj_t *o)
+{
+	if (!o || (o->kind != NDW_K_STONE && o->kind != NDW_K_ROCK && o->kind != NDW_K_BOULDER))
+		return -1;
+
+	unsigned biome = o->col_mask;
+	unsigned h = (unsigned)o->variant ^ ((unsigned)o->slot_id * 73u);
+
+	/* Map 19 world biomes (0..18) to 8 ecological stone families:
+	 * 0: alpine_tundra        (1: Ice, 2: Tundra, 3: Boreal, 6: Cold Desert)
+	 * 1: mediterranean        (4: Prairie, 10: Savanna)
+	 * 2: wetland              (0: Water/Coast, 5: Swamp)
+	 * 3: shrubland            (7: Scrub)
+	 * 4: temperate_rainforest (8: Woodland, 9: Forest, 11: Conifer, 12: Montane, 13: Rainforest)
+	 * 5: hot_desert           (14: Steppe, 15: Desert)
+	 * 6: tropical_rainforest  (16: Monsoon, 17: Jungle)
+	 * 7: volcanic             (18: Lava)
+	 */
+	static const uint8_t s_small_pools[8][8] = {
+		/* 0: alpine */
+		{ NDS_SP_ALPINE_GNEISS, NDS_SP_ALPINE_MORAINE, NDS_SP_MIN_SILVER_SO, NDS_SP_MIN_COAL_SO,
+		  NDS_SP_ALPINE_GNEISS, NDS_SP_ALPINE_MORAINE, NDS_SP_MIN_SILVER_CL, NDS_SP_MIN_OBSIDIAN_SO },
+		/* 1: mediterranean */
+		{ NDS_SP_MED_LIMESTONE_PEB, NDS_SP_MED_LATERITE, NDS_SP_MIN_AMBER_SO, NDS_SP_MIN_SALT_SO,
+		  NDS_SP_MED_LIMESTONE_PEB, NDS_SP_SHRUB_GRANITE, NDS_SP_DESERT_COPPER_SO, NDS_SP_DESERT_GOLD_SO },
+		/* 2: wetland */
+		{ NDS_SP_WET_PEBBLE, NDS_SP_WET_MUD_OUTCROP, NDS_SP_MIN_AMBER_SO, NDS_SP_MIN_JADE_SO,
+		  NDS_SP_WET_PEBBLE, NDS_SP_TEMP_RIVER_PEBBLE, NDS_SP_WET_ALGAE_ROCK, NDS_SP_MIN_COAL_SO },
+		/* 3: shrubland */
+		{ NDS_SP_SHRUB_GRANITE, NDS_SP_SHRUB_QUARTZITE, NDS_SP_MIN_COAL_SO, NDS_SP_DESERT_IRON_SO,
+		  NDS_SP_SHRUB_GRANITE, NDS_SP_SHRUB_QUARTZITE, NDS_SP_DESERT_QUARTZ_SO, NDS_SP_MIN_SILVER_SO },
+		/* 4: temperate_rainforest */
+		{ NDS_SP_TEMP_RIVER_PEBBLE, NDS_SP_TEMP_GRANITE_FRAG, NDS_SP_MIN_AMBER_SO, NDS_SP_MIN_EMERALD_SO,
+		  NDS_SP_TEMP_RIVER_PEBBLE, NDS_SP_TEMP_WET_PEBBLES, NDS_SP_MIN_JADE_SO, NDS_SP_MIN_SILVER_SO },
+		/* 5: hot_desert */
+		{ NDS_SP_DESERT_QUARTZ_SO, NDS_SP_DESERT_TOURM_SO, NDS_SP_DESERT_IRON_SO, NDS_SP_DESERT_COPPER_SO,
+		  NDS_SP_DESERT_GOLD_SO, NDS_SP_DESERT_TOURM_CL, NDS_SP_DESERT_QUARTZ_CL, NDS_SP_MIN_SALT_SO },
+		/* 6: tropical_rainforest */
+		{ NDS_SP_TROP_WET_PEBBLES, NDS_SP_MIN_EMERALD_SO, NDS_SP_MIN_JADE_SO, NDS_SP_DESERT_GOLD_SO,
+		  NDS_SP_TROP_WET_PEBBLES, NDS_SP_TEMP_RIVER_PEBBLE, NDS_SP_MIN_AMBER_SO, NDS_SP_DESERT_TOURM_SO },
+		/* 7: volcanic */
+		{ NDS_SP_VOLC_SCORIA, NDS_SP_VOLC_PUMICE_CL, NDS_SP_MIN_OBSIDIAN_SO, NDS_SP_MIN_COAL_SO,
+		  NDS_SP_VOLC_BASALT_FRAG, NDS_SP_DESERT_IRON_SO, NDS_SP_MIN_OBSIDIAN_CL, NDS_SP_VOLC_SCORIA },
+	};
+
+	static const uint8_t s_rock_pools[8][6] = {
+		/* 0: alpine */
+		{ NDS_SP_ALPINE_GRANITE, NDS_SP_ALPINE_LICHEN, NDS_SP_ALPINE_MORAINE,
+		  NDS_SP_MIN_SILVER_CL, NDS_SP_MIN_COAL_CL, NDS_SP_ALPINE_GRANITE },
+		/* 1: mediterranean */
+		{ NDS_SP_MED_LATERITE, NDS_SP_MED_DRY_MOSS, NDS_SP_MED_LIMESTONE_PEB,
+		  NDS_SP_DESERT_COPPER_CL, NDS_SP_MIN_SILVER_CL, NDS_SP_MED_LATERITE },
+		/* 2: wetland */
+		{ NDS_SP_WET_ALGAE_ROCK, NDS_SP_WET_MUD_OUTCROP, NDS_SP_WET_PEBBLE,
+		  NDS_SP_TEMP_WET_PEBBLES, NDS_SP_MIN_COAL_CL, NDS_SP_WET_ALGAE_ROCK },
+		/* 3: shrubland */
+		{ NDS_SP_SHRUB_PEBBLES, NDS_SP_SHRUB_LICHEN, NDS_SP_SHRUB_QUARTZITE,
+		  NDS_SP_DESERT_COPPER_CL, NDS_SP_MIN_COAL_CL, NDS_SP_SHRUB_LICHEN },
+		/* 4: temperate_rainforest */
+		{ NDS_SP_TEMP_WET_PEBBLES, NDS_SP_TEMP_GRANITE_FRAG, NDS_SP_TEMP_MOSS_ROCK,
+		  NDS_SP_MIN_EMERALD_CL, NDS_SP_MIN_SILVER_CL, NDS_SP_TEMP_GRANITE_FRAG },
+		/* 5: hot_desert */
+		{ NDS_SP_DESERT_COPPER_CL, NDS_SP_DESERT_IRON_CL, NDS_SP_DESERT_GOLD_CL,
+		  NDS_SP_DESERT_QUARTZ_CL, NDS_SP_DESERT_TOURM_CL, NDS_SP_MED_LATERITE },
+		/* 6: tropical_rainforest */
+		{ NDS_SP_TROP_ROLLED_ROCK, NDS_SP_TROP_ROOT_OUTCROP, NDS_SP_TROP_WET_PEBBLES,
+		  NDS_SP_MIN_EMERALD_CL, NDS_SP_TEMP_MOSS_ROCK, NDS_SP_TROP_ROLLED_ROCK },
+		/* 7: volcanic */
+		{ NDS_SP_VOLC_BASALT_FRAG, NDS_SP_VOLC_PUMICE_CL, NDS_SP_VOLC_SCORIA,
+		  NDS_SP_MIN_OBSIDIAN_CL, NDS_SP_MIN_COAL_CL, NDS_SP_DESERT_IRON_CL },
+	};
+
+	static const uint8_t s_boulder_pools[8][4] = {
+		/* 0: alpine */
+		{ NDS_SP_ALPINE_GLACIAL, NDS_SP_ALPINE_LICHEN, NDS_SP_ALPINE_GRANITE, NDS_SP_ALPINE_GLACIAL },
+		/* 1: mediterranean */
+		{ NDS_SP_MED_LIMESTONE_BLK, NDS_SP_MED_DRY_MOSS, NDS_SP_MED_LATERITE, NDS_SP_MED_LIMESTONE_BLK },
+		/* 2: wetland */
+		{ NDS_SP_WET_MOSS_ROCK, NDS_SP_WET_ALGAE_ROCK, NDS_SP_WET_MUD_OUTCROP, NDS_SP_WET_MOSS_ROCK },
+		/* 3: shrubland */
+		{ NDS_SP_SHRUB_LICHEN, NDS_SP_SHRUB_PEBBLES, NDS_SP_MED_LIMESTONE_BLK, NDS_SP_SHRUB_LICHEN },
+		/* 4: temperate_rainforest */
+		{ NDS_SP_TEMP_MOSS_ROCK, NDS_SP_TROP_MOSS_BOULDER, NDS_SP_TEMP_WET_PEBBLES, NDS_SP_TEMP_MOSS_ROCK },
+		/* 5: hot_desert */
+		{ NDS_SP_DESERT_IRON_CL, NDS_SP_DESERT_GOLD_CL, NDS_SP_MED_LIMESTONE_BLK, NDS_SP_DESERT_COPPER_CL },
+		/* 6: tropical_rainforest */
+		{ NDS_SP_TROP_MOSS_CASCADE, NDS_SP_TROP_MOSS_BOULDER, NDS_SP_TROP_ROOT_OUTCROP, NDS_SP_TROP_ROLLED_ROCK },
+		/* 7: volcanic */
+		{ NDS_SP_VOLC_LAVA_BOULDER, NDS_SP_MIN_OBSIDIAN_CL, NDS_SP_VOLC_BASALT_FRAG, NDS_SP_VOLC_LAVA_BOULDER },
+	};
+
+	unsigned fam = 4u;
+	switch (biome) {
+	case 1: case 2: case 3: case 6:
+		fam = 0u; break;
+	case 4: case 10:
+		fam = 1u; break;
+	case 0: case 5:
+		fam = 2u; break;
+	case 7:
+		fam = 3u; break;
+	case 8: case 9: case 11: case 12: case 13:
+		fam = 4u; break;
+	case 14: case 15:
+		fam = 5u; break;
+	case 16: case 17:
+		fam = 6u; break;
+	case 18:
+		fam = 7u; break;
+	default:
+		fam = 4u; break;
+	}
+
+	if (o->kind == NDW_K_STONE)
+		return (int)s_small_pools[fam][h % 8u];
+	if (o->kind == NDW_K_ROCK)
+		return (int)s_rock_pools[fam][h % 6u];
+	return (int)s_boulder_pools[fam][h % 4u];
+}
+
+const char *nd_seven_stone_name(const ndw_obj_t *o)
+{
+	int idx = resolve_stone_spec_idx(o);
+	if (idx >= 0 && idx < NDS_SP_COUNT)
+		return s_nd_stone_specs[idx].name;
+	return NULL;
+}
+
+int nd_seven_stone_has_normal(const ndw_obj_t *o)
+{
+	int idx = resolve_stone_spec_idx(o);
+	if (idx < 0 || idx >= NDS_SP_COUNT)
+		return 0;
+	flora_dyn_slot_t *slot = &s_stone_slots[idx];
+	try_load_slot_normal(slot);
+	return (slot->loaded && slot->norm_loaded) ? 1 : 0;
+}
+
+int nd_seven_stone_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect)
+{
+	int idx = resolve_stone_spec_idx(o);
+	if (idx < 0 || idx >= NDS_SP_COUNT)
+		return 0;
+
+	atlas_load();
+	flora_dyn_slot_t *slot = &s_stone_slots[idx];
+	if (!slot->norm_img_id) {
+		char norm_url[128];
+		snprintf(norm_url, sizeof(norm_url), "/nd/art/mineral/%s_normal.png",
+		         s_nd_stone_specs[idx].slug);
+		slot->norm_img_id = lam_image_request(norm_url);
+	}
+	if (slot->loaded) {
+		try_load_slot_normal(slot);
+		if (out_rect) *out_rect = slot->rect;
+		return 1;
+	}
+	if (!slot->img_id) {
+		char url[128];
+		snprintf(url, sizeof(url), "/nd/art/mineral/%s_albedo.png",
+		         s_nd_stone_specs[idx].slug);
+		slot->img_id = lam_image_request(url);
+	}
+	if (try_pack_slot_image(slot)) {
+		if (out_rect) *out_rect = slot->rect;
+		return 1;
 	}
 	return 0;
 }
@@ -416,6 +719,9 @@ int nd_seven_obj_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect)
 	if (!o || !out_rect)
 		return 0;
 	if (o->plant_id && nd_seven_plant_rect(o->plant_id, out_rect))
+		return 1;
+	if ((o->kind == NDW_K_STONE || o->kind == NDW_K_ROCK || o->kind == NDW_K_BOULDER) &&
+	    nd_seven_stone_rect(o, out_rect))
 		return 1;
 	int id = nd_seven_obj_sprite(o);
 	if (id > 0 && id < NDS_COUNT) {

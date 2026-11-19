@@ -2,6 +2,7 @@
 #include "nd_seven_gl.h"
 #include "nd_seven_motion.h"
 #include "nd_seven_atlas.h"
+#include "nd_seven_atlas_draw.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -437,6 +438,11 @@ const char *world_obj_name(const ndw_obj_t *o, const nd_client_state_t *st, int 
 	}
 	if (ND_PLANT_UNPACK_PRESENT(o->plant_id))
 		return s_nd_plant_specs[ND_PLANT_UNPACK_IDX(o->plant_id)].name;
+	if (o->kind == NDW_K_STONE || o->kind == NDW_K_ROCK || o->kind == NDW_K_BOULDER) {
+		const char *sn = nd_seven_stone_name(o);
+		if (sn)
+			return sn;
+	}
 	const nd_scenery_def_t *def = nd_seven_get_scenery_def(o->kind);
 	if (def && def->default_name)
 		return def->default_name;

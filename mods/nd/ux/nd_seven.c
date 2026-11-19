@@ -75,15 +75,15 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 	 * On coarse chunks (level >= 2), ignore perched mountain-lake water overrides (fs.water_level > base_wl)
 	 * so a single isolated mountain lake sample does not raise the sea level of an entire continental chunk. */
 	uint8_t river_carve_q4 = (level <= 8) ? fs.river_carve_q4 : 0;
-	int16_t eff_wl = (level <= 4 || river_carve_q4 > 0) ? fs.water_level : base_wl;
-	bool eff_is_water = (level <= 4 || river_carve_q4 > 0) ? fs.is_water : ((fs.elevation_q12_4 >> 4) < base_wl);
+	int16_t eff_wl = (level <= 5 || river_carve_q4 > 0) ? fs.water_level : base_wl;
+	bool eff_is_water = (level <= 5 || river_carve_q4 > 0) ? fs.is_water : ((fs.elevation_q12_4 >> 4) < base_wl);
 	int32_t eff_depth = eff_is_water ? ((int32_t)eff_wl - (fs.elevation_q12_4 >> 4)) : 0;
 	if (eff_depth < 0) eff_depth = 0;
 	out->attr[3] = (uint8_t)(eff_depth > 255 ? 255 : eff_depth);
 	out->attr[6] = river_carve_q4;
 	int32_t shore_ceil_q12_4 = ((int32_t)eff_wl + 4) << 4;
 	uint8_t flags = (eff_depth > 0 || (int32_t)fs.elevation_q12_4 <= shore_ceil_q12_4 || river_carve_q4 > 0) ? 1u : 0u;
-	if (level <= 4 && fs.water_level > base_wl && fs.river_carve_q4 == 0)
+	if (level <= 5 && fs.water_level > base_wl && fs.river_carve_q4 == 0)
 		flags |= 2u;
 	out->flags = flags;
 	if (flags) {
@@ -95,15 +95,13 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 	uint32_t c1 = ndw_biome_base_rgb(fs.bio);
 	uint32_t c2 = ndw_biome_base_rgb(fs.bio2);
 	uint8_t blend = fs.blend;
-	if (level < 5 && blend > 0 && fs.bio != fs.bio2) {
+	if (level <= 5 && blend > 0 && fs.bio != fs.bio2) {
 		/* Natural ecological ecotone mosaic: modulate smooth Whittaker blend (0..128)
 		 * with multi-scale spatial patches and micro-relief (hollows vs rises) so
 		 * adjacent biomes interdigitate organically without hard seams or flat washes. */
 		int16_t p_eco[2] = { (int16_t)wy, (int16_t)wx };
 		uint32_t n_meso = noise_wpoint_n(p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
-		uint32_t n_loc  = (level <= 2)
-			? (noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16)
-			: 128u;
+		uint32_t n_loc  = noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
 		int32_t eco_jitter = ((int32_t)n_meso - 128) + (((int32_t)n_loc - 128) >> 1) - ((int32_t)fs.fine_elev * 2);
 		int32_t span = (blend <= 128) ? 128 : 252;
 		int32_t env_w = (int32_t)blend * (span - (int32_t)blend);
@@ -168,7 +166,7 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
                                      int32_t wx, int32_t wy, ar_sample_t *out)
 {
 	(void)user_ctx;
-	int32_t step_q16 = (level <= 2)
+	int32_t step_q16 = (level <= 5)
 		? 0
 		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
 	nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
@@ -182,7 +180,7 @@ static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_
 	(void)user_ctx;
 	if (!out_row || count == 0)
 		return;
-	int32_t step_q16 = (level <= 2)
+	int32_t step_q16 = (level <= 5)
 		? 0
 		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
 	int16_t base_wl = nd_field_water_level(world);
@@ -846,9 +844,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                : (float)lamb_wl;
 		float eff_wl = fmaxf((float)lamb_wl, live_wl);
 		bool lamb_in_water = has_loc_water && (lwz < eff_wl + 0.65f);
-		if (lamb_in_water) {
-			nd_seven_gl_set_focal_water(eff_wl);
-		}
+		/* Always lock focal_sea_level to the Lamb's actual local water table (or base sea level on dry land)
+		 * so coarse terrain chunks containing distant perched mountain lakes never override billboard uSeaLevel. */
+		nd_seven_gl_set_focal_water(lamb_in_water ? eff_wl : (float)base_wl);
 		float wake_ground_z = lamb_in_water ? (lwz - ((float)lamb_wl - (float)base_wl)) : (float)base_wl + 10.0f;
 
 		/* Compute the exact 3D waterline intersection on the 55-deg tilted lamb billboard:
@@ -1142,18 +1140,32 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
-		if (node->level <= 4 && (node->flags & 2) != 0 && node->samples &&
+		if (node->level <= 2 && (node->flags & 2) != 0 && node->samples &&
 		    node->min_val > ((int32_t)(w_lvl_i + 8) << 4)) {
 			uint32_t vcnt = node->vert_count;
+			int16_t lake_wl = w_lvl_i;
+			bool has_dry_below_lake = false;
 			for (uint32_t vi = 0; vi < vcnt; vi++) {
 				if (node->samples[vi].flags & 2) {
 					int16_t s_wl = (int16_t)((uint16_t)node->samples[vi].attr[4] |
 					                         ((uint16_t)node->samples[vi].attr[5] << 8));
-					if (s_wl > w_lvl_i) {
-						w_lvl_i = s_wl;
+					if (s_wl > lake_wl) {
+						lake_wl = s_wl;
 						break;
 					}
 				}
+			}
+			if (lake_wl > w_lvl_i) {
+				int32_t lake_floor_q = ((int32_t)lake_wl - 1) << 4;
+				for (uint32_t vi = 0; vi < vcnt; vi++) {
+					if ((node->samples[vi].flags & 2) == 0 &&
+					    node->samples[vi].val < lake_floor_q) {
+						has_dry_below_lake = true;
+						break;
+					}
+				}
+				if (!has_dry_below_lake)
+					w_lvl_i = lake_wl;
 			}
 		}
 		float sea_lvl = has_water ? (float)w_lvl_i : ND_SEVEN_SEA_LEVEL_NONE;
@@ -1345,8 +1357,16 @@ static void seven_apply_obj_billboard_style(const ndw_obj_t *o,
 		bb->style = ND_BB_STYLE_MINERAL;
 		break;
 	case NDW_K_BOULDER:
-		bb->shadow_rx = 11;
-		bb->shadow_ry = 5;
+		if (sr && sr->w > 24) {
+			uint32_t rx = (uint32_t)(sr->w * 0.34f);
+			if (rx < 11u) rx = 11u;
+			if (rx > 22u) rx = 22u;
+			bb->shadow_rx = (uint8_t)rx;
+			bb->shadow_ry = (uint8_t)(rx * 0.45f > 5.0f ? rx * 0.45f : 5.0f);
+		} else {
+			bb->shadow_rx = 11;
+			bb->shadow_ry = 5;
+		}
 		bb->style = ND_BB_STYLE_MINERAL;
 		break;
 	default:
@@ -1565,6 +1585,12 @@ static void seven_async_block_bb_worker(void *ctx)
 				bb.v0 = (float)sr_val.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				bb.v1 = (float)(sr_val.y + sr_val.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 				seven_apply_obj_billboard_style(&raw_objs[k], &sr_val, 0xFFFFFFFFu, &bb);
+				if ((bb.style == ND_BB_STYLE_STANDARD || bb.style == ND_BB_STYLE_MINERAL) &&
+				    z_f < (float)local_wl - 0.05f) {
+					int16_t true_wl = 0;
+					if (seven_has_water_at((uint16_t)world, wx, wy, &true_wl) && z_f < (float)true_wl - 0.05f)
+						bb.pad0 |= 0x80u;
+				}
 				dst[cnt++] = bb;
 			}
 		}
@@ -1670,6 +1696,12 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		bb.v0 = (float)sr->y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 		bb.v1 = (float)(sr->y + sr->h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
 		seven_apply_obj_billboard_style(&raw_objs[k], sr, 0xFFFFFFFFu, &bb);
+		if ((bb.style == ND_BB_STYLE_STANDARD || bb.style == ND_BB_STYLE_MINERAL) &&
+		    z_f < (float)local_wl - 0.05f) {
+			int16_t true_wl = 0;
+			if (seven_has_water_at((uint16_t)pos[3], wx, wy, &true_wl) && z_f < (float)true_wl - 0.05f)
+				bb.pad0 |= 0x80u;
+		}
 
 		if (arena_dst && inout_arena_cnt && *inout_arena_cnt < BLOCK_BB_MAX_PER_BLK) {
 			arena_dst[(*inout_arena_cnt)++] = bb;
@@ -2478,13 +2510,20 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				dst_bb->v1 = v1;
 				if (dr[a].what == D_OBJ) {
 					seven_apply_obj_billboard_style(&dr[a].obj, &obj_sr, tint_b, dst_bb);
+					if (dst_bb->style == ND_BB_STYLE_STANDARD || dst_bb->style == ND_BB_STYLE_MINERAL) {
+						uint16_t world_id = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
+						int16_t true_wl = 0;
+						if (seven_has_water_at(world_id, dr[a].wx, dr[a].wy, &true_wl) &&
+						    dr[a].z_f < (float)true_wl - 0.05f)
+							dst_bb->pad0 |= 0x80u;
+					}
 				} else if (dr[a].what == D_LAMB) {
 					bool lamb_glows = (nd_seven_is_universe_owner(st) != 0);
 					dst_bb->tint_rgba = tint_b;
 					dst_bb->style = lamb_glows ? ND_BB_STYLE_GLOW : ND_BB_STYLE_STANDARD;
 					dst_bb->shadow_rx = lamb_glows ? 0 : 8;
 					dst_bb->shadow_ry = lamb_glows ? 0 : 4;
-					dst_bb->pad0 = 0;
+					dst_bb->pad0 = s_prev_lamb_in_water ? 0x80u : 0;
 				} else {
 					dst_bb->tint_rgba = tint_b;
 					dst_bb->pad0 = 0;
@@ -2498,6 +2537,13 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						dst_bb->pad0 = (bh <= 30.0f) ? 1u : 2u;
 					} else {
 						dst_bb->style = ND_BB_STYLE_STANDARD;
+					}
+					if (dst_bb->style == ND_BB_STYLE_STANDARD || dst_bb->style == ND_BB_STYLE_MINERAL) {
+						uint16_t world_id = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
+						int16_t true_wl = 0;
+						if (seven_has_water_at(world_id, dr[a].wx, dr[a].wy, &true_wl) &&
+						    dr[a].z_f < (float)true_wl - 0.05f)
+							dst_bb->pad0 |= 0x80u;
 					}
 					dst_bb->shadow_rx = (uint8_t)(bw * 0.34f > 4.0f ? bw * 0.34f : 4.0f);
 					dst_bb->shadow_ry = (uint8_t)(dst_bb->shadow_rx * 0.45f > 2.0f ? dst_bb->shadow_rx * 0.45f : 2.0f);

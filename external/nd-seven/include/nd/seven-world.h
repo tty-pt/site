@@ -737,6 +737,8 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 						}
 						if (o.hh > 0)
 							o.anchor_y = o.hh;
+					} else if (ce->scatter_mode == NDW_SCATTER_SINGLE) {
+						o.col_mask = t->biome;
 					}
 					if (!have_anchor) {
 						anchor_x = o.x;
