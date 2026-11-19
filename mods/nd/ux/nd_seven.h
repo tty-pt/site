@@ -88,20 +88,20 @@ void nd_seven_detail_out(void);
 #endif
 
 /* Cloud & volumetric shadow quality levels */
-enum {
-	ND_CLOUD_QUALITY_OFF    = 0,
-	ND_CLOUD_QUALITY_LOW    = 1,
-	ND_CLOUD_QUALITY_MEDIUM = 2,
-	ND_CLOUD_QUALITY_HIGH   = 3
-};
+#ifndef ND_CLOUD_QUALITY_OFF
+#define ND_CLOUD_QUALITY_OFF        0
+#define ND_CLOUD_QUALITY_LOW        1
+#define ND_CLOUD_QUALITY_MEDIUM     2
+#define ND_CLOUD_QUALITY_HIGH       3
+#endif
 
 /* Overall graphics quality presets */
-enum {
-	ND_QUALITY_LOW    = 0,
-	ND_QUALITY_MEDIUM = 1,
-	ND_QUALITY_HIGH   = 2,
-	ND_QUALITY_CUSTOM = 3
-};
+#ifndef ND_QUALITY_LOW
+#define ND_QUALITY_LOW              0
+#define ND_QUALITY_MEDIUM           1
+#define ND_QUALITY_HIGH             2
+#define ND_QUALITY_CUSTOM           3
+#endif
 
 #ifndef ND_SEVEN_RES_MIN
 #define ND_SEVEN_RES_MIN            0.25f

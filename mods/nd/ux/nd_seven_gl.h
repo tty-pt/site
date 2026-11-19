@@ -52,6 +52,7 @@ typedef struct lam_billboard_gpu {
 	uint8_t shadow_rx;  /* 3D ground contact shadow X radius in world units (0 = auto from width) */
 	uint8_t shadow_ry;  /* 3D ground contact shadow Y radius in world units (0 = auto from width) */
 	uint8_t pad0;
+	uint8_t mesh_id;    /* 3D procedural mesh template ID (0 = 2D billboard, 1..64 = plant, 65..115 = stone) */
 } lam_billboard_gpu_t;
 
 /* 20 floats (80 bytes) per billboard vertex:
@@ -220,6 +221,8 @@ const char *nd_seven_gl_vs_water(void);
 const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
+const char *nd_seven_gl_vs_mesh3d(void);
+const char *nd_seven_gl_fs_mesh3d(void);
 const char *nd_seven_gl_vs_csm(void);
 const char *nd_seven_gl_fs_csm(void);
 const char *nd_seven_gl_vs_cloud(void);

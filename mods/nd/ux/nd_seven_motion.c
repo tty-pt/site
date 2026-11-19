@@ -722,6 +722,7 @@ void nd_seven_forget(void)
 int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t, int16_t pos[4])
 {
 	const nd_map_data_t *md;
+	const int16_t *base_pos;
 	int col, row, w, h, known;
 
 	if (!st)
@@ -732,15 +733,17 @@ int nd_seven_tile_at(const nd_client_state_t *st, int ti, int tj, ndw_tile_t *t,
 	if (w == 0 || h == 0)
 		return 0;
 
-	col = md->player_x + ti;
-	row = md->player_y + tj;
+	base_pos = s_have ? s_pos : md->pos;
+	pos[0] = (int16_t)(base_pos[0] + ti);
+	pos[1] = (int16_t)(base_pos[1] - tj);
+	pos[2] = base_pos[2];
+	pos[3] = base_pos[3];
 
-	pos[0] = (int16_t)(md->pos[0] + ti);
-	pos[1] = (int16_t)(md->pos[1] - tj);
-	pos[2] = md->pos[2];
-	pos[3] = md->pos[3];
+	col = (int)md->player_x + (int)(pos[0] - md->pos[0]);
+	row = (int)md->player_y - (int)(pos[1] - md->pos[1]);
 
-	known = (col >= 0 && col < w && row >= 0 && row < h);
+	known = (pos[2] == md->pos[2] && pos[3] == md->pos[3] &&
+	         col >= 0 && col < w && row >= 0 && row < h);
 
 	if (known) {
 		*t = nd_seven_convert_tile(&md->tiles[row * w + col]);
@@ -984,13 +987,20 @@ static int is_motion_blocked(const nd_client_state_t *st, int fx, int fy)
 {
 	int x0 = fx - NDW_FOOT_HW, x1 = fx + NDW_FOOT_HW;
 	int y0 = fy - NDW_FOOT_H,  y1 = fy;
-	int ti0 = ndw_fdiv(x0, NDW_TILE_W), ti1 = ndw_fdiv(x1 - 1, NDW_TILE_W);
-	int tj0 = ndw_fdiv(y0, NDW_TILE_H), tj1 = ndw_fdiv(y1 - 1, NDW_TILE_H);
+	int f_ti0 = ndw_fdiv(x0, NDW_TILE_W), f_ti1 = ndw_fdiv(x1 - 1, NDW_TILE_W);
+	int f_tj0 = ndw_fdiv(y0, NDW_TILE_H), f_tj1 = ndw_fdiv(y1 - 1, NDW_TILE_H);
+	if (f_ti0 < -1 || f_ti1 > 1 || f_tj0 < -1 || f_tj1 > 1)
+		return 1;
+
+	int ti0 = ndw_fdiv(x0 - 16, NDW_TILE_W), ti1 = ndw_fdiv(x1 - 1 + 16, NDW_TILE_W);
+	int tj0 = ndw_fdiv(y0 - 16, NDW_TILE_H), tj1 = ndw_fdiv(y1 - 1 + 16, NDW_TILE_H);
+	if (ti0 < -1) ti0 = -1;
+	if (ti1 >  1) ti1 =  1;
+	if (tj0 < -1) tj0 = -1;
+	if (tj1 >  1) tj1 =  1;
 
 	for (int tj = tj0; tj <= tj1; tj++) {
 		for (int ti = ti0; ti <= ti1; ti++) {
-			if (ti < -1 || ti > 1 || tj < -1 || tj > 1)
-				return 1;
 			int ci = ti + 1, cj = tj + 1;
 			nd_tile_collision_t *tc = &s_col_cache[cj][ci];
 			int16_t cur_pos[4];

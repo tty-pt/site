@@ -257,6 +257,211 @@ typedef struct {
 
 static flora_dyn_slot_t s_flora_slots[ND_PLANT_MAX][2][2];
 static uint32_t s_decode_scratch[384 * 384];
+static uint32_t s_norm_scratch[384 * 384];
+
+static nd_mesh3d_vert_t  s_mesh3d_verts[ND_MESH3D_MAX_VERTS];
+static uint16_t          s_mesh3d_indices[ND_MESH3D_MAX_INDICES];
+static nd_mesh3d_slice_t s_mesh3d_slices[ND_MESH3D_TOTAL];
+static uint32_t          s_mesh3d_vert_count = 0;
+static uint32_t          s_mesh3d_idx_count  = 0;
+static uint8_t           s_mesh3d_ready      = 0;
+
+/* Map each of the 51 s_nd_stone_specs indices (0..50) to its canonical (width, height, generator_id) */
+static void
+stone_spec_canonical_params(unsigned idx, uint16_t *out_w, uint16_t *out_h, unsigned *out_gen_sp)
+{
+	uint16_t w = 28, h = 24;
+	unsigned gen = 34;
+	switch (idx) {
+	case 0:  w = 20; h = 16; gen = 28; break; /* FragmentoGneiss */
+	case 1:  w = 48; h = 38; gen = 45; break; /* PedraGlacialFendida */
+	case 2:  w = 30; h = 24; gen = 36; break; /* PedraGranitoAlpino */
+	case 3:  w = 32; h = 26; gen = 37; break; /* RochaLiquenAlpino */
+	case 4:  w = 18; h = 14; gen = 22; break; /* SeixoMorena */
+	case 5:  w = 28; h = 24; gen = 14; break; /* ClusterCobre */
+	case 6:  w = 28; h = 24; gen = 16; break; /* ClusterFerro */
+	case 7:  w = 26; h = 26; gen = 3;  break; /* ClusterTurmalina */
+	case 8:  w = 28; h = 28; gen = 1;  break; /* CristaisQuartzo */
+	case 9:  w = 18; h = 22; gen = 0;  break; /* CristalQuartzo_solo */
+	case 10: w = 18; h = 22; gen = 2;  break; /* CristalTurmalina_solo */
+	case 11: w = 18; h = 16; gen = 15; break; /* PedacoFerro_solo */
+	case 12: w = 18; h = 16; gen = 13; break; /* PepitaCobre_solo */
+	case 13: w = 18; h = 16; gen = 19; break; /* PepitaOuro_solo */
+	case 14: w = 28; h = 24; gen = 20; break; /* PepitasOuro */
+	case 15: w = 48; h = 38; gen = 46; break; /* BlocoCalcarioNatural */
+	case 16: w = 30; h = 24; gen = 38; break; /* PedraLateritica */
+	case 17: w = 44; h = 34; gen = 47; break; /* PedraMusgoSeco */
+	case 18: w = 18; h = 14; gen = 26; break; /* SeixoRioCalcario */
+	case 19: w = 28; h = 24; gen = 12; break; /* ClusterCarvao */
+	case 20: w = 26; h = 26; gen = 5;  break; /* ClusterEsmeralda */
+	case 21: w = 28; h = 28; gen = 7;  break; /* ClusterObsidiana */
+	case 22: w = 28; h = 24; gen = 18; break; /* ClusterPrata */
+	case 23: w = 18; h = 18; gen = 9;  break; /* SoloAmbar */
+	case 24: w = 18; h = 16; gen = 11; break; /* SoloCarvao */
+	case 25: w = 18; h = 22; gen = 4;  break; /* SoloEsmeralda */
+	case 26: w = 18; h = 18; gen = 8;  break; /* SoloJade */
+	case 27: w = 18; h = 22; gen = 6;  break; /* SoloObsidiana */
+	case 28: w = 18; h = 16; gen = 17; break; /* SoloPrata */
+	case 29: w = 20; h = 20; gen = 10; break; /* SoloSal */
+	case 30: w = 32; h = 26; gen = 39; break; /* AfloramentoQuartzito */
+	case 31: w = 24; h = 18; gen = 27; break; /* ClusterSeixosSoltos */
+	case 32: w = 30; h = 24; gen = 35; break; /* PedraLiquenSeco */
+	case 33: w = 18; h = 14; gen = 22; break; /* SeixoGranito */
+	case 34: w = 24; h = 18; gen = 25; break; /* ClusterSeixosMolhados */
+	case 35: w = 22; h = 18; gen = 29; break; /* FragmentoGranito */
+	case 36: w = 46; h = 36; gen = 43; break; /* PedraMusgoHumido */
+	case 37: w = 18; h = 14; gen = 21; break; /* SeixoRio */
+	case 38: w = 34; h = 28; gen = 42; break; /* AfloramentoRaizes */
+	case 39: w = 48; h = 40; gen = 50; break; /* BoulderCascataMusgo */
+	case 40: w = 46; h = 38; gen = 49; break; /* BoulderMusgo */
+	case 41: w = 30; h = 24; gen = 41; break; /* PedraRolada */
+	case 42: w = 22; h = 16; gen = 23; break; /* SeixosMolhados */
+	case 43: w = 30; h = 24; gen = 32; break; /* AfloramentoEscoria */
+	case 44: w = 48; h = 38; gen = 48; break; /* BoulderLavaSolidificada */
+	case 45: w = 26; h = 20; gen = 31; break; /* ClusterPedraPomes */
+	case 46: w = 22; h = 18; gen = 30; break; /* FragmentoBasalto */
+	case 47: w = 32; h = 24; gen = 39; break; /* AfloramentoLama */
+	case 48: w = 30; h = 24; gen = 34; break; /* PedraAlgas */
+	case 49: w = 44; h = 34; gen = 43; break; /* PedraMusgoHumido (wetland) */
+	case 50: w = 18; h = 14; gen = 24; break; /* SeixoMolhado */
+	default: break;
+	}
+	*out_w = w;
+	*out_h = h;
+	*out_gen_sp = gen;
+}
+
+void nd_seven_mesh3d_init(void)
+{
+	if (s_mesh3d_ready)
+		return;
+	memset(s_mesh3d_slices, 0, sizeof(s_mesh3d_slices));
+	nd_mesh3d_builder_t b;
+	b.verts      = s_mesh3d_verts;
+	b.vert_count = 0;
+	b.vert_cap   = ND_MESH3D_MAX_VERTS;
+	b.indices    = s_mesh3d_indices;
+	b.idx_count  = 0;
+	b.idx_cap    = ND_MESH3D_MAX_INDICES;
+
+	/* Build all 64 canonical plant templates (1..64) */
+	for (unsigned sp = 0; sp < ND_PLANT_MAX; sp++) {
+		nd_bot3d_profile_t prof = nd_m3d_get_botanical_profile(s_nd_plant_specs[sp].slug);
+		for (unsigned big = 0; big < 2u; big++) {
+			for (unsigned var = 0; var < 2u; var++) {
+				uint8_t mid = (uint8_t)(ND_MESH3D_PLANT_BASE + sp * 4u + big * 2u + var);
+				nd_m3d_build_plant_from_profile(&b, &prof, (int)big, (int)var,
+				                                0xB07A0u + sp * 97u,
+				                                &s_mesh3d_slices[mid]);
+			}
+		}
+	}
+
+	/* Build all 51 canonical stone/mineral templates (65..115) */
+	for (unsigned idx = 0; idx < (unsigned)ND_MESH3D_STONE_COUNT; idx++) {
+		uint16_t sw = 28, sh = 24;
+		unsigned gen_sp = 0;
+		stone_spec_canonical_params(idx, &sw, &sh, &gen_sp);
+		uint8_t mid = (uint8_t)(ND_MESH3D_STONE_BASE + idx);
+		nd_m3d_build_stone_spec(&b, gen_sp, sw, sh, &s_mesh3d_slices[mid]);
+	}
+
+	s_mesh3d_vert_count = b.vert_count;
+	s_mesh3d_idx_count  = b.idx_count;
+	s_mesh3d_ready      = 1;
+}
+
+const nd_mesh3d_vert_t *nd_seven_mesh3d_verts(uint32_t *out_count)
+{
+	nd_seven_mesh3d_init();
+	if (out_count) *out_count = s_mesh3d_vert_count;
+	return s_mesh3d_verts;
+}
+
+const uint16_t *nd_seven_mesh3d_indices(uint32_t *out_count)
+{
+	nd_seven_mesh3d_init();
+	if (out_count) *out_count = s_mesh3d_idx_count;
+	return s_mesh3d_indices;
+}
+
+const nd_mesh3d_slice_t *nd_seven_mesh3d_slice(uint8_t mesh_id)
+{
+	nd_seven_mesh3d_init();
+	if (mesh_id == 0 || mesh_id >= ND_MESH3D_TOTAL)
+		return NULL;
+	return &s_mesh3d_slices[mesh_id];
+}
+
+uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id)
+{
+	if (!ND_PLANT_UNPACK_PRESENT(plant_id))
+		return ND_MESH3D_NONE;
+	unsigned sp_idx  = ND_PLANT_UNPACK_IDX(plant_id);
+	unsigned is_big  = ND_PLANT_UNPACK_BIG(plant_id);
+	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 1u;
+	return (uint8_t)(ND_MESH3D_PLANT_BASE + sp_idx * 4u + is_big * 2u + var_idx);
+}
+
+/* Bake a 3D mesh template synchronously into a dynamic atlas slot (albedo + normal map) */
+static int
+bake_mesh3d_into_slot(flora_dyn_slot_t *slot, uint8_t mesh_id)
+{
+	if (!slot || mesh_id == 0 || mesh_id >= ND_MESH3D_TOTAL)
+		return 0;
+	if (slot->loaded)
+		return 1;
+	nd_seven_mesh3d_init();
+	const nd_mesh3d_slice_t *sl = &s_mesh3d_slices[mesh_id];
+	uint32_t iw = sl->sprite_w;
+	uint32_t ih = sl->sprite_h;
+	if (iw == 0 || ih == 0 || iw > 256 || ih > 256)
+		return 0;
+
+	nd_seven_mesh3d_bake_ortho_rgba(s_mesh3d_verts, s_mesh3d_indices, sl,
+	                                s_decode_scratch, s_norm_scratch, iw);
+
+	const uint32_t pad_x = 4u;
+	const uint32_t pad_top = 2u;
+	uint32_t slot_w = iw + pad_x * 2u;
+	uint32_t slot_h = ih + pad_top;
+	if ((uint32_t)s_shelf_x + slot_w > ND_SEVEN_ATLAS_W) {
+		s_shelf_x = 0;
+		s_shelf_y = (uint16_t)(s_shelf_y + s_shelf_h);
+		s_shelf_h = 0;
+	}
+	if ((uint32_t)s_shelf_y + slot_h > ND_SEVEN_RUNTIME_ATLAS_H)
+		return 0;
+
+	for (uint32_t ry = 0; ry < slot_h; ry++) {
+		memset(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
+		       0, slot_w * sizeof(uint32_t));
+		for (uint32_t rx = 0; rx < slot_w; rx++) {
+			s_atlas_norm_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + rx] = 0xFFFF8080u;
+		}
+	}
+	for (uint32_t ry = 0; ry < ih; ry++) {
+		memcpy(&s_atlas_rgba[(s_shelf_y + pad_top + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + pad_x],
+		       &s_decode_scratch[ry * iw],
+		       iw * sizeof(uint32_t));
+		memcpy(&s_atlas_norm_rgba[(s_shelf_y + pad_top + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + pad_x],
+		       &s_norm_scratch[ry * iw],
+		       iw * sizeof(uint32_t));
+	}
+	slot->raw_w       = (uint16_t)iw;
+	slot->raw_h       = (uint16_t)ih;
+	slot->rect.x      = s_shelf_x;
+	slot->rect.y      = s_shelf_y;
+	slot->rect.w      = (uint16_t)slot_w;
+	slot->rect.h      = (uint16_t)slot_h;
+	s_shelf_x         = (uint16_t)(s_shelf_x + slot_w);
+	if (slot_h > s_shelf_h)
+		s_shelf_h = (uint16_t)slot_h;
+	slot->loaded      = 1;
+	slot->norm_loaded = 1;
+	s_atlas_ver++;
+	return 1;
+}
 
 void atlas_load(void)
 {
@@ -277,6 +482,7 @@ void atlas_load(void)
 		s_atlas_norm_rgba[p] = 0x00FF8080u;
 	}
 	synthesize_botanical_shelf();
+	nd_seven_mesh3d_init();
 	s_atlas_ready = 1;
 }
 
@@ -304,25 +510,6 @@ uint32_t atlas_rgba_version(void)
 	return s_atlas_ver;
 }
 
-static void try_load_slot_normal(flora_dyn_slot_t *slot)
-{
-	if (!slot || !slot->loaded || slot->norm_loaded || !slot->norm_img_id)
-		return;
-	uint32_t nw = 0, nh = 0;
-	if (lam_image_read(slot->norm_img_id, s_decode_scratch, sizeof(s_decode_scratch), &nw, &nh) &&
-	    nw == slot->raw_w && nh == slot->raw_h) {
-		const uint32_t pad_x = 4u;
-		const uint32_t pad_top = 2u;
-		for (uint32_t ry = 0; ry < nh; ry++) {
-			memcpy(&s_atlas_norm_rgba[(slot->rect.y + pad_top + ry) * ND_SEVEN_ATLAS_W + slot->rect.x + pad_x],
-			       &s_decode_scratch[ry * nw],
-			       nw * sizeof(uint32_t));
-		}
-		slot->norm_loaded = 1;
-		s_atlas_ver++;
-	}
-}
-
 int nd_seven_plant_has_normal(uint8_t plant_id)
 {
 	if (!ND_PLANT_UNPACK_PRESENT(plant_id))
@@ -330,55 +517,11 @@ int nd_seven_plant_has_normal(uint8_t plant_id)
 	unsigned sp_idx = ND_PLANT_UNPACK_IDX(plant_id);
 	unsigned is_big = ND_PLANT_UNPACK_BIG(plant_id);
 	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 1u;
+	atlas_load();
 	flora_dyn_slot_t *slot = &s_flora_slots[sp_idx][is_big][var_idx];
-	try_load_slot_normal(slot);
+	if (!slot->loaded)
+		bake_mesh3d_into_slot(slot, nd_seven_plant_mesh3d_id(plant_id));
 	return (slot->loaded && slot->norm_loaded) ? 1 : 0;
-}
-
-static int try_pack_slot_image(flora_dyn_slot_t *slot)
-{
-	if (!slot || !slot->img_id)
-		return 0;
-	uint32_t iw = 0, ih = 0;
-	if (lam_image_read(slot->img_id, s_decode_scratch, sizeof(s_decode_scratch), &iw, &ih) &&
-	    iw > 0 && ih > 0 && iw <= 384 && ih <= 384) {
-		/* Pad left/right by 4px and top by 2px of transparent texels (bottom pad = 0 so
-		 * ground root anchor_y is unchanged) so waving canopy leaves never clip at rect edges */
-		const uint32_t pad_x = 4u;
-		const uint32_t pad_top = 2u;
-		uint32_t slot_w = iw + pad_x * 2u;
-		uint32_t slot_h = ih + pad_top;
-		if ((uint32_t)s_shelf_x + slot_w > ND_SEVEN_ATLAS_W) {
-			s_shelf_x = 0;
-			s_shelf_y = (uint16_t)(s_shelf_y + s_shelf_h);
-			s_shelf_h = 0;
-		}
-		if ((uint32_t)s_shelf_y + slot_h <= ND_SEVEN_RUNTIME_ATLAS_H) {
-			for (uint32_t ry = 0; ry < slot_h; ry++) {
-				memset(&s_atlas_rgba[(s_shelf_y + ry) * ND_SEVEN_ATLAS_W + s_shelf_x],
-				       0, slot_w * sizeof(uint32_t));
-			}
-			for (uint32_t ry = 0; ry < ih; ry++) {
-				memcpy(&s_atlas_rgba[(s_shelf_y + pad_top + ry) * ND_SEVEN_ATLAS_W + s_shelf_x + pad_x],
-				       &s_decode_scratch[ry * iw],
-				       iw * sizeof(uint32_t));
-			}
-			slot->raw_w = (uint16_t)iw;
-			slot->raw_h = (uint16_t)ih;
-			slot->rect.x = s_shelf_x;
-			slot->rect.y = s_shelf_y;
-			slot->rect.w = (uint16_t)slot_w;
-			slot->rect.h = (uint16_t)slot_h;
-			s_shelf_x = (uint16_t)(s_shelf_x + slot_w);
-			if (slot_h > s_shelf_h)
-				s_shelf_h = (uint16_t)slot_h;
-			slot->loaded = 1;
-			s_atlas_ver++;
-			try_load_slot_normal(slot);
-			return 1;
-		}
-	}
-	return 0;
 }
 
 int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
@@ -391,28 +534,9 @@ int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
 
 	atlas_load();
 	flora_dyn_slot_t *slot = &s_flora_slots[sp_idx][is_big][var_idx];
-	if (!slot->norm_img_id) {
-		char norm_url[112];
-		snprintf(norm_url, sizeof(norm_url), "/nd/art/plant/%s/%s/%u_n.png",
-		         s_nd_plant_specs[sp_idx].slug,
-		         is_big ? "big" : "small",
-		         var_idx + 1u);
-		slot->norm_img_id = lam_image_request(norm_url);
-	}
+	if (!slot->loaded)
+		bake_mesh3d_into_slot(slot, nd_seven_plant_mesh3d_id(plant_id));
 	if (slot->loaded) {
-		try_load_slot_normal(slot);
-		if (out_rect) *out_rect = slot->rect;
-		return 1;
-	}
-	if (!slot->img_id) {
-		char url[96];
-		snprintf(url, sizeof(url), "/nd/art/plant/%s/%s/%u.png",
-		         s_nd_plant_specs[sp_idx].slug,
-		         is_big ? "big" : "small",
-		         var_idx + 1u);
-		slot->img_id = lam_image_request(url);
-	}
-	if (try_pack_slot_image(slot)) {
 		if (out_rect) *out_rect = slot->rect;
 		return 1;
 	}
@@ -664,6 +788,60 @@ static int resolve_stone_spec_idx(const ndw_obj_t *o)
 	return (int)s_boulder_pools[fam][h % 4u];
 }
 
+uint8_t nd_seven_stone_mesh3d_id(const ndw_obj_t *o)
+{
+	int idx = resolve_stone_spec_idx(o);
+	if (idx < 0 || idx >= NDS_SP_COUNT)
+		return ND_MESH3D_NONE;
+	return (uint8_t)(ND_MESH3D_STONE_BASE + (unsigned)idx);
+}
+
+uint8_t nd_seven_obj_mesh3d_id(const ndw_obj_t *o)
+{
+	if (!o)
+		return ND_MESH3D_NONE;
+	if (ND_PLANT_UNPACK_PRESENT(o->plant_id))
+		return nd_seven_plant_mesh3d_id(o->plant_id);
+	if (o->kind == NDW_K_STONE || o->kind == NDW_K_ROCK || o->kind == NDW_K_BOULDER)
+		return nd_seven_stone_mesh3d_id(o);
+	/* Fallback for unbound procedural plants by kind */
+	unsigned v = (unsigned)(o->variant & 1u);
+	unsigned b = o->big ? 1u : 0u;
+	switch (o->kind) {
+	case NDW_K_DECID:  return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 4u + b * 2u + v); /* Quercus robur */
+	case NDW_K_TALL:   return (uint8_t)(ND_MESH3D_PLANT_BASE +  2u * 4u + b * 2u + v); /* Betula pendula */
+	case NDW_K_FIR:    return (uint8_t)(ND_MESH3D_PLANT_BASE +  1u * 4u + b * 2u + v); /* Pseudotsuga menziesii */
+	case NDW_K_CACTUS: return (uint8_t)(ND_MESH3D_PLANT_BASE +  6u * 4u + b * 2u + v); /* Arthrocereus rondonianus */
+	default:           return ND_MESH3D_NONE;
+	}
+}
+
+uint8_t nd_seven_entity_mesh3d_id(int spr_id)
+{
+	switch (spr_id) {
+	case NDS_TREE_OAK:       return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 4u + 2u + 0u);
+	case NDS_TREE_APPLE:     return (uint8_t)(ND_MESH3D_PLANT_BASE + 12u * 4u + 2u + 0u);
+	case NDS_TREE_APPLE2:    return (uint8_t)(ND_MESH3D_PLANT_BASE +  2u * 4u + 2u + 1u);
+	case NDS_TREE_BIG:       return (uint8_t)(ND_MESH3D_PLANT_BASE +  1u * 4u + 2u + 0u);
+	case NDS_TREE_ROUND:     return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 4u + 0u + 0u);
+	case NDS_BUSH_DARK:      return (uint8_t)(ND_MESH3D_PLANT_BASE +  5u * 4u + 0u + 0u);
+	case NDS_BUSH_TEAL:      return (uint8_t)(ND_MESH3D_PLANT_BASE +  0u * 4u + 0u + 1u);
+	case NDS_ROCK_GREY:      return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_ALPINE_GRANITE);
+	case NDS_ROCK_TAN:       return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_MED_LATERITE);
+	case NDS_ROCK_WHITE:     return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_SHRUB_QUARTZITE);
+	case NDS_ROCK_TAN_SM:    return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_SHRUB_LICHEN);
+	case NDS_ROCK_TAN_TINY:  return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_MED_LIMESTONE_PEB);
+	case NDS_STONE_BLUE:     return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_WET_ALGAE_ROCK);
+	case NDS_STONE_FLAT:     return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_TEMP_RIVER_PEBBLE);
+	case NDS_STONE_TINY:     return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_ALPINE_MORAINE);
+	case NDS_STONE_GREY:     return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_SHRUB_GRANITE);
+	case NDS_STONE_BLUE_SM:  return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_WET_PEBBLE);
+	case NDS_ROCK_WHITE_BIG: return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_MED_LIMESTONE_BLK);
+	case NDS_ROCK_TAN_BIG:   return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_ALPINE_GLACIAL);
+	default:                 return ND_MESH3D_NONE;
+	}
+}
+
 const char *nd_seven_stone_name(const ndw_obj_t *o)
 {
 	int idx = resolve_stone_spec_idx(o);
@@ -677,8 +855,10 @@ int nd_seven_stone_has_normal(const ndw_obj_t *o)
 	int idx = resolve_stone_spec_idx(o);
 	if (idx < 0 || idx >= NDS_SP_COUNT)
 		return 0;
+	atlas_load();
 	flora_dyn_slot_t *slot = &s_stone_slots[idx];
-	try_load_slot_normal(slot);
+	if (!slot->loaded)
+		bake_mesh3d_into_slot(slot, (uint8_t)(ND_MESH3D_STONE_BASE + (unsigned)idx));
 	return (slot->loaded && slot->norm_loaded) ? 1 : 0;
 }
 
@@ -690,24 +870,9 @@ int nd_seven_stone_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect)
 
 	atlas_load();
 	flora_dyn_slot_t *slot = &s_stone_slots[idx];
-	if (!slot->norm_img_id) {
-		char norm_url[128];
-		snprintf(norm_url, sizeof(norm_url), "/nd/art/mineral/%s_normal.png",
-		         s_nd_stone_specs[idx].slug);
-		slot->norm_img_id = lam_image_request(norm_url);
-	}
+	if (!slot->loaded)
+		bake_mesh3d_into_slot(slot, (uint8_t)(ND_MESH3D_STONE_BASE + (unsigned)idx));
 	if (slot->loaded) {
-		try_load_slot_normal(slot);
-		if (out_rect) *out_rect = slot->rect;
-		return 1;
-	}
-	if (!slot->img_id) {
-		char url[128];
-		snprintf(url, sizeof(url), "/nd/art/mineral/%s_albedo.png",
-		         s_nd_stone_specs[idx].slug);
-		slot->img_id = lam_image_request(url);
-	}
-	if (try_pack_slot_image(slot)) {
 		if (out_rect) *out_rect = slot->rect;
 		return 1;
 	}

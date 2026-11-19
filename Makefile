@@ -323,6 +323,9 @@ print-prefix:
 
 mm: ;
 
+jarvis-lib: stele-lib corm-lib xylem-lib
+	$(MAKE) -C external/libjarvis $(EXT_MAKE_ARGS)
+
 xylem-lib: stele-lib corm-lib
 	$(MAKE) -C external/libxylem $(EXT_MAKE_ARGS)
 

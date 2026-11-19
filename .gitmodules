@@ -136,3 +136,6 @@
 [submodule "external/axil-auren"]
 	path = external/axil-auren
 	url = git@github.com:tty-pt/axil-auren.git
+[submodule "external/libjarvis"]
+	path = external/libjarvis
+	url = https://github.com/tty-pt/libjarvis

@@ -1215,12 +1215,13 @@ int main(void)
 		g_grid_tile = tb;
 		assert(ndw_blocked(lookup_open, NULL, obb[0].x, obb[0].y) == 1);
 
-		/* Runtime atlas fallback when host image decode has not yet populated pixels */
+		/* Synchronous 3D procedural plant baking into runtime atlas + normal map */
 		nd_seven_sprite_rect_t rect = { 0, 0, 0, 0 };
 		int ready = nd_seven_plant_rect(tb.plant_id[0], &rect);
-		assert(ready == 0);
+		assert(ready == 1 && rect.w > 0 && rect.h > 0);
+		assert(nd_seven_plant_has_normal(tb.plant_id[0]) == 1);
 
-		printf("PASS: staged flora metadata, 4 variants, Temperate Seasonal Forest species distribution, collision footprints, and sprite cache fallback verified\n");
+		printf("PASS: staged flora metadata, 4 variants, Temperate Seasonal Forest species distribution, collision footprints, and 3D sprite cache verified\n");
 	}
 
 	/* §7.1 Runtime-parameterized room dimensions & proportional sub-room geometry */

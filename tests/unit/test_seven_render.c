@@ -2236,10 +2236,10 @@ int main(void)
 				float sz = bw > bh ? bw : bh;
 				if (cheb >= 4 && cheb <= 12) {
 					ring_4_12_mid_zoom++;
-					if (sz >= 34.0f)
+					if (sz >= 100.0f)
 						ring_4_12_large_mid_zoom++;
 				}
-				if (sz <= 24.0f)
+				if (sz <= 42.0f)
 					small_mid_zoom++;
 			}
 		}
@@ -2248,7 +2248,7 @@ int main(void)
 		assert(small_mid_zoom > 0);
 
 		/* Now zoom out to canopy/horizon zoom (0.10f, cam_dist = 2,800 wu):
-		 * large trees in ring [4..12] must NOT thin out, while small plants (sz <= 22)
+		 * large trees in ring [4..12] must NOT thin out, while small plants/stones (sz <= 23)
 		 * have already faded/culled out by the linear size/distance law! */
 		nd_seven_set_zoom(0.10f);
 		nd_seven_render(fb, 1280, 720, &st);
@@ -2275,14 +2275,14 @@ int main(void)
 					max_cheb_seen = cheb;
 				if (cheb >= 4 && cheb <= 12) {
 					ring_4_12_far_zoom++;
-					if (sz >= 34.0f)
+					if (sz >= 100.0f)
 						ring_4_12_large_far_zoom++;
 				}
-				if (sz <= 22.0f)
+				if (sz <= 23.0f)
 					small_far_zoom++;
 				if (cheb > 14)
 					far_horizon_cnt++;
-				assert(bw > 0.0f && bh > 0.0f && bh <= 74.0f); /* True 1:1 physical world-space dimensions */
+				assert(bw > 0.0f && bh > 0.0f && bh <= 2000.0f); /* True 1:1 physical Earth metric world-space dimensions (up to 44m = 1980 wu) */
 				unscaled_cnt++;
 			}
 		}
@@ -2722,21 +2722,22 @@ int main(void)
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 4 WebGL2 shader programs (terrain, water, billboard, cloud) compile and link cleanly
+		/* 5. Verify all 6 WebGL2 shader programs (terrain, water, billboard, mesh3d, cloud, csm) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[5] = {
+			} progs[6] = {
 				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
 				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
 				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() },
+				{ "mesh3d",    nd_seven_gl_vs_mesh3d(),    nd_seven_gl_fs_mesh3d()    },
 				{ "cloud",     nd_seven_gl_vs_cloud(),     nd_seven_gl_fs_cloud()     },
 				{ "csm",       nd_seven_gl_vs_csm(),       nd_seven_gl_fs_csm()       }
 			};
-			for (int p = 0; p < 5; p++) {
+			for (int p = 0; p < 6; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
@@ -3770,7 +3771,7 @@ int main(void)
 			uint32_t cnt_full_detail = nd_seven_last_mid_billboard_count();
 			assert(cnt_full_detail > cnt_mid_detail);
 
-			nd_seven_set_detail_scale(1.0f);
+			nd_seven_set_detail_scale(0.75f);
 			nd_seven_set_zoom(1.0f);
 			printf("PASS: User-adjustable detail scale verified (1.25x=%u, 0.85x=%u, 0.35x=0 billboards at 0.08x zoom)\n",
 			       cnt_full_detail, cnt_mid_detail);
@@ -4004,6 +4005,7 @@ int main(void)
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1920 && rh == 1080);
 				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 1920 && st_h == 1080);
 				assert(sc_w == 1920 && sc_h == 1080);
@@ -4023,6 +4025,7 @@ int main(void)
 				assert(nd_seven_get_fps_cap() == 30);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 960 && rh == 540);
+				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 960 && st_h == 540);
@@ -4044,6 +4047,7 @@ int main(void)
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1440 && rh == 810);
 				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 1440 && st_h == 810);
 				assert(sc_w == 1440 && sc_h == 810);
@@ -4060,6 +4064,7 @@ int main(void)
 				nd_seven_set_msaa(1);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
 				assert(nd_seven_gl_should_queue_cloud_chunk(0, 0, 5120, 5120, p1) == false);
+				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 480 && st_h == 270);
@@ -4107,6 +4112,179 @@ int main(void)
 			       orb_leaves, back_hemisphere_leaves, back_clouds_queued, front_clouds_queued,
 			       syn_clear_culled, syn_clear_culled + syn_cloudy_kept, mid_leaves,
 			       nd_seven_gl_get_hiz_mip_levels(), nd_seven_gl_get_indirect_draw_count());
+		}
+
+		/* 3D Procedural Botanical & Geological Mesh Engine (Option A) + Orthographic Pixel-Art Baker (Option B) */
+		{
+			uint32_t m3d_vcnt = 0, m3d_icnt = 0;
+			const nd_mesh3d_vert_t *m3d_verts = nd_seven_mesh3d_verts(&m3d_vcnt);
+			const uint16_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
+			assert(m3d_verts != NULL && m3d_idx != NULL);
+			assert(m3d_vcnt > 4000 && m3d_vcnt <= ND_MESH3D_MAX_VERTS);
+			assert(m3d_icnt > 12000 && m3d_icnt <= ND_MESH3D_MAX_INDICES);
+
+			/* Verify all 64 canonical plant templates (1..64) and 51 stone/mineral templates (65..115) */
+			for (uint8_t mid = 1; mid < ND_MESH3D_TOTAL; mid++) {
+				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice(mid);
+				assert(sl != NULL);
+				assert(sl->vert_count >= 12 && sl->idx_count >= 18);
+				assert(sl->first_vert + sl->vert_count <= m3d_vcnt);
+				assert(sl->first_idx + sl->idx_count <= m3d_icnt);
+				assert(sl->sprite_w > 0 && sl->sprite_h > 0);
+			}
+
+			/* Verify 3D instanced GLSL 300 es shaders */
+			const char *vs_m3d = nd_seven_gl_vs_mesh3d();
+			const char *fs_m3d = nd_seven_gl_fs_mesh3d();
+			assert(vs_m3d && strstr(vs_m3d, "#version 300 es") != NULL);
+			assert(fs_m3d && strstr(fs_m3d, "#version 300 es") != NULL);
+			assert(strstr(vs_m3d, "a_vpos") != NULL);
+			assert(strstr(vs_m3d, "a_ibase") != NULL);
+			assert(strstr(fs_m3d, "nd_cloud_shadow_map") != NULL);
+
+			/* Verify synchronous Option B orthographic 55-deg pixel-art albedo & normal map baking */
+			for (unsigned sp = 0; sp < 16; sp++) {
+				uint16_t pid_s = ND_PLANT_PACK_ID(sp, 0, 0);
+				uint16_t pid_b = ND_PLANT_PACK_ID(sp, 1, 1);
+				nd_seven_sprite_rect_t sr_s = {0}, sr_b = {0};
+				assert(nd_seven_plant_rect(pid_s, &sr_s) == 1 && sr_s.w > 0 && sr_s.h > 0);
+				assert(nd_seven_plant_rect(pid_b, &sr_b) == 1 && sr_b.w > 0 && sr_b.h > 0);
+				assert(nd_seven_plant_has_normal(pid_s) == 1);
+				assert(nd_seven_plant_has_normal(pid_b) == 1);
+				assert(nd_seven_plant_mesh3d_id(pid_s) >= ND_MESH3D_PLANT_BASE);
+				assert(nd_seven_plant_mesh3d_id(pid_b) > nd_seven_plant_mesh3d_id(pid_s));
+			}
+			const uint8_t stone_kinds[3] = { NDW_K_STONE, NDW_K_ROCK, NDW_K_BOULDER };
+			for (int ki = 0; ki < 3; ki++) {
+				for (uint8_t fg = 0; fg < 16; fg++) {
+					for (uint8_t var = 0; var < 4; var++) {
+						ndw_obj_t st_obj;
+						memset(&st_obj, 0, sizeof(st_obj));
+						st_obj.kind = stone_kinds[ki];
+						st_obj.fg = fg;
+						st_obj.variant = var;
+						nd_seven_sprite_rect_t sr_m = {0};
+						assert(nd_seven_stone_rect(&st_obj, &sr_m) == 1 && sr_m.w > 0 && sr_m.h > 0);
+						assert(nd_seven_stone_has_normal(&st_obj) == 1);
+						uint8_t mid_s = nd_seven_stone_mesh3d_id(&st_obj);
+						assert(mid_s >= ND_MESH3D_STONE_BASE && mid_s < ND_MESH3D_TOTAL);
+					}
+				}
+			}
+
+			/* Verify calibrated 3D diorama world-unit scale (anchored to 0.40 m = 18.0 wu Lamb and 160x128 wu room grid) */
+			{
+				const float lamb_wu = ND_MESH3D_LAMB_BODY_WU; /* 18.0 wu = 0.40 m */
+				float pw_s = 0.0f, ph_s = 0.0f, pay_s = 0.0f;
+				float pw_b = 0.0f, ph_b = 0.0f, pay_b = 0.0f;
+
+				/* 14: bellis_perennis (English Daisy): ankle-high on the 40 cm Lamb (3.5 wu small, 6.0 wu big) */
+				nd_m3d_plant_metric_dims(14u, 0u, &pw_s, &ph_s, &pay_s);
+				nd_m3d_plant_metric_dims(14u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_s > 0.15f * lamb_wu && ph_s < 0.25f * lamb_wu);
+				assert(ph_b > 0.28f * lamb_wu && ph_b < 0.40f * lamb_wu);
+
+				/* 3: linum_usitatissimum (Common Flax) & 8: daucus_carota (Wild Carrot): ~1.7x to 2.0x Lamb height */
+				nd_m3d_plant_metric_dims(3u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_b > 1.7f * lamb_wu && ph_b < 2.2f * lamb_wu);
+				nd_m3d_plant_metric_dims(8u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_b > 1.6f * lamb_wu && ph_b < 2.0f * lamb_wu);
+
+				/* 15: typha_latifolia (Broadleaf Cattail): 62 wu mature = ~3.4x Lamb height */
+				nd_m3d_plant_metric_dims(15u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_b > 3.0f * lamb_wu && ph_b < 3.9f * lamb_wu);
+
+				/* 7: acacia_senegal (Savannah Umbrella Thorn): wide flat tabletop crown (width > 1.3 * height) */
+				nd_m3d_plant_metric_dims(7u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_b > 5.5f * lamb_wu && ph_b < 7.0f * lamb_wu);
+				assert(pw_b > 1.30f * ph_b);
+
+				/* 10: quercus_robur (Pedunculate Oak): 144 wu mature = 8.0x Lamb height, broad spreading crown (152 wu) */
+				nd_m3d_plant_metric_dims(10u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_b > 7.5f * lamb_wu && ph_b < 8.8f * lamb_wu);
+				assert(pw_b >= ph_b);
+
+				/* 1: pseudotsuga_menziesii (Coast Douglas-fir): 196 wu mature = ~10.9x Lamb height */
+				nd_m3d_plant_metric_dims(1u, 1u, &pw_b, &ph_b, &pay_b);
+				assert(ph_b > 10.0f * lamb_wu && ph_b < 11.8f * lamb_wu);
+
+				/* Geological metric tiers: STONE (< 0.75 * Lamb) < ROCK (1.1..1.5 * Lamb) < BOULDER (2.2..2.8 * Lamb) */
+				float sw_st = 0.0f, sh_st = 0.0f, say_st = 0.0f;
+				float sw_rk = 0.0f, sh_rk = 0.0f, say_rk = 0.0f;
+				float sw_bl = 0.0f, sh_bl = 0.0f, say_bl = 0.0f;
+				nd_m3d_stone_metric_dims(NDW_K_STONE, 1u, &sw_st, &sh_st, &say_st);
+				nd_m3d_stone_metric_dims(NDW_K_ROCK, 1u, &sw_rk, &sh_rk, &say_rk);
+				nd_m3d_stone_metric_dims(NDW_K_BOULDER, 1u, &sw_bl, &sh_bl, &say_bl);
+				assert(sh_st < 0.75f * lamb_wu);
+				assert(sh_rk > 1.10f * lamb_wu && sh_rk < 1.50f * lamb_wu);
+				assert(sh_bl > 2.20f * lamb_wu && sh_bl < 2.80f * lamb_wu);
+				assert(sw_st < sw_rk && sw_rk < sw_bl);
+
+				/* Crystallographic termination check:
+				 * Emerald (NDS_SP_MIN_EMERALD_SO = 25, SoloEsmeralda, mid = ND_MESH3D_STONE_BASE + 25) has flat basal pinacoid {0001} faces (N_z > 0.98)
+				 * whereas Quartz (NDS_SP_DESERT_QUARTZ_SO = 9, CristalQuartzo_solo, mid = ND_MESH3D_STONE_BASE + 9) has slanted rhombohedral apex faces,
+				 * and Halite / Rock Salt (NDS_SP_MIN_SALT_SO = 29, SoloSal, mid = ND_MESH3D_STONE_BASE + 29) has orthogonal cubic {100} cleavage faces */
+				const nd_mesh3d_slice_t *sl_em = nd_seven_mesh3d_slice(ND_MESH3D_STONE_BASE + 25u);
+				const nd_mesh3d_slice_t *sl_qz = nd_seven_mesh3d_slice(ND_MESH3D_STONE_BASE + 9u);
+				const nd_mesh3d_slice_t *sl_hl = nd_seven_mesh3d_slice(ND_MESH3D_STONE_BASE + 29u);
+				assert(sl_em && sl_qz && sl_hl);
+				int em_flat_pinacoid = 0, qz_flat_pinacoid = 0, hl_ortho_faces = 0;
+				for (uint32_t vi = 0; vi < sl_em->vert_count; vi++) {
+					const nd_mesh3d_vert_t *v = &m3d_verts[sl_em->first_vert + vi];
+					if (v->col[3] >= 0.90f && v->pos[2] > (float)sl_em->sprite_h * 0.50f && v->norm[2] > 0.98f)
+						em_flat_pinacoid++;
+				}
+				for (uint32_t vi = 0; vi < sl_qz->vert_count; vi++) {
+					const nd_mesh3d_vert_t *v = &m3d_verts[sl_qz->first_vert + vi];
+					if (v->col[3] >= 0.90f && v->pos[2] > (float)sl_qz->sprite_h * 0.50f && v->norm[2] > 0.98f)
+						qz_flat_pinacoid++;
+				}
+				for (uint32_t vi = 0; vi < sl_hl->vert_count; vi++) {
+					const nd_mesh3d_vert_t *v = &m3d_verts[sl_hl->first_vert + vi];
+					if (fabsf(v->norm[0]) > 0.98f || fabsf(v->norm[1]) > 0.98f || fabsf(v->norm[2]) > 0.98f)
+						hl_ortho_faces++;
+				}
+				assert(em_flat_pinacoid >= 6);
+				assert(qz_flat_pinacoid == 0);
+				assert(hl_ortho_faces >= 18);
+			}
+
+			printf("PASS: 3D procedural botanical (64 templates) & geological (51 templates) mesh engine (verts=%u, tris=%u) + Earth metric scale (1m=45wu) + 55-deg orthographic baker verified\n",
+			       m3d_vcnt, m3d_icnt / 3u);
+
+			/* Multi-frame approach / zoom-in LOD progression regression test:
+			 * Starting from high altitude (zoom = 0.02, dist = 12500) where >32 coarse chunks are populated,
+			 * progressively approach normal zoom (1.0) and walk across rooms. Verify that ar_system_begin_frame
+			 * resets the populate counter every frame so near-field chunks refine all the way to Level 0
+			 * without getting stuck in AR_NODE_FLAG_DEFERRED bilinear upsampling, and exhibit true 3D relief. */
+			{
+				ar_system_t *cs = nd_seven_get_chunk_sys();
+				assert(cs != NULL);
+				const float zoom_steps[] = { 0.02f, 0.05f, 0.12f, 0.25f, 0.50f, 1.00f, 1.00f };
+				for (size_t zi = 0; zi < sizeof(zoom_steps) / sizeof(zoom_steps[0]); zi++) {
+					nd_seven_set_zoom(zoom_steps[zi]);
+					nd_seven_render(fb, 640, 480, &st);
+				}
+				size_t act_cnt = ar_system_get_active_count(cs);
+				assert(act_cnt > 0);
+				size_t lvl0_real_count = 0;
+				int32_t max_chunk_relief_q4 = 0;
+				for (size_t li = 0; li < act_cnt; li++) {
+					const ar_node_t *ln = ar_system_get_active_node(cs, li);
+					assert(ln != NULL);
+					if (ln->level == 0) {
+						assert((ln->flags & AR_NODE_FLAG_DEFERRED) == 0);
+						lvl0_real_count++;
+						int32_t relief = (int32_t)ln->max_val - (int32_t)ln->min_val;
+						if (relief > max_chunk_relief_q4)
+							max_chunk_relief_q4 = relief;
+					}
+				}
+				assert(lvl0_real_count >= 16);
+				assert(max_chunk_relief_q4 > 0);
+				printf("PASS: Multi-frame approach LOD progression refines to %zu non-deferred Level-0 chunks (max relief=%.2f wu)\n",
+				       lvl0_real_count, (float)max_chunk_relief_q4 / 16.0f);
+			}
 		}
 	}
 

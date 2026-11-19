@@ -220,7 +220,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.default_rgba = 0xFF3C804Eu;
 		cfg.period_x = 6.2831853f * 2000000.0f;
 		cfg.period_y = 6.2831853f * 1335000.0f;
-		cfg.max_populates_per_frame = 8;
+		cfg.max_populates_per_frame = 96;
 		cfg.wq = s_seven_wq;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
@@ -581,6 +581,11 @@ int nd_seven_is_alt_planet_occluded(const float eye_3d[3], float dist,
 #define SEVEN_MAX_VISIBLE_LEAVES 160
 static const ar_node_t *s_visible_leaves[SEVEN_MAX_VISIBLE_LEAVES];
 static size_t s_visible_leaf_count = 0;
+typedef struct {
+	int32_t ox, oy, w, h;
+} seven_leaf_bounds_t;
+static seven_leaf_bounds_t s_front_leaf_bounds[SEVEN_MAX_VISIBLE_LEAVES];
+static size_t s_front_leaf_count = 0;
 static uint32_t s_last_ridge_culled_count = 0;
 static uint32_t s_last_alt_planet_chunk_count = 0;
 static ar_frustum_t s_frame_frustum;
@@ -786,12 +791,15 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	bool use_horizon_cull = (dist >= 8000.0f);
 
 	s_frame_detail_scale = nd_seven_get_detail_scale();
-	if (s_frame_detail_scale < 0.99f) {
+	bool is_normal_zoom = (dist <= 650.0f);
+	if (!is_normal_zoom && s_frame_detail_scale < 0.99f) {
 		target_quad_px /= fmaxf(0.35f, s_frame_detail_scale);
 	}
-	uint32_t max_pop = (s_frame_detail_scale < 0.99f)
-		? (uint32_t)(48.0f * fmaxf(0.25f, s_frame_detail_scale))
-		: 48u;
+	uint32_t max_pop = is_normal_zoom
+		? 96u
+		: ((s_frame_detail_scale < 0.99f)
+			? (uint32_t)(48.0f * fmaxf(0.25f, s_frame_detail_scale))
+			: 48u);
 
 	ar_cull_opts_t opts = {
 		.z_min = z_min_cull,
@@ -810,9 +818,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.max_level = 14,
 		.view_id = 0,
 		.max_populates_per_query = max_pop,
-		.split_hysteresis = 0.14f
+		.split_hysteresis = is_normal_zoom ? 0.0f : 0.14f
 	};
 
+	ar_system_begin_frame(cs);
 	s_visible_leaf_count = ar_system_query_matrix(cs, world, use_3d_primary ? mvp_3d : flat_mvp,
 	                                              &opts, s_visible_leaves, max_leaves);
 	size_t macro_count = s_visible_leaf_count;
@@ -1135,8 +1144,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			}
 		}
 
-		if (!terrain_ridge_occluded)
-			s_visible_leaves[kept_count++] = node;
+		if (!terrain_ridge_occluded) {
+			s_visible_leaves[kept_count] = node;
+			kept_count++;
+		}
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
@@ -1229,6 +1240,18 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	}
 	s_last_ridge_culled_count = (uint32_t)(macro_count - kept_count);
 	s_visible_leaf_count = kept_count;
+	s_front_leaf_count = (kept_count <= SEVEN_MAX_VISIBLE_LEAVES) ? kept_count : SEVEN_MAX_VISIBLE_LEAVES;
+	for (size_t a = 0; a < s_front_leaf_count; a++) {
+		const ar_node_t *nd = s_visible_leaves[a];
+		if (nd) {
+			s_front_leaf_bounds[a].ox = nd->ox;
+			s_front_leaf_bounds[a].oy = nd->oy;
+			s_front_leaf_bounds[a].w  = nd->w;
+			s_front_leaf_bounds[a].h  = nd->h;
+		} else {
+			memset(&s_front_leaf_bounds[a], 0, sizeof(s_front_leaf_bounds[a]));
+		}
+	}
 	s_last_alt_planet_chunk_count = 0;
 
 	/* Multi-Planet 3D Manifold Rendering:
@@ -1311,8 +1334,10 @@ static void seven_apply_obj_billboard_style(const ndw_obj_t *o,
 	bb->shadow_rx = 0;
 	bb->shadow_ry = 0;
 	bb->pad0 = 0;
+	bb->mesh_id = 0;
 	if (!o)
 		return;
+	bb->mesh_id = nd_seven_obj_mesh3d_id(o);
 
 	bool is_non_trunk_plant =
 		(ND_PLANT_UNPACK_PRESENT(o->plant_id) && o->col_mask == ND_PLANT_COL_NONE) ||
@@ -1381,38 +1406,19 @@ static void seven_calc_obj_billboard_dims(const ndw_obj_t *o,
 	float w = (float)sr->w;
 	float h = (float)sr->h;
 	float ay = (float)ndw_obj_anchor_y(o, sr->h);
-	if (o && ND_PLANT_UNPACK_PRESENT(o->plant_id) && h > 1.0f &&
-	    !nd_seven_plant_has_normal(o->plant_id)) {
-		unsigned sp_idx = ND_PLANT_UNPACK_IDX(o->plant_id);
-		unsigned is_big = ND_PLANT_UNPACK_BIG(o->plant_id);
-		float max_h = is_big ? 62.0f : 38.0f;
-		float max_w = is_big ? 64.0f : 40.0f;
-		if (sp_idx == 7u || sp_idx == 13u) {
-			/* Acacia & Olive: wide spreading crowns, moderate height */
-			max_h = is_big ? 54.0f : 34.0f;
-			max_w = is_big ? 68.0f : 44.0f;
-		} else if (sp_idx == 6u) {
-			/* Cactus: slender columnar profile */
-			max_h = is_big ? 46.0f : 28.0f;
-			max_w = is_big ? 28.0f : 20.0f;
-		} else if (sp_idx == 15u) {
-			/* Typha latifolia (bulrush): compact wetland reed clump */
-			max_h = is_big ? 34.0f : 24.0f;
-			max_w = is_big ? 28.0f : 20.0f;
-		} else if (o->col_mask == ND_PLANT_COL_NONE) {
-			/* Herbs, flax, wild carrot, tomato, daisy */
-			max_h = is_big ? 28.0f : 20.0f;
-			max_w = is_big ? 30.0f : 22.0f;
-		}
-		float scale = 1.0f;
-		if (h > max_h)
-			scale = max_h / h;
-		if (w * scale > max_w)
-			scale = max_w / w;
-		if (scale < 1.0f) {
-			w *= scale;
-			h *= scale;
-			ay *= scale;
+	if (o && h > 1.0f) {
+		if (ND_PLANT_UNPACK_PRESENT(o->plant_id)) {
+			unsigned sp_idx = ND_PLANT_UNPACK_IDX(o->plant_id);
+			unsigned is_big = ND_PLANT_UNPACK_BIG(o->plant_id);
+			nd_m3d_plant_metric_dims(sp_idx, is_big, &w, &h, &ay);
+		} else if (o->kind == NDW_K_DECID || o->kind == NDW_K_TALL ||
+		           o->kind == NDW_K_FIR || o->kind == NDW_K_CACTUS) {
+			unsigned sp_idx = (o->kind == NDW_K_FIR) ? 1u :
+			                  ((o->kind == NDW_K_TALL) ? 2u :
+			                  ((o->kind == NDW_K_CACTUS) ? 6u : 10u));
+			nd_m3d_plant_metric_dims(sp_idx, o->big ? 1u : 0u, &w, &h, &ay);
+		} else if (o->kind == NDW_K_STONE || o->kind == NDW_K_ROCK || o->kind == NDW_K_BOULDER) {
+			nd_m3d_stone_metric_dims(o->kind, o->variant, &w, &h, &ay);
 		}
 	}
 	*out_w = w;
@@ -1703,16 +1709,18 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 				bb.pad0 |= 0x80u;
 		}
 
-		if (arena_dst && inout_arena_cnt && *inout_arena_cnt < BLOCK_BB_MAX_PER_BLK) {
-			arena_dst[(*inout_arena_cnt)++] = bb;
-			if (inout_max_dim) {
-				float dim = (bb.width > bb.height) ? bb.width : bb.height;
-				if (dim > *inout_max_dim)
-					*inout_max_dim = dim;
+		if (arena_dst && inout_arena_cnt) {
+			if (*inout_arena_cnt < BLOCK_BB_MAX_PER_BLK) {
+				arena_dst[(*inout_arena_cnt)++] = bb;
+				if (inout_max_dim) {
+					float dim = (bb.width > bb.height) ? bb.width : bb.height;
+					if (dim > *inout_max_dim)
+						*inout_max_dim = dim;
+				}
 			}
+		} else {
+			emitted += seven_stream_faded_billboard(&bb);
 		}
-
-		emitted += seven_stream_faded_billboard(&bb);
 	}
 	return emitted;
 }
@@ -2524,9 +2532,11 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					dst_bb->shadow_rx = lamb_glows ? 0 : 8;
 					dst_bb->shadow_ry = lamb_glows ? 0 : 4;
 					dst_bb->pad0 = s_prev_lamb_in_water ? 0x80u : 0;
+					dst_bb->mesh_id = 0;
 				} else {
 					dst_bb->tint_rgba = tint_b;
 					dst_bb->pad0 = 0;
+					dst_bb->mesh_id = nd_seven_entity_mesh3d_id(entity_spr);
 					if (entity_spr >= NDS_ROCK_TAN_BIG && entity_spr <= NDS_STONE_TINY) {
 						dst_bb->style = ND_BB_STYLE_MINERAL;
 					} else if (entity_spr >= NDS_DECOR_YEL && entity_spr <= NDS_DECOR_PINK) {
@@ -2719,6 +2729,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						bb->shadow_ry = (uint8_t)gry;
 					}
 					bb->pad0 = (uint8_t)zone;
+					bb->mesh_id = 0;
 				}
 			}
 		}
@@ -2764,6 +2775,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			dst_bb->shadow_rx = 0;
 			dst_bb->shadow_ry = 0;
 			dst_bb->pad0 = p_draw[pi].kind;
+			dst_bb->mesh_id = 0;
 		}
 	}
 
@@ -2958,6 +2970,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 								slot->arena_off = cur_off;
 								slot->max_dim = s_block_bb_staging_max_dim[slot->staging_idx];
 								slot->count = scnt;
+								slot->w_level = w_level;
+								slot->node_level = node->level;
 								slot->node_rev = node->rev;
 								slot->atlas_ver = cur_atlas_ver;
 								slot->forget_seq = cur_forget_seq;
@@ -3039,6 +3053,15 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						}
 
 						nd_seven_sort_billboards_by_size(arena_dst, arena_cnt);
+						if (arena_max_dim > min_vis_sz) {
+							for (uint16_t ci = 0; ci < arena_cnt; ci++) {
+								float bsz = (arena_dst[ci].width > arena_dst[ci].height)
+									? arena_dst[ci].width : arena_dst[ci].height;
+								if (bsz <= min_vis_sz)
+									break;
+								seven_stream_faded_billboard(&arena_dst[ci]);
+							}
+						}
 						s_block_bb_arena_cursor += (uint64_t)arena_cnt;
 						slot->bx0 = bx0;
 						slot->by0 = by0;
@@ -3130,7 +3153,7 @@ int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, floa
 
 uint32_t nd_seven_last_visible_leaf_count(void)
 {
-	return (uint32_t)s_visible_leaf_count;
+	return (uint32_t)s_front_leaf_count;
 }
 
 uint32_t nd_seven_last_ridge_culled_count(void)
@@ -3145,11 +3168,11 @@ uint32_t nd_seven_last_alt_planet_chunk_count(void)
 
 int nd_seven_last_visible_leaf_bounds(uint32_t idx, int32_t *ox, int32_t *oy, int32_t *w, int32_t *h)
 {
-	if (idx >= s_visible_leaf_count || !s_visible_leaves[idx])
+	if (idx >= s_front_leaf_count)
 		return 0;
-	if (ox) *ox = s_visible_leaves[idx]->ox;
-	if (oy) *oy = s_visible_leaves[idx]->oy;
-	if (w)  *w  = s_visible_leaves[idx]->w;
-	if (h)  *h  = s_visible_leaves[idx]->h;
+	if (ox) *ox = s_front_leaf_bounds[idx].ox;
+	if (oy) *oy = s_front_leaf_bounds[idx].oy;
+	if (w)  *w  = s_front_leaf_bounds[idx].w;
+	if (h)  *h  = s_front_leaf_bounds[idx].h;
 	return 1;
 }

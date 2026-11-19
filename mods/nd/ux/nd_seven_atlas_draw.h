@@ -46,7 +46,18 @@ int nd_seven_botanical_rect(int kind, nd_seven_sprite_rect_t *out_rect);
 uint32_t tint_col(uint32_t c, int r, int g, int b);
 uint32_t shade(uint32_t c, int num);
 
+#include "nd_seven_mesh3d.h"
+
 int nd_seven_obj_sprite(const ndw_obj_t *o);
 void plant_tint(int fg, tint_t *t);
+
+void nd_seven_mesh3d_init(void);
+const nd_mesh3d_vert_t *nd_seven_mesh3d_verts(uint32_t *out_count);
+const uint16_t *nd_seven_mesh3d_indices(uint32_t *out_count);
+const nd_mesh3d_slice_t *nd_seven_mesh3d_slice(uint8_t mesh_id);
+uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id);
+uint8_t nd_seven_stone_mesh3d_id(const ndw_obj_t *o);
+uint8_t nd_seven_obj_mesh3d_id(const ndw_obj_t *o);
+uint8_t nd_seven_entity_mesh3d_id(int spr_id);
 
 #endif /* ND_SEVEN_ATLAS_DRAW_H */
