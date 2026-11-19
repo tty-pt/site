@@ -395,7 +395,7 @@ int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 	ar_system_t *cs = nd_seven_get_chunk_sys();
 	if (cs) {
 		ar_sample_t s;
-		if (ar_system_probe_view(cs, 0, world, wx, wy, &s))
+		if (ar_probe_view(cs, 0, world, wx, wy, &s))
 			return s.val;
 	}
 

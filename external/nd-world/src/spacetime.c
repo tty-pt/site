@@ -203,7 +203,7 @@ eng_object_drop(unsigned where_ref, unsigned skel_id)
         register int i;
 	unsigned drop_id;
 	OBJ where;
-	const void *__v, *kp, *vp;
+	const void *kp, *vp;
 	unsigned c = corm_iter(nd_table_handle(HD_ADROP), &skel_id, CM_RANGE);
 
 	nd_get(HD_OBJ, &(where), &where_ref);

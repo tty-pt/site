@@ -90,9 +90,9 @@ static bud_node *render_transpose_form(bud_node *key_options)
 	        "data-song-id='%s' data-action='/api/song/%s/transpose?h=1'>"
 	        "  <label>%s: <select name='t' %bind>%node</select></label>"
 	        "  %node"
-	        "  <label>%s <input type='range' name='z' min='" STR(
+	        "  <label>%s <input type='range' name='z' min='" VZ_STR(
 	                VIEWER_ZOOM_MIN) "' "
-	                                 "max='" STR(
+	                                 "max='" VZ_STR(
 	                                         VIEWER_ZOOM_MAX) "' step='10' "
 	                                                          "value='%d' "
 	                                                          "data-detail-"

@@ -8,9 +8,9 @@
 #endif
 
 /* Stringize macro for embedding numeric constants in HTML attrs */
-#ifndef STR
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
+#ifndef VZ_STR
+#define VZ_STR_HELPER(x) #x
+#define VZ_STR(x) VZ_STR_HELPER(x)
 #endif
 
 #endif

@@ -236,7 +236,7 @@ eng_object_art(unsigned thing_ref)
 {
 	OBJ thing;
 	static char art[BUFSIZ];
-	char typestr[BUFSIZ];
+	char typestr[64];
 	char *type = NULL;
 	char *void_art = "biome/void/1.jpeg";
 
@@ -802,6 +802,13 @@ do_recycle(int fd, int argc __attribute__((unused)), char *argv[])
 	char *name = argv[1];
 	unsigned thing_ref;
 	OBJ thing;
+
+	if ((thing_ref = ematch_absolute(name)) == NOTHING
+	    && (thing_ref = ematch_near(player_ref, name)) == NOTHING
+	    && (thing_ref = ematch_mine(player_ref, name)) == NOTHING) {
+		nd_printf(player_ref, NOMATCH_MESSAGE);
+		return;
+	}
 	if (corm_read(obj_hd, &thing_ref, &(thing), sizeof(thing)) != 0) {
 		nd_printf(player_ref, NOMATCH_MESSAGE);
 		return;

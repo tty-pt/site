@@ -97,15 +97,86 @@
 	"    }\n" \
 	"    return coarse_q12_4;\n" \
 	"}\n" \
+	"float nd_gpu_bimodal_hypsometry(float elev) {\n" \
+	"    if (elev < 0.0) {\n" \
+	"        if (elev > -8.0) return elev;\n" \
+	"        float d = -elev - 8.0;\n" \
+	"        float deep = 8.0 + d * 1.8 + d * d * 0.45;\n" \
+	"        return -min(deep, 2000.0);\n" \
+	"    } else {\n" \
+	"        if (elev <= 8.0) return elev * 1.5;\n" \
+	"        if (elev <= 25.0) return 12.0 + (elev - 8.0) * 1.8;\n" \
+	"        float m = elev - 25.0;\n" \
+	"        float peak = 43.0 + m * 2.2 + m * m * 0.12;\n" \
+	"        return min(peak, 1854.0);\n" \
+	"    }\n" \
+	"}\n" \
+	"float nd_gpu_room_hyp_coarse(uint seed, int rx_unwrapped, int ry_unwrapped, float fw) {\n" \
+	"    int rx = ((rx_unwrapped + 32768) & 65535) - 32768;\n" \
+	"    int ry = ((ry_unwrapped + 32768) & 65535) - 32768;\n" \
+	"    uint ux = (uint(rx) - 32512u) & 0xFFFFu;\n" \
+	"    uint uy = (uint(ry) - 32512u) & 0xFFFFu;\n" \
+	"    bool wrap_x = (ux < 512u);\n" \
+	"    bool wrap_y = (uy < 512u);\n" \
+	"    float tx = wrap_x ? (float(ux) * (1.0 / 512.0)) : 0.0;\n" \
+	"    float ty = wrap_y ? (float(uy) * (1.0 / 512.0)) : 0.0;\n" \
+	"    int rx_base = wrap_x ? (32512 + int(ux)) : rx;\n" \
+	"    int ry_base = wrap_y ? (32512 + int(uy)) : ry;\n" \
+	"    int k_limit = wrap_y ? 4 : (wrap_x ? 2 : 1);\n" \
+	"    float c00 = 0.0, c10 = 0.0, c01 = 0.0, c11 = 0.0;\n" \
+	"    for (int k = 0; k < k_limit; k++) {\n" \
+	"        if ((k & 1) != 0 && !wrap_x) continue;\n" \
+	"        int cur_x = rx_base - (k & 1) * 65536;\n" \
+	"        int cur_y = ry_base - (k >> 1) * 65536;\n" \
+	"        float val = nd_gpu_eval_coarse_unwrapped(seed, cur_x, cur_y, fw);\n" \
+	"        if (k == 0) c00 = val;\n" \
+	"        else if (k == 1) c10 = val;\n" \
+	"        else if (k == 2) c01 = val;\n" \
+	"        else c11 = val;\n" \
+	"    }\n" \
+	"    float c_y0 = wrap_x ? mix(c00, c10, tx) : c00;\n" \
+	"    float c_y1 = wrap_x ? mix(c01, c11, tx) : c01;\n" \
+	"    float c = wrap_y ? mix(c_y0, c_y1, ty) : c_y0;\n" \
+	"    c -= float(uSeaOffsetQ12_4);\n" \
+	"    return nd_gpu_bimodal_hypsometry(c * 0.0625);\n" \
+	"}\n" \
 	"vec3 nd_gpu_eval_canonical_field(vec2 worldPos, float fw, float texelSpan, float texZ, vec2 texGrad, out float out_fine_elev) {\n" \
+	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n" \
 	"    float coarseH = texZ;\n" \
 	"    vec2 coarseGrad = texGrad;\n" \
+	"    if (texelSpan > 320.0) {\n" \
+	"        float rx_f = (worldPos.x - 80.0) / 160.0;\n" \
+	"        float ry_f = (64.0 - worldPos.y) / 128.0;\n" \
+	"        int rx0 = int(floor(rx_f));\n" \
+	"        int ry0 = int(floor(ry_f));\n" \
+	"        int corner_limit = (fw < 120.0) ? 4 : 1;\n" \
+	"        float h_c[4];\n" \
+	"        for (int c = 0; c < corner_limit; c++) {\n" \
+	"            h_c[c] = nd_gpu_room_hyp_coarse(seed, rx0 + (c & 1), ry0 + (c >> 1), fw);\n" \
+	"        }\n" \
+	"        if (corner_limit == 4) {\n" \
+	"            vec2 f = vec2(rx_f - floor(rx_f), ry_f - floor(ry_f));\n" \
+	"            vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n" \
+	"            vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n" \
+	"            float h00 = h_c[0];\n" \
+	"            float h10 = h_c[1];\n" \
+	"            float h01 = h_c[2];\n" \
+	"            float h11 = h_c[3];\n" \
+	"            float k0 = h10 - h00;\n" \
+	"            float k1 = h01 - h00;\n" \
+	"            float k2 = h11 - h01 - k0;\n" \
+	"            coarseH = h00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n" \
+	"            coarseGrad = vec2((k0 + k2 * u.y) * du.x / 160.0, -(k1 + k2 * u.x) * du.y / 128.0);\n" \
+	"        } else {\n" \
+	"            coarseH = h_c[0];\n" \
+	"            coarseGrad = texGrad;\n" \
+	"        }\n" \
+	"    }\n" \
 	"    /* Compute exact active sub-texel octave window [s_min, s_max] in [3..9] before evaluating ruggedness */\n" \
 	"    if (fw * OCTAVE_MIN_PX >= 512.0 || texelSpan * 3.2 <= 8.0 || chaff_band_weight(512.0, fw, texelSpan) <= 0.001) {\n" \
 	"        out_fine_elev = 0.0;\n" \
 	"        return vec3(coarseH, coarseGrad.x, coarseGrad.y);\n" \
 	"    }\n" \
-	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n" \
 	"    uint rug_seed = 0x52554747u ^ (uint(uWorldId) * 0x9E3779B1u);\n" \
 	"    const mat2 rotAtan = mat2(0.8942871, 0.44714355, -0.44714355, 0.8942871);\n" \
 	"    const mat2 irotAtan = mat2(0.8942871, -0.44714355, 0.44714355, 0.8942871);\n" \

@@ -959,7 +959,7 @@ XY_IMPL(int, on_axil_parse, socket_t, fd, unsigned char *, input, int, nread)
 
 	/* Find or create session for this WS fd */
 	char sess_id[CHAT_ID_MAX] = {0};
-	void *sess_id_ptr = corm_get(g_ws_session_map, &fd);
+	const void *sess_id_ptr = corm_get(g_ws_session_map, &fd);
 	if (sess_id_ptr) {
 		strncpy(sess_id, (const char *)sess_id_ptr, CHAT_ID_MAX - 1);
 	}

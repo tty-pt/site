@@ -26,7 +26,7 @@ map_init(void)
 {
 	islet_init();
 	/* reduce bucket count on constrained memory; corm auto-grows on overflow */
-	map_hd = islet_open(world_db(), "map", 0xFFFF);
+	map_hd = islet_open((char *)world_db(), "map", 0xFFFF);
 	pos_type = corm_reg(sizeof(pos_t));
 	w_hd = corm_open(world_db(), "map_w", CM_U32, pos_type, 0xFFFF, 0);
 }

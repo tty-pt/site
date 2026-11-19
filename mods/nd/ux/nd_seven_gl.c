@@ -19,16 +19,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifndef __wasm__
-/* Native GL stub for glReadPixels (not provided by webgl.h for native) */
-static inline void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                                GLenum format, GLenum type, void *pixels) {
-    (void)x; (void)y; (void)width; (void)height; (void)format; (void)type; (void)pixels;
-}
-
-/* Forward declarations for native-only functions */
+/* Forward declaration for 2D hierarchical occlusion map builder */
 static void gl_build_occ2d_map(void);
-#endif
 
 #define PI_F 3.14159265358979323846f
 #define TWO_PI_F 6.28318530717958647692f
@@ -1109,10 +1101,13 @@ static const char *s_fs_terrain =
 	"    vec2 worldSlopeGrad = fragGrad * effectiveScale;\n"
 	"    float fw = clamp(max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos))), 1e-4, max(uChunkSpan.x, uChunkSpan.y) * 0.25);\n"
 	"    /* Option A: Per-pixel canonical GPU terrain field evaluation with continuous cross-LOD fading.\n"
-	"     * Blending purely by continuous vDistance ensures adjacent chunks of different\n"
-	"     * quadtree levels fade seamlessly with zero LOD boundary seam or pop. */\n"
-	"    float texelSpan = max(3.333333, vDistance * 0.0085);\n"
-	"    float gpuFieldBlend = smoothstep(3200.0, 9600.0, vDistance);\n"
+	"     * Blending by both continuous vDistance and chunk texelSpan ensures any chunk coarser than\n"
+	"     * Level 0 evaluates sub-texel octaves and normals on the GPU with zero LOD boundary seam. */\n"
+	"    float chunkTexelSpan = uChunkSpan.x / 48.0;\n"
+	"    float texelSpan = max(chunkTexelSpan, max(3.333333, vDistance * 0.0085));\n"
+	"    float spanBlend = smoothstep(5.0, 14.0, chunkTexelSpan);\n"
+	"    float distBlend = smoothstep(3200.0, 8400.0, vDistance);\n"
+	"    float gpuFieldBlend = clamp(max(spanBlend, distBlend), 0.0, 1.0);\n"
 	"    float texZ = fragZ;\n"
 	"    float riverProx = 0.0;\n"
 	"    float riverCarve = 0.0;\n"
@@ -1138,7 +1133,9 @@ static const char *s_fs_terrain =
 	"    vec3 torusN = normalize(vTorusNormal);\n"
 	"    vec3 tangentU = normalize(vTangentU);\n"
 	"    vec3 tangentV = normalize(vTangentV);\n"
-	"    vec3 fragNormal = normalize(torusN - worldSlopeGrad.x * tangentU - worldSlopeGrad.y * tangentV);\n"
+	"    float slopeMag = length(worldSlopeGrad);\n"
+	"    float normalExag = mix(2.4, 1.15, smoothstep(0.04, 0.35, slopeMag));\n"
+	"    vec3 fragNormal = normalize(torusN - (worldSlopeGrad.x * normalExag) * tangentU - (worldSlopeGrad.y * normalExag) * tangentV);\n"
 	"    vec4 macroOct = vec4(0.5);\n"
 	"    vec4 macroDetail = eval_macro_planetary_detail(vWorldPos, vDistance, fw, texelSpan, macroOct);\n"
 	"    vec4 wind = eval_recursive_wind(vWorldPos, uAnimTime, fw, vDistance);\n"
@@ -1271,8 +1268,10 @@ static const char *s_fs_terrain =
 	"    float convexity = clamp(-rawCurv * 28.0 + max(0.0, h0) * 0.65, 0.0, 1.0);\n"
 	"    float concavity = clamp(rawCurv * 28.0 + microCavity * 1.15 - min(0.0, h0) * 0.45, 0.0, 1.0);\n"
 	"    /* Full per-pixel hypsometric & fine-relief shading (moved from CPU substrate to preserve pure RGB biome chromaticity) */\n"
-	"    float hypsoShade = clamp((elevAboveWater - 18.0) * 0.0012, -0.06, 0.14) * (1.0 - wPolar * 0.7);\n"
-	"    dryCol *= clamp(1.0 + hypsoShade + (convexity - concavity) * 0.05, 0.84, 1.18);\n"
+	"    float lowHillShade = clamp((elevAboveWater - 12.0) * 0.0038, -0.05, 0.09);\n"
+	"    float highHypsoShade = clamp((elevAboveWater - 40.0) * 0.0010, 0.0, 0.12);\n"
+	"    float hypsoShade = (lowHillShade + highHypsoShade) * (1.0 - wPolar * 0.7);\n"
+	"    dryCol *= clamp(1.0 + hypsoShade + (convexity - concavity) * 0.09, 0.82, 1.22);\n"
 	"    float macroFade = clamp((44000.0 - vDistance) / 38000.0, 0.0, 1.0);\n"
 	"    float distFade  = clamp(1.0 - (vDistance - 1800.0) / 26200.0, 0.0, 1.0);\n"
 	"    float closeZoom = clamp((1350.0 - vDistance) / 700.0, 0.0, 1.0);\n"
@@ -6471,46 +6470,13 @@ static inline bool gl_build_hiz_pyramid(void)
 	return true;
 }
 
-#ifndef __wasm__
-/* Read back Hi-Z pyramid to CPU for occlusion queries.
- * Reads level 0..min(hiz_levels, 6) at up to 16x16 blocks per level. */
-static void gl_readback_hiz(void)
-{
-    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0) return;
-    
-    int levels_to_read = s_gl.hiz_levels < ND_HIZ_MAX_LEVELS ? s_gl.hiz_levels : ND_HIZ_MAX_LEVELS;
-    
-    for (int level = 0; level < levels_to_read; level++) {
-        uint32_t lw = (s_gl.hiz_w > (1u << level)) ? (s_gl.hiz_w >> level) : 1u;
-        uint32_t lh = (s_gl.hiz_h > (1u << level)) ? (s_gl.hiz_h >> level) : 1u;
-        
-        int read_w = lw < 16 ? lw : 16;
-        int read_h = lh < 16 ? lh : 16;
-        
-        // Bind the Hi-Z texture level to a temporary FBO for readback
-        GLuint tmp_fbo = glCreateFramebuffer();
-        glBindFramebuffer(GL_FRAMEBUFFER, tmp_fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                              GL_TEXTURE_2D, s_gl.hiz_depth_tex, level);
-        
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
-            glReadPixels(0, 0, read_w, read_h, GL_RED, GL_FLOAT,
-                        &s_gl.hiz_readback[level][0][0]);
-        }
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glDeleteFramebuffer(tmp_fbo);
-    }
-    glBindTexture(GL_TEXTURE_2D, 0);
-}
-#else
+/* Read back Hi-Z pyramid to CPU when CPU occlusion readback is active.
+ * GPU-driven Hi-Z culling samples uHiZTex directly in the vertex shader. */
 static void gl_readback_hiz(void)
 {
     (void)s_gl;
 }
-#endif
 
-#ifndef __wasm__
 /* Build 2D hierarchical occlusion map from Hi-Z pyramid.
  * Creates a min-depth pyramid at tile granularity for fast rectangle queries. */
 static void gl_build_occ2d_map(void)
@@ -6583,7 +6549,6 @@ static void gl_build_occ2d_map(void)
     
     s_occ2d_valid = 1;
 }
-#endif
 
 /* Test if a world-space bounding sphere is occluded by Hi-Z buffer.
  * Returns true (1) if fully occluded (sphere behind depth at all samples). */
@@ -6882,12 +6847,10 @@ void nd_seven_gl_end_frame(void)
 		gl_readback_hiz();
 	}
 	
-#ifndef __wasm__
-	/* Build 2D hierarchical occlusion map from Hi-Z readback */
-	if (s_gl.hiz_valid) {
+	/* Build 2D hierarchical occlusion map from Hi-Z readback when readback is active */
+	if (s_gl.hiz_valid && s_occ2d_valid) {
 		gl_build_occ2d_map();
 	}
-#endif
 	
 	/* The sprite marker lives in the scene alpha: the canvas must end up fully opaque */
 	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
@@ -7791,21 +7754,17 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue the water surface of this chunk for the submerged-object pass */
 	if (terrain_sea_lvl > -900.0f && s_gl.water_count < (uint32_t)nd_seven_gl_max_water_queue()) {
-		/* Skip water chunks that are occluded (2D hierarchical occlusion map) */
-#ifndef __wasm__
+		/* Skip water chunks that are occluded (2D hierarchical occlusion map or 1D ridge test) */
 		if (s_occ2d_valid && s_gl.hiz_valid) {
 			if (nd_seven_occ2d_test_water_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, terrain_sea_lvl)) {
 				s_gl.water_culled_occ2d++;
 				return; /* Don't queue this water chunk */
 			}
-		}
-#else
-		/* WASM: fall back to 1D ridge test */
-		if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
-		                                     s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-		                                     s_gl.cur_pdef.minor_r))
+		} else if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
+		                                            s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+		                                            s_gl.cur_pdef.minor_r)) {
 			return; /* Don't queue this water chunk */
-#endif
+		}
 		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];
 		wq->ox = ox;
 		wq->oy = oy;
@@ -8756,8 +8715,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		uint32_t need_core = 0, need_other = 0, need_mesh3d = 0;
 		const nd_mesh3d_slice_t *m3d_slice = NULL;
 		if (!last) {
-			/* Hi-Z occlusion culling for billboards (native build) */
-#ifndef __wasm__
+			/* Hi-Z occlusion culling for billboards when CPU readback map is active */
 			if (s_gl.hiz_valid && s_occ2d_valid) {
 				float radius = fmaxf(batch[i].width, batch[i].height) * 0.5f;
 				if (nd_seven_hiz_test_sphere(batch[i].x, batch[i].y, batch[i].z, radius)) {
@@ -8765,7 +8723,6 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 					continue;  // Skip this billboard
 				}
 			}
-#endif
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
 			if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {

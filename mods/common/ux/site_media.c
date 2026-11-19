@@ -64,8 +64,8 @@ bud_node *site_ui_viewer_controls(
 		        "data-detail-viewer-controls='%s' "
 		        "data-detail-viewer-save-url='%s'>"
 		        "  <label>%s"
-		        "    <input type='range' min='" STR(
-		                VIEWER_ZOOM_MIN) "' max='" STR(VIEWER_ZOOM_MAX) "' step='10' value='%d' data-detail-viewer-zoom='1' %bind %bind/>"
+		        "    <input type='range' min='" VZ_STR(
+		                VIEWER_ZOOM_MIN) "' max='" VZ_STR(VIEWER_ZOOM_MAX) "' step='10' value='%d' data-detail-viewer-zoom='1' %bind %bind/>"
 		                                                                "  </label>"
 		                                                                "  <p class='text-xs text-muted' data-detail-viewer-zoom-label='1'>%node</p>"
 		                                                                "  <label>"
@@ -82,8 +82,8 @@ bud_node *site_ui_viewer_controls(
 	        "<div class='viewer-controls' data-detail-viewer-controls='%s' "
 	        "data-detail-viewer-save-url='%s'>"
 	        "  <label>%s"
-	        "    <input type='range' min='" STR(
-	                VIEWER_ZOOM_MIN) "' max='" STR(VIEWER_ZOOM_MAX) "' "
+	        "    <input type='range' min='" VZ_STR(
+	                VIEWER_ZOOM_MIN) "' max='" VZ_STR(VIEWER_ZOOM_MAX) "' "
 	                                                                "step='"
 	                                                                "10' "
 	                                                                "value="
