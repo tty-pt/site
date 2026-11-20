@@ -255,12 +255,12 @@ typedef struct {
 	nd_seven_sprite_rect_t rect;
 } flora_dyn_slot_t;
 
-static flora_dyn_slot_t s_flora_slots[ND_PLANT_MAX][2][2];
+static flora_dyn_slot_t s_flora_slots[ND_PLANT_MAX][2][4];
 static uint32_t s_decode_scratch[384 * 384];
 static uint32_t s_norm_scratch[384 * 384];
 
 static nd_mesh3d_vert_t  s_mesh3d_verts[ND_MESH3D_MAX_VERTS];
-static uint16_t          s_mesh3d_indices[ND_MESH3D_MAX_INDICES];
+static uint32_t          s_mesh3d_indices[ND_MESH3D_MAX_INDICES];
 static nd_mesh3d_slice_t s_mesh3d_slices[ND_MESH3D_TOTAL];
 static uint32_t          s_mesh3d_vert_count = 0;
 static uint32_t          s_mesh3d_idx_count  = 0;
@@ -344,20 +344,20 @@ void nd_seven_mesh3d_init(void)
 	b.idx_count  = 0;
 	b.idx_cap    = ND_MESH3D_MAX_INDICES;
 
-	/* Build all 64 canonical plant templates (1..64) */
+	/* Build all 128 canonical plant templates (1..128: 16 species x 2 stages x 4 skeletal alleles) */
 	for (unsigned sp = 0; sp < ND_PLANT_MAX; sp++) {
-		nd_bot3d_profile_t prof = nd_m3d_get_botanical_profile(s_nd_plant_specs[sp].slug);
+		const nd_plant_spec_t *spec = &s_nd_plant_specs[sp];
 		for (unsigned big = 0; big < 2u; big++) {
-			for (unsigned var = 0; var < 2u; var++) {
-				uint8_t mid = (uint8_t)(ND_MESH3D_PLANT_BASE + sp * 4u + big * 2u + var);
-				nd_m3d_build_plant_from_profile(&b, &prof, (int)big, (int)var,
-				                                0xB07A0u + sp * 97u,
-				                                &s_mesh3d_slices[mid]);
+			for (unsigned var = 0; var < 4u; var++) {
+				uint8_t mid = (uint8_t)(ND_MESH3D_PLANT_BASE + sp * 8u + big * 4u + var);
+				nd_m3d_build_plant_from_genes(&b, spec, (int)big, (int)var,
+				                              0xB07A0u + sp * 97u,
+				                              &s_mesh3d_slices[mid]);
 			}
 		}
 	}
 
-	/* Build all 51 canonical stone/mineral templates (65..115) */
+	/* Build all 51 canonical stone/mineral templates (129..179) */
 	for (unsigned idx = 0; idx < (unsigned)ND_MESH3D_STONE_COUNT; idx++) {
 		uint16_t sw = 28, sh = 24;
 		unsigned gen_sp = 0;
@@ -378,7 +378,7 @@ const nd_mesh3d_vert_t *nd_seven_mesh3d_verts(uint32_t *out_count)
 	return s_mesh3d_verts;
 }
 
-const uint16_t *nd_seven_mesh3d_indices(uint32_t *out_count)
+const uint32_t *nd_seven_mesh3d_indices(uint32_t *out_count)
 {
 	nd_seven_mesh3d_init();
 	if (out_count) *out_count = s_mesh3d_idx_count;
@@ -399,8 +399,8 @@ uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id)
 		return ND_MESH3D_NONE;
 	unsigned sp_idx  = ND_PLANT_UNPACK_IDX(plant_id);
 	unsigned is_big  = ND_PLANT_UNPACK_BIG(plant_id);
-	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 1u;
-	return (uint8_t)(ND_MESH3D_PLANT_BASE + sp_idx * 4u + is_big * 2u + var_idx);
+	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 3u;
+	return (uint8_t)(ND_MESH3D_PLANT_BASE + sp_idx * 8u + is_big * 4u + var_idx);
 }
 
 /* Bake a 3D mesh template synchronously into a dynamic atlas slot (albedo + normal map) */
@@ -516,7 +516,7 @@ int nd_seven_plant_has_normal(uint8_t plant_id)
 		return 0;
 	unsigned sp_idx = ND_PLANT_UNPACK_IDX(plant_id);
 	unsigned is_big = ND_PLANT_UNPACK_BIG(plant_id);
-	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 1u;
+	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 3u;
 	atlas_load();
 	flora_dyn_slot_t *slot = &s_flora_slots[sp_idx][is_big][var_idx];
 	if (!slot->loaded)
@@ -530,7 +530,7 @@ int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect)
 		return 0;
 	unsigned sp_idx = ND_PLANT_UNPACK_IDX(plant_id);
 	unsigned is_big = ND_PLANT_UNPACK_BIG(plant_id);
-	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 1u;
+	unsigned var_idx = (ND_PLANT_UNPACK_VAR(plant_id) - 1u) & 3u;
 
 	atlas_load();
 	flora_dyn_slot_t *slot = &s_flora_slots[sp_idx][is_big][var_idx];
@@ -805,13 +805,13 @@ uint8_t nd_seven_obj_mesh3d_id(const ndw_obj_t *o)
 	if (o->kind == NDW_K_STONE || o->kind == NDW_K_ROCK || o->kind == NDW_K_BOULDER)
 		return nd_seven_stone_mesh3d_id(o);
 	/* Fallback for unbound procedural plants by kind */
-	unsigned v = (unsigned)(o->variant & 1u);
+	unsigned v = (unsigned)(o->variant & 3u);
 	unsigned b = o->big ? 1u : 0u;
 	switch (o->kind) {
-	case NDW_K_DECID:  return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 4u + b * 2u + v); /* Quercus robur */
-	case NDW_K_TALL:   return (uint8_t)(ND_MESH3D_PLANT_BASE +  2u * 4u + b * 2u + v); /* Betula pendula */
-	case NDW_K_FIR:    return (uint8_t)(ND_MESH3D_PLANT_BASE +  1u * 4u + b * 2u + v); /* Pseudotsuga menziesii */
-	case NDW_K_CACTUS: return (uint8_t)(ND_MESH3D_PLANT_BASE +  6u * 4u + b * 2u + v); /* Arthrocereus rondonianus */
+	case NDW_K_DECID:  return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 8u + b * 4u + v); /* Quercus robur */
+	case NDW_K_TALL:   return (uint8_t)(ND_MESH3D_PLANT_BASE +  2u * 8u + b * 4u + v); /* Betula pendula */
+	case NDW_K_FIR:    return (uint8_t)(ND_MESH3D_PLANT_BASE +  1u * 8u + b * 4u + v); /* Pseudotsuga menziesii */
+	case NDW_K_CACTUS: return (uint8_t)(ND_MESH3D_PLANT_BASE +  6u * 8u + b * 4u + v); /* Arthrocereus rondonianus */
 	default:           return ND_MESH3D_NONE;
 	}
 }
@@ -819,13 +819,13 @@ uint8_t nd_seven_obj_mesh3d_id(const ndw_obj_t *o)
 uint8_t nd_seven_entity_mesh3d_id(int spr_id)
 {
 	switch (spr_id) {
-	case NDS_TREE_OAK:       return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 4u + 2u + 0u);
-	case NDS_TREE_APPLE:     return (uint8_t)(ND_MESH3D_PLANT_BASE + 12u * 4u + 2u + 0u);
-	case NDS_TREE_APPLE2:    return (uint8_t)(ND_MESH3D_PLANT_BASE +  2u * 4u + 2u + 1u);
-	case NDS_TREE_BIG:       return (uint8_t)(ND_MESH3D_PLANT_BASE +  1u * 4u + 2u + 0u);
-	case NDS_TREE_ROUND:     return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 4u + 0u + 0u);
-	case NDS_BUSH_DARK:      return (uint8_t)(ND_MESH3D_PLANT_BASE +  5u * 4u + 0u + 0u);
-	case NDS_BUSH_TEAL:      return (uint8_t)(ND_MESH3D_PLANT_BASE +  0u * 4u + 0u + 1u);
+	case NDS_TREE_OAK:       return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 8u + 4u + 0u);
+	case NDS_TREE_APPLE:     return (uint8_t)(ND_MESH3D_PLANT_BASE + 12u * 8u + 4u + 0u);
+	case NDS_TREE_APPLE2:    return (uint8_t)(ND_MESH3D_PLANT_BASE +  2u * 8u + 4u + 1u);
+	case NDS_TREE_BIG:       return (uint8_t)(ND_MESH3D_PLANT_BASE +  1u * 8u + 4u + 0u);
+	case NDS_TREE_ROUND:     return (uint8_t)(ND_MESH3D_PLANT_BASE + 10u * 8u + 0u + 0u);
+	case NDS_BUSH_DARK:      return (uint8_t)(ND_MESH3D_PLANT_BASE +  5u * 8u + 0u + 0u);
+	case NDS_BUSH_TEAL:      return (uint8_t)(ND_MESH3D_PLANT_BASE +  0u * 8u + 0u + 1u);
 	case NDS_ROCK_GREY:      return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_ALPINE_GRANITE);
 	case NDS_ROCK_TAN:       return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_MED_LATERITE);
 	case NDS_ROCK_WHITE:     return (uint8_t)(ND_MESH3D_STONE_BASE + NDS_SP_SHRUB_QUARTZITE);

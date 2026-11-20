@@ -4118,12 +4118,12 @@ int main(void)
 		{
 			uint32_t m3d_vcnt = 0, m3d_icnt = 0;
 			const nd_mesh3d_vert_t *m3d_verts = nd_seven_mesh3d_verts(&m3d_vcnt);
-			const uint16_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
+			const uint32_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
 			assert(m3d_verts != NULL && m3d_idx != NULL);
 			assert(m3d_vcnt > 4000 && m3d_vcnt <= ND_MESH3D_MAX_VERTS);
 			assert(m3d_icnt > 12000 && m3d_icnt <= ND_MESH3D_MAX_INDICES);
 
-			/* Verify all 64 canonical plant templates (1..64) and 51 stone/mineral templates (65..115) */
+			/* Verify all 128 canonical plant templates (1..128) and 51 stone/mineral templates (129..179) */
 			for (uint8_t mid = 1; mid < ND_MESH3D_TOTAL; mid++) {
 				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice(mid);
 				assert(sl != NULL);
@@ -4142,17 +4142,19 @@ int main(void)
 			assert(strstr(vs_m3d, "a_ibase") != NULL);
 			assert(strstr(fs_m3d, "nd_cloud_shadow_map") != NULL);
 
-			/* Verify synchronous Option B orthographic 55-deg pixel-art albedo & normal map baking */
+			/* Verify synchronous Option B orthographic 55-deg pixel-art albedo & normal map baking across all 4 alleles */
 			for (unsigned sp = 0; sp < 16; sp++) {
-				uint16_t pid_s = ND_PLANT_PACK_ID(sp, 0, 0);
-				uint16_t pid_b = ND_PLANT_PACK_ID(sp, 1, 1);
-				nd_seven_sprite_rect_t sr_s = {0}, sr_b = {0};
-				assert(nd_seven_plant_rect(pid_s, &sr_s) == 1 && sr_s.w > 0 && sr_s.h > 0);
-				assert(nd_seven_plant_rect(pid_b, &sr_b) == 1 && sr_b.w > 0 && sr_b.h > 0);
-				assert(nd_seven_plant_has_normal(pid_s) == 1);
-				assert(nd_seven_plant_has_normal(pid_b) == 1);
-				assert(nd_seven_plant_mesh3d_id(pid_s) >= ND_MESH3D_PLANT_BASE);
-				assert(nd_seven_plant_mesh3d_id(pid_b) > nd_seven_plant_mesh3d_id(pid_s));
+				for (unsigned var0 = 0; var0 < 4; var0++) {
+					uint16_t pid_s = ND_PLANT_PACK_ID(sp, 0, var0);
+					uint16_t pid_b = ND_PLANT_PACK_ID(sp, 1, var0);
+					nd_seven_sprite_rect_t sr_s = {0}, sr_b = {0};
+					assert(nd_seven_plant_rect(pid_s, &sr_s) == 1 && sr_s.w > 0 && sr_s.h > 0);
+					assert(nd_seven_plant_rect(pid_b, &sr_b) == 1 && sr_b.w > 0 && sr_b.h > 0);
+					assert(nd_seven_plant_has_normal(pid_s) == 1);
+					assert(nd_seven_plant_has_normal(pid_b) == 1);
+					assert(nd_seven_plant_mesh3d_id(pid_s) >= ND_MESH3D_PLANT_BASE);
+					assert(nd_seven_plant_mesh3d_id(pid_b) > nd_seven_plant_mesh3d_id(pid_s));
+				}
 			}
 			const uint8_t stone_kinds[3] = { NDW_K_STONE, NDW_K_ROCK, NDW_K_BOULDER };
 			for (int ki = 0; ki < 3; ki++) {
@@ -4194,19 +4196,19 @@ int main(void)
 				nd_m3d_plant_metric_dims(15u, 1u, &pw_b, &ph_b, &pay_b);
 				assert(ph_b > 3.0f * lamb_wu && ph_b < 3.9f * lamb_wu);
 
-				/* 7: acacia_senegal (Savannah Umbrella Thorn): wide flat tabletop crown (width > 1.3 * height) */
+				/* 7: acacia_senegal (Savannah Umbrella Thorn): 270 wu mature = 15.0x Lamb height, wide flat tabletop crown (width > 1.3 * height) */
 				nd_m3d_plant_metric_dims(7u, 1u, &pw_b, &ph_b, &pay_b);
-				assert(ph_b > 5.5f * lamb_wu && ph_b < 7.0f * lamb_wu);
+				assert(ph_b > 14.0f * lamb_wu && ph_b < 16.5f * lamb_wu);
 				assert(pw_b > 1.30f * ph_b);
 
-				/* 10: quercus_robur (Pedunculate Oak): 144 wu mature = 8.0x Lamb height, broad spreading crown (152 wu) */
+				/* 10: quercus_robur (Pedunculate Oak): 432 wu mature = 24.0x Lamb height, broad spreading crown (450 wu) */
 				nd_m3d_plant_metric_dims(10u, 1u, &pw_b, &ph_b, &pay_b);
-				assert(ph_b > 7.5f * lamb_wu && ph_b < 8.8f * lamb_wu);
+				assert(ph_b > 22.0f * lamb_wu && ph_b < 26.0f * lamb_wu);
 				assert(pw_b >= ph_b);
 
-				/* 1: pseudotsuga_menziesii (Coast Douglas-fir): 196 wu mature = ~10.9x Lamb height */
+				/* 1: pseudotsuga_menziesii (Coast Douglas-fir): 648 wu mature = 36.0x Lamb height */
 				nd_m3d_plant_metric_dims(1u, 1u, &pw_b, &ph_b, &pay_b);
-				assert(ph_b > 10.0f * lamb_wu && ph_b < 11.8f * lamb_wu);
+				assert(ph_b > 34.0f * lamb_wu && ph_b < 38.0f * lamb_wu);
 
 				/* Geological metric tiers: STONE (< 0.75 * Lamb) < ROCK (1.1..1.5 * Lamb) < BOULDER (2.2..2.8 * Lamb) */
 				float sw_st = 0.0f, sh_st = 0.0f, say_st = 0.0f;
@@ -4249,7 +4251,7 @@ int main(void)
 				assert(hl_ortho_faces >= 18);
 			}
 
-			printf("PASS: 3D procedural botanical (64 templates) & geological (51 templates) mesh engine (verts=%u, tris=%u) + Earth metric scale (1m=45wu) + 55-deg orthographic baker verified\n",
+			printf("PASS: 3D procedural botanical (128 templates) & geological (51 templates) mesh engine (verts=%u, tris=%u) + Earth metric scale (1m=45wu) + 55-deg orthographic baker verified\n",
 			       m3d_vcnt, m3d_icnt / 3u);
 
 			/* Multi-frame approach / zoom-in LOD progression regression test:

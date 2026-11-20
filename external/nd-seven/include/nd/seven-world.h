@@ -709,8 +709,8 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 						continue;
 					if (ce->scatter_mode == NDW_SCATTER_CLUSTER &&
 					    (t->plant_id[s] != 0 || t->col_mask[s] != 0)) {
-						unsigned base_var0 = ((unsigned)t->plant_id[s] >> 6) & 1u;
-						unsigned c_var0 = (base_var0 + (unsigned)c) & 1u;
+						unsigned base_var0 = ((unsigned)t->plant_id[s] >> 6) & 3u;
+						unsigned c_var0 = (base_var0 + (unsigned)c) & 3u;
 						o.plant_id = (uint8_t)((t->plant_id[s] & 0x3Fu) | (c_var0 << 6));
 						o.col_mask = t->col_mask[s];
 						uint8_t nhw = o.hw, nhh = o.hh;

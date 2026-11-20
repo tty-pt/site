@@ -10,6 +10,7 @@
 #include "nd_seven_shader.h"
 #include "nd_seven_atlas.h"
 #include "nd_seven_atlas_draw.h"
+#include "nd_seven_ground.h"
 #include <ttypt/webgl.h>
 #include <ttypt/areole.h>
 #include <ttypt/chaff_glsl.h>
@@ -2667,12 +2668,12 @@ static const char *s_vs_billboard =
 	"    vQuadUV = a_quad_uv;\n"
 	"    vSpriteBounds = a_sprite_bounds;\n"
 	"    /* GPU-Driven Hi-Z Occlusion Culling: project all 4 quad corners and test against hierarchical depth */\n"
-	"    if (uHiZActive > 0.5) {\n"
+	"    if (uHiZActive > 0.5 && a_param.w >= -0.5) {\n"
 	"        vec3 cCenter = 0.25 * (a_pos0.xyz + a_pos1.xyz + a_pos2.xyz + a_pos3.xyz);\n"
 	"        vec3 toCamC = uCameraPos - cCenter;\n"
 	"        float dCamC = length(toCamC);\n"
 	"        vec3 dirC = (dCamC > 0.001) ? (toCamC / dCamC) : vec3(0.0, 0.0, 1.0);\n"
-	"        float biasC = (a_param.w < -0.5) ? min(10.0, dCamC * 0.035) : min(24.0, dCamC * 0.08);\n"
+	"        float biasC = (a_param.w < -0.5) ? min(19.5, dCamC * 0.062) : min(24.0, dCamC * 0.08);\n"
 	"        vec3 bOff = dirC * biasC;\n"
 	"        vec4 c0 = uMVP * vec4(a_pos0.xyz + bOff, 1.0);\n"
 	"        vec4 c1 = uMVP * vec4(a_pos1.xyz + bOff, 1.0);\n"
@@ -2707,7 +2708,7 @@ static const char *s_vs_billboard =
 	"    vec3 toCam = uCameraPos - p.xyz;\n"
 	"    float dCam = length(toCam);\n"
 	"    vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
-	"    float bias = (a_quad_uv.w < -0.5) ? min(10.0, dCam * 0.035) : min(24.0, dCam * 0.08);\n"
+	"    float bias = (a_quad_uv.w < -0.5) ? min(21.0, dCam * 0.072) : min(24.0, dCam * 0.08);\n"
 	"    gl_Position = uMVP * vec4(p.xyz + dirToCam * bias, 1.0);\n"
 	"}\n";
 
@@ -2928,25 +2929,33 @@ static const char *s_fs_billboard =
 	"        float silAlpha = 0.0;\n"
 	"        if (vSpriteBounds.z > vSpriteBounds.x && vSpriteBounds.w > vSpriteBounds.y) {\n"
 	"            float aC = sampleAtlasSmooth(vUV, vSpriteBounds, 0.0).a;\n"
-	"            if (vDist < 1200.0) {\n"
+	"            if (vDist < 1400.0) {\n"
 	"                vec2 atlasSz = max(vec2(1.0), vec2(textureSize(uAtlasTex, 0)));\n"
-	"                vec2 blurStep = ((isLambShadow ? 0.55 : 0.35) + (isLambShadow ? 1.95 : 1.45) * hFrac) / atlasSz;\n"
+	"                vec2 blurStep = ((isLambShadow ? 0.65 : 0.45) + (isLambShadow ? 2.25 : 1.75) * hFrac) / atlasSz;\n"
 	"                float aL = sampleAtlasSmooth(vUV + vec2(-blurStep.x, 0.0), vSpriteBounds, 0.0).a;\n"
 	"                float aR = sampleAtlasSmooth(vUV + vec2( blurStep.x, 0.0), vSpriteBounds, 0.0).a;\n"
 	"                float aD = sampleAtlasSmooth(vUV + vec2(0.0, -blurStep.y), vSpriteBounds, 0.0).a;\n"
 	"                float aU = sampleAtlasSmooth(vUV + vec2(0.0,  blurStep.y), vSpriteBounds, 0.0).a;\n"
-	"                silAlpha = 0.40 * aC + 0.15 * (aL + aR + aD + aU);\n"
+	"                float aDL = sampleAtlasSmooth(vUV + vec2(-blurStep.x * 0.7, -blurStep.y * 0.7), vSpriteBounds, 0.0).a;\n"
+	"                float aDR = sampleAtlasSmooth(vUV + vec2( blurStep.x * 0.7, -blurStep.y * 0.7), vSpriteBounds, 0.0).a;\n"
+	"                float aUL = sampleAtlasSmooth(vUV + vec2(-blurStep.x * 0.7,  blurStep.y * 0.7), vSpriteBounds, 0.0).a;\n"
+	"                float aUR = sampleAtlasSmooth(vUV + vec2( blurStep.x * 0.7,  blurStep.y * 0.7), vSpriteBounds, 0.0).a;\n"
+	"                silAlpha = 0.28 * aC + 0.11 * (aL + aR + aD + aU) + 0.07 * (aDL + aDR + aUL + aUR);\n"
 	"            } else {\n"
 	"                silAlpha = aC;\n"
 	"            }\n"
 	"        }\n"
-	"        /* Ground-contact elliptical umbra at the base/trunk/feet + radial fallback when bounds are unset */\n"
+	"        /* Ground-contact elliptical umbra at the base/trunk/feet + continuous trunk-to-canopy shadow spine */\n"
 	"        float r2 = dot(vQuadUV.xy, vQuadUV.xy);\n"
-	"        vec2 baseDelta = vec2(vQuadUV.x * 1.45, (hFrac - 0.14) * 3.20);\n"
-	"        float contactUmbra = exp(-dot(baseDelta, baseDelta) * 2.6) * (isLambShadow ? 0.24 : 0.34);\n"
-	"        float radialPenumbra = (r2 < 1.0) ? pow(clamp(1.0 - r2, 0.0, 1.0), 1.65) : 0.0;\n"
-	"        float heightFade = 1.0 - (isLambShadow ? 0.45 : 0.32) * hFrac * hFrac;\n"
-	"        float castMask = (vSpriteBounds.z > vSpriteBounds.x) ? max(silAlpha * heightFade * 0.44, contactUmbra) : (radialPenumbra * 0.36 + contactUmbra * 0.45);\n"
+	"        vec2 baseDelta = vec2(vQuadUV.x * 1.35, (hFrac - 0.14) * 2.85);\n"
+	"        float contactUmbra = exp(-dot(baseDelta, baseDelta) * 2.1) * (isLambShadow ? 0.56 : 0.44);\n"
+	"        vec2 crownDelta = vec2(vQuadUV.x * 1.16, (hFrac - 0.62) * 1.92);\n"
+	"        float crownVolume = exp(-dot(crownDelta, crownDelta) * 1.55) * (isLambShadow ? 0.48 : 0.34);\n"
+	"        float trunkSpine = exp(-vQuadUV.x * vQuadUV.x * 15.0) * smoothstep(0.02, 0.18, hFrac) * smoothstep(0.78, 0.35, hFrac) * (isLambShadow ? 0.46 : 0.32);\n"
+	"        float radialPenumbra = (r2 < 1.0) ? pow(clamp(1.0 - r2, 0.0, 1.0), 1.50) : 0.0;\n"
+	"        float heightFade = 1.0 - (isLambShadow ? 0.24 : 0.24) * hFrac * hFrac;\n"
+	"        float softCore = max(contactUmbra, max(trunkSpine, crownVolume * silAlpha));\n"
+	"        float castMask = (vSpriteBounds.z > vSpriteBounds.x) ? max(silAlpha * heightFade * (isLambShadow ? 0.78 : 0.56), softCore) : (radialPenumbra * (isLambShadow ? 0.58 : 0.42) + contactUmbra * 0.52);\n"
 	"        if (castMask <= 0.008) discard;\n"
 	"        float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
 	"        float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
@@ -2955,14 +2964,16 @@ static const char *s_fs_billboard =
 	"        float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, dot(torusN, sDir)), 0.12, 1.0);\n"
 	"        vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
 	"        float cloudSh = isLambShadow ? 0.0 : nd_cloud_shadow_map(vLocalPos.xy, vQuadUV.z, vDist);\n"
-	"        vec3 shNoise = chaff_grad_noise2d(vLocalPos.xy * 0.28, 0x53484457u);\n"
-	"        float dapple = 0.88 + 0.24 * shNoise.x;\n"
+	"        vec3 shNoise = chaff_grad_noise2d(vLocalPos.xy * 0.34, 0x53484457u);\n"
+	"        vec3 shFine  = chaff_grad_noise2d(vLocalPos.xy * 0.92, 0x4C465348u);\n"
+	"        float canopyPorosity = smoothstep(0.25, 0.70, hFrac) * (0.35 * (shNoise.x - 0.5) + 0.25 * (shFine.x - 0.5));\n"
+	"        float dapple = clamp(0.92 + 0.22 * shNoise.x + canopyPorosity, 0.48, 1.18);\n"
 	"        float waterAtten = isSubmerged ? clamp(1.0 - d * 0.25, 0.0, 1.0) : 1.0;\n"
-	"        float distAtten = isLambShadow ? clamp((3200.0 - vDist) / 1200.0, 0.0, 1.0) : clamp((6500.0 - vDist) / 2500.0, 0.0, 1.0);\n"
+	"        float distAtten = isLambShadow ? clamp((3600.0 - vDist) / 1400.0, 0.0, 1.0) : clamp((6500.0 - vDist) / 2500.0, 0.0, 1.0);\n"
 	"        float lightTrans = isLambShadow ? 1.0 : nd_sun_trans(cloudSh);\n"
-	"        float shadowAlpha = clamp(castMask * dapple * lightTrans * vTint.a * waterAtten * distAtten * (1.0 - fogFactor * uAtmoIntensity), 0.0, isLambShadow ? 0.38 : 0.50);\n"
+	"        float shadowAlpha = clamp(castMask * dapple * lightTrans * vTint.a * waterAtten * distAtten * (1.0 - fogFactor * uAtmoIntensity), 0.0, isLambShadow ? 0.62 : 0.56);\n"
 	"        if (shadowAlpha <= 0.005) discard;\n"
-	"        vec3 shadowRgb = mix(vec3(0.05, 0.07, 0.10), sky * 0.16, 0.45);\n"
+	"        vec3 shadowRgb = mix(vec3(0.04, 0.06, 0.09), sky * 0.15, 0.42);\n"
 	"        FragColor = vec4(shadowRgb, shadowAlpha);\n"
 	"        return;\n"
 	"    }\n"
@@ -3224,15 +3235,19 @@ static const char *s_vs_mesh3d =
 	"layout (location = 0) in vec4 a_vpos;   /* xyz: local 3D pos in canonical wu, w: wind weight 0..1 */\n"
 	"layout (location = 1) in vec4 a_vnorm;  /* xyz: local 3D unit normal, w: ambient occlusion 0.12..1.0 */\n"
 	"layout (location = 2) in vec4 a_vcol;   /* rgb: 5-6-5 palette albedo, a: ND_MAT3D_* material class */\n"
-	"/* Per-instance attributes (divisor 1, stride 96 bytes) */\n"
+	"/* Per-instance attributes (divisor 1, stride 112 bytes) */\n"
 	"layout (location = 3) in vec4 a_ibase;  /* xyz: torus world base_pos rel cur_origin, w: scale_xy */\n"
 	"layout (location = 4) in vec4 a_iE;     /* xyz: rotated East tangent basis, w: scale_z */\n"
 	"layout (location = 5) in vec4 a_iS;     /* xyz: rotated South tangent basis, w: wind_sx */\n"
 	"layout (location = 6) in vec4 a_iN;     /* xyz: torus Zenith normal N, w: wind_sy */\n"
 	"layout (location = 7) in vec4 a_itint;  /* rgba: instance tint & distance fade alpha */\n"
 	"layout (location = 8) in vec4 a_iparam; /* xyz: world (wx, wy, ground_wz), w: style + 16.0 if inWaterTile */\n"
+	"layout (location = 9) in vec4 a_iterr;  /* xyz: terrain slope (gx, gy) & curvature, w: signed (shFlags + yaw01) */\n"
 	"uniform mat4 uMVP;\n"
 	"uniform vec3 uCameraPos;\n"
+	"uniform vec3 uSunDir;\n"
+	"uniform vec4 uLambLight;\n"
+	"uniform int uShadowPass;\n"
 	"out vec3 vWorldPos;\n"
 	"out vec3 vLocalPos;\n"
 	"out vec3 vNormal;\n"
@@ -3242,20 +3257,105 @@ static const char *s_vs_mesh3d =
 	"out vec4 vParam;\n"
 	"out float vAO;\n"
 	"out float vHeightAboveGround;\n"
+	"out vec2 vCardUV;\n"
 	"void main() {\n"
 	"    float scXY = a_ibase.w;\n"
 	"    float scZ  = a_iE.w;\n"
-	"    float wgt  = a_vpos.w;\n"
+	"    bool hasCardU = (a_vpos.w > 1.0);\n"
+	"    float wgt  = hasCardU ? fract(a_vpos.w) : a_vpos.w;\n"
+	"    float cardU = hasCardU ? ((floor(a_vpos.w) - 1.0) / 249.0) : -1.0;\n"
+	"    float mat = a_vcol.a;\n"
+	"    float cardV = 0.5;\n"
+	"    if (hasCardU && mat >= 0.198 && mat <= 0.352) {\n"
+	"        if (mat < 0.239) cardV = clamp((mat - 0.200) / 0.038, 0.0, 1.0);\n"
+	"        else if (mat < 0.279) cardV = clamp((mat - 0.240) / 0.038, 0.0, 1.0);\n"
+	"        else if (mat < 0.319) cardV = clamp((mat - 0.280) / 0.038, 0.0, 1.0);\n"
+	"        else cardV = clamp((mat - 0.320) / 0.030, 0.0, 1.0);\n"
+	"    }\n"
+	"    vCardUV = vec2(cardU, cardV);\n"
 	"    float wind_sx = a_iS.w * wgt;\n"
 	"    float wind_sy = a_iN.w * wgt;\n"
 	"    float wind_dz = 0.06 * (a_iS.w * a_iS.w + a_iN.w * a_iN.w) * wgt;\n"
 	"    float lx = a_vpos.x * scXY + wind_sx;\n"
 	"    float ly = a_vpos.y * scXY + wind_sy;\n"
 	"    float lz = max(0.0, a_vpos.z * scZ - wind_dz);\n"
+	"    float tw = a_iterr.w;\n"
+	"    float flip = (tw < 0.0) ? -1.0 : 1.0;\n"
+	"    float atw = abs(tw);\n"
+	"    float shFlags = floor(atw + 1e-4);\n"
+	"    float yaw = (fract(atw) - 0.5) * 6.28318530718;\n"
+	"    float cy = cos(yaw), sy = sin(yaw);\n"
+	"    /* Recover unrotated world East/South vertex offsets (dx_e, dy_s) and tangent basis (E, S) */\n"
+	"    float dx_e = (cy * flip) * lx - sy * ly;\n"
+	"    float dy_s = (sy * flip) * lx + cy * ly;\n"
+	"    vec3 E = (cy * flip) * a_iE.xyz - sy * a_iS.xyz;\n"
+	"    vec3 S = (sy * flip) * a_iE.xyz + cy * a_iS.xyz;\n"
+	"    if (uShadowPass > 0) {\n"
+	"        bool emitSun  = (shFlags >= 0.5 && (shFlags < 1.5 || shFlags >= 2.5));\n"
+	"        bool emitLamb = (shFlags >= 1.5);\n"
+	"        if ((uShadowPass == 1 && !emitSun) || (uShadowPass == 2 && !emitLamb)) {\n"
+	"            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"            return;\n"
+	"        }\n"
+	"        float ray_dx = 0.0, ray_dy = 0.0, max_drop = 260.0, lift_z = 0.28;\n"
+	"        if (uShadowPass == 1) {\n"
+	"            float sun_e = -0.50, sun_s = -0.42, sun_n = 0.76;\n"
+	"            if (dot(uSunDir, uSunDir) > 1e-4) {\n"
+	"                float le = dot(uSunDir, E);\n"
+	"                float ls = dot(uSunDir, S);\n"
+	"                float ln = dot(uSunDir, a_iN.xyz);\n"
+	"                if (ln > -0.05) {\n"
+	"                    sun_e = -0.46 + 0.18 * le;\n"
+	"                    sun_s = -0.40 + 0.18 * ls;\n"
+	"                    sun_n = max(0.42, 0.65 + 0.25 * ln);\n"
+	"                }\n"
+	"            }\n"
+	"            float cast_scale = min(1.65, 0.74 / sun_n);\n"
+	"            ray_dx = -sun_e * cast_scale;\n"
+	"            ray_dy = -sun_s * cast_scale;\n"
+	"        } else {\n"
+	"            vec2 baseFromLamb = a_iparam.xy - uLambLight.xy;\n"
+	"            float distBase = length(baseFromLamb);\n"
+	"            vec2 vertFromLamb = baseFromLamb + vec2(dx_e, dy_s);\n"
+	"            float distVert = length(vertFromLamb);\n"
+	"            vec2 radDir = (distVert > 0.25) ? (vertFromLamb / distVert)\n"
+	"                        : ((distBase > 0.25) ? (baseFromLamb / distBase) : vec2(1.0, 0.0));\n"
+	"            float lamb_h = clamp((uLambLight.z + 12.0) - a_iparam.z, 10.0, 28.0);\n"
+	"            float cast_scale = clamp((distBase / 54.0) * (24.0 / (lamb_h + 10.0)), 0.58, 1.65);\n"
+	"            ray_dx = radDir.x * cast_scale;\n"
+	"            ray_dy = radDir.y * cast_scale;\n"
+	"            max_drop = 180.0 / max(0.58, cast_scale);\n"
+	"            lift_z = 0.34;\n"
+	"        }\n"
+	"        /* Project 3D vertex along light ray onto curved local terrain surface dz(sx, sy) */\n"
+	"        float gx = a_iterr.x, gy = a_iterr.y, curv = a_iterr.z;\n"
+	"        float dz_vert = gx * dx_e + gy * dy_s + curv * (dx_e * dx_e + dy_s * dy_s);\n"
+	"        float slope_denom = clamp(1.0 + gx * ray_dx + gy * ray_dy, 0.48, 2.20);\n"
+	"        float h_drop = min(max_drop, max(0.0, (lz - dz_vert) / slope_denom));\n"
+	"        float sx = dx_e + h_drop * ray_dx;\n"
+	"        float sy = dy_s + h_drop * ray_dy;\n"
+	"        float dz_terr = clamp(gx * sx + gy * sy + curv * (sx * sx + sy * sy), -48.0, 48.0);\n"
+	"        vec3 p_sh = a_ibase.xyz + sx * E + sy * S + (lift_z + dz_terr) * a_iN.xyz;\n"
+	"        vWorldPos = p_sh;\n"
+	"        vLocalPos = vec3(a_iparam.x + sx, a_iparam.y + sy, a_iparam.z + dz_terr);\n"
+	"        vNormal = a_iN.xyz;\n"
+	"        vLocalN = normalize(a_vnorm.xyz);\n"
+	"        vCol = a_vcol;\n"
+	"        vTint = a_itint;\n"
+	"        vParam = a_iparam;\n"
+	"        vAO = a_vnorm.w;\n"
+	"        vHeightAboveGround = lz;\n"
+	"        vec3 toCam = uCameraPos - p_sh;\n"
+	"        float dCam = length(toCam);\n"
+	"        vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
+	"        float shBias = (uShadowPass == 2) ? min(21.2, dCam * 0.073) : min(21.0, dCam * 0.072);\n"
+	"        gl_Position = uMVP * vec4(p_sh + dirToCam * shBias, 1.0);\n"
+	"        return;\n"
+	"    }\n"
 	"    vec3 p = a_ibase.xyz + lx * a_iE.xyz + ly * a_iS.xyz + lz * a_iN.xyz;\n"
 	"    vec3 n = normalize(a_vnorm.x * a_iE.xyz + a_vnorm.y * a_iS.xyz + a_vnorm.z * a_iN.xyz);\n"
 	"    vWorldPos = p;\n"
-	"    vLocalPos = vec3(a_iparam.x + lx, a_iparam.y + ly, a_iparam.z + lz);\n"
+	"    vLocalPos = vec3(a_iparam.x + dx_e, a_iparam.y + dy_s, a_iparam.z + lz);\n"
 	"    vNormal = n;\n"
 	"    vLocalN = normalize(a_vnorm.xyz);\n"
 	"    vCol = a_vcol;\n"
@@ -3284,6 +3384,7 @@ static const char *s_fs_mesh3d =
 	"in vec4 vParam;\n"
 	"in float vAO;\n"
 	"in float vHeightAboveGround;\n"
+	"in vec2 vCardUV;\n"
 	"uniform float uSeaLevel;\n"
 	"uniform float uAnimTime;\n"
 	"uniform vec3 uCameraPos;\n"
@@ -3293,6 +3394,7 @@ static const char *s_fs_mesh3d =
 	"uniform float uAtmoIntensity;\n"
 	"uniform vec4 uLambLight;\n"
 	"uniform vec3 uSunDir;\n"
+	"uniform int uShadowPass;\n"
 	"out vec4 FragColor;\n"
 	ND_GLSL_SCENE_LIGHT
 	ND_GLSL_CSM_LOOKUP_FN
@@ -3313,10 +3415,77 @@ static const char *s_fs_mesh3d =
 	"    }\n"
 	"    float mat = vCol.a;\n"
 	"    bool isBark    = (mat < 0.18);\n"
-	"    bool isFoliage = (mat >= 0.18 && mat <= 0.35);\n"
-	"    bool isFlower  = (mat > 0.35 && mat <= 0.55);\n"
+	"    bool isFoliage = (mat >= 0.18 && mat <= 0.355);\n"
+	"    bool isFolCore = (mat >= 0.18 && mat < 0.195);\n"
+	"    bool isFolConifer = (mat >= 0.198 && mat < 0.239);\n"
+	"    bool isFolOvate   = (mat >= 0.239 && mat < 0.279);\n"
+	"    bool isFolLobed   = (mat >= 0.279 && mat < 0.319);\n"
+	"    bool isFolBlade   = (mat >= 0.319 && mat <= 0.355);\n"
+	"    bool isFolFringe  = (mat >= 0.28 && mat <= 0.355);\n"
+	"    bool isFlower  = (mat > 0.355 && mat <= 0.55);\n"
 	"    bool isRock    = (mat > 0.55 && mat < 0.85);\n"
 	"    bool isCrystal = (mat >= 0.85);\n"
+	"    if (uShadowPass > 0) {\n"
+	"        if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 4.0) discard;\n"
+	"        if (isFoliage && !isFolCore && vDist < 3400.0) {\n"
+	"            if (vCardUV.x >= 0.0) {\n"
+	"                float cu = vCardUV.x;\n"
+	"                float dv = vCardUV.y - 0.5;\n"
+	"                float adv = abs(dv);\n"
+	"                if (isFolConifer) {\n"
+	"                    float envW = 0.48 * sin(min(1.0, cu * 1.15 + 0.12) * 2.85);\n"
+	"                    if (adv > envW || cu > 0.98) discard;\n"
+	"                    float uNeedle = cu - adv * 0.78;\n"
+	"                    float phase = uNeedle * 18.0 + ((dv > 0.0) ? 0.35 : 0.0);\n"
+	"                    float rFrac = adv / max(0.05, envW);\n"
+	"                    if (adv > 0.042 * (1.0 - 0.65 * cu) && sin(phase * 6.2831853) < -0.25 + 0.72 * rFrac) discard;\n"
+	"                } else if (isFolOvate || isFolLobed) {\n"
+	"                    float envW = 0.48 * sin(min(1.0, cu * 1.05 + 0.08) * 2.95);\n"
+	"                    if (adv > envW) discard;\n"
+	"                    if (adv >= 0.032 * (1.0 - 0.75 * cu) || cu >= 0.86) {\n"
+	"                        float uLeaf = cu * 5.2 - adv * 1.6;\n"
+	"                        float lf = fract(uLeaf + ((dv < 0.0) ? 0.48 * mod(abs(floor(uLeaf)), 2.0) : 0.0));\n"
+	"                        float rFrac = adv / max(0.05, envW);\n"
+	"                        float serrate = isFolLobed ? (0.14 * sin(rFrac * 15.7)) : (0.06 * sin(rFrac * 34.0));\n"
+	"                        if (abs(lf - 0.5) > 0.44 * sin(min(1.0, rFrac) * 3.05) + serrate) discard;\n"
+	"                    }\n"
+	"                } else if (isFolBlade) {\n"
+	"                    if (adv > 0.48 * (1.0 - 0.78 * cu * cu)) discard;\n"
+	"                }\n"
+	"            } else {\n"
+	"                vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.58 + vec2(-vHeightAboveGround * 0.36, vLocalPos.x * 0.24), 0x464F4C32u);\n"
+	"                vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.45 + vec2(vHeightAboveGround * 0.95, vLocalPos.y * 0.75), 0x4C463333u);\n"
+	"                float poreField = 0.55 * gLeaf.x + 0.45 * gMicro.x;\n"
+	"                float cutThresh = isFolFringe ? 0.36 : 0.24;\n"
+	"                if (poreField < cutThresh) discard;\n"
+	"            }\n"
+	"        }\n"
+	"        float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
+	"        float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
+	"        vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
+	"        vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"        float sunDot = dot(torusN, sDir);\n"
+	"        float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
+	"        vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
+	"        float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vParam.z, vDist);\n"
+	"        float hSoft = 1.0 - 0.22 * clamp(vHeightAboveGround / 135.0, 0.0, 1.0);\n"
+	"        float matDensity = (isBark || isRock || isCrystal) ? 0.56 : (isFolCore ? 0.50 : (isFolFringe ? 0.36 : 0.44));\n"
+	"        float shAlpha = 0.0;\n"
+	"        vec3 shRgb = mix(vec3(0.03, 0.05, 0.09), sky * 0.16, 0.42);\n"
+	"        if (uShadowPass == 1) {\n"
+	"            float directSun = smoothstep(-0.08, 0.16, sunDot);\n"
+	"            shAlpha = vTint.a * matDensity * hSoft * (0.28 + 0.72 * directSun) * nd_sun_trans(cloudSh) * (1.0 - fogFactor);\n"
+	"        } else {\n"
+	"            float dLamb = length(vLocalPos.xy - uLambLight.xy);\n"
+	"            float tFall = clamp(1.0 - dLamb / 290.0, 0.0, 1.0);\n"
+	"            float atten = tFall * tFall * (3.0 - 2.0 * tFall) * clamp(uLambLight.w, 0.0, 1.5);\n"
+	"            shAlpha = vTint.a * matDensity * 0.78 * hSoft * atten * (1.0 - fogFactor);\n"
+	"        }\n"
+	"        if (isSubmerged) shAlpha *= clamp(1.0 - dWater * 0.28, 0.0, 1.0);\n"
+	"        if (shAlpha <= 0.01) discard;\n"
+	"        FragColor = vec4(shRgb, shAlpha);\n"
+	"        return;\n"
+	"    }\n"
 	"    /* Diorama Sightline Canopy Cutaway: when tall overstory tree crowns (> 2.0 m = 90 wu)\n"
 	"     * pass between the 55-deg diorama camera and the 40 cm (18 wu) Lamb, screen-door dither\n"
 	"     * the upper foliage canopy so the Lamb remains clearly visible while lower trunks stay solid. */\n"
@@ -3345,25 +3514,89 @@ static const char *s_fs_mesh3d =
 	"    float distFade = clamp(1.0 - (vDist - 1800.0) / 36000.0, 0.0, 1.0);\n"
 	"    vec3 N_local = normalize(vLocalN);\n"
 	"    if (!gl_FrontFacing) N_local = -N_local;\n"
+	"    vec3 V_local = normalize(vec3(0.0, 0.573576, 0.819152));\n"
 	"    float microAO = 1.0;\n"
-	"    /* Procedural botanical & mineralogical micro-relief (continuous PBR detail) */\n"
+	"    /* Procedural botanical & mineralogical micro-relief (continuous PBR detail & porous leaf/needle cutout) */\n"
 	"    if (distFade > 0.02) {\n"
 	"        if (isBark) {\n"
-	"            float furrow = chaff_grad_noise2d(vec2((vLocalPos.x + vLocalPos.y) * 0.45, vHeightAboveGround * 0.16), 0x4241524Bu).x - 0.5;\n"
-	"            float fFine  = chaff_grad_noise2d(vec2((vLocalPos.x - vLocalPos.y) * 1.35, vHeightAboveGround * 0.55), 0x42524B32u).x - 0.5;\n"
-	"            float fComb  = furrow * 0.72 + fFine * 0.28;\n"
-	"            N_local = normalize(N_local + vec3(fComb * 0.42, -fComb * 0.36, fFine * 0.14) * distFade);\n"
-	"            microAO = clamp(1.0 + fComb * 0.34 * distFade, 0.55, 1.15);\n"
-	"            albedo = clamp(albedo * (1.0 + fComb * 0.22 * distFade), 0.0, 1.0);\n"
+	"            float furrow = chaff_grad_noise2d(vec2((vLocalPos.x + vLocalPos.y) * 0.58, vHeightAboveGround * 0.16), 0x4241524Bu).x - 0.5;\n"
+	"            float fFine  = chaff_grad_noise2d(vec2((vLocalPos.x - vLocalPos.y) * 1.85, vHeightAboveGround * 0.72), 0x42524B32u).x - 0.5;\n"
+	"            float fComb  = furrow * 0.68 + fFine * 0.32;\n"
+	"            N_local = normalize(N_local + vec3(fComb * 0.54, -fComb * 0.46, fFine * 0.18) * distFade);\n"
+	"            microAO = clamp(0.95 + fComb * 0.46 * distFade, 0.44, 1.18);\n"
+	"            albedo = clamp(albedo * (0.98 + fComb * 0.30 * distFade), 0.0, 1.0);\n"
+	"            /* Subtle Nordic forest-floor moss & lichen collar on lower trunk bases */\n"
+	"            float mossMask = smoothstep(14.0, 1.5, vHeightAboveGround) * smoothstep(-0.1, 0.45, furrow + 0.15) * distFade;\n"
+	"            albedo = mix(albedo, vec3(0.22, 0.36, 0.16), mossMask * 0.38);\n"
 	"        } else if (isFoliage) {\n"
-	"            vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.14 + vec2(vHeightAboveGround * 0.11, -vHeightAboveGround * 0.08), 0x4C454146u);\n"
-	"            vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.48 + vec2(-vHeightAboveGround * 0.34, vLocalPos.x * 0.22), 0x464F4C32u);\n"
-	"            vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.25 + vec2(vHeightAboveGround * 0.85, vLocalPos.y * 0.65), 0x4C463333u);\n"
-	"            float leafCluster = 0.48 * gMacro.x + 0.34 * gLeaf.x + 0.18 * gMicro.x;\n"
-	"            vec2 dLeaf = gMacro.yz * 0.38 + gLeaf.yz * 0.42 + gMicro.yz * 0.20;\n"
-	"            N_local = normalize(N_local + vec3(dLeaf.x * 0.44, dLeaf.y * 0.44, (leafCluster - 0.46) * 0.34) * distFade);\n"
-	"            microAO = clamp(0.72 + 0.52 * leafCluster, 0.56, 1.16);\n"
-	"            albedo = clamp(albedo * (0.86 + 0.30 * leafCluster), 0.0, 1.0);\n"
+	"            vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.18 + vec2(vHeightAboveGround * 0.14, -vHeightAboveGround * 0.10), 0x4C454146u);\n"
+	"            vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.62 + vec2(-vHeightAboveGround * 0.44, vLocalPos.x * 0.28), 0x464F4C32u);\n"
+	"            vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.65 + vec2(vHeightAboveGround * 1.15, vLocalPos.y * 0.85), 0x4C463333u);\n"
+	"            float leafCluster = 0.42 * gMacro.x + 0.36 * gLeaf.x + 0.22 * gMicro.x;\n"
+	"            if (vCardUV.x >= 0.0 && !isFolCore && vDist < 3800.0) {\n"
+	"                /* SpeedTree / Creation Engine UV-Space Botanical Silhouette & Venation Synthesizer */\n"
+	"                float cu = vCardUV.x;\n"
+	"                float dv = vCardUV.y - 0.5;\n"
+	"                float adv = abs(dv);\n"
+	"                if (isFolConifer) {\n"
+	"                    /* Pectinate Boreal Conifer Bough: resinous woody twig rachis + angled needle comb fascicles */\n"
+	"                    float rachisW = 0.042 * (1.0 - 0.65 * cu);\n"
+	"                    if (adv < rachisW) {\n"
+	"                        albedo = mix(vec3(0.32, 0.22, 0.14), albedo, 0.28);\n"
+	"                        microAO = 0.72;\n"
+	"                    } else {\n"
+	"                        float envW = 0.48 * sin(min(1.0, cu * 1.15 + 0.12) * 2.85);\n"
+	"                        if (adv > envW || cu > 0.98) discard;\n"
+	"                        float uNeedle = cu - adv * 0.78;\n"
+	"                        float phase = uNeedle * 18.0 + ((dv > 0.0) ? 0.35 : 0.0) + (gMicro.x - 0.5) * 0.18;\n"
+	"                        float comb = sin(phase * 6.2831853);\n"
+	"                        float rFrac = adv / max(0.05, envW);\n"
+	"                        if (comb < (-0.25 + 0.72 * rFrac) * distFade) discard;\n"
+	"                        float nRoll = cos(phase * 6.2831853) * 0.44;\n"
+	"                        N_local = normalize(N_local + vec3(nRoll, -nRoll * 0.65, 0.18 * comb) * distFade);\n"
+	"                        microAO = clamp(0.64 + 0.48 * (0.5 + 0.5 * comb), 0.46, 1.18);\n"
+	"                        albedo = clamp(albedo * (0.84 + 0.28 * rFrac + 0.14 * comb), 0.0, 1.0);\n"
+	"                    }\n"
+	"                } else if (isFolOvate || isFolLobed) {\n"
+	"                    /* Broadleaf Shoot Card: central woody twig + 5..9 alternate serrated/lobed leaf blades */\n"
+	"                    float stemW = 0.032 * (1.0 - 0.75 * cu);\n"
+	"                    if (adv < stemW && cu < 0.86) {\n"
+	"                        albedo = mix(vec3(0.34, 0.26, 0.16), albedo, 0.35);\n"
+	"                        microAO = 0.74;\n"
+	"                    } else {\n"
+	"                        float envW = 0.48 * sin(min(1.0, cu * 1.05 + 0.08) * 2.95);\n"
+	"                        if (adv > envW) discard;\n"
+	"                        float uLeaf = cu * 5.2 - adv * 1.6 + (gLeaf.x - 0.5) * 0.16;\n"
+	"                        float leafIdx = floor(uLeaf);\n"
+	"                        float lf = fract(uLeaf + ((dv < 0.0) ? 0.48 * mod(abs(leafIdx), 2.0) : 0.0));\n"
+	"                        float rFrac = adv / max(0.05, envW);\n"
+	"                        float serrate = isFolLobed ? (0.14 * sin(rFrac * 15.7)) : (0.06 * sin(rFrac * 34.0));\n"
+	"                        float leafHalfW = 0.44 * sin(min(1.0, rFrac) * 3.05) + serrate;\n"
+	"                        if (abs(lf - 0.5) > leafHalfW) discard;\n"
+	"                        float vein = (lf - 0.5) * 0.62;\n"
+	"                        float latVein = sin((rFrac * 8.0 - abs(lf - 0.5) * 5.0) * 6.2831853) * 0.14;\n"
+	"                        N_local = normalize(N_local + vec3(vein + latVein, -vein * 0.5, 0.24 - 0.48 * abs(lf - 0.5)) * distFade);\n"
+	"                        microAO = clamp(0.62 + 0.52 * (1.0 - abs(lf - 0.5) * 1.4), 0.44, 1.18);\n"
+	"                        albedo = clamp(albedo * (0.82 + 0.32 * (1.0 - abs(lf - 0.5) * 1.5) + 0.08 * latVein), 0.0, 1.0);\n"
+	"                    }\n"
+	"                } else if (isFolBlade) {\n"
+	"                    /* Tapered Sword / Rosette Leaf Blade with parallel vascular ridges */\n"
+	"                    float bladeHW = 0.48 * (1.0 - 0.78 * cu * cu);\n"
+	"                    if (adv > bladeHW) discard;\n"
+	"                    float ridge = sin(dv * 38.0) * 0.22;\n"
+	"                    N_local = normalize(N_local + vec3(ridge, -ridge * 0.5, 0.16 * (1.0 - adv / max(0.05, bladeHW))) * distFade);\n"
+	"                    microAO = clamp(0.68 + 0.42 * (1.0 - adv / max(0.05, bladeHW)), 0.48, 1.16);\n"
+	"                }\n"
+	"            } else if (!isFolCore && vDist < 3400.0) {\n"
+	"                float rim = 1.0 - abs(dot(N_local, V_local));\n"
+	"                float poreField = 0.55 * gLeaf.x + 0.45 * gMicro.x;\n"
+	"                float cutThresh = isFolFringe ? (0.30 + 0.18 * rim) : (0.14 + 0.28 * smoothstep(0.38, 0.86, rim));\n"
+	"                if (poreField < cutThresh * distFade) discard;\n"
+	"                vec2 dLeaf = gMacro.yz * 0.34 + gLeaf.yz * 0.44 + gMicro.yz * 0.22;\n"
+	"                N_local = normalize(N_local + vec3(dLeaf.x * 0.58, dLeaf.y * 0.58, (leafCluster - 0.45) * 0.48) * distFade);\n"
+	"                microAO = clamp(0.58 + 0.68 * leafCluster, 0.42, 1.18);\n"
+	"                albedo = clamp(albedo * (0.78 + 0.42 * leafCluster), 0.0, 1.0);\n"
+	"            }\n"
 	"        } else if (isRock) {\n"
 	"            /* Phaneritic mineral grain speckle (quartz/feldspar/mica micro-facets) */\n"
 	"            float grain = chaff_grad_noise2d(vLocalPos.xy * 0.85 + vec2(vHeightAboveGround * 0.70), 0x524F434Bu).x - 0.5;\n"
@@ -3386,32 +3619,39 @@ static const char *s_fs_mesh3d =
 	"    float directSun = smoothstep(-0.06, 0.16, sunDot);\n"
 	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
 	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vParam.z, vDist);\n"
-	"    /* Canonical NW diorama sun direction in local tangent space + continuous physical Lambert/wrap diffuse */\n"
+	"    /* Da Vinci 4-Zone Volumetric Canopy Chiaroscuro:\n"
+	"     *   Zone 1: Sunlit outer crown dome with crisp directional contrast & cuticle gloss\n"
+	"     *   Zone 2: Warm yellow-green chlorophyll subsurface transmittance on back/rim-lit outer leaves\n"
+	"     *   Zone 3: Cool zenith sky-dome hemisphere illumination on upward shaded foliage\n"
+	"     *   Zone 4: Deep multi-scattered sub-canopy cavity umbra on interior boughs & undersides */\n"
 	"    vec3 L_default = normalize(vec3(-0.50, -0.50, 0.7071));\n"
 	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
 	"    vec3 L_day = (sunLocal.z > 0.05) ? normalize(vec3(sunLocal.xy, max(0.35, sunLocal.z))) : L_default;\n"
 	"    vec3 L_local = normalize(mix(L_default, L_day, 0.45));\n"
 	"    float ndotl = max(0.0, dot(N_local, L_local));\n"
-	"    float wrapDiff = clamp((dot(N_local, L_local) + 0.35) / 1.35, 0.0, 1.0);\n"
-	"    float diff = mix(ndotl, wrapDiff, isFoliage ? 0.52 : 0.18);\n"
+	"    float wrapDiff = clamp((dot(N_local, L_local) + 0.30) / 1.30, 0.0, 1.0);\n"
+	"    float diff = mix(ndotl, wrapDiff, isFoliage ? 0.24 : 0.14);\n"
 	"    float hemiSky = 0.5 + 0.5 * N_local.z;\n"
-	"    vec3 ambCol = mix(vec3(0.52, 0.57, 0.65), vec3(0.80, 0.84, 0.90), hemiSky);\n"
-	"    vec3 sunCol = vec3(1.10, 1.04, 0.95);\n"
-	"    float contactAO = mix(0.82, 1.0, smoothstep(0.0, 4.5, vHeightAboveGround));\n"
-	"    float ao = clamp(vAO * contactAO * microAO, 0.18, 1.08);\n"
-	"    vec3 lightTerm = (ambCol * (0.54 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor)) +\n"
-	"                      sunCol * (0.74 * diff * nd_sun_trans(cloudSh) * directSun)) * ao;\n"
+	"    vec3 ambCol = mix(vec3(0.38, 0.44, 0.54), vec3(0.78, 0.84, 0.92), hemiSky);\n"
+	"    vec3 sunCol = vec3(1.12, 1.05, 0.94);\n"
+	"    float contactAO = mix(0.80, 1.0, smoothstep(0.0, 5.0, vHeightAboveGround));\n"
+	"    float cavityAO = isFoliage ? pow(clamp(vAO, 0.14, 1.0), 1.36) : clamp(vAO, 0.18, 1.0);\n"
+	"    float sunSelfShadow = isFoliage ? smoothstep(0.22, 0.86, vAO) : smoothstep(0.16, 0.72, vAO);\n"
+	"    float ao = clamp(cavityAO * contactAO * microAO, 0.14, 1.08);\n"
+	"    vec3 lightTerm = ambCol * (0.50 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor) * ao) +\n"
+	"                     sunCol * (0.86 * diff * nd_sun_trans(cloudSh) * directSun * sunSelfShadow * clamp(microAO, 0.65, 1.12));\n"
 	"    vec3 lit = albedo * lightTerm;\n"
 	"    /* Physical Subsurface Transmittance (Foliage/Crystals) & Schlick Fresnel Specular */\n"
-	"    vec3 V_local = normalize(vec3(0.0, 0.573576, 0.819152));\n"
 	"    vec3 H_local = normalize(L_local + V_local);\n"
 	"    float specAngle = max(0.0, dot(N_local, H_local));\n"
 	"    float ndotv = max(0.0, dot(N_local, V_local));\n"
 	"    if (isFoliage || isFlower) {\n"
-	"        float sss = max(0.0, dot(-N_local, L_local) + 0.40) * smoothstep(0.40, 0.98, vAO);\n"
-	"        lit += albedo * vec3(0.32, 0.44, 0.12) * (sss * 0.38 * nd_sun_trans(cloudSh) * directSun) * distFade;\n"
-	"        float leafFresnel = 0.04 + 0.22 * pow(1.0 - ndotv, 4.0);\n"
-	"        lit += mix(albedo, vec3(1.0), 0.35) * (pow(specAngle, 20.0) * leafFresnel * 0.45 * nd_sun_trans(cloudSh) * directSun) * distFade;\n"
+	"        float backTrans = max(0.0, dot(-N_local, L_local) + 0.35);\n"
+	"        float rimTrans = (1.0 - ndotv) * max(0.0, L_local.z);\n"
+	"        float sss = (0.70 * backTrans + 0.30 * rimTrans) * smoothstep(0.45, 0.96, vAO) * (isFolCore ? 0.35 : 1.0);\n"
+	"        lit += albedo * vec3(0.42, 0.56, 0.12) * (sss * 0.48 * nd_sun_trans(cloudSh) * directSun) * distFade;\n"
+	"        float leafFresnel = 0.04 + 0.24 * pow(1.0 - ndotv, 4.0);\n"
+	"        lit += mix(albedo, vec3(1.0, 0.99, 0.92), 0.38) * (pow(specAngle, 22.0) * leafFresnel * 0.48 * sunSelfShadow * nd_sun_trans(cloudSh) * directSun) * distFade;\n"
 	"    } else if (isCrystal) {\n"
 	"        float f0 = 0.06;\n"
 	"        float fresnel = f0 + (1.0 - f0) * pow(clamp(1.0 - ndotv, 0.0, 1.0), 5.0);\n"
@@ -4843,6 +5083,28 @@ void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
 
 static float s_shadow_sun_dir[3] = { 0.0f, 0.0f, 0.0f };
 
+/* Sample local terrain slope differential dz = terrain_z(wx, wy) - base_z when ground chunk system is active,
+ * so projected tree/plant shadow quad corners drape accurately over hills and never clip underground. */
+static inline float shadow_corner_terrain_dz(float wx, float wy, float base_z, float dx, float dy)
+{
+	float d2 = dx * dx + dy * dy;
+	if (d2 < 9.0f || !nd_seven_get_chunk_sys())
+		return 0.0f;
+	float gz = nd_seven_ground_elevation_f((int32_t)floorf(wx + 0.5f), (int32_t)floorf(wy + 0.5f));
+	float dz = gz - base_z;
+	if (d2 > 100.0f) {
+		float gz_mid = nd_seven_ground_elevation_f((int32_t)floorf(wx - 0.5f * dx + 0.5f),
+		                                           (int32_t)floorf(wy - 0.5f * dy + 0.5f));
+		float dz_mid = gz_mid - base_z;
+		float crest_lift = dz_mid - 0.5f * dz;
+		if (crest_lift > 0.0f)
+			dz += crest_lift * 1.15f;
+	}
+	if (dz < -48.0f) dz = -48.0f;
+	if (dz >  48.0f) dz =  48.0f;
+	return dz;
+}
+
 static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
                                                   const billboard_basis_t *basis,
                                                   nd_seven_gl_bb_vert_t out_verts[6])
@@ -4850,7 +5112,14 @@ static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	const float *base_pos = basis->base_pos;
+	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float base_pos[3] = {
+		basis->base_pos[0] - S[0] * north_shift,
+		basis->base_pos[1] - S[1] * north_shift,
+		basis->base_pos[2] - S[2] * north_shift
+	};
+	float bx = b->x;
+	float by = b->y - north_shift;
 
 	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(2.0f, b->width * 0.34f);
 	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(1.0f, rx * 0.45f);
@@ -4872,7 +5141,7 @@ static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
 		}
 	}
 
-	float cast_scale = 0.72f / sun_n;
+	float cast_scale = 0.74f / sun_n;
 	if (cast_scale > 1.65f) cast_scale = 1.65f;
 	float cast_dx = -sun_e * h * cast_scale;
 	float cast_dy = -sun_s * h * cast_scale;
@@ -4880,8 +5149,8 @@ static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
 	float sway_dx = basis->grass_sx;
 	float sway_dy = basis->grass_sy;
 
-	float base_pad_y = fminf(ry * 0.55f, 4.0f);
-	float lift_z = 0.22f;
+	float base_pad_y = fminf(ry * 0.55f, 4.5f);
+	float lift_z = 0.28f;
 	float alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
 
 	struct { float dx, dy, u, v, qx, qy; } c[4] = {
@@ -4891,13 +5160,17 @@ static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
 		{  half_w + cast_dx + sway_dx,  cast_dy + sway_dy,   b->u1, b->v0,  1.0f,  1.0f }  /* Crown-Right (3) */
 	};
 
+	float c_zn[4];
+	for (int k = 0; k < 4; k++)
+		c_zn[k] = lift_z + shadow_corner_terrain_dz(bx + c[k].dx, by + c[k].dy, b->z, c[k].dx, c[k].dy);
+
 	int idx[6] = { 0, 1, 2, 1, 3, 2 };
 
 	for (int i = 0; i < 6; i++) {
 		int k = idx[i];
-		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * E[0] + c[k].dy * S[0] + lift_z * N[0];
-		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * E[1] + c[k].dy * S[1] + lift_z * N[1];
-		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * E[2] + c[k].dy * S[2] + lift_z * N[2];
+		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * E[0] + c[k].dy * S[0] + c_zn[k] * N[0];
+		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * E[1] + c[k].dy * S[1] + c_zn[k] * N[1];
+		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * E[2] + c[k].dy * S[2] + c_zn[k] * N[2];
 
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
@@ -4907,8 +5180,8 @@ static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
 		out_verts[i].tint[2] = 0.0f;
 		out_verts[i].tint[3] = alpha;
 
-		out_verts[i].local_pos[0] = b->x + c[k].dx;
-		out_verts[i].local_pos[1] = b->y + c[k].dy;
+		out_verts[i].local_pos[0] = bx + c[k].dx;
+		out_verts[i].local_pos[1] = by + c[k].dy;
 		out_verts[i].local_pos[2] = b->z;
 
 		out_verts[i].quad_uv[0] = c[k].qx;
@@ -4951,23 +5224,30 @@ static bool eval_billboard_lamb_shadow_quad_from_basis(const lam_billboard_gpu_t
 	float l_int = s_lamb_shadow_light[3];
 	if (l_int <= 0.01f) return false;
 
-	float dx_l = b->x - s_lamb_shadow_light[0];
-	float dy_l = b->y - s_lamb_shadow_light[1];
-	float dist2 = dx_l * dx_l + dy_l * dy_l;
-	/* Exclude the Lamb itself (dist < 2.0 wu) and objects outside the 220 wu glow radius */
-	if (dist2 < 4.0f || dist2 > 220.0f * 220.0f) return false;
-
-	float dist = sqrtf(dist2);
-	float t_fall = 1.0f - (dist * (1.0f / 220.0f));
-	float atten = t_fall * t_fall * (3.0f - 2.0f * t_fall) * l_int;
-	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
-	float alpha = base_alpha * atten * 0.78f;
-	if (alpha <= 0.01f) return false;
-
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	const float *base_pos = basis->base_pos;
+	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float base_pos[3] = {
+		basis->base_pos[0] - S[0] * north_shift,
+		basis->base_pos[1] - S[1] * north_shift,
+		basis->base_pos[2] - S[2] * north_shift
+	};
+	float bx = b->x;
+	float by = b->y - north_shift;
+
+	float dx_l = bx - s_lamb_shadow_light[0];
+	float dy_l = by - s_lamb_shadow_light[1];
+	float dist2 = dx_l * dx_l + dy_l * dy_l;
+	/* Exclude the Lamb itself (dist < 2.0 wu) and objects outside the 290 wu glow shadow radius */
+	if (dist2 < 4.0f || dist2 > 290.0f * 290.0f) return false;
+
+	float dist = sqrtf(dist2);
+	float t_fall = 1.0f - (dist * (1.0f / 290.0f));
+	float atten = t_fall * t_fall * (3.0f - 2.0f * t_fall) * l_int;
+	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
+	float alpha = base_alpha * (0.40f + 0.58f * atten) * fminf(1.0f, t_fall * 2.5f);
+	if (alpha <= 0.01f) return false;
 
 	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(2.0f, b->width * 0.34f);
 	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(1.0f, rx * 0.45f);
@@ -4976,33 +5256,42 @@ static bool eval_billboard_lamb_shadow_quad_from_basis(const lam_billboard_gpu_t
 
 	float rad_x = dx_l / dist;
 	float rad_y = dy_l / dist;
-	float lamb_h = fmaxf(8.0f, (s_lamb_shadow_light[2] + 10.0f) - b->z);
-	float cast_scale = fminf(1.65f, fmaxf(0.42f, (dist * (1.0f / 68.0f)) * (22.0f / (lamb_h + 10.0f))));
-	float cast_dx = rad_x * h * cast_scale;
-	float cast_dy = rad_y * h * cast_scale;
+	/* Transverse unit vector perpendicular to radial shadow ray in (East, South) plane */
+	float perp_x = -rad_y;
+	float perp_y =  rad_x;
 
-	float sway_dx = basis->grass_sx;
-	float sway_dy = basis->grass_sy;
+	float lamb_h = fmaxf(10.0f, fminf(28.0f, (s_lamb_shadow_light[2] + 12.0f) - b->z));
+	float cast_scale = fminf(1.65f, fmaxf(0.58f, (dist * (1.0f / 54.0f)) * (24.0f / (lamb_h + 10.0f))));
+	float cast_len = fminf(h * cast_scale, 175.0f);
+	float cast_dx = rad_x * cast_len;
+	float cast_dy = rad_y * cast_len;
 
-	/* Point-light radial divergence widens the projected crown silhouette slightly with distance from the base */
-	float top_half_w = half_w * (1.0f + fminf(0.40f, (h * cast_scale) / fmaxf(24.0f, dist)));
-	float base_pad_y = fminf(ry * 0.50f, 3.5f);
-	float lift_z = 0.20f;
+	float sway_dx = basis->grass_sx * 0.55f;
+	float sway_dy = basis->grass_sy * 0.55f;
+
+	/* Point-light radial divergence widens the projected crown silhouette with distance from the base */
+	float top_half_w = half_w * (1.0f + fminf(0.45f, cast_len / fmaxf(26.0f, dist)));
+	float base_pad = fminf(ry * 0.55f, 4.5f);
+	float lift_z = 0.34f;
 
 	struct { float dx, dy, u, v, qx, qy; } c[4] = {
-		{ -half_w,                         -base_pad_y * rad_y,        b->u0, b->v1, -1.0f, -1.0f }, /* Base-Left (0) */
-		{  half_w,                         -base_pad_y * rad_y,        b->u1, b->v1,  1.0f, -1.0f }, /* Base-Right (1) */
-		{ -top_half_w + cast_dx + sway_dx,  cast_dy + sway_dy,         b->u0, b->v0, -1.0f,  1.0f }, /* Crown-Left (2) */
-		{  top_half_w + cast_dx + sway_dx,  cast_dy + sway_dy,         b->u1, b->v0,  1.0f,  1.0f }  /* Crown-Right (3) */
+		{ -half_w * perp_x - base_pad * rad_x,            -half_w * perp_y - base_pad * rad_y,            b->u0, b->v1, -1.0f, -1.0f }, /* Base-Left (0) */
+		{  half_w * perp_x - base_pad * rad_x,             half_w * perp_y - base_pad * rad_y,            b->u1, b->v1,  1.0f, -1.0f }, /* Base-Right (1) */
+		{ -top_half_w * perp_x + cast_dx + sway_dx,       -top_half_w * perp_y + cast_dy + sway_dy,       b->u0, b->v0, -1.0f,  1.0f }, /* Crown-Left (2) */
+		{  top_half_w * perp_x + cast_dx + sway_dx,        top_half_w * perp_y + cast_dy + sway_dy,        b->u1, b->v0,  1.0f,  1.0f }  /* Crown-Right (3) */
 	};
+
+	float c_zn[4];
+	for (int k = 0; k < 4; k++)
+		c_zn[k] = lift_z + shadow_corner_terrain_dz(bx + c[k].dx, by + c[k].dy, b->z, c[k].dx, c[k].dy);
 
 	int idx[6] = { 0, 1, 2, 1, 3, 2 };
 
 	for (int i = 0; i < 6; i++) {
 		int k = idx[i];
-		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * E[0] + c[k].dy * S[0] + lift_z * N[0];
-		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * E[1] + c[k].dy * S[1] + lift_z * N[1];
-		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * E[2] + c[k].dy * S[2] + lift_z * N[2];
+		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * E[0] + c[k].dy * S[0] + c_zn[k] * N[0];
+		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * E[1] + c[k].dy * S[1] + c_zn[k] * N[1];
+		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * E[2] + c[k].dy * S[2] + c_zn[k] * N[2];
 
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
@@ -5012,8 +5301,8 @@ static bool eval_billboard_lamb_shadow_quad_from_basis(const lam_billboard_gpu_t
 		out_verts[i].tint[2] = 0.0f;
 		out_verts[i].tint[3] = alpha;
 
-		out_verts[i].local_pos[0] = b->x + c[k].dx;
-		out_verts[i].local_pos[1] = b->y + c[k].dy;
+		out_verts[i].local_pos[0] = bx + c[k].dx;
+		out_verts[i].local_pos[1] = by + c[k].dy;
 		out_verts[i].local_pos[2] = b->z;
 
 		out_verts[i].quad_uv[0] = c[k].qx;
@@ -5142,7 +5431,12 @@ static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	const float *base_pos = basis->base_pos;
+	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float base_pos[3] = {
+		basis->base_pos[0] - S[0] * north_shift,
+		basis->base_pos[1] - S[1] * north_shift,
+		basis->base_pos[2] - S[2] * north_shift
+	};
 
 	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(2.0f, b->width * 0.34f);
 	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(1.0f, rx * 0.45f);
@@ -5164,7 +5458,7 @@ static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
 		}
 	}
 
-	float cast_scale = 0.72f / sun_n;
+	float cast_scale = 0.74f / sun_n;
 	if (cast_scale > 1.65f) cast_scale = 1.65f;
 	float cast_dx = -sun_e * h * cast_scale;
 	float cast_dy = -sun_s * h * cast_scale;
@@ -5172,32 +5466,37 @@ static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
 	float sway_dx = basis->grass_sx;
 	float sway_dy = basis->grass_sy;
 
-	float base_pad_y = fminf(ry * 0.55f, 4.0f);
+	float base_pad_y = fminf(ry * 0.55f, 4.5f);
 	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
-	float alpha = base_alpha * 0.65f;
-	float lift_z = 0.22f;
+	float alpha = base_alpha * 0.76f;
+	float lift_z = 0.28f;
+	float bx = b->x;
+	float by = b->y - north_shift;
 
 	float c_dx[4] = { -half_w, half_w, -half_w + cast_dx + sway_dx, half_w + cast_dx + sway_dx };
 	float c_dy[4] = { -base_pad_y, -base_pad_y, cast_dy + sway_dy, cast_dy + sway_dy };
+	float c_zn[4];
+	for (int k = 0; k < 4; k++)
+		c_zn[k] = lift_z + shadow_corner_terrain_dz(bx + c_dx[k], by + c_dy[k], b->z, c_dx[k], c_dy[k]);
 
-	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + lift_z * N[0];
-	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + lift_z * N[1];
-	out->pos0[2] = base_pos[2] + c_dx[0] * E[2] + c_dy[0] * S[2] + lift_z * N[2];
+	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + c_zn[0] * N[0];
+	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + c_zn[0] * N[1];
+	out->pos0[2] = base_pos[2] + c_dx[0] * E[2] + c_dy[0] * S[2] + c_zn[0] * N[2];
 	out->pos0[3] = c_dx[0];
 
-	out->pos1[0] = base_pos[0] + c_dx[1] * E[0] + c_dy[1] * S[0] + lift_z * N[0];
-	out->pos1[1] = base_pos[1] + c_dx[1] * E[1] + c_dy[1] * S[1] + lift_z * N[1];
-	out->pos1[2] = base_pos[2] + c_dx[1] * E[2] + c_dy[1] * S[2] + lift_z * N[2];
+	out->pos1[0] = base_pos[0] + c_dx[1] * E[0] + c_dy[1] * S[0] + c_zn[1] * N[0];
+	out->pos1[1] = base_pos[1] + c_dx[1] * E[1] + c_dy[1] * S[1] + c_zn[1] * N[1];
+	out->pos1[2] = base_pos[2] + c_dx[1] * E[2] + c_dy[1] * S[2] + c_zn[1] * N[2];
 	out->pos1[3] = c_dx[1];
 
-	out->pos2[0] = base_pos[0] + c_dx[2] * E[0] + c_dy[2] * S[0] + lift_z * N[0];
-	out->pos2[1] = base_pos[1] + c_dx[2] * E[1] + c_dy[2] * S[1] + lift_z * N[1];
-	out->pos2[2] = base_pos[2] + c_dx[2] * E[2] + c_dy[2] * S[2] + lift_z * N[2];
+	out->pos2[0] = base_pos[0] + c_dx[2] * E[0] + c_dy[2] * S[0] + c_zn[2] * N[0];
+	out->pos2[1] = base_pos[1] + c_dx[2] * E[1] + c_dy[2] * S[1] + c_zn[2] * N[1];
+	out->pos2[2] = base_pos[2] + c_dx[2] * E[2] + c_dy[2] * S[2] + c_zn[2] * N[2];
 	out->pos2[3] = c_dx[2];
 
-	out->pos3[0] = base_pos[0] + c_dx[3] * E[0] + c_dy[3] * S[0] + lift_z * N[0];
-	out->pos3[1] = base_pos[1] + c_dx[3] * E[1] + c_dy[3] * S[1] + lift_z * N[1];
-	out->pos3[2] = base_pos[2] + c_dx[3] * E[2] + c_dy[3] * S[2] + lift_z * N[2];
+	out->pos3[0] = base_pos[0] + c_dx[3] * E[0] + c_dy[3] * S[0] + c_zn[3] * N[0];
+	out->pos3[1] = base_pos[1] + c_dx[3] * E[1] + c_dy[3] * S[1] + c_zn[3] * N[1];
+	out->pos3[2] = base_pos[2] + c_dx[3] * E[2] + c_dy[3] * S[2] + c_zn[3] * N[2];
 	out->pos3[3] = c_dx[3];
 
 	out->uv[0] = b->u0;
@@ -5211,7 +5510,7 @@ static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
 	out->tint[3] = alpha;
 
 	out->param[0] = b->x;
-	out->param[1] = b->y;
+	out->param[1] = b->y - north_shift;
 	out->param[2] = b->z;
 	out->param[3] = -1.0f;
 }
@@ -5224,66 +5523,89 @@ static inline bool pack_bb_lamb_shadow_quad_instance(const lam_billboard_gpu_t *
 	float l_int = s_lamb_shadow_light[3];
 	if (l_int <= 0.01f) return false;
 
-	float dx_l = b->x - s_lamb_shadow_light[0];
-	float dy_l = b->y - s_lamb_shadow_light[1];
-	float dist2 = dx_l * dx_l + dy_l * dy_l;
-	if (dist2 < 4.0f || dist2 > 220.0f * 220.0f) return false;
-
-	float dist = sqrtf(dist2);
-	float t_fall = 1.0f - (dist * (1.0f / 220.0f));
-	float atten = t_fall * t_fall * (3.0f - 2.0f * t_fall) * l_int;
-	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
-	float alpha = base_alpha * atten * 0.78f;
-	if (alpha <= 0.01f) return false;
-
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	const float *base_pos = basis->base_pos;
+	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float base_pos[3] = {
+		basis->base_pos[0] - S[0] * north_shift,
+		basis->base_pos[1] - S[1] * north_shift,
+		basis->base_pos[2] - S[2] * north_shift
+	};
+	float bx = b->x;
+	float by = b->y - north_shift;
+
+	float dx_l = bx - s_lamb_shadow_light[0];
+	float dy_l = by - s_lamb_shadow_light[1];
+	float dist2 = dx_l * dx_l + dy_l * dy_l;
+	if (dist2 < 4.0f || dist2 > 290.0f * 290.0f) return false;
+
+	float dist = sqrtf(dist2);
+	float t_fall = 1.0f - (dist * (1.0f / 290.0f));
+	float atten = t_fall * t_fall * (3.0f - 2.0f * t_fall) * l_int;
+	float base_alpha = (float)(b->tint_rgba & 0xFF) / 255.0f;
+	float alpha = base_alpha * (0.40f + 0.58f * atten) * fminf(1.0f, t_fall * 2.5f);
+	if (alpha <= 0.01f) return false;
 
 	float rx = (b->shadow_rx > 0) ? (float)b->shadow_rx : fmaxf(2.0f, b->width * 0.34f);
 	float ry = (b->shadow_ry > 0) ? (float)b->shadow_ry : fmaxf(1.0f, rx * 0.45f);
 	float half_w = fmaxf(rx, b->width * 0.5f);
 	float h = fmaxf(ry * 2.0f, b->height);
 
+	/* (dx_l, dy_l) is already in the local 2D (East, South) tangent plane */
 	float rad_x = dx_l / dist;
 	float rad_y = dy_l / dist;
+	/* Transverse unit vector perpendicular to the radial light-to-object shadow ray */
+	float perp_x = -rad_y;
+	float perp_y =  rad_x;
 
-	float le = rad_x * E[0] + rad_y * E[1];
-	float ls = rad_x * S[0] + rad_y * S[1];
+	float lamb_h = fmaxf(10.0f, fminf(28.0f, (s_lamb_shadow_light[2] + 12.0f) - b->z));
+	float cast_scale = fminf(1.65f, fmaxf(0.58f, (dist * (1.0f / 54.0f)) * (24.0f / (lamb_h + 10.0f))));
+	float cast_len = fminf(h * cast_scale, 175.0f);
+	float cast_dx = rad_x * cast_len;
+	float cast_dy = rad_y * cast_len;
 
-	float cast_len = fminf(h * 1.25f, 32.0f) * (0.45f + 0.55f * atten);
-	float cast_dx = le * cast_len;
-	float cast_dy = ls * cast_len;
+	float sway_dx = basis->grass_sx * 0.55f;
+	float sway_dy = basis->grass_sy * 0.55f;
 
-	float sway_dx = basis->grass_sx * 0.45f;
-	float sway_dy = basis->grass_sy * 0.45f;
+	float base_pad = fminf(ry * 0.55f, 4.5f);
+	float top_half_w = half_w * (1.0f + fminf(0.45f, cast_len / fmaxf(26.0f, dist)));
+	float lift_z = 0.34f;
 
-	float base_pad_y = fminf(ry * 0.45f, 3.5f);
-	float top_half_w = half_w * (1.0f + 0.35f * (cast_len / 32.0f));
-	float lift_z = 0.35f;
+	float c_dx[4] = {
+		-half_w * perp_x - base_pad * rad_x,
+		 half_w * perp_x - base_pad * rad_x,
+		-top_half_w * perp_x + cast_dx + sway_dx,
+		 top_half_w * perp_x + cast_dx + sway_dy * 0.0f + sway_dx
+	};
+	float c_dy[4] = {
+		-half_w * perp_y - base_pad * rad_y,
+		 half_w * perp_y - base_pad * rad_y,
+		-top_half_w * perp_y + cast_dy + sway_dy,
+		 top_half_w * perp_y + cast_dy + sway_dy
+	};
+	float c_zn[4];
+	for (int k = 0; k < 4; k++)
+		c_zn[k] = lift_z + shadow_corner_terrain_dz(bx + c_dx[k], by + c_dy[k], b->z, c_dx[k], c_dy[k]);
 
-	float c_dx[4] = { -half_w, half_w, -top_half_w + cast_dx + sway_dx, top_half_w + cast_dx + sway_dx };
-	float c_dy[4] = { -base_pad_y, -base_pad_y, cast_dy + sway_dy, cast_dy + sway_dy };
-
-	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + lift_z * N[0];
-	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + lift_z * N[1];
-	out->pos0[2] = base_pos[2] + c_dx[0] * E[2] + c_dy[0] * S[2] + lift_z * N[2];
+	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + c_zn[0] * N[0];
+	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + c_zn[0] * N[1];
+	out->pos0[2] = base_pos[2] + c_dx[0] * E[2] + c_dy[0] * S[2] + c_zn[0] * N[2];
 	out->pos0[3] = c_dx[0];
 
-	out->pos1[0] = base_pos[0] + c_dx[1] * E[0] + c_dy[1] * S[0] + lift_z * N[0];
-	out->pos1[1] = base_pos[1] + c_dx[1] * E[1] + c_dy[1] * S[1] + lift_z * N[1];
-	out->pos1[2] = base_pos[2] + c_dx[1] * E[2] + c_dy[1] * S[2] + lift_z * N[2];
+	out->pos1[0] = base_pos[0] + c_dx[1] * E[0] + c_dy[1] * S[0] + c_zn[1] * N[0];
+	out->pos1[1] = base_pos[1] + c_dx[1] * E[1] + c_dy[1] * S[1] + c_zn[1] * N[1];
+	out->pos1[2] = base_pos[2] + c_dx[1] * E[2] + c_dy[1] * S[2] + c_zn[1] * N[2];
 	out->pos1[3] = c_dx[1];
 
-	out->pos2[0] = base_pos[0] + c_dx[2] * E[0] + c_dy[2] * S[0] + lift_z * N[0];
-	out->pos2[1] = base_pos[1] + c_dx[2] * E[1] + c_dy[2] * S[1] + lift_z * N[1];
-	out->pos2[2] = base_pos[2] + c_dx[2] * E[2] + c_dy[2] * S[2] + lift_z * N[2];
+	out->pos2[0] = base_pos[0] + c_dx[2] * E[0] + c_dy[2] * S[0] + c_zn[2] * N[0];
+	out->pos2[1] = base_pos[1] + c_dx[2] * E[1] + c_dy[2] * S[1] + c_zn[2] * N[1];
+	out->pos2[2] = base_pos[2] + c_dx[2] * E[2] + c_dy[2] * S[2] + c_zn[2] * N[2];
 	out->pos2[3] = c_dx[2];
 
-	out->pos3[0] = base_pos[0] + c_dx[3] * E[0] + c_dy[3] * S[0] + lift_z * N[0];
-	out->pos3[1] = base_pos[1] + c_dx[3] * E[1] + c_dy[3] * S[1] + lift_z * N[1];
-	out->pos3[2] = base_pos[2] + c_dx[3] * E[2] + c_dy[3] * S[2] + lift_z * N[2];
+	out->pos3[0] = base_pos[0] + c_dx[3] * E[0] + c_dy[3] * S[0] + c_zn[3] * N[0];
+	out->pos3[1] = base_pos[1] + c_dx[3] * E[1] + c_dy[3] * S[1] + c_zn[3] * N[1];
+	out->pos3[2] = base_pos[2] + c_dx[3] * E[2] + c_dy[3] * S[2] + c_zn[3] * N[2];
 	out->pos3[3] = c_dx[3];
 
 	out->uv[0] = b->u0;
@@ -5296,8 +5618,8 @@ static inline bool pack_bb_lamb_shadow_quad_instance(const lam_billboard_gpu_t *
 	out->tint[2] = 0.0f;
 	out->tint[3] = alpha;
 
-	out->param[0] = b->x;
-	out->param[1] = b->y;
+	out->param[0] = bx;
+	out->param[1] = by;
 	out->param[2] = b->z;
 	out->param[3] = -2.0f;
 	return true;
@@ -5550,6 +5872,7 @@ typedef struct {
 	GLint uSunDir;
 	GLint uCloudShadowMap;
 	GLint uCsm;
+	GLint uShadowPass;
 } gl_mesh3d_pipe_t;
 
 typedef struct {
@@ -5919,14 +6242,14 @@ static void init_grid_buffers(void)
 	nd_seven_mesh3d_init();
 	uint32_t m3d_vcnt = 0, m3d_icnt = 0;
 	const nd_mesh3d_vert_t *m3d_verts = nd_seven_mesh3d_verts(&m3d_vcnt);
-	const uint16_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
+	const uint32_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
 	s_gl.mesh3d_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
 	glBufferData(GL_ARRAY_BUFFER, m3d_verts, (GLsizei)((size_t)m3d_vcnt * sizeof(nd_mesh3d_vert_t)), GL_STATIC_DRAW);
 
 	s_gl.mesh3d_ibo = glCreateBuffer();
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, m3d_idx, (GLsizei)((size_t)m3d_icnt * sizeof(uint16_t)), GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, m3d_idx, (GLsizei)((size_t)m3d_icnt * sizeof(uint32_t)), GL_STATIC_DRAW);
 
 	s_gl.mesh3d_inst_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
@@ -6110,6 +6433,7 @@ static bool check_pipelines_ready(void)
 			s_gl.mesh3d_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.mesh3d_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
 			s_gl.mesh3d_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.mesh3d_pipe.uShadowPass     = glGetUniformLocation(p, "uShadowPass", 11);
 		}
 	}
 
@@ -7817,7 +8141,7 @@ void nd_seven_gl_flush_water(void)
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 	glEnable(GL_STENCIL_TEST);
 	glStencilMask(0);
-	glStencilFunc(GL_EQUAL, 1, 0xFF);
+	glStencilFunc(GL_EQUAL, 1, 0x01);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
@@ -8433,14 +8757,18 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const nd_mesh3d_slice_t *sl,
                                         nd_seven_gl_mesh3d_inst_t *out)
 {
-	float ref_w = (sl && sl->sprite_w > 0.1f) ? sl->sprite_w : 12.0f;
-	float ref_h = (sl && sl->sprite_h > 0.1f) ? sl->sprite_h : 12.0f;
+	float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
+	float ref_h = (sl && sl->mesh_h_wu > 0.1f) ? sl->mesh_h_wu : ((sl && sl->sprite_h > 0.1f) ? (float)sl->sprite_h : 12.0f);
 	float scale_xy = fmaxf(0.15f, b->width / ref_w);
 	float scale_z  = fmaxf(0.15f, b->height / ref_h);
 
-	/* Deterministic yaw variation (+/- 20 deg) and horizontal mirror from u0 > u1 */
-	uint32_t h = (uint32_t)(b->x * 73.0f) * 0x9E3779B1u ^ (uint32_t)(b->y * 131.0f) * 0x85EBCA77u;
-	float yaw = (((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f) * 0.70f;
+	/* Deterministic full 360-deg 3D yaw rotation and horizontal mirror from u0 > u1 */
+	uint32_t h = (uint32_t)(b->x * 73.0f) * 0x9E3779B1u ^ (uint32_t)(b->y * 131.0f) * 0x85EBCA77u ^
+	             ((uint32_t)b->mesh_id * 0xC2B2AE3Du);
+	h ^= h >> 16;
+	h *= 0x7FEB352Du;
+	h ^= h >> 15;
+	float yaw = (((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f) * TWO_PI_F;
 	float cy = cosf(yaw), sy = sinf(yaw);
 	float flip = (b->u0 > b->u1) ? -1.0f : 1.0f;
 
@@ -8576,8 +8904,8 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			                      sizeof(nd_seven_gl_mesh3d_inst_t),
 			                      inst_base_bytes + (size_t)(a * 16));
 		}
-		glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_SHORT,
-		                        (int)(sl->first_idx * sizeof(uint16_t)), (GLsizei)icnt);
+		glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+		                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
 		if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
 			nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
 			cmd->count = sl->idx_count;
@@ -8649,7 +8977,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	float det_scale = nd_seven_get_detail_scale();
 	bool emit_shadows = (s_gl.cur_dist < 5000.0f * det_scale);
 	bool emit_grass_shadows = (s_gl.cur_dist < 1800.0f * det_scale);
-	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3200.0f * det_scale);
+	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3800.0f * det_scale);
 	float pitch_rad = s_gl.cur_pitch_deg * (PI_F / 180.0f);
 	float cos_p = cosf(pitch_rad);
 	float sin_p = sinf(pitch_rad);
@@ -8752,10 +9080,11 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 					want_shadow = emit_shadows && (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
 			}
 			if (want_shadow && emit_lamb_shadows) {
+				float north_shift = (batch[i].mesh_id > 0 && batch[i].anchor_y > 0.0f) ? (batch[i].anchor_y * 0.5f) : 0.0f;
 				float dx_l = batch[i].x - s_lamb_shadow_light[0];
-				float dy_l = batch[i].y - s_lamb_shadow_light[1];
+				float dy_l = (batch[i].y - north_shift) - s_lamb_shadow_light[1];
 				float d2_l = dx_l * dx_l + dy_l * dy_l;
-				want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 220.0f * 220.0f);
+				want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 290.0f * 290.0f);
 			}
 			need_core   = (is_other || is_mesh3d) ? 0u : 1u;
 			need_mesh3d = is_mesh3d ? 1u : 0u;

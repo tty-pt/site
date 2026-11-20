@@ -1049,10 +1049,10 @@ int main(void)
 					unsigned v_s = ND_PLANT_UNPACK_VAR(pid_s);
 					assert(idx_s < ND_PLANT_MAX);
 					assert(is_big <= 1);
-					assert(v_s >= 1 && v_s <= 2);
+					assert(v_s >= 1 && v_s <= ND_PLANT_VAR_MAX);
 					const nd_plant_spec_t *sp = &s_nd_plant_specs[idx_s];
 					assert(cm_s == (is_big ? sp->big_col : sp->small_col));
-					assert(sp->small_art == 2 && sp->big_art == 2);
+					assert(sp->small_art == ND_PLANT_VAR_MAX && sp->big_art == ND_PLANT_VAR_MAX);
 					var_mask |= (1u << (v_s - 1u));
 					if (idx_s == 10) saw_oak++;
 					if (idx_s == 11) saw_willow++;
@@ -1063,7 +1063,7 @@ int main(void)
 		}
 		assert(saw_oak > 0 && saw_willow > 0 && saw_maple > 0);
 		assert(saw_acacia == 0);
-		assert(var_mask == 0x3u);
+		assert(var_mask == 0xFu);
 
 		/* Planetary Biome Flora Fidelity Gate across Tundra (2), Alpine Meadow (3), Mediterranean (4),
 		 * Wetland (5), Cold Desert (6), Boreal Taiga (9), Temperate Rainforest (13), Savannah (15),

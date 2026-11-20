@@ -615,7 +615,7 @@ static inline bool seven_test_frustum_xy(float min_x, float min_y, float max_x, 
 	float sag = r2_max * (1.0f / 2000000.0f);
 	return ar_frustum_test_box(&s_frame_frustum,
 	                           min_x, min_y, base_z_min - sag - 256.0f,
-	                           max_x, max_y, base_z_max + 256.0f);
+	                           max_x, max_y, base_z_max + 720.0f);
 }
 
 /* 3-state frustum test for 8x8 room blocks:
@@ -634,7 +634,7 @@ static inline int seven_test_frustum_xy_state(float min_x, float min_y, float ma
 	float r2_max = mx + my;
 	float sag = r2_max * (1.0f / 2000000.0f);
 	float min_z = base_z_min - sag - 256.0f;
-	float max_z = base_z_max + 256.0f;
+	float max_z = base_z_max + 720.0f;
 	int all_inside = 1;
 	for (int i = 0; i < 6; i++) {
 		float a = s_frame_frustum.planes[i][0];
@@ -1407,18 +1407,33 @@ static void seven_calc_obj_billboard_dims(const ndw_obj_t *o,
 	float h = (float)sr->h;
 	float ay = (float)ndw_obj_anchor_y(o, sr->h);
 	if (o && h > 1.0f) {
+		int is_plant = 0;
 		if (ND_PLANT_UNPACK_PRESENT(o->plant_id)) {
 			unsigned sp_idx = ND_PLANT_UNPACK_IDX(o->plant_id);
 			unsigned is_big = ND_PLANT_UNPACK_BIG(o->plant_id);
 			nd_m3d_plant_metric_dims(sp_idx, is_big, &w, &h, &ay);
+			is_plant = 1;
 		} else if (o->kind == NDW_K_DECID || o->kind == NDW_K_TALL ||
 		           o->kind == NDW_K_FIR || o->kind == NDW_K_CACTUS) {
 			unsigned sp_idx = (o->kind == NDW_K_FIR) ? 1u :
 			                  ((o->kind == NDW_K_TALL) ? 2u :
 			                  ((o->kind == NDW_K_CACTUS) ? 6u : 10u));
 			nd_m3d_plant_metric_dims(sp_idx, o->big ? 1u : 0u, &w, &h, &ay);
+			is_plant = 1;
 		} else if (o->kind == NDW_K_STONE || o->kind == NDW_K_ROCK || o->kind == NDW_K_BOULDER) {
 			nd_m3d_stone_metric_dims(o->kind, o->variant, &w, &h, &ay);
+		}
+		if (is_plant) {
+			/* Deterministic per-instance allometric stature and crown spread variation (+/- 15%) */
+			uint32_t ph = ((uint32_t)o->x * 0x9E3779B1u) ^ ((uint32_t)o->y * 0x85EBCA77u) ^
+			              ((uint32_t)o->plant_id * 0xC2B2AE3Du) ^ ((uint32_t)o->variant * 0x27D4EB2Fu);
+			ph ^= ph >> 16;
+			ph *= 0x7FEB352Du;
+			ph ^= ph >> 15;
+			float s_w = 0.85f + 0.30f * ((float)(ph & 0xFFFFu) * (1.0f / 65535.0f));
+			float s_h = 0.85f + 0.30f * ((float)((ph >> 16) & 0xFFFFu) * (1.0f / 65535.0f));
+			w *= s_w;
+			h *= s_h;
 		}
 	}
 	*out_w = w;
