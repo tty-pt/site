@@ -8,6 +8,10 @@ ${CC:-clang} -Wall -Wextra -Werror -I"$ROOT/external/libbud/include" -I"$ROOT/ex
     -I"$ROOT/external/libhyle/include" -I"$ROOT/external/libhyle-source/include" \
     "$DIR/bud_table_test.c" \
     "$ROOT/external/libbud/src/libbud.c" \
+    "$ROOT/external/libbud/src/bud_tpl.c" \
+    "$ROOT/external/libbud/src/bud_render.c" \
+    "$ROOT/external/libbud/src/bud_runtime.c" \
+    "$ROOT/external/libbud/src/bud_json.c" \
     "$ROOT/external/libhyle-bud/src/libhyle-bud.c" \
     "$ROOT/external/libhyle-bud/src/table.c" \
     -ljson-c \

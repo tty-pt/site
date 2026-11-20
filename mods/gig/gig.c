@@ -129,11 +129,10 @@ static void grp_rand_match_cb(
 	const char *ftype = (format && format[0]) ? format : "any";
 
 	if (strcmp(ftype, ctx->type) == 0 || strcmp(ctx->type, "any") == 0) {
-		if (song_id &&
-		    ctx->id_pos + strlen(song_id) + 1 < sizeof(ctx->ids))
-		{
-			strcpy(ctx->ids + ctx->id_pos, song_id);
-			ctx->id_pos += strlen(song_id) + 1;
+		size_t slen = song_id ? strlen(song_id) : 0;
+		if (song_id && ctx->id_pos + slen + 1 < sizeof(ctx->ids)) {
+			memcpy(ctx->ids + ctx->id_pos, song_id, slen + 1);
+			ctx->id_pos += slen + 1;
 			ctx->match_count++;
 		}
 	}
@@ -572,7 +571,10 @@ static int sb_load_song_row(
 				        resolved_type);
 		}
 	}
-	sd->chord_html = ch;
+	if (ch) {
+		snprintf(sd->chord_html, sizeof(sd->chord_html), "%s", ch);
+		free(ch);
+	}
 	return 0;
 }
 
@@ -757,14 +759,6 @@ static void sb_populate_detail_state(
 	sb_app_state.pick_fmt_page = g_sb_fmt_pick_state.entries[0].page;
 }
 
-static void sb_free_detail_songs(void)
-{
-	for (int i = 0; i < sb_app_state.n_songs; i++) {
-		free(g_sb_songs[i].chord_html);
-		g_sb_songs[i].chord_html = NULL;
-	}
-}
-
 static int
 gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 {
@@ -812,7 +806,6 @@ gig_detail_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 	detail_respond_page(fd, &state, layout);
 	free(state.state_json);
 
-	sb_free_detail_songs();
 	free(grp_id);
 	return 0;
 }
@@ -854,7 +847,7 @@ static int gig_edit_auth(int fd, char *body, const item_ctx_t *ctx, void *user)
 		strncpy(song_source, sm.song_source, sizeof(song_source) - 1);
 	}
 	if (grp_id && !song_source[0])
-		strcpy(song_source, "repertoire");
+		snprintf(song_source, sizeof(song_source), "repertoire");
 
 	/* Load current songs via ordered source + compute original keys */
 	sb_edit_row_t songs[256];

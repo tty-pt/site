@@ -34,9 +34,10 @@
 	F_STR(st, yt, 512)                                                     \
 	F_STR(st, audio, 512)                                                  \
 	F_STR(st, pdf, 512)                                                    \
-	F_STR(st, type, 512)
+	F_STR(st, type, 512)                                                   \
+	F_STR(st, chord_html, 16384)
 
-BUD_STATE_STRUCT_EXT(sb_song_row_data_t, SB_SONG_ROW_SCHEMA, char *chord_html;)
+BUD_STATE_STRUCT_EXT(sb_song_row_data_t, SB_SONG_ROW_SCHEMA, )
 
 typedef struct {
 	char sb_id[128];
@@ -68,9 +69,6 @@ static site_ui_picker_buffer_t g_sb_pick_buf;
 static pick_view_t g_sb_pick_state;
 static site_ui_picker_buffer_t g_sb_fmt_pick_buf;
 static pick_view_t g_sb_fmt_pick_state;
-static bud_node *g_sb_chord_nodes[MAX_SB_SONGS];
-static bud_node *g_sb_media_nodes[MAX_SB_SONGS];
-static int g_sb_n_chord_nodes;
 static bud_node *g_sb_root = NULL;
 static bud_node *g_sb_main = NULL;
 
@@ -146,26 +144,20 @@ static void fetch_sb_transpose(int song_index, int semitones)
 	bud_host_fetch_fn(url, strlen(url), 1);
 }
 
-extern void wasm_mark_dirty(void);
-extern void wasm_flush(void);
-
 static void gig_fetch_callback(int request_id, const char *data, int data_len)
 {
 	(void)request_id;
-	char chord_html[65536];
 	size_t dlen = data_len >= 0 ? (size_t)data_len : 0;
-	bud_json_str_len(
-	        data, dlen, "chord_html", chord_html, sizeof(chord_html));
-	if (!chord_html[0])
-		return;
 
 	/* Extract song index from JSON */
-	int idx = bud_json_int_len(data, dlen, "index", 0);
-	if (idx < 0 || idx >= g_sb_n_chord_nodes || !g_sb_chord_nodes[idx])
+	int idx = bud_json_int_len(data, dlen, "index", -1);
+	if (idx < 0 || idx >= sb_app_state.n_songs)
 		return;
 
-	extern void bud_patch_innerhtml(unsigned int node_id, const char *html);
-	bud_patch_innerhtml(bud_node_id(g_sb_chord_nodes[idx]), chord_html);
+	bud_json_str_len(
+	        data, dlen, "chord_html", g_sb_songs[idx].chord_html,
+	        sizeof(g_sb_songs[idx].chord_html));
+	bud_app_set_state();
 }
 
 static int on_sb_transpose_change(bud_event *event)
@@ -187,26 +179,10 @@ static int on_sb_transpose_change(bud_event *event)
 
 /* ── Option checkbox change handler (latin, flats, media) ── */
 
-extern void (*bud_host_set_location_fn)(const char *url, size_t len);
-
 static void sb_toggle_media(int show)
 {
 	(void)show;
-	if (!bud_host_set_location_fn)
-		return;
-	for (int i = 0; i < sb_app_state.n_songs && i < g_sb_n_chord_nodes; i++)
-	{
-		if (!g_sb_media_nodes[i])
-			continue;
-		char html[8192];
-		sb_song_row_data_t *s = &g_sb_songs[i];
-		site_ui_build_media_html(
-		        s->yt, s->audio, s->pdf, html, sizeof(html));
-		extern void bud_patch_innerhtml(
-		        unsigned int node_id, const char *html);
-		bud_patch_innerhtml(
-		        bud_node_id(g_sb_media_nodes[i]), html[0] ? html : "");
-	}
+	bud_app_set_state();
 }
 
 static int on_sb_option_change(bud_event *event)
@@ -217,9 +193,15 @@ static int on_sb_option_change(bud_event *event)
 	if (!name || !value)
 		return 0;
 
-	if (strcmp(name, "l") == 0)
+	if (strcmp(name, "l") == 0) {
 		sb_app_state.latin = atoi(value);
-	else if (strcmp(name, "m") == 0) {
+		for (int i = 0; i < sb_app_state.n_songs; i++) {
+			if (sb_app_state.latin)
+				g_sb_songs[i].flags |= TRANSP_LATIN;
+			else
+				g_sb_songs[i].flags &= ~TRANSP_LATIN;
+		}
+	} else if (strcmp(name, "m") == 0) {
 		sb_app_state.show_media = atoi(value);
 		sb_toggle_media(sb_app_state.show_media);
 	} else if (strcmp(name, "z") == 0) {
@@ -270,8 +252,6 @@ static bud_node *gig_stl_render(void)
 {
 	g_sb_root = NULL;
 	g_sb_main = NULL;
-	g_sb_n_chord_nodes = 0;
-	memset(g_sb_media_nodes, 0, sizeof(g_sb_media_nodes));
 
 	char zoom_str[16];
 	char zoom_style[64];
@@ -308,7 +288,6 @@ static bud_node *gig_stl_render(void)
 	                opts, item_menu);
 
 	/* Build body content from state (proper Bud nodes for hydration) */
-	g_sb_n_chord_nodes = 0;
 	bud_node *body_content = sb_build_body_content();
 
 	/* Page layout with proper Bud nodes */
@@ -477,37 +456,22 @@ static bud_node *sb_render_song_row(
         int row_idx, const sb_song_row_data_t *s, const char *tgt_key,
         int is_owner, const char *csrf_token, const char *rem_action,
         const char *tpose_action, const char *rand_action, const char *t_str,
-        const char *chord_html, const char *n_buf, bud_node **out_pre,
-        bud_node **out_media, const pick_view_t *row_pv, int is_active,
-        const pick_view_t *fmt_row_pv, int is_fmt_active)
+        const char *chord_html, const char *n_buf, const pick_view_t *row_pv,
+        int is_active, const pick_view_t *fmt_row_pv, int is_fmt_active)
 {
 	int t = t_str ? atoi(t_str) : 0;
 	bud_node *key_opts = sb_render_key_options(t, s->orig_key, s->flags);
 
-	/* Always create the <pre> node and its raw child (even with empty
-	 * content on WASM) so the hydrated tree structure matches the
-	 * server-rendered DOM and node IDs stay aligned. */
 	bud_node *chord_pre = bud_tpl(
 	        "<pre data-gig-chord-data='%s' class='whitespace-pre-wrap "
 	        "font-mono text-xs mt-1 p-2 rounded chord-data'>%raw</pre>",
 	        n_buf, chord_html ? chord_html : "");
-	if (out_pre)
-		*out_pre = chord_pre;
 
-	/* Media container (always rendered, patched by WASM) */
-	char media_html[8192] = { 0 };
-	if (s->yt[0] || s->audio[0] || s->pdf[0])
-		site_ui_build_media_html(
-		        s->yt, s->audio, s->pdf, media_html,
-		        sizeof(media_html));
-
+	bud_node *media_slot = site_ui_render_media_slot(s->yt, s->audio, s->pdf);
 	bud_node *media_node = bud_tpl(
 	        "<div data-gig-media='%s' class='gig-media flex justify-end "
-	        "items-center flex-shrink-0 ml-auto'>%raw</div>",
-	        n_buf, media_html);
-
-	if (out_media)
-		*out_media = media_node;
+	        "items-center flex-shrink-0 ml-auto'>%node</div>",
+	        n_buf, media_slot);
 
 	/* Title/type column */
 	bud_node *title_elem = NULL;
@@ -702,7 +666,6 @@ static bud_node *sb_build_body_content(void)
 
 			snprintf(t_str, sizeof(t_str), "%d", s->transpose);
 
-			bud_node *pre_ptr = NULL, *media_ptr = NULL;
 			int is_active = (i == sb_app_state.active_row_pick);
 			const pick_view_t *row_pv =
 			        is_active ? &g_sb_pick_state : NULL;
@@ -714,16 +677,8 @@ static bud_node *sb_build_body_content(void)
 			        i, s, tgt_key, sb_app_state.is_owner,
 			        sb_app_state.csrf_token, rem_action,
 			        tpose_action, rand_action, t_str, s->chord_html,
-			        n_buf, &pre_ptr, &media_ptr, row_pv, is_active,
-			        fmt_pv, is_fmt_active);
-
-			if (pre_ptr && g_sb_n_chord_nodes < MAX_SB_SONGS)
-				g_sb_chord_nodes[g_sb_n_chord_nodes++] =
-				        pre_ptr;
-
-			if (media_ptr && g_sb_n_chord_nodes <= MAX_SB_SONGS)
-				g_sb_media_nodes[g_sb_n_chord_nodes - 1] =
-				        media_ptr;
+			        n_buf, row_pv, is_active, fmt_pv,
+			        is_fmt_active);
 
 			bud_append(frag, row);
 		}
@@ -737,8 +692,8 @@ static void gig_stl_cleanup(void)
 	memset(&sb_app_state, 0, sizeof(sb_app_state));
 	g_sb_root = NULL;
 	g_sb_main = NULL;
-	g_sb_n_chord_nodes = 0;
 }
 
 BUD_WASM_MODULE_EXT(gig_detail, gig_stl_init, gig_stl_render, NULL, NULL, gig_stl_cleanup, gig_fetch_callback);
+
 

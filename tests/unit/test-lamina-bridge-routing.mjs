@@ -74,7 +74,7 @@ console.log('PASS: generic lam_image_request and lam_image_read imports verified
 
 // Verify webgl-bridge.js offloads shader compilation to a separate Worker while glGetProgramParameter(GL_COMPLETION_STATUS_KHR) stays 0 until worker completes
 {
-	const { createWebGlBridge } = await import('../../external/liblamina/htdocs/webgl-bridge.js');
+	const { createWebGlBridge } = await import('../../external/liblamina/htdocs/webgl-cap.js');
 	let localCompileCalls = 0;
 	let localLinkCalls = 0;
 	let workerMessages = [];
@@ -175,7 +175,7 @@ console.log('PASS: generic lam_image_request and lam_image_read imports verified
 
 // Verify direct native KHR_parallel_shader_compile on main WebGL context without worker detour
 {
-	const { createWebGlBridge } = await import('../../external/liblamina/htdocs/webgl-bridge.js');
+	const { createWebGlBridge } = await import('../../external/liblamina/htdocs/webgl-cap.js');
 	let localCompileCalls = 0;
 	let localLinkCalls = 0;
 	let completionStatus = false;

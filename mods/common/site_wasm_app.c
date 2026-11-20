@@ -15,10 +15,6 @@ ISO_IMPORT(void, stele, stl_host_fetch, const char *url, size_t url_len, int req
 ISO_IMPORT(void, stele, stl_host_log, const char *msg, size_t len);
 ISO_IMPORT(void, stele, stl_host_set_location, const char *url, size_t url_len);
 
-extern void (*bud_host_fetch_fn)(const char *url, size_t len, int id);
-extern void (*bud_host_log_fn)(const char *msg, size_t len);
-extern void (*bud_host_set_location_fn)(const char *url, size_t len);
-
 __attribute__((constructor)) static void site_platform_init(void)
 {
 	bud_host_fetch_fn = (void (*)(const char *, size_t, int))stl_host_fetch;

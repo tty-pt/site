@@ -53,7 +53,7 @@ SITE_WASM_INCLUDES = -Iexternal/libstele/include -Iexternal/libbud/include \
                      -Imods/song/include -Imods/gig/include -Imods/index/include -Imods/chat/include
 
 SITE_WASM_BUILD_DIR = /tmp/site_wasm_build_$(shell pwd | cksum | cut -d' ' -f1)
-SITE_WASM_OBJS = kernel.o stele_event.o bud.o site_wasm_app.o site_ui.o xylem.o \
+SITE_WASM_OBJS = kernel.o stele_event.o bud.o bud_tpl.o bud_render.o bud_runtime.o bud_json.o site_wasm_app.o site_ui.o xylem.o \
                  modules.o site_chrome.o chrome.o song.o gig.o list.o \
                  chat.o chat_ui.o music.o hyle_bud.o filter.o table.o \
                  picker.o form.o hyle_bud_cache.o url.o
@@ -64,7 +64,19 @@ $(SITE_WASM_BUILD_DIR)/kernel.o: external/libstele/src/stele_wasm_kernel.c exter
 $(SITE_WASM_BUILD_DIR)/stele_event.o: external/libstele/src/stele_event.c external/libstele/include/ttypt/stele_wasm.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/bud.o: external/libbud/src/libbud.c
+$(SITE_WASM_BUILD_DIR)/bud.o: external/libbud/src/libbud.c external/libbud/src/bud_internal.h
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/bud_tpl.o: external/libbud/src/bud_tpl.c external/libbud/src/bud_internal.h
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/bud_render.o: external/libbud/src/bud_render.c external/libbud/src/bud_internal.h
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/bud_runtime.o: external/libbud/src/bud_runtime.c external/libbud/src/bud_internal.h
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/bud_json.o: external/libbud/src/bud_json.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c mods/common/site_wasm_app.h
@@ -621,7 +633,7 @@ new-mod:
 # Deploy JS/WASM/CSS to remote server (build wasm locally, deploy to OpenBSD)
 DEPLOY_HOST ?= tty.pt
 DEPLOY_PATH ?= /var/www/htdocs
-PROD_ASSETS = styles.css hyle.css bud-cap.js hyle-cap.js axil-cap.js axil-tty-cap.js lamina-cap.js webgl-cap.js xylem-cap.js bud-hydrate.js hyle-fragments.js stele-client.js stele.wasm site.wasm
+PROD_ASSETS = styles.css hyle.css bud-cap.js hyle-cap.js axil-cap.js axil-tty-cap.js lamina-cap.js webgl-cap.js xylem-cap.js stele-client.js stele.wasm site.wasm
 
 deploy-wasm: clients
 	scp $(PROD_ASSETS:%=htdocs/%) \

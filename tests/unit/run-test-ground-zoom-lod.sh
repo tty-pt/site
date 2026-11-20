@@ -21,7 +21,7 @@ gcc -Wall -Wextra -Werror -O1 \
     -o "$out/test_ground_zoom_lod" \
     tests/unit/test_ground_zoom_lod.c \
     mods/nd/ux/nd_seven.c \
-    mods/nd/ux/nd_seven_gl.c \
+    mods/nd/ux/nd_seven_gl_shaders.c mods/nd/ux/nd_seven_gl_math.c mods/nd/ux/nd_seven_gl_billboard.c mods/nd/ux/nd_seven_gl_occ.c mods/nd/ux/nd_seven_gl_clouds.c mods/nd/ux/nd_seven_gl.c \
     mods/nd/ux/nd_seven_atlas_draw.c \
     mods/nd/ux/nd_seven_ground.c \
     mods/nd/ux/nd_seven_motion.c \

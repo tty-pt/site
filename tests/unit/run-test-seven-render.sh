@@ -24,7 +24,7 @@ gcc -Wall -Wextra -Werror -O1 \
     mods/nd/ux/nd_seven_ground.c \
     mods/nd/ux/nd_seven_motion.c \
     mods/nd/ux/nd_seven_objects.c \
-    mods/nd/ux/nd_seven_gl.c \
+    mods/nd/ux/nd_seven_gl_shaders.c mods/nd/ux/nd_seven_gl_math.c mods/nd/ux/nd_seven_gl_billboard.c mods/nd/ux/nd_seven_gl_occ.c mods/nd/ux/nd_seven_gl_clouds.c mods/nd/ux/nd_seven_gl.c \
     mods/nd/ux/nd_lamina.c \
     external/libareole/src/areole.c \
     external/libstele/src/stele_wq.c \

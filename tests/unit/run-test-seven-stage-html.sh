@@ -36,7 +36,7 @@ gcc -g -O0 \
 	mods/nd/ux/nd_seven_ground.c \
 	mods/nd/ux/nd_seven_motion.c \
 	mods/nd/ux/nd_seven_objects.c \
-	mods/nd/ux/nd_seven_gl.c \
+	mods/nd/ux/nd_seven_gl_shaders.c mods/nd/ux/nd_seven_gl_math.c mods/nd/ux/nd_seven_gl_billboard.c mods/nd/ux/nd_seven_gl_occ.c mods/nd/ux/nd_seven_gl_clouds.c mods/nd/ux/nd_seven_gl.c \
 	mods/nd/ux/glue/equip_ui.c \
 	mods/nd/ux/glue/attr_ui.c \
 	mods/nd/ux/glue/spell_ui.c \

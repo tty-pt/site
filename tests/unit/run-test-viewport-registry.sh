@@ -32,7 +32,7 @@ gcc -g -O0 \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
 	mods/nd/ux/nd_seven.c \
-	mods/nd/ux/nd_seven_gl.c \
+	mods/nd/ux/nd_seven_gl_shaders.c mods/nd/ux/nd_seven_gl_math.c mods/nd/ux/nd_seven_gl_billboard.c mods/nd/ux/nd_seven_gl_occ.c mods/nd/ux/nd_seven_gl_clouds.c mods/nd/ux/nd_seven_gl.c \
 	external/libareole/src/areole.c external/liblamina/src/particle.c \
 	mods/nd/ux/nd_seven_atlas_draw.c \
 	mods/nd/ux/nd_seven_ground.c \

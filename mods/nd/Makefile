@@ -19,6 +19,11 @@ ND_UX_PARTS = \
 	ux/nd_seven_objects.c \
 	ux/nd_dock_ui.c \
 	ux/nd_state_io.c \
+	ux/nd_seven_gl_shaders.c \
+	ux/nd_seven_gl_math.c \
+	ux/nd_seven_gl_billboard.c \
+	ux/nd_seven_gl_occ.c \
+	ux/nd_seven_gl_clouds.c \
 	ux/nd_seven_gl.c
 
 SRC = nd.c ux/nd_ui.c $(ND_UX_PARTS) ux/nd_scene.c ux/nd_lamina.c $(ND_UX_MODULES) $(REPO_ROOT)/external/libareole/src/areole.c $(REPO_ROOT)/external/libcorolla/src/corolla.c $(REPO_ROOT)/external/liblamina/src/particle.c
