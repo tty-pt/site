@@ -90,19 +90,11 @@ Incomplete report = task not complete.
    or custom client logic in JS. All rich client behaviors belong in isomorphic
    WASM (`mods/*/ux/*.c`). Enforced via `scripts/check-no-site-specific-js.sh`.
 
-7. **Autonomous Quest Management.** All work MUST use the Quest Journal workflow.
-   - The assistant automatically creates and maintains active quests on disk (`.pi/quest/future/<qid>.md`) from user requests (or when activated via `/quest on`, `"quest: Go for it."`, or `/quest new` after conversational planning with Argon).
-   - The quest file is your single source of truth for goals, status, and decisions. Update it proactively as you make progress and before context is compacted.
-   - Sub-quests are created automatically via `quest_subquest` when tangent remarks or follow-ups arise.
-   - Completed work is finalized via `quest_archive` (or `/quest finish`), integrating the scratch worktree into `main` (or retaining `.pi/scratch/slot-N` via `keep-slot` / `squash-keep-slot` for manual testing) and cleaning up `.pi/quest/future/<qid>.md` directly without `.zip` files.
-   - Never use ad-hoc scratchpads, `.todo` files, or try to keep the entire plan in your head.
-   - **Unified Bundle Packaging**:
-     ```text
-     After testing or making changes:
-         npm --prefix .pi/extensions/pi-quest run zip
-
-     Send pi-quest-bundle.zip containing current code and latest run diagnostics.
-     ```
+7. **Multi-Agent Worktree & `pi-mm` Memory Coordination (`pi-quest` Deactivated).**
+   - `pi-quest` is deactivated; do NOT invoke `quest_*` tools or write `.pi/quest/` files. Track multi-step session tasks with `todo` and persist cross-session engineering lore with `pi-mm` (`memory_recall`, `memory_record`, `memory_review`).
+   - **Cross-Agent & Worktree Discovery**: Before starting non-trivial mutations or restarting host-wide daemons (`axil` on `:8080`, `jarvisd`, `axil-auren`), check active worktrees and live swarm attention leases via `sh scripts/worktree.sh status` or `memory_recall({ scope: "session", session: "parallel", query: "<topic>" })`.
+   - **Worktree Provisioning**: When creating or switching into a git worktree (`/worktree`, `subagent({ worktree: true })`, or `sh scripts/worktree.sh create <branch>`), always run `sh scripts/worktree.sh init` so all `external/*` submodules are linked zero-network from `.git/modules/*` and `node_modules/@tty-pt/*` headers are staged.
+   - **Standing Operational Memory**: Persist newly discovered build/daemon/environment traps immediately with `memory_record({ ..., standing: true })` and resolve `[STALE_SUSPECT]` epistemic drift alerts with `memory_review`. See `.pi/skills/worktree-and-memory/SKILL.md`.
 
 8. **Targeted Verification Hierarchy & Quality Gates.**
    - **Scope-Calibrated Actions First**: When code changes, perform ONLY the targeted rebuild and test actions corresponding to the modified files. Never run `make test` for single-module, UI, or client asset fixes.

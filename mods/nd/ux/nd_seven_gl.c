@@ -3473,19 +3473,25 @@ static const char *s_fs_mesh3d =
 	"uniform vec3 uSunDir;\n"
 	"uniform int uShadowPass;\n"
 	"uniform sampler2D uBranchletTex;\n"
+	"uniform sampler2D uBranchletNorm;\n"
 	"out vec4 FragColor;\n"
 	ND_GLSL_SCENE_LIGHT
 	ND_GLSL_CSM_LOOKUP_FN
 	ND_GLSL_TREE_SHADOW_FN
 	CHAFF_GLSL_HASH_FN
 	CHAFF_GLSL_GRAD_NOISE_FN
-	"vec4 nd_sample_branchlet(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
+	"vec2 nd_branchlet_uv(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
 	"    vec2 tileOff = isCon ? vec2(0.0, 0.0)\n"
 	"                 : (isOv ? vec2(0.5, 0.0)\n"
 	"                 : (isLob ? vec2(0.0, 0.5) : vec2(0.5, 0.5)));\n"
-	"    vec2 uv = tileOff + vec2(0.006 + clamp(cuv.x, 0.0, 1.0) * 0.488,\n"
-	"                             0.006 + clamp(cuv.y, 0.0, 1.0) * 0.488);\n"
-	"    return texture(uBranchletTex, uv);\n"
+	"    return tileOff + vec2(0.006 + clamp(cuv.x, 0.0, 1.0) * 0.488,\n"
+	"                          0.006 + clamp(cuv.y, 0.0, 1.0) * 0.488);\n"
+	"}\n"
+	"vec4 nd_sample_branchlet(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
+	"    return texture(uBranchletTex, nd_branchlet_uv(cuv, isCon, isOv, isLob));\n"
+	"}\n"
+	"vec4 nd_sample_branchlet_norm(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
+	"    return texture(uBranchletNorm, nd_branchlet_uv(cuv, isCon, isOv, isLob));\n"
 	"}\n"
 	"void main() {\n"
 	"    if (vTint.a <= 0.01) discard;\n"
@@ -3622,6 +3628,7 @@ static const char *s_fs_mesh3d =
 	"    }\n"
 	"    vec3 V_local = normalize(vec3(0.0, 0.573576, 0.819152));\n"
 	"    float microAO = 1.0;\n"
+	"    float brTrans = 0.72;\n"
 	"    /* Botanical & mineralogical micro-relief */\n"
 	"    if (distFade > 0.02) {\n"
 	"        if (isBark) {\n"
@@ -3653,15 +3660,19 @@ static const char *s_fs_mesh3d =
 	"            albedo = mix(albedo, vec3(0.25, 0.41, 0.18), mossMask * 0.40);\n"
 	"        } else if (isFoliage) {\n"
 	"            if (hasBrCard) {\n"
+	"                vec4 brNorm    = nd_sample_branchlet_norm(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
 	"                float brShade  = brSample.r;\n"
 	"                float rollN    = (brSample.g - 0.5) * 2.0;\n"
 	"                float twigMask = brSample.b;\n"
+	"                vec2 texNxy    = (brNorm.rg - 0.5) * 2.0;\n"
+	"                float brDepth  = brNorm.b;\n"
+	"                brTrans        = brNorm.a;\n"
 	"                vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.14 + vec2(vHeightAboveGround * 0.10, -vHeightAboveGround * 0.08), 0x4C454146u);\n"
 	"                vec3 twigCol = mix(albedo * 0.52, vec3(0.35, 0.26, 0.17), 0.60) * (0.84 + 0.32 * brShade);\n"
 	"                vec3 leafCol = clamp(albedo * (0.78 + 0.46 * brShade + (gMacro.x - 0.5) * 0.14), 0.0, 1.0);\n"
 	"                albedo = mix(leafCol, twigCol, twigMask * 0.90);\n"
-	"                N_local = normalize(N_local + vec3(rollN * 0.52, -rollN * 0.38, (brShade - 0.5) * 0.34) * distFade);\n"
-	"                microAO = clamp(0.76 + 0.46 * brShade, 0.68, 1.20);\n"
+	"                N_local = normalize(N_local + vec3(texNxy.x * 0.54 + rollN * 0.22, texNxy.y * 0.54 - rollN * 0.16, (brDepth - 0.45) * 0.36) * distFade);\n"
+	"                microAO = clamp(0.76 + 0.46 * brShade * (0.88 + 0.24 * brDepth), 0.68, 1.20);\n"
 	"            } else if (!isFolCore && vDist < 3400.0) {\n"
 	"                vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.18 + vec2(vHeightAboveGround * 0.14, -vHeightAboveGround * 0.10), 0x4C454146u);\n"
 	"                vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.62 + vec2(-vHeightAboveGround * 0.44, vLocalPos.x * 0.28), 0x464F4C32u);\n"
@@ -3730,7 +3741,7 @@ static const char *s_fs_mesh3d =
 	"    if (isFoliage || isFlower) {\n"
 	"        float backTrans = max(0.0, dot(-N_local, L_local) + 0.42);\n"
 	"        float rimTrans = (1.0 - ndotv) * max(0.0, L_local.z);\n"
-	"        float sss = (0.65 * backTrans + 0.35 * rimTrans) * (0.45 + 0.55 * smoothstep(0.25, 0.90, vAO)) * (isFolCore ? 0.40 : 1.0);\n"
+	"        float sss = (0.65 * backTrans + 0.35 * rimTrans) * (0.45 + 0.55 * smoothstep(0.25, 0.90, vAO)) * (isFolCore ? 0.40 : 1.0) * (hasBrCard ? (0.25 + 1.10 * brTrans) : 1.0);\n"
 	"        lit += albedo * vec3(0.46, 0.62, 0.16) * (sss * 0.46 * selfShadowVis * sunTrans * directSun * sunLitCol) * distFade;\n"
 	"        float leafFresnel = 0.04 + 0.22 * pow(1.0 - ndotv, 4.0);\n"
 	"        lit += mix(albedo, vec3(1.0, 0.99, 0.92), 0.35) * (pow(specAngle, 20.0) * leafFresnel * 0.40 * sunSelfShadow * sunTrans * directSun * sunLitCol) * distFade;\n"
@@ -5960,6 +5971,7 @@ typedef struct {
 	GLint uCsm;
 	GLint uShadowPass;
 	GLint uBranchletTex;
+	GLint uBranchletNorm;
 	GLint uTreeShadowTex;
 	GLint uTreeShadowOrigin;
 	GLint uTreeShadowVP;
@@ -6141,6 +6153,7 @@ static struct {
 	GLuint mesh3d_ibo;
 	GLuint mesh3d_inst_vbo;
 	GLuint fol_atlas_tex;
+	GLuint fol_atlas_norm_tex;
 	GLuint tree_shadow_fbo[2];
 	GLuint tree_shadow_tex[2];
 	int    tree_shadow_read_idx;
@@ -6361,13 +6374,17 @@ static void init_grid_buffers(void)
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
 	glBufferData(GL_ARRAY_BUFFER, NULL, MAX_BB_INSTANCES * sizeof(nd_seven_gl_mesh3d_inst_t), GL_DYNAMIC_DRAW);
 
-	/* Bake and upload 512x512 RGBA8 Skyrim/SpeedTree botanical branchlet atlas with 8 CPU mip levels */
-	if (!s_gl.fol_atlas_tex) {
+	/* Bake and upload 1024x1024 RGBA8 botanical branchlet albedo + companion normal/depth/translucency atlases with CPU mip levels */
+	if (!s_gl.fol_atlas_tex || !s_gl.fol_atlas_norm_tex) {
 		uint8_t *buf_a = (uint8_t *)malloc((size_t)ND_FOL_ATLAS_SIZE * (size_t)ND_FOL_ATLAS_SIZE * 4u);
+		uint8_t *buf_n = (uint8_t *)malloc((size_t)ND_FOL_ATLAS_SIZE * (size_t)ND_FOL_ATLAS_SIZE * 4u);
 		uint8_t *buf_b = (uint8_t *)malloc((size_t)(ND_FOL_ATLAS_SIZE / 2) * (size_t)(ND_FOL_ATLAS_SIZE / 2) * 4u);
-		if (buf_a && buf_b) {
+		if (buf_a && buf_n && buf_b) {
 			nd_foliage_atlas_bake_level0(buf_a);
-			s_gl.fol_atlas_tex = glCreateTexture();
+			nd_foliage_atlas_bake_normals_level0(buf_a, buf_n);
+
+			if (!s_gl.fol_atlas_tex)
+				s_gl.fol_atlas_tex = glCreateTexture();
 			glActiveTexture(GL_TEXTURE0 + 3);
 			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -6389,9 +6406,34 @@ static void init_grid_buffers(void)
 				cur_w = next_w;
 			}
 			glBindTexture(GL_TEXTURE_2D, 0);
+
+			if (!s_gl.fol_atlas_norm_tex)
+				s_gl.fol_atlas_norm_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 4);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_norm_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_FOL_MIP_LEVELS - 1);
+			cur_w = ND_FOL_ATLAS_SIZE;
+			src = buf_n;
+			dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_FOL_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1;
+				nd_foliage_atlas_downsample_normals(src, cur_w, cur_w, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
 			glActiveTexture(GL_TEXTURE0);
 		}
 		free(buf_a);
+		free(buf_n);
 		free(buf_b);
 	}
 }
@@ -6579,6 +6621,7 @@ static bool check_pipelines_ready(void)
 			s_gl.mesh3d_pipe.uCsm                   = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.mesh3d_pipe.uShadowPass            = glGetUniformLocation(p, "uShadowPass", 11);
 			s_gl.mesh3d_pipe.uBranchletTex          = glGetUniformLocation(p, "uBranchletTex", 13);
+		s_gl.mesh3d_pipe.uBranchletNorm          = glGetUniformLocation(p, "uBranchletNorm", 14);
 			s_gl.mesh3d_pipe.uTreeShadowTex         = glGetUniformLocation(p, "uTreeShadowTex", 14);
 			s_gl.mesh3d_pipe.uTreeShadowOrigin      = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
 			s_gl.mesh3d_pipe.uTreeShadowVP          = glGetUniformLocation(p, "uTreeShadowVP", 13);
@@ -9192,6 +9235,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		glActiveTexture(GL_TEXTURE0 + 3);
 		glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
 		glUniform1i(s_gl.mesh3d_pipe.uBranchletTex, 3);
+		if (s_gl.fol_atlas_norm_tex && s_gl.mesh3d_pipe.uBranchletNorm >= 0) {
+			glActiveTexture(GL_TEXTURE0 + 4);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_norm_tex);
+			glUniform1i(s_gl.mesh3d_pipe.uBranchletNorm, 4);
+		}
 		glActiveTexture(GL_TEXTURE0);
 	}
 	glUniformMatrix4fv(s_gl.mesh3d_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);

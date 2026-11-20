@@ -306,6 +306,48 @@ main(void)
 		       "3D Beer-Lambert canopy light competition must differentiate sunlit outer leaves from shaded interior leaves");
 		assert(ND_FOL_ATLAS_SIZE == 1024 && ND_FOL_TILE_SIZE == 512 && ND_FOL_MIP_LEVELS == 9 &&
 		       "Botanical branchlet atlas must be 1024x1024 with 9 mip levels");
+
+		size_t atlas_bytes = (size_t)ND_FOL_ATLAS_SIZE * (size_t)ND_FOL_ATLAS_SIZE * 4u;
+		uint8_t *fol_alb  = (uint8_t *)malloc(atlas_bytes);
+		uint8_t *fol_norm = (uint8_t *)malloc(atlas_bytes);
+		uint8_t *fol_mip1 = (uint8_t *)malloc(atlas_bytes / 4u);
+		assert(fol_alb && fol_norm && fol_mip1);
+
+		nd_foliage_atlas_bake_level0(fol_alb);
+		nd_foliage_atlas_bake_normals_level0(fol_alb, fol_norm);
+		nd_foliage_atlas_downsample_normals(fol_norm, ND_FOL_ATLAS_SIZE, ND_FOL_ATLAS_SIZE, fol_mip1);
+
+		uint32_t opaque_cnt = 0u, tilted_norm_cnt = 0u, leaf_trans_cnt = 0u, twig_opaque_cnt = 0u;
+		for (size_t i = 0; i < (size_t)ND_FOL_ATLAS_SIZE * (size_t)ND_FOL_ATLAS_SIZE; i++) {
+			const uint8_t *a = fol_alb + i * 4u;
+			const uint8_t *n = fol_norm + i * 4u;
+			if (a[3] > 200u) {
+				opaque_cnt++;
+				if (abs((int)n[0] - 128) > 8 || abs((int)n[1] - 128) > 8)
+					tilted_norm_cnt++;
+				if (a[2] < 40u && n[3] > 100u)
+					leaf_trans_cnt++;
+				if (a[2] > 200u && n[3] < 40u)
+					twig_opaque_cnt++;
+			} else if (a[3] <= 1u) {
+				assert(n[0] == 128u && n[1] == 128u && n[2] == 0u && n[3] == 0u);
+			}
+		}
+		assert(opaque_cnt > 50000u && "Foliage atlas must have substantial opaque botanical coverage");
+		assert(tilted_norm_cnt > 10000u && "Companion normal atlas must encode surface relief across leaves and needles");
+		assert(leaf_trans_cnt > 20000u && "Chlorophyll foliage must have high subsurface translucency");
+		assert(twig_opaque_cnt > 2000u && "Woody twigs must have low subsurface translucency");
+
+		uint32_t mip_valid = 0u;
+		for (size_t i = 0; i < (size_t)(ND_FOL_ATLAS_SIZE / 2) * (size_t)(ND_FOL_ATLAS_SIZE / 2); i++) {
+			if (fol_mip1[i * 4u + 3u] > 0u)
+				mip_valid++;
+		}
+		assert(mip_valid > 10000u && "Downsampled normal atlas mip-1 must preserve valid coverage");
+
+		free(fol_alb);
+		free(fol_norm);
+		free(fol_mip1);
 	}
 
 	/* 6. Verify v1.0 IDEA.md Cholesky Correlation Validation, MTG Graph Validation,

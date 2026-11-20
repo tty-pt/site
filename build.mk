@@ -111,7 +111,8 @@ $(TARGET): $(SRC) $(MAKEFILE_DEPS)
 	@rm -f $@.d; for src in $(SRC); do \
 		$(CC) $(CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
 	done
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(MODULE_EXTRA_SRC) $(LDLIBS)
+	$(if $(filter 0,$(V)),@echo "  CC      $@")
+	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(MODULE_EXTRA_SRC) $(LDLIBS)
 
 MOD_DEPS != for f in $(TARGET) $(WASM_TARGETS); do [ -n "$$f" ] && [ -f "$$f.d" ] && printf '%s.d ' "$$f"; done; printf '/dev/null'
 -include $(MOD_DEPS)

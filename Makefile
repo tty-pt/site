@@ -1,4 +1,12 @@
 CC  ?= clang
+V   ?= 0
+ifeq ($(V),0)
+  Q = @
+  MAKEFLAGS += --no-print-directory -s
+else
+  Q =
+endif
+export V Q
 DEV ?= 0
 PROFILE ?= dev
 WASI_CC ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
@@ -18,13 +26,21 @@ WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stage-assets stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib chaff-lib areole-lib sepal-lib hyle-lib pitch-lib bud-lib hyle-source hyle-bud axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm boundary-check
+all: stage-assets stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib chaff-lib areole-lib sepal-lib hyle-lib pitch-lib bud-lib hyle-source hyle-bud axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm
 
-mods:
-	@for d in $(MOD_DIRS); do $(MAKE) -C $$d || exit 1; done
+.PHONY: check
+check: boundary-check
 
-clients:
-	@for d in $(CLIENT_DIRS); do $(MAKE) -C $$d || exit 1; done
+.PHONY: $(MOD_DIRS) $(CLIENT_DIRS)
+mods: $(MOD_DIRS)
+$(MOD_DIRS):
+	$(if $(filter 0,$(V)),@echo "  MOD     $@")
+	$(Q)$(MAKE) -C $@
+
+clients: $(CLIENT_DIRS)
+$(CLIENT_DIRS):
+	$(if $(filter 0,$(V)),@echo "  CLIENT  $@")
+	$(Q)$(MAKE) -C $@
 
 site-wasm: htdocs/site.wasm
 
@@ -43,59 +59,84 @@ SITE_WASM_OBJS = kernel.o stele_event.o bud.o site_wasm_app.o site_ui.o xylem.o 
                  picker.o form.o hyle_bud_cache.o url.o
 
 $(SITE_WASM_BUILD_DIR)/kernel.o: external/libstele/src/stele_wasm_kernel.c external/libstele/include/ttypt/stele_wasm.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/stele_event.o: external/libstele/src/stele_event.c external/libstele/include/ttypt/stele_wasm.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud.o: external/libbud/src/libbud.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c mods/common/site_wasm_app.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/xylem.o: external/libxylem/src/libxylem-wasm.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/modules.o: mods/common/ux/site_modules.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_chrome.o: mods/common/ux/site_chrome.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chrome.o: mods/site_chrome/ux/chrome.c mods/common/site_wasm_app.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.c mods/common/site_wasm_app.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.c mods/common/site_wasm_app.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_fe.c mods/common/site_wasm_app.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chat.o: mods/chat/ux/chat_fe.c mods/common/site_wasm_app.h
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chat_ui.o: mods/chat/ux/chat_ui.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/music.o: external/libpitch/src/music.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/hyle_bud.o: external/libhyle-bud/src/libhyle-bud.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/filter.o: external/libhyle-bud/src/filter.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/table.o: external/libhyle-bud/src/table.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/picker.o: external/libhyle-bud/src/picker.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/form.o: external/libhyle-bud/src/form.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/hyle_bud_cache.o: external/libhyle-bud/src/hyle-bud-cache.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/url.o: external/libhyle/src/url.c
-	@mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 
 htdocs/site.wasm: $(addprefix $(SITE_WASM_BUILD_DIR)/,$(SITE_WASM_OBJS))
-	@mkdir -p htdocs
-	$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
-	@sh external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }
+	$(if $(filter 0,$(V)),@echo "  LD.WASM $@")
+	$(Q)mkdir -p htdocs
+	$(Q)$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
+	$(Q)sh external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }
 
 # Staged htdocs deploy assets. Exported from each library and module <pkg>/htdocs/.
 DEPLOY_ASSETS = styles.css hyle.css bud-cap.js hyle-cap.js axil-cap.js axil-tty-cap.js lamina-cap.js webgl-cap.js xylem-cap.js stele-client.js stele.wasm
 
-stage-assets:
+stage-assets: htdocs/.assets-staged
+
+htdocs/.assets-staged:
 	@mkdir -p htdocs
 	@rm -rf node_modules/@ttypt
 	@mkdir -p node_modules/@tty-pt
@@ -151,6 +192,7 @@ stage-assets:
 		echo "ERROR: missing deploy assets:$$missing" >&2; \
 		exit 1; \
 	fi
+	@touch $@
 
 assets-sync: stage-assets
 
@@ -158,69 +200,69 @@ EXT_RPATH_LINK := $(if $(filter Linux,$(shell uname -s)),$(foreach d,$(wildcard 
 EXT_MAKE_ARGS = add-prefix-glob="../*" LDFLAGS-Unix="$(EXT_RPATH_LINK)"
 
 lemma-lib: stele-lib corm-lib
-	$(MAKE) -C external/liblemma $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/liblemma $(EXT_MAKE_ARGS)
 
 joint-lib: stele-lib corm-lib
-	$(MAKE) -C external/libjoint $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libjoint $(EXT_MAKE_ARGS)
 
 islet-lib: stele-lib corm-lib
-	$(MAKE) -C external/libislet $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libislet $(EXT_MAKE_ARGS)
 
 areole-lib: islet-lib
-	$(MAKE) -C external/libareole
+	$(Q)$(MAKE) -C external/libareole
 
 corolla-lib: chaff-lib
-	$(MAKE) -C external/libcorolla
+	$(Q)$(MAKE) -C external/libcorolla
 
 chunk-lib: areole-lib
 
 chaff-lib: stele-lib
-	$(MAKE) -C external/libchaff
+	$(Q)$(MAKE) -C external/libchaff
 
 noise-lib: chaff-lib
 
 sepal-lib: stele-lib corm-lib
-	$(MAKE) -C external/libsepal $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libsepal $(EXT_MAKE_ARGS)
 
 pi-mm-zip:
-	$(MAKE) -C .pi/extensions/pi-mm zip
+	$(Q)$(MAKE) -C .pi/extensions/pi-mm zip
 
 hyle-lib: lemma-lib corm-lib
-	$(MAKE) -C external/libhyle $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libhyle $(EXT_MAKE_ARGS)
 
 pitch-lib: stele-lib
-	$(MAKE) -C external/libpitch $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libpitch $(EXT_MAKE_ARGS)
 
 transp-lib: pitch-lib
 
 bud-lib: stele-lib
-	$(MAKE) -C external/libbud $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libbud $(EXT_MAKE_ARGS)
 
 hyle-bud: hyle-lib bud-lib hyle-source
-	$(MAKE) -C external/libhyle-bud $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libhyle-bud $(EXT_MAKE_ARGS)
 
 hyle-source: hyle-lib corm-lib lemma-lib stele-lib
-	$(MAKE) -C external/libhyle-source $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libhyle-source $(EXT_MAKE_ARGS)
 
 stele-lib:
-	$(MAKE) -C external/libstele $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libstele $(EXT_MAKE_ARGS)
 
 qsys-lib: stele-lib
 
 axil-lib: stele-lib corm-lib xylem-lib
-	$(MAKE) -C external/axil $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/axil $(EXT_MAKE_ARGS)
 
 axil-auth-lib: axil-lib corm-lib xylem-lib
-	$(MAKE) -C external/axil-auth $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/axil-auth $(EXT_MAKE_ARGS)
 
 axil-hyle: axil-lib hyle-source axil-auth-lib
-	$(MAKE) -C external/axil-hyle $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/axil-hyle $(EXT_MAKE_ARGS)
 
 axil-tty-lib: axil-lib corm-lib xylem-lib
-	$(MAKE) -C external/axil-tty $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/axil-tty $(EXT_MAKE_ARGS)
 
 axil-nd-lib: axil-tty-lib axil-lib corm-lib xylem-lib islet-lib stele-lib
-	$(MAKE) -C external/axil-nd $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/axil-nd $(EXT_MAKE_ARGS)
 
 nd-libs: axil-nd-lib chaff-lib areole-lib
 	@$(MAKE) -C external/nd-bus $(EXT_MAKE_ARGS) || exit 1
@@ -230,7 +272,7 @@ nd-libs: axil-nd-lib chaff-lib areole-lib
 	done
 
 corm-lib: stele-lib
-	$(MAKE) -C external/libcorm $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libcorm $(EXT_MAKE_ARGS)
 
 # The external packages own their install: mk/include.mk's `install` target
 # copies ${LIB} (plus the bare-soname alias xy_load() addresses), headers and
@@ -324,16 +366,16 @@ print-prefix:
 mm: ;
 
 jarvis-lib: stele-lib corm-lib xylem-lib
-	$(MAKE) -C external/libjarvis $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libjarvis $(EXT_MAKE_ARGS)
 
 xylem-lib: stele-lib corm-lib
-	$(MAKE) -C external/libxylem $(EXT_MAKE_ARGS)
+	$(Q)$(MAKE) -C external/libxylem $(EXT_MAKE_ARGS)
 
 dev:
 	@./scripts/dev.sh
 
 run:
-	$(MAKE) DEV=1 all
+	$(Q)$(MAKE) DEV=1 all
 	./start.sh
 
 MODS != cat mods.load
@@ -518,7 +560,7 @@ build-capture:
 	@timestamp=$$(date +%Y-%m-%d_%H-%M-%S); \
 	touch $(BUILD_LOG_DIR)/build_$$timestamp.log; \
 	echo "=== Build started at $$(date) ===" >> $(BUILD_LOG_DIR)/build_$$timestamp.log; \
-	$(MAKE) 2>&1 | tee -a $(BUILD_LOG_DIR)/build_$$timestamp.log; \
+	$(Q)$(MAKE) 2>&1 | tee -a $(BUILD_LOG_DIR)/build_$$timestamp.log; \
 	echo "=== Build completed at $$(date) ===" >> $(BUILD_LOG_DIR)/build_$$timestamp.log
 	@echo "Build log saved to $(BUILD_LOG_DIR)/build_$$timestamp.log"
 
