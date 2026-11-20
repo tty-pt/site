@@ -13,6 +13,29 @@ make
 make watch          # auto-rebuild + restart on :8080
 ```
 
+---
+
+## ⚡ CONSTITUTION (10 Rules — Non-Negotiable)
+
+**Every task. No exceptions. Output the Report Template (`docs/REPORT_TEMPLATE.md`) before claiming done.**
+
+1. **Data layout first** — Define the struct/invariant before writing code.
+2. **Surgical scope only** — Touch only what the task requires. No drive-by refactors.
+3. **Tier 0 must pass** — Run targeted build/test for changed scope; report exit codes.
+4. **git diff --stat clean** — Only intended changes. No debug artifacts.
+5. **Read torvalds-doctrine skill** — Before any non-trivial code/design/review task.
+6. **Proof over confidence** — Show actual command output, not claims.
+7. **No userspace breaks** — Existing behavior > your theory of cleanliness.
+8. **Simplicity first** — Dumbest code that's obviously right. No speculative abstractions.
+9. **Hardware truth** — Respect cache lines, branches, memory locality.
+10. **Pre-commit runs Tier 0** — `git commit` auto-verifies; fix or `git commit --no-verify`.
+
+### Mandatory Completion Report
+**Before saying "done", output `docs/REPORT_TEMPLATE.md` filled with actual command results.**
+Incomplete report = task not complete.
+
+---
+
 ## Guidelines — read this, 2 minutes
 
 1. **UX is pure & isomorphic.** `mods/*/ux` compiles twice: native `.so`

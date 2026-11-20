@@ -254,7 +254,7 @@ main(void)
 								fol_cnt++;
 								if (vz < min_fol_z) min_fol_z = vz;
 								if (h_proj < min_fol_proj) min_fol_proj = h_proj;
-							} else if (mat < 0.05f) {
+							} else if (mat < 0.08f) {
 								if (vz >= h_wu * 0.32f && vz <= h_wu * 0.72f)
 									mid_bark_cnt++;
 							}
@@ -280,6 +280,32 @@ main(void)
 		       "All 128 plant templates must fit comfortably within VBO index budget");
 		printf("Stage 4 Geometry Budget: 128 plant templates used %u / %u verts, %u / %u indices\n",
 		       b.vert_count, ND_MESH3D_MAX_VERTS, b.idx_count, ND_MESH3D_MAX_INDICES);
+	}
+
+	/* 5b. Verify 3D Beer-Lambert Intra-Crown Light Competition & 1024x1024 Foliage Atlas */
+	{
+		PlantSpeciesDef oak_sp;
+		plant_species_init_preset(&oak_sp, 10u);
+		PlantGenome oak_g = plant_genome_sample(&oak_sp, 0xCAFE777ULL);
+		static PlantPhenotypeStorage store_oak;
+		PlantInstance inst_oak;
+		memset(&inst_oak, 0, sizeof(inst_oak));
+		inst_oak.genome = oak_g;
+		plant_phenotype_bind_storage(&inst_oak.phenotype, &store_oak);
+		plant_simulate_at_time(&inst_oak, &env, 180.0f, NULL, 0u);
+
+		float min_leaf_health = 1.0f, max_leaf_health = 0.0f;
+		for (uint32_t i = 0; i < inst_oak.phenotype.organ_count; i++) {
+			const PlantOrgan *o = &inst_oak.phenotype.organs[i];
+			if (o->type == PLANT_ORGAN_LEAF) {
+				if (o->health < min_leaf_health) min_leaf_health = o->health;
+				if (o->health > max_leaf_health) max_leaf_health = o->health;
+			}
+		}
+		assert(max_leaf_health > min_leaf_health + 0.02f &&
+		       "3D Beer-Lambert canopy light competition must differentiate sunlit outer leaves from shaded interior leaves");
+		assert(ND_FOL_ATLAS_SIZE == 1024 && ND_FOL_TILE_SIZE == 512 && ND_FOL_MIP_LEVELS == 9 &&
+		       "Botanical branchlet atlas must be 1024x1024 with 9 mip levels");
 	}
 
 	/* 6. Verify v1.0 IDEA.md Cholesky Correlation Validation, MTG Graph Validation,

@@ -709,12 +709,24 @@ ndw_tile_objects(const ndw_tile_t *t, const int16_t pos[4], int unknown,
 						continue;
 					if (ce->scatter_mode == NDW_SCATTER_CLUSTER &&
 					    (t->plant_id[s] != 0 || t->col_mask[s] != 0)) {
+						/* Local neighbor canopy competition: count closely adjacent flora instances in this room */
+						int neighbor_crowd = 0;
+						for (int p = 0; p < n; p++) {
+							int dx = o.x - out[p].x, dy = o.y - out[p].y;
+							int d2 = dx * dx + dy * dy;
+							if (d2 < 1600)
+								neighbor_crowd++;
+						}
 						unsigned base_var0 = ((unsigned)t->plant_id[s] >> 6) & 3u;
-						unsigned c_var0 = (base_var0 + (unsigned)c) & 3u;
+						unsigned c_var0 = (base_var0 + (unsigned)c + (unsigned)(neighbor_crowd > 1 ? 1 : 0)) & 3u;
 						o.plant_id = (uint8_t)((t->plant_id[s] & 0x3Fu) | (c_var0 << 6));
 						o.col_mask = t->col_mask[s];
 						uint8_t nhw = o.hw, nhh = o.hh;
 						ndw_plant_col_box(o.plant_id, o.col_mask, ce->kind, big, &nhw, &nhh);
+						if (neighbor_crowd >= 2 && nhw > 4) {
+							/* Lateral crown shyness under dense neighbor competition */
+							nhw = (uint8_t)((nhw * 7u) / 8u);
+						}
 						if (nhw <= o.hw && nhh <= o.hh) {
 							o.hw = nhw;
 							o.hh = nhh;
