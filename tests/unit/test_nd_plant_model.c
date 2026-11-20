@@ -11,7 +11,6 @@
 #include <assert.h>
 
 #include <nd/plant.h>
-#include "../../mods/nd/ux/nd_seven_mesh3d.h"
 
 static int
 phenotypes_equal(const PlantPhenotype *a, const PlantPhenotype *b, float eps)
@@ -203,7 +202,11 @@ main(void)
 		assert(remaining == 0u && "Expired delta must be garbage-collected to 0 records");
 	}
 
-	/* 5. Verify Stage 4 (plant_geometry_build) across all 128 canonical templates (16 species x 2 stages x 4 alleles) */
+	/* 5. Verify Stage 4 (plant_geometry_build) across all 128 canonical templates (16 species x 2 stages x 4 alleles):
+	 *    - Every tree species (big_col > 0, excluding columnar cactus sp==6) must have ZERO foliage vertices
+	 *      descending below the clear-bole crown floor in either 3D Z or 55-deg projected height (z - 0.7002*y).
+	 *    - Acacia senegal (sp == 7) must have its foliage concentrated in the upper umbrella stratum while
+	 *      exposing bare woody V-vase scaffold branches through the middle stratum. */
 	{
 		static nd_mesh3d_vert_t s_test_verts[ND_MESH3D_MAX_VERTS];
 		static uint32_t s_test_indices[ND_MESH3D_MAX_INDICES];
@@ -217,6 +220,10 @@ main(void)
 
 		for (unsigned sp = 0; sp < ND_PLANT_MAX; sp++) {
 			const nd_plant_spec_t *spec = &s_nd_plant_specs[sp];
+			PlantSpeciesDef sdef;
+			plant_species_init_preset(&sdef, sp);
+			bool is_tree = (sdef.life_form == PLANT_LIFEFORM_TREE);
+
 			for (unsigned big = 0; big < 2u; big++) {
 				for (unsigned var = 0; var < 4u; var++) {
 					nd_mesh3d_slice_t slice;
@@ -230,6 +237,40 @@ main(void)
 					assert(slice.vert_count > 12u && "Every plant template must emit valid 3D vertices");
 					assert(slice.idx_count > 18u && (slice.idx_count % 3u) == 0u &&
 					       "Every plant template must emit valid 3D triangles");
+
+					if (is_tree) {
+						float h_wu = slice.mesh_h_wu;
+						float min_fol_z = h_wu;
+						float min_fol_proj = h_wu;
+						uint32_t fol_cnt = 0u;
+						uint32_t mid_bark_cnt = 0u;
+						for (uint32_t vi = 0; vi < slice.vert_count; vi++) {
+							const nd_mesh3d_vert_t *v = &b.verts[slice.first_vert + vi];
+							float mat = v->col[3];
+							float vz = v->pos[2];
+							float vy = v->pos[1];
+							float h_proj = vz - 0.7002075f * vy;
+							if (mat >= 0.19f && mat <= 0.36f) {
+								fol_cnt++;
+								if (vz < min_fol_z) min_fol_z = vz;
+								if (h_proj < min_fol_proj) min_fol_proj = h_proj;
+							} else if (mat < 0.05f) {
+								if (vz >= h_wu * 0.32f && vz <= h_wu * 0.72f)
+									mid_bark_cnt++;
+							}
+						}
+						assert(fol_cnt > 0u && "Every tree must emit foliage vertices");
+						assert(min_fol_z >= h_wu * 0.17f &&
+						       "Tree foliage 3D Z must never descend to the ground below clear bole");
+						assert(min_fol_proj >= h_wu * 0.16f &&
+						       "Tree foliage 55-deg projected height must never descend to the ground");
+						if (sp == 7u) { /* Acacia senegal */
+							assert(min_fol_z >= h_wu * 0.55f &&
+							       "Acacia senegal foliage must be perched in the upper savannah umbrella stratum");
+							assert(mid_bark_cnt >= 24u &&
+							       "Acacia senegal must have bare ascending V-vase scaffold branches in mid-crown");
+						}
+					}
 				}
 			}
 		}

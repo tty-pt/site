@@ -11,7 +11,7 @@
 #include "nd_seven_atlas.h"
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_ground.h"
-#include "nd_seven_foliage_atlas.h"
+#include <nd/plant_foliage_atlas.h>
 #include <ttypt/webgl.h>
 #include <ttypt/areole.h>
 #include <ttypt/chaff_glsl.h>
