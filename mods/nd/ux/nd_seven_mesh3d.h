@@ -391,19 +391,19 @@ nd_m3d_add_trunk_tube_ex(nd_mesh3d_builder_t *b,
 			float vy = cy + ny * rr;
 			float vz = cz + nz * rr;
 
-			/* Smooth cylindrical illumination gradient + organic bark grain (no alternating striped facets) */
-			float sun_dot = nx * (-0.52f) + ny * (-0.52f) + nz * 0.68f;
+			/* Rotation-invariant cylindrical bark shading (no baked compass sun that spins with yaw) */
+			float sky_bias = 0.50f + 0.50f * nz;
 			uint32_t h = nd_m3d_hash(seed + (uint32_t)(ir * 37 + is * 17));
-			float grain = (((float)(h & 0xFFu) / 255.0f) - 0.5f) * 0.24f;
-			float shade_t = fminf(1.0f, fmaxf(0.0f, 0.52f + 0.45f * sun_dot + grain));
-			uint32_t col = (shade_t < 0.48f)
-				? nd_m3d_lerp_col(col_dark, col_mid, shade_t / 0.48f)
-				: nd_m3d_lerp_col(col_mid, col_lit, (shade_t - 0.48f) / 0.52f);
+			float grain = (((float)(h & 0xFFu) / 255.0f) - 0.5f) * 0.22f;
+			float shade_t = fminf(1.0f, fmaxf(0.0f, 0.48f + 0.24f * sky_bias + 0.14f * h_norm + grain));
+			uint32_t col = (shade_t < 0.42f)
+				? nd_m3d_lerp_col(col_dark, col_mid, 0.35f + 0.65f * (shade_t / 0.42f))
+				: nd_m3d_lerp_col(col_mid, col_lit, (shade_t - 0.42f) / 0.58f);
 
 			if (bark_type == ND_PLANT_BARK_BIRCH) {
 				/* Dark fissured basal chevron bark + horizontal lenticel bands on chalk-white periderm */
 				if (h_norm < 0.14f || (h & 7u) == 0u) {
-					col = nd_m3d_lerp_col(col_dark, col_mid, 0.22f);
+					col = nd_m3d_lerp_col(col_dark, col_mid, 0.32f);
 				} else {
 					col = nd_m3d_lerp_col(col_mid, col_lit, fminf(1.0f, shade_t * 1.15f));
 				}
@@ -414,7 +414,7 @@ nd_m3d_add_trunk_tube_ex(nd_mesh3d_builder_t *b,
 					uint32_t upper_c = nd_m3d_lerp_col(col_mid, col_lit, 0.35f + 0.65f * shade_t);
 					col = nd_m3d_lerp_col(col, upper_c, up_t * 0.85f);
 				} else {
-					col = nd_m3d_lerp_col(col_dark, col_mid, shade_t * 0.72f);
+					col = nd_m3d_lerp_col(col_dark, col_mid, 0.30f + shade_t * 0.70f);
 				}
 			}
 			ring_verts[ir][is] = nd_m3d_push_vert(b, vx, vy, vz, wind_w, nx, ny, nz, canopy_occl, col, ND_MAT3D_BARK);
@@ -427,6 +427,226 @@ nd_m3d_add_trunk_tube_ex(nd_mesh3d_builder_t *b,
 			uint32_t b0 = ring_verts[ir][next_s];
 			uint32_t c = ring_verts[ir + 1][next_s];
 			uint32_t d = ring_verts[ir + 1][is];
+			nd_m3d_push_tri(b, a, b0, c);
+			nd_m3d_push_tri(b, a, c, d);
+		}
+	}
+}
+
+/* Continuous Catmull-Rom Parallel-Transported Multi-Joint Bark Axis Tube with Welded Branch-Collar Socket:
+ * Subdivides the axis polyline with smooth Catmull-Rom curvature across all branch orders, then sweeps
+ * the entire limb as a single seamless, twist-free 3D tubular mesh using a Rotation-Minimizing
+ * (Bishop parallel-transport) frame (u_vec, v_vec). Every joint shares a single welded vertex ring
+ * (zero open polygon gaps or angular zigzag elbows), and child branches (is_lateral != 0) flare into
+ * a swollen branch-collar socket embedded cleanly inside the parent limb's bark cylinder. */
+static inline void
+nd_m3d_add_axis_spline_tube(nd_mesh3d_builder_t *b,
+                            const float (*in_pts)[3],
+                            const float *in_radii,
+                            int in_n_pts,
+                            int sides,
+                            int is_lateral,
+                            uint32_t col_dark, uint32_t col_mid, uint32_t col_lit,
+                            uint8_t bark_type, float total_h, uint32_t seed)
+{
+	if (!in_pts || !in_radii || in_n_pts < 2) return;
+	if (sides < 4) sides = 4;
+	if (sides > 10) sides = 10;
+	if (in_n_pts > 24) in_n_pts = 24;
+
+	/* Catmull-Rom midpoint refinement when there are >= 3 control points so limbs bend smoothly
+	 * instead of forming sharp angular polylines at internode junctions. */
+	float pts[48][3];
+	float radii[48];
+	int n_pts = 0;
+	if (in_n_pts >= 3 && in_n_pts <= 20) {
+		for (int i = 0; i < in_n_pts - 1 && n_pts < 46; i++) {
+			const float *p0 = in_pts[(i > 0) ? (i - 1) : 0];
+			const float *p1 = in_pts[i];
+			const float *p2 = in_pts[i + 1];
+			const float *p3 = in_pts[(i + 2 < in_n_pts) ? (i + 2) : (in_n_pts - 1)];
+			float r1 = in_radii[i], r2 = in_radii[i + 1];
+			pts[n_pts][0] = p1[0]; pts[n_pts][1] = p1[1]; pts[n_pts][2] = p1[2];
+			radii[n_pts] = r1;
+			n_pts++;
+			/* Insert smooth Catmull-Rom midpoint (t = 0.5) on long trunk / primary bough segments */
+			float sdx = p2[0] - p1[0], sdy = p2[1] - p1[1], sdz = p2[2] - p1[2];
+			float slen = sqrtf(sdx * sdx + sdy * sdy + sdz * sdz);
+			int is_collar_seg = (is_lateral && i == 0);
+			int is_cap_seg = (i == in_n_pts - 2 && r2 < 0.15f);
+			if ((!is_lateral || sides >= 6) && !is_collar_seg && !is_cap_seg &&
+			    slen > fmaxf(r1 * 2.5f, 8.0f) && n_pts < 46) {
+				/* Catmull-Rom at t=0.5: 0.5 * (-0.125*p0 + 1.125*p1 + 1.125*p2 - 0.125*p3) */
+				pts[n_pts][0] = 0.5625f * (p1[0] + p2[0]) - 0.0625f * (p0[0] + p3[0]);
+				pts[n_pts][1] = 0.5625f * (p1[1] + p2[1]) - 0.0625f * (p0[1] + p3[1]);
+				pts[n_pts][2] = 0.5625f * (p1[2] + p2[2]) - 0.0625f * (p0[2] + p3[2]);
+				radii[n_pts]  = 0.5f * (r1 + r2);
+				n_pts++;
+			}
+		}
+		pts[n_pts][0] = in_pts[in_n_pts - 1][0];
+		pts[n_pts][1] = in_pts[in_n_pts - 1][1];
+		pts[n_pts][2] = in_pts[in_n_pts - 1][2];
+		radii[n_pts]  = in_radii[in_n_pts - 1];
+		n_pts++;
+	} else {
+		n_pts = in_n_pts;
+		for (int i = 0; i < n_pts; i++) {
+			pts[i][0] = in_pts[i][0]; pts[i][1] = in_pts[i][1]; pts[i][2] = in_pts[i][2];
+			radii[i] = in_radii[i];
+		}
+	}
+
+	float tang[48][3];
+	for (int i = 0; i < n_pts; i++) {
+		int i0 = (i > 0) ? (i - 1) : 0;
+		int i1 = (i + 1 < n_pts) ? (i + 1) : (n_pts - 1);
+		float tx = pts[i1][0] - pts[i0][0];
+		float ty = pts[i1][1] - pts[i0][1];
+		float tz = pts[i1][2] - pts[i0][2];
+		float len = sqrtf(tx * tx + ty * ty + tz * tz);
+		if (len < 1e-4f) {
+			tang[i][0] = 0.0f; tang[i][1] = 0.0f; tang[i][2] = 1.0f;
+		} else {
+			tang[i][0] = tx / len; tang[i][1] = ty / len; tang[i][2] = tz / len;
+		}
+	}
+
+	/* Initial cross-section frame at base node i = 0 */
+	float t_prev[3] = { tang[0][0], tang[0][1], tang[0][2] };
+	float up_ref[3] = { 0.0f, 1.0f, 0.0f };
+	if (fabsf(t_prev[1]) > 0.85f) {
+		up_ref[0] = 1.0f; up_ref[1] = 0.0f; up_ref[2] = 0.0f;
+	}
+	float u_vec[3] = {
+		up_ref[1] * t_prev[2] - up_ref[2] * t_prev[1],
+		up_ref[2] * t_prev[0] - up_ref[0] * t_prev[2],
+		up_ref[0] * t_prev[1] - up_ref[1] * t_prev[0]
+	};
+	nd_m3d_norm3(u_vec);
+	float v_vec[3] = {
+		t_prev[1] * u_vec[2] - t_prev[2] * u_vec[1],
+		t_prev[2] * u_vec[0] - t_prev[0] * u_vec[2],
+		t_prev[0] * u_vec[1] - t_prev[1] * u_vec[0]
+	};
+	nd_m3d_norm3(v_vec);
+
+	uint32_t ring_verts[48][11];
+	for (int i = 0; i < n_pts; i++) {
+		if (i > 0) {
+			/* Parallel-transport (u_vec, v_vec) from t_prev to tang[i] without axial torsion */
+			float *t_cur = tang[i];
+			float dot_u = u_vec[0] * t_cur[0] + u_vec[1] * t_cur[1] + u_vec[2] * t_cur[2];
+			u_vec[0] -= dot_u * t_cur[0];
+			u_vec[1] -= dot_u * t_cur[1];
+			u_vec[2] -= dot_u * t_cur[2];
+			nd_m3d_norm3(u_vec);
+			v_vec[0] = t_cur[1] * u_vec[2] - t_cur[2] * u_vec[1];
+			v_vec[1] = t_cur[2] * u_vec[0] - t_cur[0] * u_vec[2];
+			v_vec[2] = t_cur[0] * u_vec[1] - t_cur[1] * u_vec[0];
+			nd_m3d_norm3(v_vec);
+			t_prev[0] = t_cur[0]; t_prev[1] = t_cur[1]; t_prev[2] = t_cur[2];
+		}
+
+		float t = (float)i / (float)(n_pts - 1);
+		float cx = pts[i][0], cy = pts[i][1], cz = pts[i][2];
+		float rad = radii[i];
+
+		/* Subtle root-collar swell near ground (for trunk) or branch-collar ridge at lateral fork socket (i == 0) */
+		float flare_h = fmaxf(4.0f, total_h * 0.065f);
+		float flare = 1.0f;
+		if (!is_lateral && cz < flare_h && pts[0][2] < 1.5f) {
+			float f0 = 1.0f - cz / flare_h;
+			flare = 1.0f + 0.22f * f0 * f0;
+		} else if (is_lateral && i == 0) {
+			/* Swollen woody branch-collar socket where lateral limb welds into parent bark */
+			flare = 1.18f;
+		} else if (is_lateral && i == 1) {
+			flare = 1.04f;
+		}
+
+		float wind_w = (total_h > 1.0f) ? fminf(0.45f, (cz / total_h) * 0.38f) : 0.1f;
+		float h_norm = (total_h > 1.0f) ? fminf(1.0f, fmaxf(0.0f, cz / total_h)) : t;
+		float canopy_occl = (h_norm > 0.35f)
+			? (0.76f - 0.10f * sinf((h_norm - 0.35f) * 4.5f))
+			: (0.68f + 0.26f * (h_norm / 0.35f));
+
+		for (int is = 0; is < sides; is++) {
+			float ang = ((float)is / (float)sides) * 6.2831853f;
+			float twist_ang = (bark_type == ND_PLANT_BARK_FLUTED) ? (ang + t * 1.45f) : ang;
+			float ca = cosf(ang), sa = sinf(ang);
+			float rib = 1.0f;
+			float rib_wave = 0.0f, rib_deriv = 0.0f;
+			if (bark_type == ND_PLANT_BARK_RIBBED) {
+				/* Deep 8-ribbed cereoid cactus fluting with 3D normal perturbation across rib crests & valleys */
+				rib_wave  = cosf(ang * 8.0f);
+				rib_deriv = -sinf(ang * 8.0f);
+				rib = 1.0f + 0.20f * rib_wave;
+			} else if (bark_type == ND_PLANT_BARK_FLUTED) {
+				rib = 1.0f + 0.16f * cosf(twist_ang * 3.0f + (float)(seed & 7u));
+			} else if (!is_lateral && flare > 1.02f) {
+				rib = 1.0f + 0.14f * cosf(ang * 4.0f + (float)(seed & 7u)) * (flare - 1.0f);
+			} else {
+				rib = 1.0f + 0.04f * cosf(ang * 3.0f + t * 3.14f);
+			}
+			float rr = rad * flare * rib;
+			float tan_x = -u_vec[0] * sa + v_vec[0] * ca;
+			float tan_y = -u_vec[1] * sa + v_vec[1] * ca;
+			float tan_z = -u_vec[2] * sa + v_vec[2] * ca;
+			float nx = u_vec[0] * ca + v_vec[0] * sa - tan_x * (0.42f * rib_deriv);
+			float ny = u_vec[1] * ca + v_vec[1] * sa - tan_y * (0.42f * rib_deriv);
+			float nz = u_vec[2] * ca + v_vec[2] * sa - tan_z * (0.42f * rib_deriv);
+			float nlen = sqrtf(nx * nx + ny * ny + nz * nz);
+			if (nlen > 1e-4f) { nx /= nlen; ny /= nlen; nz /= nlen; }
+			float vx = cx + (u_vec[0] * ca + v_vec[0] * sa) * rr;
+			float vy = cy + (u_vec[1] * ca + v_vec[1] * sa) * rr;
+			float vz = cz + (u_vec[2] * ca + v_vec[2] * sa) * rr;
+			/* Clamp basal trunk collar ring flush to the ground plane so tilted trunks never poke underground */
+			if (!is_lateral && i == 0 && pts[0][2] < 1.5f) {
+				vz = 0.0f;
+			} else if (vz < 0.0f) {
+				vz = 0.0f;
+			}
+
+			/* Rotation-invariant bark albedo variation (live solar directional shading is computed in s_fs_mesh3d) */
+			float sky_bias = 0.50f + 0.50f * nz;
+			uint32_t h = nd_m3d_hash(seed + (uint32_t)(i * 37 + is * 17));
+			float grain = (((float)(h & 0xFFu) / 255.0f) - 0.5f) * 0.22f;
+			float shade_t = fminf(1.0f, fmaxf(0.0f, 0.48f + 0.24f * sky_bias + 0.14f * h_norm + grain));
+			uint32_t col = (shade_t < 0.42f)
+				? nd_m3d_lerp_col(col_dark, col_mid, 0.35f + 0.65f * (shade_t / 0.42f))
+				: nd_m3d_lerp_col(col_mid, col_lit, (shade_t - 0.42f) / 0.58f);
+
+			if (bark_type == ND_PLANT_BARK_RIBBED) {
+				/* Cactus rib valley vs sunlit glaucous rib crest with pale spine areoles */
+				col = (rib_wave > 0.25f)
+					? nd_m3d_lerp_col(col_mid, col_lit, 0.45f + 0.55f * rib_wave)
+					: nd_m3d_lerp_col(col_dark, col_mid, 0.50f + 0.50f * (rib_wave + 1.0f));
+			} else if (bark_type == ND_PLANT_BARK_BIRCH) {
+				if ((!is_lateral && i == 0 && pts[0][2] < 1.5f) || (is_lateral && i == 0) || ((h & 15u) == 0u)) {
+					col = nd_m3d_lerp_col(col_dark, col_mid, 0.38f);
+				} else {
+					col = nd_m3d_lerp_col(col_mid, col_lit, fminf(1.0f, 0.45f + shade_t * 0.65f));
+				}
+			} else if (bark_type == ND_PLANT_BARK_SCOTS) {
+				if (h_norm > 0.36f) {
+					float up_t = fminf(1.0f, (h_norm - 0.36f) / 0.35f);
+					uint32_t upper_c = nd_m3d_lerp_col(col_mid, col_lit, 0.35f + 0.65f * shade_t);
+					col = nd_m3d_lerp_col(col, upper_c, up_t * 0.85f);
+				} else {
+					col = nd_m3d_lerp_col(col_dark, col_mid, 0.30f + shade_t * 0.70f);
+				}
+			}
+			ring_verts[i][is] = nd_m3d_push_vert(b, vx, vy, vz, wind_w, nx, ny, nz, canopy_occl, col, ND_MAT3D_BARK);
+		}
+	}
+	for (int i = 0; i < n_pts - 1; i++) {
+		for (int is = 0; is < sides; is++) {
+			int next_s = (is + 1) % sides;
+			uint32_t a  = ring_verts[i][is];
+			uint32_t b0 = ring_verts[i][next_s];
+			uint32_t c  = ring_verts[i + 1][next_s];
+			uint32_t d  = ring_verts[i + 1][is];
 			nd_m3d_push_tri(b, a, b0, c);
 			nd_m3d_push_tri(b, a, c, d);
 		}
@@ -505,29 +725,29 @@ nd_m3d_add_foliage_lobe(nd_mesh3d_builder_t *b,
 			float fny = ny * 0.58f + gdy * 0.42f + jy;
 			float fnz = nz * 0.58f + gdz * 0.42f + 0.22f;
 
-			/* Continuous sunlit NW crown to deep underside shelf color gradient */
-			float sun_metric = fnx * (-0.50f) + fny * (-0.50f) + fnz * 0.71f;
-			uint32_t col;
-			if (st < -0.10f || sun_metric < -0.18f) {
-				col = col_deep;
-			} else if (sun_metric < 0.16f) {
-				float lt = (sun_metric + 0.18f) / 0.34f;
-				col = nd_m3d_lerp_col(col_deep, col_mid, lt);
-			} else if (sun_metric < 0.52f) {
-				float lt = (sun_metric - 0.16f) / 0.36f;
-				col = nd_m3d_lerp_col(col_mid, col_lit, lt);
-			} else {
-				float lt = fminf(1.0f, (sun_metric - 0.52f) / 0.38f);
-				col = nd_m3d_lerp_col(col_lit, col_high, lt);
-			}
-
 			float h_frac = fminf(1.0f, fmaxf(0.0f, pz / fmaxf(1.0f, total_h)));
 			float r_horiz = sqrtf(px * px + py * py);
 			float r_ref = fmaxf(8.0f, total_h * 0.36f);
 			float radial_exposure = fminf(1.0f, r_horiz / r_ref);
-			/* Da Vinci sub-canopy interior occlusion: deep inner/lower bough cavities are dark, outer sun-facing shell is bright */
-			float ao = (0.24f + 0.34f * v + 0.22f * h_frac + 0.20f * radial_exposure);
-			if (st < 0.0f) ao *= 0.62f;
+			/* Rotation-invariant chlorophyll exposure gradient (live sun direction is evaluated in s_fs_mesh3d) */
+			float canopy_metric = fnz * 0.62f + radial_exposure * 0.28f + h_frac * 0.20f - 0.14f;
+			uint32_t col;
+			if (st < -0.14f || canopy_metric < -0.10f) {
+				col = col_deep;
+			} else if (canopy_metric < 0.22f) {
+				float lt = (canopy_metric + 0.10f) / 0.32f;
+				col = nd_m3d_lerp_col(col_deep, col_mid, lt);
+			} else if (canopy_metric < 0.56f) {
+				float lt = (canopy_metric - 0.22f) / 0.34f;
+				col = nd_m3d_lerp_col(col_mid, col_lit, lt);
+			} else {
+				float lt = fminf(1.0f, (canopy_metric - 0.56f) / 0.36f);
+				col = nd_m3d_lerp_col(col_lit, col_high, lt);
+			}
+
+			/* Da Vinci sub-canopy interior occlusion: deep inner/lower bough cavities are shaded, outer shell is bright */
+			float ao = (0.34f + 0.30f * v + 0.18f * h_frac + 0.18f * radial_exposure);
+			if (st < 0.0f) ao *= 0.72f;
 			float wind_w = 0.45f + 0.55f * h_frac;
 
 			/* Tag outer/equatorial skirt rings as porous leaf-tip fringe so s_fs_mesh3d carves leaf-cluster silhouettes */
@@ -635,24 +855,25 @@ nd_m3d_add_branchlet_card(nd_mesh3d_builder_t *b,
 		float arc_z = height_arc * sinf(u * 2.15f) - drop_end * u * u;
 		float cx = x0 + fwd[0] * reach;
 		float cy = y0 + fwd[1] * reach;
-		float cz = z0 + fwd[2] * reach + arc_z;
+		float cz = fmaxf(0.4f, z0 + fwd[2] * reach + arc_z);
 
 		float wx_l = cx - side[0] * hw - card_up[0] * (cup_dz * width_prof);
 		float wy_l = cy - side[1] * hw - card_up[1] * (cup_dz * width_prof);
-		float wz_l = cz - side[2] * hw - card_up[2] * (cup_dz * width_prof);
+		float wz_l = fmaxf(0.4f, cz - side[2] * hw - card_up[2] * (cup_dz * width_prof));
 
 		float wx_r = cx + side[0] * hw - card_up[0] * (cup_dz * width_prof);
 		float wy_r = cy + side[1] * hw - card_up[1] * (cup_dz * width_prof);
-		float wz_r = cz + side[2] * hw - card_up[2] * (cup_dz * width_prof);
+		float wz_r = fmaxf(0.4f, cz + side[2] * hw - card_up[2] * (cup_dz * width_prof));
 
 		/* Pure physical chlorophyll gradient from interior attachment base to fresh young shoot tip */
-		uint32_t c_sp = (s == 0) ? col_deep : ((s == 1) ? col_mid : col_lit);
-		uint32_t c_wg = (s == 0) ? col_mid  : ((s == 1) ? col_lit : col_high);
+		uint32_t c_base_mid = nd_m3d_lerp_col(col_deep, col_mid, 0.58f);
+		uint32_t c_sp = (s == 0) ? c_base_mid : ((s == 1) ? col_mid : col_lit);
+		uint32_t c_wg = (s == 0) ? col_mid    : ((s == 1) ? col_lit : col_high);
 		float h_frac = fminf(1.0f, fmaxf(0.0f, cz / fmaxf(1.0f, total_h)));
 		float r_dist = sqrtf(cx * cx + cy * cy);
 		float r_frac = fminf(1.0f, r_dist / fmaxf(4.0f, total_h * 0.28f));
-		float crown_exp = fminf(1.0f, 0.20f + 0.44f * h_frac + 0.36f * r_frac);
-		float ao = fminf(1.0f, (0.18f + 0.56f * crown_exp) * (0.48f + 0.52f * u) + 0.24f * u * crown_exp);
+		float crown_exp = fminf(1.0f, 0.28f + 0.40f * h_frac + 0.32f * r_frac);
+		float ao = fminf(1.0f, (0.36f + 0.46f * crown_exp) * (0.62f + 0.38f * u) + 0.18f * u * crown_exp);
 		float raw_ww = fminf(0.98f, fmaxf(0.14f, h_frac) * (0.40f + 0.60f * u));
 		float pw_mid  = nd_m3d_pack_card_u_wind(u, raw_ww * 0.90f);
 		float pw_wing = nd_m3d_pack_card_u_wind(u, raw_ww);
@@ -677,13 +898,13 @@ nd_m3d_add_branchlet_card(nd_mesh3d_builder_t *b,
 		};
 
 		v_left[s]  = nd_m3d_push_vert(b, wx_l, wy_l, wz_l, pw_wing,
-		                              nl[0], nl[1], nl[2], ao * 0.90f,
+		                              nl[0], nl[1], nl[2], ao * 0.94f,
 		                              c_wg, mat_left);
 		v_mid[s]   = nd_m3d_push_vert(b, cx, cy, cz, pw_mid,
 		                              nm[0], nm[1], nm[2], ao,
 		                              c_sp, mat_mid);
 		v_right[s] = nd_m3d_push_vert(b, wx_r, wy_r, wz_r, pw_wing,
-		                              nr[0], nr[1], nr[2], ao * 0.90f,
+		                              nr[0], nr[1], nr[2], ao * 0.94f,
 		                              c_wg, mat_right);
 	}
 	for (int s = 0; s < 2; s++) {
@@ -772,7 +993,7 @@ nd_m3d_add_conifer_tier(nd_mesh3d_builder_t *b,
 	}
 }
 
-/* 3D Arching Botanical Blade / Leaf / Frond / Weeping Curtain Strand with UV Encoding */
+/* 3D Arching Monocot Sword-Blade (Typha latifolia / Graminoid Reed Blade) */
 static inline void
 nd_m3d_add_arching_blade(nd_mesh3d_builder_t *b,
                          float x0, float y0, float z0,
@@ -786,31 +1007,27 @@ nd_m3d_add_arching_blade(nd_mesh3d_builder_t *b,
 	float pl = sqrtf(pdir[0] * pdir[0] + pdir[1] * pdir[1]);
 	if (pl > 1e-5f) { pdir[0] /= pl; pdir[1] /= pl; }
 
-	float mat_l = nd_m3d_pack_card_mat_v(ND_MAT3D_FOL_BLADE, 0.05f);
-	float mat_r = nd_m3d_pack_card_mat_v(ND_MAT3D_FOL_BLADE, 0.95f);
-
 	uint32_t v_left[4], v_right[4];
 	for (int s = 0; s <= 3; s++) {
 		float t = (float)s / 3.0f;
 		float reach = length * t;
-		float z = z0 + height_arc * sinf(t * 2.1f) - drop_end * t * t;
-		float hw = base_half_w * (1.0f - 0.76f * t * t);
+		float z = fmaxf(0.4f, z0 + height_arc * sinf(t * 2.05f) - drop_end * t * t);
+		float hw = base_half_w * (1.0f - 0.82f * t * t);
 		float cx = x0 + dir_x * reach;
 		float cy = y0 + dir_y * reach;
 
-		float nx = dir_x * 0.35f;
-		float ny = dir_y * 0.35f;
-		float nz = 0.92f - 0.45f * t;
+		float nx = dir_x * 0.42f;
+		float ny = dir_y * 0.42f;
+		float nz = 0.90f - 0.35f * t;
 
 		uint32_t col = (s == 0) ? col_dark : ((s == 1) ? col_mid : col_lit);
-		float ao = 0.46f + 0.54f * t;
-		float raw_ww = fminf(0.98f, fmaxf(0.15f, z / fmaxf(1.0f, total_h)) * (0.4f + 0.6f * t));
-		float pw = nd_m3d_pack_card_u_wind(t, raw_ww);
+		float ao = 0.50f + 0.50f * t;
+		float ww = fminf(0.95f, fmaxf(0.12f, z / fmaxf(1.0f, total_h)) * (0.35f + 0.65f * t));
 
-		v_left[s]  = nd_m3d_push_vert(b, cx - pdir[0] * hw, cy - pdir[1] * hw, z, pw,
-		                              nx - pdir[0] * 0.25f, ny - pdir[1] * 0.25f, nz, ao, col, mat_l);
-		v_right[s] = nd_m3d_push_vert(b, cx + pdir[0] * hw, cy + pdir[1] * hw, z, pw,
-		                              nx + pdir[0] * 0.25f, ny + pdir[1] * 0.25f, nz, ao, col, mat_r);
+		v_left[s]  = nd_m3d_push_vert(b, cx - pdir[0] * hw, cy - pdir[1] * hw, z, ww,
+		                              nx - pdir[0] * 0.30f, ny - pdir[1] * 0.30f, nz, ao, col, ND_MAT3D_FOLIAGE_CORE);
+		v_right[s] = nd_m3d_push_vert(b, cx + pdir[0] * hw, cy + pdir[1] * hw, z, ww,
+		                              nx + pdir[0] * 0.30f, ny + pdir[1] * 0.30f, nz, ao, col, ND_MAT3D_FOLIAGE_CORE);
 	}
 	for (int s = 0; s < 3; s++) {
 		nd_m3d_push_tri(b, v_left[s], v_right[s], v_right[s + 1]);
@@ -818,7 +1035,7 @@ nd_m3d_add_arching_blade(nd_mesh3d_builder_t *b,
 	}
 }
 
-/* 3D Blossom / Berry / Umbel / Flower Capitulum Cluster */
+/* 3D 5-Petal Radial Flower Corolla with Contrasting Central Disc (Daisy, Flax, Umbel Floret) */
 static inline void
 nd_m3d_add_blossom_star(nd_mesh3d_builder_t *b,
                         float cx, float cy, float cz,
@@ -826,16 +1043,64 @@ nd_m3d_add_blossom_star(nd_mesh3d_builder_t *b,
                         uint32_t col_petal_lit, uint32_t col_petal_shade, uint32_t col_center,
                         float total_h)
 {
-	float ww = fminf(1.0f, cz / fmaxf(1.0f, total_h));
-	uint32_t v_top = nd_m3d_push_vert(b, cx, cy, cz + r_height, ww, 0.0f, 0.0f, 1.0f, 0.98f, col_center, ND_MAT3D_BLOSSOM);
-	uint32_t v_bot = nd_m3d_push_vert(b, cx, cy, cz - r_height * 0.6f, ww, 0.0f, 0.0f, -1.0f, 0.55f, col_petal_shade, ND_MAT3D_BLOSSOM);
+	float ww = fminf(0.95f, cz / fmaxf(1.0f, total_h));
+	float h_cup = fminf(r_height, r_outer * 0.34f);
+	float pitch_tilt = 0.26f; /* Slight camera-facing tilt so petals read from both 55-deg and side views */
+	uint32_t v_top = nd_m3d_push_vert(b, cx, cy, cz + h_cup * 0.65f, ww,
+	                                  0.0f, 0.22f, 0.97f, 0.99f, col_center, ND_MAT3D_BLOSSOM);
+	uint32_t v_bot = nd_m3d_push_vert(b, cx, cy, fmaxf(0.4f, cz - h_cup * 0.45f), ww,
+	                                  0.0f, 0.0f, -1.0f, 0.62f, col_petal_shade, ND_MAT3D_BLOSSOM);
+	uint32_t disc[5], tips[5], clefts[5];
+	for (int i = 0; i < 5; i++) {
+		float ang_tip   = ((float)i / 5.0f) * 6.2831853f;
+		float ang_cleft = ang_tip + 0.6283185f;
+		float ct = cosf(ang_tip),   st = sinf(ang_tip);
+		float cc = cosf(ang_cleft), sc = sinf(ang_cleft);
+		float r_disc  = r_outer * 0.32f;
+		float r_cleft = r_outer * 0.40f;
+		float z_disc  = cz + h_cup * 0.50f - st * r_disc * pitch_tilt;
+		float z_tip   = cz + h_cup * 0.25f - st * r_outer * pitch_tilt;
+		float z_cleft = cz + h_cup * 0.32f - sc * r_cleft * pitch_tilt;
+		disc[i] = nd_m3d_push_vert(b, cx + ct * r_disc, cy + st * r_disc, fmaxf(0.4f, z_disc), ww,
+		                           ct * 0.25f, st * 0.25f + 0.20f, 0.94f, 0.96f, col_center, ND_MAT3D_BLOSSOM);
+		tips[i] = nd_m3d_push_vert(b, cx + ct * r_outer, cy + st * r_outer, fmaxf(0.4f, z_tip), ww,
+		                           ct * 0.38f, st * 0.38f + 0.20f, 0.90f, 0.96f, col_petal_lit, ND_MAT3D_BLOSSOM);
+		clefts[i] = nd_m3d_push_vert(b, cx + cc * r_cleft, cy + sc * r_cleft, fmaxf(0.4f, z_cleft), ww,
+		                             cc * 0.30f, sc * 0.30f + 0.20f, 0.92f, 0.85f, col_petal_shade, ND_MAT3D_BLOSSOM);
+	}
+	for (int i = 0; i < 5; i++) {
+		int next = (i + 1) % 5;
+		int prev = (i + 4) % 5;
+		/* Central golden/contrasting disc pentagon */
+		nd_m3d_push_tri(b, disc[i], disc[next], v_top);
+		/* 5 distinct ray petals radiating from central disc */
+		nd_m3d_push_tri(b, disc[i], tips[i], clefts[i]);
+		nd_m3d_push_tri(b, disc[i], clefts[prev], tips[i]);
+		nd_m3d_push_tri(b, disc[i], disc[next], clefts[i]);
+		/* Underside calyx cup */
+		nd_m3d_push_tri(b, clefts[i], tips[i], v_bot);
+		nd_m3d_push_tri(b, tips[next], clefts[i], v_bot);
+	}
+}
+
+/* 3D Globose Berry / Drupe / Tomato Fruit with Spherical Shading & Apical Calyx */
+static inline void
+nd_m3d_add_fruit_berry(nd_mesh3d_builder_t *b,
+                       float cx, float cy, float cz,
+                       float rad, uint32_t col_ripe, uint32_t col_shade,
+                       float total_h)
+{
+	float ww = fminf(0.92f, cz / fmaxf(1.0f, total_h));
+	uint32_t v_top = nd_m3d_push_vert(b, cx, cy, cz + rad * 0.88f, ww,
+	                                  0.0f, 0.0f, 1.0f, 0.95f, col_ripe, ND_MAT3D_BLOSSOM);
+	uint32_t v_bot = nd_m3d_push_vert(b, cx, cy, fmaxf(0.4f, cz - rad * 0.88f), ww,
+	                                  0.0f, 0.0f, -1.0f, 0.55f, col_shade, ND_MAT3D_BLOSSOM);
 	uint32_t ring[6];
 	for (int i = 0; i < 6; i++) {
 		float ang = ((float)i / 6.0f) * 6.2831853f;
 		float ca = cosf(ang), sa = sinf(ang);
-		uint32_t c = (ca + sa < 0.0f) ? col_petal_lit : col_petal_shade;
-		ring[i] = nd_m3d_push_vert(b, cx + ca * r_outer, cy + sa * r_outer, cz, ww,
-		                           ca, sa, 0.45f, 0.90f, c, ND_MAT3D_BLOSSOM);
+		ring[i] = nd_m3d_push_vert(b, cx + ca * rad, cy + sa * rad, fmaxf(0.4f, cz), ww,
+		                           ca * 0.86f, sa * 0.86f, 0.35f, 0.90f, col_ripe, ND_MAT3D_BLOSSOM);
 	}
 	for (int i = 0; i < 6; i++) {
 		int next = (i + 1) % 6;
@@ -1165,6 +1430,237 @@ nd_m3d_add_foliage_bough_cluster(nd_mesh3d_builder_t *b,
 	                                    total_h, seed);
 }
 
+/* Branch-Aligned Shingled Bough Fan (Skyrim / SpeedTree Style):
+ * Anchors all 4 branchlet cards' woody stems (u = 0) directly into the terminal shoot fork
+ * (ax, ay, az) and fans them outward along the branch growth direction (dx, dy) in layered,
+ * cambered tiers (1 central leader shoot + 2 lateral V-fan wings at +/-48 deg + 1 upper
+ * crown-shingle cap). Blends local sub-crown and global tree-crown centroids for seamless
+ * dome-normal lighting across the entire canopy without floating mid-air polygon intersections. */
+static inline void
+nd_m3d_add_foliage_bough_fan_ex(nd_mesh3d_builder_t *b,
+                                float ax, float ay, float az,
+                                float dx, float dy,
+                                float rx, float ry, float rz,
+                                float fol_base,
+                                uint32_t col_deep, uint32_t col_mid, uint32_t col_lit, uint32_t col_high,
+                                float total_h, uint32_t seed)
+{
+	float dlen = sqrtf(dx * dx + dy * dy);
+	float dir_x = (dlen > 1e-4f) ? (dx / dlen) : 1.0f;
+	float dir_y = (dlen > 1e-4f) ? (dy / dlen) : 0.0f;
+	float base_ang = atan2f(dir_y, dir_x);
+
+	/* Blend local bough center (55%) with global tree crown core (45%) for unified Skyrim dome shading */
+	float loc_cx = ax + dir_x * (rx * 0.42f);
+	float loc_cy = ay + dir_y * (ry * 0.42f);
+	float loc_cz = az - rz * 0.14f;
+	float dome_cx = loc_cx * 0.55f;
+	float dome_cy = loc_cy * 0.55f;
+	float dome_cz = loc_cz * 0.55f + (total_h * 0.56f) * 0.45f;
+
+	float r_base = fmaxf(rx, ry);
+	uint32_t h0 = nd_m3d_hash(seed + 137u);
+	float jit0 = (((float)(h0 & 0xFFu) / 255.0f) - 0.5f) * 0.18f;
+
+	/* Card 0: Central forward leader shoot anchored slightly behind the woody fork tip */
+	{
+		float ang = base_ang + jit0;
+		float ca = cosf(ang), sa = sinf(ang);
+		float sx = ax - dir_x * (r_base * 0.42f);
+		float sy = ay - dir_y * (r_base * 0.42f);
+		float sz = az - rz * 0.04f;
+		float card_len = r_base * 1.38f;
+		float card_hw  = card_len * 0.56f;
+		nd_m3d_add_branchlet_card(b, sx, sy, sz,
+		                          ca, sa, 0.16f,
+		                          card_len, rz * 0.34f, rz * 0.32f,
+		                          card_hw, rz * 0.16f, jit0 * 0.8f,
+		                          dome_cx, dome_cy, dome_cz,
+		                          fol_base,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+
+	/* Cards 1 & 2: Left & right lateral shingled bough fan wings at +/-48 deg with natural dihedral roll */
+	for (int s = 0; s < 2; s++) {
+		float side_sign = (s == 0) ? 1.0f : -1.0f;
+		uint32_t hs = nd_m3d_hash(seed + (uint32_t)(s * 179 + 43));
+		float jitter = (((float)(hs & 0xFFu) / 255.0f) - 0.5f) * 0.22f;
+		float ang = base_ang + side_sign * 0.84f + jitter;
+		float ca = cosf(ang), sa = sinf(ang);
+		float sx = ax - dir_x * (r_base * 0.34f);
+		float sy = ay - dir_y * (r_base * 0.34f);
+		float sz = az - rz * (0.06f + 0.05f * (float)s);
+		float card_len = r_base * (1.22f + 0.12f * ((float)((hs >> 8) & 0x3Fu) / 63.0f));
+		float card_hw  = card_len * 0.58f;
+		float roll = side_sign * 0.36f + jitter * 0.25f;
+		nd_m3d_add_branchlet_card(b, sx, sy, sz,
+		                          ca, sa, 0.10f,
+		                          card_len, rz * 0.28f, rz * 0.40f,
+		                          card_hw, rz * 0.17f, roll,
+		                          dome_cx, dome_cy, dome_cz,
+		                          fol_base,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+
+	/* Card 3: Upper crown-shingle cap anchored above the fork for oblique & top-down silhouette volume */
+	{
+		uint32_t hf = nd_m3d_hash(seed + 71u);
+		float jitter = (((float)(hf & 0xFFu) / 255.0f) - 0.5f) * 0.34f;
+		float ang = base_ang + jitter;
+		float ca = cosf(ang), sa = sinf(ang);
+		float fx = ax - dir_x * (r_base * 0.48f);
+		float fy = ay - dir_y * (r_base * 0.48f);
+		float fz = az + rz * 0.18f;
+		float card_len = r_base * 1.16f;
+		float card_hw  = card_len * 0.62f;
+		nd_m3d_add_branchlet_card(b, fx, fy, fz,
+		                          ca, sa, 0.28f,
+		                          card_len, rz * 0.36f, rz * 0.28f,
+		                          card_hw, rz * 0.18f, (hf & 1u) ? 0.28f : -0.28f,
+		                          dome_cx, dome_cy, dome_cz,
+		                          fol_base,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+}
+
+/* Skyrim Creation-Engine Style Drooping Conifer Bough (Skirt + Cross-Fin Shingle):
+ * Replaces upward-cupped broadleaf fans on conifers (Douglas Fir, Silver Fir, Scots Pine)
+ * with gravity-swept, downward-shingled pine/fir boughs:
+ *   - Card 0: Central sweeping needle mantle pitched downward (-0.28..-0.40) with upturned distal tip
+ *   - Cards 1 & 2: Steeply banked left/right lateral skirt wings (roll = +/-44 deg) that drape over the whorl below
+ *   - Card 3: Steeply rolled dorsal/ventral cross-fin (roll = +/-72 deg) for deep 3D side-view & 55-deg diorama volume. */
+static inline void
+nd_m3d_add_conifer_bough_fan(nd_mesh3d_builder_t *b,
+                             float ax, float ay, float az,
+                             float dx, float dy,
+                             float rx, float ry, float rz,
+                             uint32_t col_deep, uint32_t col_mid, uint32_t col_lit, uint32_t col_high,
+                             float total_h, uint32_t seed)
+{
+	float dlen = sqrtf(dx * dx + dy * dy);
+	float dir_x = (dlen > 1e-4f) ? (dx / dlen) : 1.0f;
+	float dir_y = (dlen > 1e-4f) ? (dy / dlen) : 0.0f;
+	float base_ang = atan2f(dir_y, dir_x);
+
+	float r_base = fmaxf(rx, ry);
+	float loc_cx = ax + dir_x * (r_base * 0.38f);
+	float loc_cy = ay + dir_y * (r_base * 0.38f);
+	float loc_cz = az - rz * 0.32f;
+	float dome_cx = loc_cx * 0.50f;
+	float dome_cy = loc_cy * 0.50f;
+	float dome_cz = loc_cz * 0.65f + (total_h * 0.48f) * 0.35f;
+
+	uint32_t h0 = nd_m3d_hash(seed + 137u);
+	float jit0 = (((float)(h0 & 0xFFu) / 255.0f) - 0.5f) * 0.16f;
+
+	/* Card 0: Central gravity-swept conifer needle mantle with downward droop and upturned tip */
+	{
+		float ang = base_ang + jit0;
+		float ca = cosf(ang), sa = sinf(ang);
+		float sx = ax - dir_x * (r_base * 0.38f);
+		float sy = ay - dir_y * (r_base * 0.38f);
+		float sz = az + rz * 0.12f;
+		float card_len = r_base * 1.42f;
+		float card_hw  = card_len * 0.58f;
+		nd_m3d_add_branchlet_card(b, sx, sy, sz,
+		                          ca, sa, -0.26f,
+		                          card_len, -rz * 0.24f, rz * 0.42f,
+		                          card_hw, rz * 0.22f, jit0 * 0.9f,
+		                          dome_cx, dome_cy, dome_cz,
+		                          ND_MAT3D_FOL_CONIFER,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+
+	/* Cards 1 & 2: Left & right steeply pitched lateral skirt wings (roll = +/-0.76 rad = +/-44 deg) */
+	for (int s = 0; s < 2; s++) {
+		float side_sign = (s == 0) ? 1.0f : -1.0f;
+		uint32_t hs = nd_m3d_hash(seed + (uint32_t)(s * 179 + 43));
+		float jitter = (((float)(hs & 0xFFu) / 255.0f) - 0.5f) * 0.20f;
+		float ang = base_ang + side_sign * 0.62f + jitter;
+		float ca = cosf(ang), sa = sinf(ang);
+		float sx = ax - dir_x * (r_base * 0.30f);
+		float sy = ay - dir_y * (r_base * 0.30f);
+		float sz = az + rz * 0.06f;
+		float card_len = r_base * (1.26f + 0.12f * ((float)((hs >> 8) & 0x3Fu) / 63.0f));
+		float card_hw  = card_len * 0.60f;
+		float roll = side_sign * 0.76f + jitter * 0.22f;
+		nd_m3d_add_branchlet_card(b, sx, sy, sz,
+		                          ca, sa, -0.32f,
+		                          card_len, -rz * 0.18f, rz * 0.56f,
+		                          card_hw, rz * 0.20f, roll,
+		                          dome_cx, dome_cy, dome_cz,
+		                          ND_MAT3D_FOL_CONIFER,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+
+	/* Card 3: Steeply rolled dorsal/ventral cross-fin (roll = +/-1.22 rad = +/-70 deg) for side-view fullness */
+	{
+		uint32_t hf = nd_m3d_hash(seed + 71u);
+		float jitter = (((float)(hf & 0xFFu) / 255.0f) - 0.5f) * 0.24f;
+		float ang = base_ang + jitter;
+		float ca = cosf(ang), sa = sinf(ang);
+		float fx = ax - dir_x * (r_base * 0.36f);
+		float fy = ay - dir_y * (r_base * 0.36f);
+		float fz = az + rz * 0.18f;
+		float card_len = r_base * 1.22f;
+		float card_hw  = card_len * 0.56f;
+		float roll = ((hf & 1u) ? 1.20f : -1.20f) + jitter * 0.20f;
+		nd_m3d_add_branchlet_card(b, fx, fy, fz,
+		                          ca, sa, -0.22f,
+		                          card_len, rz * 0.16f, rz * 0.48f,
+		                          card_hw, rz * 0.16f, roll,
+		                          dome_cx, dome_cy, dome_cz,
+		                          ND_MAT3D_FOL_CONIFER,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+}
+
+/* Flat Horizontal Tabular Umbrella Pad (Acacia senegal & Scots Pine Upper Cloud Table):
+ * Spreads 4 wide, horizontally stratified branchlet cards with near-zero vertical pitch
+ * and shallow vertical thickness so adjacent terminal pads merge into a continuous flat
+ * savannah umbrella tabletop (Acacia) or billowy layered upper pine table (Pinus sylvestris). */
+static inline void
+nd_m3d_add_tabular_umbrella_fan(nd_mesh3d_builder_t *b,
+                                float ax, float ay, float az,
+                                float dx, float dy,
+                                float rx, float ry, float rz,
+                                float fol_base,
+                                uint32_t col_deep, uint32_t col_mid, uint32_t col_lit, uint32_t col_high,
+                                float total_h, uint32_t seed)
+{
+	float dlen = sqrtf(dx * dx + dy * dy);
+	float dir_x = (dlen > 1e-4f) ? (dx / dlen) : 1.0f;
+	float dir_y = (dlen > 1e-4f) ? (dy / dlen) : 0.0f;
+	float base_ang = atan2f(dir_y, dir_x);
+
+	float r_base = fmaxf(rx, ry);
+	float dome_cx = (ax + dir_x * r_base * 0.35f) * 0.45f;
+	float dome_cy = (ay + dir_y * r_base * 0.35f) * 0.45f;
+	float dome_cz = az - r_base * 0.45f; /* Below the flat table so normals point strongly upward + outward */
+
+	static const float fan_offs[4] = { 0.0f, -1.02f, 1.02f, 3.1415926f };
+	static const float fan_roll[4] = { 0.12f, -0.22f, 0.22f, -0.14f };
+	static const float fan_len[4]  = { 1.22f, 1.14f, 1.14f, 0.92f };
+	for (int s = 0; s < 4; s++) {
+		uint32_t hs = nd_m3d_hash(seed + (uint32_t)(s * 163 + 29));
+		float jitter = (((float)(hs & 0xFFu) / 255.0f) - 0.5f) * 0.24f;
+		float ang = base_ang + fan_offs[s] + jitter;
+		float ca = cosf(ang), sa = sinf(ang);
+		float sx = ax - ca * (r_base * 0.18f);
+		float sy = ay - sa * (r_base * 0.18f);
+		float sz = az + ((float)(s - 1) * rz * 0.10f);
+		float card_len = r_base * fan_len[s];
+		float card_hw  = card_len * 0.64f;
+		nd_m3d_add_branchlet_card(b, sx, sy, sz,
+		                          ca, sa, 0.03f,
+		                          card_len, rz * 0.20f, rz * 0.22f,
+		                          card_hw, rz * 0.10f, fan_roll[s] + jitter * 0.2f,
+		                          dome_cx, dome_cy, dome_cz,
+		                          fol_base,
+		                          col_deep, col_mid, col_lit, col_high, total_h);
+	}
+}
+
 /* Leonardo da Vinci Recursive Vascular Tree Architecture (Notebook M / Treatise on Painting):
  *   1. Cross-Sectional Area Conservation at Every Fork:
  *      "All the branches of a tree at every stage of its height when put together are equal
@@ -1453,18 +1949,64 @@ plant_geometry_build(const PlantInstance *plant,
 	uint32_t inst_seed = (uint32_t)(plant->instance_id ^ (plant->genome.genetic_seed >> 17));
 	bool is_massart_conifer = (g->leaf.complexity == PLANT_LEAF_NEEDLE &&
 	                           g->architecture.model == PLANT_ARCH_MASSART);
+	bool is_scots_pine = (g->leaf.complexity == PLANT_LEAF_NEEDLE &&
+	                      !is_massart_conifer);
+	bool is_acacia = (g->leaf.complexity == PLANT_LEAF_BIPINNATE);
+	bool is_birch  = (bark_class == ND_PLANT_BARK_BIRCH);
+	bool is_olive  = (bark_class == ND_PLANT_BARK_FLUTED);
+	bool is_willow = (g->architecture.orthotropy < -0.55f);
+	bool is_cactus = (bark_class == ND_PLANT_BARK_RIBBED ||
+	                  g->leaf.complexity == PLANT_LEAF_SCALE);
+	if (is_cactus) {
+		bark_class = ND_PLANT_BARK_RIBBED;
+		/* Columnar cactus leaf genes represent tan spine color; photosynthetic stem is glaucous green */
+		c_leaf_deep = 0xFF1A4222u;
+		c_leaf_mid  = 0xFF286434u;
+		c_leaf_lit  = 0xFF3A8446u;
+		c_leaf_high = 0xFF58A664u;
+	}
 	bool is_graminoid = (g->leaf.shape == PLANT_LEAF_SHAPE_LINEAR &&
 	                     g->leaf.venation_type == PLANT_VENATION_PARALLELODROMOUS);
 	bool is_herb = (!is_graminoid &&
-	                g->leaf.complexity != PLANT_LEAF_SCALE &&
+	                !is_cactus &&
 	                g->architecture.max_branch_order <= 2u &&
 	                g->physiology.mature_height_m < 1.5f);
 	float tree_fol_base = (g->leaf.complexity == PLANT_LEAF_NEEDLE)
 		? ND_MAT3D_FOL_CONIFER
-		: ((g->leaf.shape == PLANT_LEAF_SHAPE_PINNATELY_LOBED ||
-		    g->leaf.shape == PLANT_LEAF_SHAPE_PALMATELY_LOBED)
-			? ND_MAT3D_FOL_LOBED
-			: ND_MAT3D_FOL_OVATE);
+		: ((g->leaf.complexity == PLANT_LEAF_BIPINNATE)
+			? ND_MAT3D_FOL_BLADE
+			: ((g->leaf.shape == PLANT_LEAF_SHAPE_PINNATELY_LOBED ||
+			    g->leaf.shape == PLANT_LEAF_SHAPE_PALMATELY_LOBED)
+				? ND_MAT3D_FOL_LOBED
+				: ND_MAT3D_FOL_OVATE));
+
+	/* Normalize pipe-model trunk base radius to authentic forestry DBH-to-height slenderness ratios
+	 * while preserving Da Vinci relative child-to-parent taper across all branch orders:
+	 *   - Birches (Betula pendula / pubescens): DBH = 3.8% of H (slender chalk-white trunks)
+	 *   - Conifers (Pseudotsuga, Abies, Pinus): DBH = 4.6%..5.0% of H (tall forest spires)
+	 *   - Acacia senegal:                       DBH = 5.6% of H (lean savannah bole)
+	 *   - Maple / Willow:                       DBH = 6.6%..7.2% of H
+	 *   - Ancient Oak / Twisted Olive:          DBH = 8.4%..9.0% of H
+	 *   - Columnar Cactus (Arthrocereus):       DBH = 11.5% of H (slender ribbed xerophytic column) */
+	float pheno_r0_wu = (pheno->unit_count > 0u)
+		? fmaxf(0.15f, pheno->units[0].base_radius_m * wu_per_m)
+		: 1.0f;
+	float target_trunk_r0_wu = pheno_r0_wu;
+	if (!is_herb && !is_graminoid) {
+		float target_dbh_ratio = 0.068f;
+		if (is_birch)                target_dbh_ratio = 0.038f;
+		else if (is_massart_conifer) target_dbh_ratio = 0.046f;
+		else if (is_scots_pine)      target_dbh_ratio = 0.050f;
+		else if (is_acacia)          target_dbh_ratio = 0.056f;
+		else if (is_willow)          target_dbh_ratio = 0.072f;
+		else if (is_olive)           target_dbh_ratio = 0.088f;
+		else if (is_cactus)          target_dbh_ratio = 0.115f;
+		else if (g->leaf.shape == PLANT_LEAF_SHAPE_PINNATELY_LOBED)
+			target_dbh_ratio = 0.084f; /* Quercus robur */
+		else
+			target_dbh_ratio = 0.066f; /* Acer pseudoplatanus */
+		target_trunk_r0_wu = fmaxf(1.2f, h_total * (0.5f * target_dbh_ratio));
+	}
 
 	/* 0. Ground-hugging basal rosette for herbaceous wildflowers/crops (Linum, Daucus, Solanum, Bellis)
 	 *    and sweeping basal wetland sword-blades for graminoid reeds (Typha latifolia). */
@@ -1496,11 +2038,49 @@ plant_geometry_build(const PlantInstance *plant,
 			nd_m3d_add_arching_blade(b, ca * w_total * 0.07f, sa * w_total * 0.07f, 0.0f,
 			                         ca, sa,
 			                         w_total * (0.28f + 0.07f * (float)(i & 1)),
-			                         h_total * (0.70f + 0.12f * (float)(i % 3)),
+			                         h_total * (0.64f + 0.10f * (float)(i % 3)),
 			                         h_total * 0.16f,
-			                         w_total * 0.072f,
+			                         w_total * 0.068f,
 			                         c_leaf_deep, c_leaf_mid, (i & 1) ? c_leaf_high : c_leaf_lit,
 			                         h_total);
+		}
+		/* Erect wetland cattail culms topped with velvety dark-chocolate cylindrical female spadix
+		 * and slender golden-tan apical male staminate spike (Typha latifolia) */
+		int n_culms = (detail_level == 0u) ? 3 : 2;
+		uint32_t c_spadix_dark = 0xFF101C34u;
+		uint32_t c_spadix_mid  = 0xFF1A2E52u;
+		uint32_t c_spadix_lit  = 0xFF284472u;
+		uint32_t c_male_spike  = 0xFF4288B4u;
+		for (int c = 0; c < n_culms; c++) {
+			float c_ang = ((float)c / (float)n_culms) * 6.2831853f + 0.55f + (float)(inst_seed & 3u) * 0.25f;
+			float cx0 = cosf(c_ang) * (w_total * 0.06f);
+			float cy0 = sinf(c_ang) * (w_total * 0.06f);
+			float cx1 = cosf(c_ang) * (w_total * (0.11f + 0.03f * (float)c));
+			float cy1 = sinf(c_ang) * (w_total * (0.11f + 0.03f * (float)c));
+			float ch  = h_total * (0.94f - 0.05f * (float)c);
+			float sp_z0 = ch * 0.62f;
+			float sp_z1 = ch * 0.86f;
+			float sp_x0 = cx0 + (cx1 - cx0) * 0.62f;
+			float sp_y0 = cy0 + (cy1 - cy0) * 0.62f;
+			float sp_x1 = cx0 + (cx1 - cx0) * 0.86f;
+			float sp_y1 = cy0 + (cy1 - cy0) * 0.86f;
+			float culm_r = fmaxf(0.8f, w_total * 0.016f);
+			float spad_r = fmaxf(1.8f, w_total * 0.044f);
+			/* Green cylindrical reed culm */
+			nd_m3d_add_trunk_tube_ex(b, cx0, cy0, 0.0f, culm_r * 1.15f,
+			                         sp_x0, sp_y0, sp_z0, culm_r,
+			                         5, 2, c_leaf_deep, c_leaf_mid, c_leaf_lit,
+			                         ND_PLANT_BARK_HERB, 0.01f, h_total, inst_seed + (uint32_t)c * 59u);
+			/* Plush dark-brown cylindrical cattail spadix ("cigar" head) */
+			nd_m3d_add_trunk_tube_ex(b, sp_x0, sp_y0, sp_z0, spad_r,
+			                         sp_x1, sp_y1, sp_z1, spad_r * 0.95f,
+			                         7, 2, c_spadix_dark, c_spadix_mid, c_spadix_lit,
+			                         ND_PLANT_BARK_HERB, 0.004f, h_total, inst_seed + (uint32_t)c * 83u);
+			/* Slender apical male staminate spike above the brown spadix */
+			nd_m3d_add_trunk_tube_ex(b, sp_x1, sp_y1, sp_z1, culm_r * 0.90f,
+			                         cx1, cy1, ch, culm_r * 0.35f,
+			                         5, 1, c_spadix_mid, c_male_spike, c_male_spike,
+			                         ND_PLANT_BARK_HERB, 0.004f, h_total, inst_seed + (uint32_t)c * 107u);
 		}
 	}
 
@@ -1508,13 +2088,14 @@ plant_geometry_build(const PlantInstance *plant,
 	uint32_t trunk_node_count = 0u;
 	bool has_woody_child[PLANT_MAX_UNITS];
 	memset(has_woody_child, 0, sizeof(has_woody_child));
+	uint8_t woody_order_cap = (is_massart_conifer && max_order_draw > 2u) ? 2u : max_order_draw;
 	for (uint32_t u_idx = 0u; u_idx < pheno->unit_count; u_idx++) {
 		const PlantGrowthUnit *u = &pheno->units[u_idx];
 		if (u->branch_order == 0u &&
 		    (uint32_t)(u->node_index + 1u) > trunk_node_count) {
 			trunk_node_count = (uint32_t)(u->node_index + 1u);
 		}
-		if (u->branch_order <= max_order_draw &&
+		if (u->branch_order <= woody_order_cap &&
 		    u->parent_unit != PLANT_INVALID_ID &&
 		    u->parent_unit < PLANT_MAX_UNITS) {
 			has_woody_child[u->parent_unit] = true;
@@ -1523,125 +2104,361 @@ plant_geometry_build(const PlantInstance *plant,
 	if (trunk_node_count == 0u)
 		trunk_node_count = 1u;
 
-	/* 1. Traverse MTG PlantGrowthUnits to sweep continuous bark/stem tubes */
-	for (uint32_t u_idx = 0u; u_idx < pheno->unit_count; u_idx++) {
-		const PlantGrowthUnit *u = &pheno->units[u_idx];
-		if (u->branch_order > max_order_draw && g->architecture.max_branch_order > 1u)
+	/* 1. Traverse MTG PlantAxes in ascending branch order (0 -> 1 -> 2 -> 3) to sweep smooth
+	 *    Catmull-Rom parallel-transported bark/stem tubes:
+	 *    - Recording each unit's exact rendered tip position & radius guarantees child axes
+	 *      socket seamlessly into the actual curved parent limb centerline (never floating or
+	 *      poking through the far side of a bowed trunk).
+	 *    - Every axis shares welded vertex rings along its entire length with zero polygon gaps.
+	 *    - Step 2 foliage organs also lock directly onto the recorded rendered twig tips. */
+	float max_r_env = w_total * (is_acacia ? 0.48f : 0.44f);
+	uint32_t bd = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_deep : c_bark_dark;
+	uint32_t bm = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_mid  : c_bark_mid;
+	uint32_t bl = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_high : c_bark_light;
+
+	float unit_tip_pos[PLANT_MAX_UNITS][3];
+	float unit_tip_rad[PLANT_MAX_UNITS];
+	uint8_t unit_tip_valid[PLANT_MAX_UNITS];
+	memset(unit_tip_valid, 0, sizeof(unit_tip_valid));
+
+	for (uint8_t pass_ord = 0u; pass_ord <= max_order_draw; pass_ord++) {
+		if (is_massart_conifer && pass_ord > 2u)
 			continue;
-		if ((is_herb || is_graminoid) && u->branch_order > 0u)
-			continue;
+		for (uint32_t a_idx = 0u; a_idx < pheno->axis_count; a_idx++) {
+			const PlantAxis *ax = &pheno->axes[a_idx];
+			if (!ax->alive || ax->is_root_axis || ax->first_unit == PLANT_INVALID_ID)
+				continue;
+			if (ax->order != pass_ord)
+				continue;
+			if ((is_herb || is_graminoid) && ax->order > 0u)
+				continue;
 
-		float x0 = u->base_pos.x * wu_per_m;
-		float y0 = u->base_pos.y * wu_per_m;
-		float z0 = u->base_pos.z * wu_per_m;
-		float x1 = u->tip_pos.x * wu_per_m;
-		float y1 = u->tip_pos.y * wu_per_m;
-		float z1 = u->tip_pos.z * wu_per_m;
+			float pts[24][3];
+			float radii[24];
+			int n_pts = 0;
 
-		/* Smooth soft-knee radial envelope so lateral branches never kink at a cylindrical wall */
-		float max_r = w_total * 0.44f;
-		float r_h1 = sqrtf(x1 * x1 + y1 * y1);
-		if (r_h1 > max_r * 0.75f && r_h1 > 1e-3f) {
-			float excess = (r_h1 - max_r * 0.75f) / (max_r * 0.25f);
-			float r_soft = max_r * (0.75f + 0.25f * tanhf(excess));
-			x1 *= r_soft / r_h1;
-			y1 *= r_soft / r_h1;
-		}
-		float r_h0 = sqrtf(x0 * x0 + y0 * y0);
-		if (r_h0 > max_r * 0.75f && r_h0 > 1e-3f) {
-			float excess = (r_h0 - max_r * 0.75f) / (max_r * 0.25f);
-			float r_soft = max_r * (0.75f + 0.25f * tanhf(excess));
-			x0 *= r_soft / r_h0;
-			y0 *= r_soft / r_h0;
-		}
-
-		float r0 = fmaxf(0.50f, u->base_radius_m * wu_per_m);
-		float r1 = fmaxf(0.36f, u->tip_radius_m * wu_per_m);
-		int sides = (u->branch_order == 0u)
-			? ((bark_class == ND_PLANT_BARK_RIBBED) ? 8 : ((is_herb || is_graminoid) ? 5 : 7))
-			: ((u->branch_order == 1u) ? 5 : 4);
-		int rings = (u->branch_order == 0u && !is_herb && !is_graminoid)
-			? 2
-			: ((u->branch_order == 1u && detail_level == 0u && !is_herb && !is_graminoid && !is_massart_conifer) ? 2 : 1);
-		uint32_t useed = (uint32_t)(u->topo_hash ^ (u->topo_hash >> 32));
-
-		uint32_t bd = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_deep : c_bark_dark;
-		uint32_t bm = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_mid  : c_bark_mid;
-		uint32_t bl = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_high : c_bark_light;
-
-		nd_m3d_add_trunk_tube_ex(b, x0, y0, z0, r0,
-		                         x1, y1, z1, r1,
-		                         sides, rings,
-		                         bd, bm, bl,
-		                         bark_class, crook_mag, h_total, useed);
-
-		/* Spreading root-collar buttress spurs on mature tree bases */
-		if (u->branch_order == 0u && u->node_index == 0u && detail_level == 0u &&
-		    !is_herb && !is_graminoid && bark_class != ND_PLANT_BARK_RIBBED &&
-		    g->allometry.root_flare_strength > 0.32f) {
-			int n_spurs = 3;
-			for (int sp = 0; sp < n_spurs; sp++) {
-				float sp_ang = ((float)sp / (float)n_spurs) * 6.2831853f + (float)(useed & 31u) * 0.1f;
-				float sp_reach = r0 * (1.55f + 0.65f * g->allometry.root_flare_strength);
-				nd_m3d_add_trunk_tube_ex(b,
-				                         x0 + cosf(sp_ang) * r0 * 0.42f,
-				                         y0 + sinf(sp_ang) * r0 * 0.42f,
-				                         z0 + fminf(h_total * 0.08f, (z1 - z0) * 0.42f),
-				                         r0 * 0.46f,
-				                         x0 + cosf(sp_ang) * sp_reach,
-				                         y0 + sinf(sp_ang) * sp_reach,
-				                         0.0f,
-				                         r0 * 0.22f,
-				                         4, 1, bd, bm, bl, bark_class, 0.02f, h_total, useed + (uint32_t)sp * 41u);
+			/* Delta shift to keep child axis base locked onto its parent's exact curved spine */
+			float shift_x = 0.0f, shift_y = 0.0f, shift_z = 0.0f;
+			float p_rad_socket = 0.0f;
+			if (ax->order >= 1u && ax->parent_unit != PLANT_INVALID_ID &&
+			    ax->parent_unit < PLANT_MAX_UNITS && unit_tip_valid[ax->parent_unit]) {
+				const PlantGrowthUnit *u0 = &pheno->units[ax->first_unit];
+				float raw_x0 = u0->base_pos.x * wu_per_m;
+				float raw_y0 = u0->base_pos.y * wu_per_m;
+				float raw_z0 = u0->base_pos.z * wu_per_m;
+				float rh = sqrtf(raw_x0 * raw_x0 + raw_y0 * raw_y0);
+				if (rh > max_r_env * 0.75f && rh > 1e-3f) {
+					float ex = (rh - max_r_env * 0.75f) / (max_r_env * 0.25f);
+					float rs = max_r_env * (0.75f + 0.25f * tanhf(ex));
+					raw_x0 *= rs / rh;
+					raw_y0 *= rs / rh;
+				}
+				shift_x = unit_tip_pos[ax->parent_unit][0] - raw_x0;
+				shift_y = unit_tip_pos[ax->parent_unit][1] - raw_y0;
+				shift_z = unit_tip_pos[ax->parent_unit][2] - raw_z0;
+				p_rad_socket = unit_tip_rad[ax->parent_unit];
 			}
-		}
 
-		/* Dead self-pruned lower conifer branch stubs on clear lower bole of Pine & Douglas Fir */
-		if (u->branch_order == 0u && u->node_index <= 1u && detail_level == 0u &&
-		    g->leaf.complexity == PLANT_LEAF_NEEDLE) {
-			for (int st = 0; st < 2; st++) {
-				float st_ang = (float)(u->node_index * 2u + (uint32_t)st) * 2.15f + (float)(useed & 15u) * 0.2f;
-				float st_z = z0 + (z1 - z0) * (0.35f + 0.40f * (float)st);
-				float st_len = w_total * 0.085f;
-				nd_m3d_add_trunk_tube_ex(b,
-				                         x0 + (x1 - x0) * 0.5f,
-				                         y0 + (y1 - y0) * 0.5f,
-				                         st_z,
-				                         r1 * 0.34f,
-				                         x0 + cosf(st_ang) * st_len,
-				                         y0 + sinf(st_ang) * st_len,
-				                         st_z - st_len * 0.22f,
-				                         r1 * 0.14f,
-				                         4, 1, bd, bd, bm, bark_class, 0.04f, h_total, useed + (uint32_t)st * 79u);
+			PlantUnitId uid = ax->first_unit;
+			uint32_t guard = 0u;
+			float prev_x = 0.0f, prev_y = 0.0f, prev_z = 0.0f;
+			while (uid != PLANT_INVALID_ID && uid < pheno->unit_count && guard < 20u) {
+				const PlantGrowthUnit *u = &pheno->units[uid];
+				guard++;
+
+				float x0 = u->base_pos.x * wu_per_m;
+				float y0 = u->base_pos.y * wu_per_m;
+				float z0 = u->base_pos.z * wu_per_m;
+				float x1 = u->tip_pos.x * wu_per_m;
+				float y1 = u->tip_pos.y * wu_per_m;
+				float z1 = u->tip_pos.z * wu_per_m;
+
+				/* Smooth soft-knee radial envelope matching organ attachment coordinates */
+				float r_h0 = sqrtf(x0 * x0 + y0 * y0);
+				if (r_h0 > max_r_env * 0.75f && r_h0 > 1e-3f) {
+					float excess = (r_h0 - max_r_env * 0.75f) / (max_r_env * 0.25f);
+					float r_soft = max_r_env * (0.75f + 0.25f * tanhf(excess));
+					x0 *= r_soft / r_h0;
+					y0 *= r_soft / r_h0;
+				}
+				float r_h1 = sqrtf(x1 * x1 + y1 * y1);
+				if (r_h1 > max_r_env * 0.75f && r_h1 > 1e-3f) {
+					float excess = (r_h1 - max_r_env * 0.75f) / (max_r_env * 0.25f);
+					float r_soft = max_r_env * (0.75f + 0.25f * tanhf(excess));
+					x1 *= r_soft / r_h1;
+					y1 *= r_soft / r_h1;
+				}
+
+				/* Propagate parent spine alignment so forks remain 100% welded */
+				x0 += shift_x; y0 += shift_y; z0 += shift_z;
+				x1 += shift_x; y1 += shift_y; z1 += shift_z;
+				if (n_pts > 0) {
+					x0 = prev_x; y0 = prev_y; z0 = prev_z;
+				}
+
+				/* Species-specific architectural spine shaping */
+				if (is_acacia) {
+					if (ax->order == 0u) {
+						/* Acacia senegal: low sympodial bole terminating at ~34% height before splitting into V-vase */
+						float z_cap = h_total * 0.36f;
+						if (z1 > z_cap) {
+							float t_node = (float)(u->node_index + 1u) / (float)trunk_node_count;
+							z1 = h_total * (0.14f + 0.22f * t_node);
+							float fork_ang = (float)(inst_seed & 15u) * 0.4f;
+							x1 += cosf(fork_ang) * (w_total * 0.03f * t_node);
+							y1 += sinf(fork_ang) * (w_total * 0.03f * t_node);
+						}
+					} else if (ax->order == 1u) {
+						/* Ascending V-shaped savannah vase scaffold limbs distributed around the 360-deg compass
+						 * and rising uniformly to the flat 78..85% H umbrella tabletop */
+						float target_ang = (float)a_idx * 2.3999632f + (float)(inst_seed & 7u) * 0.35f;
+						float cur_ang = atan2f(y1, x1);
+						float blend_ang = target_ang + 0.25f * sinf(cur_ang - target_ang);
+						float step_t = plant_clampf((float)(guard) / 3.0f, 0.33f, 1.0f);
+						float target_r = w_total * (0.14f + 0.26f * step_t);
+						x1 = cosf(blend_ang) * target_r;
+						/* Compress Y depth spread slightly so 55-deg diorama projection reads as a flat horizontal table */
+						y1 = sinf(blend_ang) * target_r * 0.58f;
+						z1 = h_total * (0.36f + 0.47f * powf(step_t, 0.78f));
+					} else {
+						/* Secondary/tertiary flat horizontal table twigs fanning across the upper umbrella stratum */
+						float sub_ang = (float)(a_idx * 137u + guard * 53u) * 0.045f;
+						float step_len = w_total * ((ax->order == 2u) ? 0.11f : 0.08f);
+						x1 = x0 + cosf(sub_ang) * step_len;
+						y1 = y0 + sinf(sub_ang) * step_len * 0.58f;
+						float r_xy = hypotf(x1, y1 / 0.58f);
+						if (r_xy > w_total * 0.46f && r_xy > 1e-3f) {
+							float sc = (w_total * 0.46f) / r_xy;
+							x1 *= sc;
+							y1 *= sc;
+						}
+						z1 = plant_clampf(z0 + h_total * 0.025f, h_total * 0.68f, h_total * 0.89f);
+					}
+				} else if (is_scots_pine) {
+					/* Pinus sylvestris: high bare salmon-ochre lower trunk (first 56% clear of live limbs)
+					 * with irregular picturesque crooked upper scaffold crown (56%..94% H) */
+					if (ax->order == 0u) {
+						float t_node = (float)(u->node_index + 1u) / (float)trunk_node_count;
+						if (t_node >= 0.35f) {
+							float lift = h_total * (0.54f + 0.36f * ((t_node - 0.35f) / 0.65f));
+							z1 = fmaxf(z1, lift);
+						}
+					} else {
+						if (z1 < h_total * 0.56f) {
+							z1 = h_total * 0.56f + (z1 - h_total * 0.30f) * 0.55f;
+						}
+					}
+				} else if (is_massart_conifer && ax->order >= 1u) {
+					/* Skyrim Pine / Douglas Fir / Silver Fir: sweeping downward-angled conifer boughs
+					 * with subtle upturned distal tips */
+					float seg_horiz = hypotf(x1 - x0, y1 - y0);
+					float droop = (ax->order == 1u) ? (-seg_horiz * 0.24f) : (-seg_horiz * 0.14f);
+					z1 = fmaxf(h_total * 0.10f, z0 + droop);
+				}
+
+				/* Normalized botanical radius preserving Da Vinci taper across branch orders */
+				float r0_raw = fmaxf(0.10f, u->base_radius_m * wu_per_m);
+				float r1_raw = fmaxf(0.08f, u->tip_radius_m * wu_per_m);
+				float r0, r1;
+				if (is_herb || is_graminoid) {
+					r0 = fmaxf(0.38f, r0_raw * 0.65f);
+					r1 = fmaxf(0.26f, r1_raw * 0.65f);
+				} else if (is_cactus) {
+					r0 = target_trunk_r0_wu * powf(plant_clampf(r0_raw / pheno_r0_wu, 0.35f, 1.0f), 0.45f);
+					r1 = target_trunk_r0_wu * powf(plant_clampf(r1_raw / pheno_r0_wu, 0.32f, 1.0f), 0.45f);
+				} else {
+					float ratio0 = plant_clampf(r0_raw / pheno_r0_wu, 0.03f, 1.0f);
+					float ratio1 = plant_clampf(r1_raw / pheno_r0_wu, 0.02f, 1.0f);
+					float exp_t  = (ax->order == 0u) ? 0.74f : 0.86f;
+					float ord_atten = (ax->order == 0u) ? 1.0f : ((ax->order == 1u) ? 0.72f : ((ax->order == 2u) ? 0.52f : 0.38f));
+					r0 = fmaxf(0.45f, target_trunk_r0_wu * powf(ratio0, exp_t) * ord_atten);
+					r1 = fmaxf(0.32f, target_trunk_r0_wu * powf(ratio1, exp_t) * ord_atten);
+				}
+				uint32_t useed = (uint32_t)(u->topo_hash ^ (u->topo_hash >> 32));
+
+				/* Gentle organic gnarl/bow on trunk and lateral limbs while tracking exact endpoint */
+				float seg_dx = x1 - x0, seg_dy = y1 - y0, seg_dz = z1 - z0;
+				float seg_len = sqrtf(seg_dx * seg_dx + seg_dy * seg_dy + seg_dz * seg_dz);
+
+				if (n_pts == 0) {
+					if (ax->order >= 1u) {
+						float p_rad = (p_rad_socket > 0.1f) ? p_rad_socket : (r0 * 1.35f);
+						if (p_rad < r0) p_rad = r0;
+						/* Clamp child radius strictly inside parent limb radius so forks look natural */
+						if (r0 > p_rad * 0.78f) r0 = p_rad * 0.78f;
+						if (r1 > r0 * 0.88f)    r1 = r0 * 0.88f;
+						/* Tuck child base cleanly inside parent centerline (<= 0.42 * p_rad so it never pokes through back) */
+						float tuck = (seg_len > 1e-3f) ? fminf(p_rad * 0.42f, seg_len * 0.22f) : 0.0f;
+						float inv_l = (seg_len > 1e-3f) ? (1.0f / seg_len) : 0.0f;
+						pts[0][0] = x0 - seg_dx * inv_l * tuck;
+						pts[0][1] = y0 - seg_dy * inv_l * tuck;
+						pts[0][2] = z0 - seg_dz * inv_l * tuck;
+						radii[0]  = fminf(p_rad * 0.86f, r0 * 1.12f);
+						n_pts = 1;
+						/* Smooth branch-collar transition ring at 20% along primary bough internode */
+						if (ax->order == 1u && seg_len > r0 * 1.6f && n_pts < 22) {
+							pts[n_pts][0] = x0 + seg_dx * 0.20f;
+							pts[n_pts][1] = y0 + seg_dy * 0.20f;
+							pts[n_pts][2] = z0 + seg_dz * 0.20f;
+							radii[n_pts]  = fminf(p_rad * 0.80f, r0 * 0.96f);
+							n_pts++;
+						}
+					} else {
+						pts[0][0] = x0; pts[0][1] = y0; pts[0][2] = z0;
+						radii[0]  = r0;
+						n_pts = 1;
+					}
+				}
+
+				/* Subtle organic mid-span curvature on trunk and primary boughs */
+				if (ax->order <= 1u && !is_herb && !is_graminoid && n_pts + 2 < 23 && seg_len > r0 * 2.1f) {
+					float bow_ang = ((float)(useed & 255u) / 255.0f) * 6.2831853f;
+					float bow_scale = (ax->order == 0u)
+						? ((is_olive || is_scots_pine || is_acacia) ? 0.36f : 0.22f)
+						: 0.22f;
+					float bow = seg_len * crook_mag * bow_scale;
+					/* Subtle gravitropic sag on conifer boughs or ascending lift on broadleaf limbs */
+					float z_arch = (ax->order >= 1u)
+						? (is_massart_conifer ? (-seg_len * 0.08f) : (seg_len * 0.04f))
+						: 0.0f;
+					pts[n_pts][0] = 0.5f * (x0 + x1) + cosf(bow_ang) * bow;
+					pts[n_pts][1] = 0.5f * (y0 + y1) + sinf(bow_ang) * bow;
+					pts[n_pts][2] = 0.5f * (z0 + z1) + z_arch;
+					radii[n_pts]  = 0.5f * (r0 + r1);
+					n_pts++;
+				}
+
+				if (n_pts < 23) {
+					pts[n_pts][0] = x1;
+					pts[n_pts][1] = y1;
+					pts[n_pts][2] = z1;
+					radii[n_pts]  = r1;
+					n_pts++;
+				}
+
+				/* Record exact rendered unit tip for child-axis sockets and Step 2 foliage anchoring */
+				if (uid < PLANT_MAX_UNITS) {
+					unit_tip_pos[uid][0] = x1;
+					unit_tip_pos[uid][1] = y1;
+					unit_tip_pos[uid][2] = z1;
+					unit_tip_rad[uid]    = r1;
+					unit_tip_valid[uid]  = 1u;
+				}
+				prev_x = x1; prev_y = y1; prev_z = z1;
+
+				/* Subtle ground-hugging root-collar spurs on ancient buttressed trees (Quercus, Olea, Acer) */
+				if (u->branch_order == 0u && u->node_index == 0u && detail_level == 0u &&
+				    !is_herb && !is_graminoid && !is_cactus && !is_birch &&
+				    g->allometry.root_flare_strength > 0.38f) {
+					int n_spurs = 3;
+					for (int sp = 0; sp < n_spurs; sp++) {
+						float sp_ang = ((float)sp / (float)n_spurs) * 6.2831853f + (float)(useed & 31u) * 0.1f;
+						float sp_reach = r0 * (1.28f + 0.32f * g->allometry.root_flare_strength);
+						float spts[3][3] = {
+							{ x0, y0, z0 + fminf(h_total * 0.045f, (z1 - z0) * 0.32f) },
+							{ x0 + cosf(sp_ang) * sp_reach * 0.58f, y0 + sinf(sp_ang) * sp_reach * 0.58f, z0 + fminf(h_total * 0.016f, (z1 - z0) * 0.12f) },
+							{ x0 + cosf(sp_ang) * sp_reach, y0 + sinf(sp_ang) * sp_reach, 0.0f }
+						};
+						float srads[3] = { r0 * 0.38f, r0 * 0.24f, r0 * 0.10f };
+						nd_m3d_add_axis_spline_tube(b, spts, srads, 3, 5, 1,
+						                            bd, bm, bl, bark_class, h_total, useed + (uint32_t)sp * 41u);
+					}
+				}
+
+				/* Dead self-pruned lower conifer branch stubs on clear lower bole of Scots Pine & Douglas Fir */
+				if (u->branch_order == 0u && u->node_index <= (is_scots_pine ? 2u : 1u) && detail_level == 0u &&
+				    g->leaf.complexity == PLANT_LEAF_NEEDLE) {
+					for (int st = 0; st < 2; st++) {
+						float st_ang = (float)(u->node_index * 2u + (uint32_t)st) * 2.15f + (float)(useed & 15u) * 0.2f;
+						float st_z = z0 + (z1 - z0) * (0.35f + 0.40f * (float)st);
+						float st_len = r0 * 2.4f;
+						float st_pts[3][3] = {
+							{ x0 + (x1 - x0) * 0.5f, y0 + (y1 - y0) * 0.5f, st_z },
+							{ x0 + cosf(st_ang) * st_len * 0.55f, y0 + sinf(st_ang) * st_len * 0.55f, st_z - st_len * 0.14f },
+							{ x0 + cosf(st_ang) * st_len, y0 + sinf(st_ang) * st_len, st_z - st_len * 0.32f }
+						};
+						float st_rads[3] = { r1 * 0.34f, r1 * 0.20f, r1 * 0.08f };
+						nd_m3d_add_axis_spline_tube(b, st_pts, st_rads, 3, 4, 1,
+						                            bd, bd, bm, bark_class, h_total, useed + (uint32_t)st * 79u);
+					}
+				}
+
+				/* Rounded succulent dome apex + sub-apical nocturnal cactus blossom on terminal cactus columns */
+				if (is_cactus && u->next_in_axis == PLANT_INVALID_ID) {
+					r1 *= 0.78f;
+					if (n_pts > 0)
+						radii[n_pts - 1] = r1;
+					if (n_pts < 22) {
+						pts[n_pts][0] = x1;
+						pts[n_pts][1] = y1;
+						pts[n_pts][2] = z1 + r1 * 0.52f;
+						radii[n_pts]  = r1 * 0.48f;
+						n_pts++;
+						pts[n_pts][0] = x1;
+						pts[n_pts][1] = y1;
+						pts[n_pts][2] = z1 + r1 * 0.82f;
+						radii[n_pts]  = 0.08f;
+						n_pts++;
+					}
+					float c_fl_r = fmaxf(2.2f, r1 * 0.82f);
+					float fl_ang = (float)(a_idx * 2u + 1u) * 1.1f;
+					nd_m3d_add_blossom_star(b,
+					                        x1 + cosf(fl_ang) * (r1 * 0.55f),
+					                        y1 + sinf(fl_ang) * (r1 * 0.55f),
+					                        z1 + r1 * 0.45f,
+					                        c_fl_r, c_fl_r * 0.42f,
+					                        0xFFF4F2FCu, 0xFFD0A8E8u, 0xFF38D4F8u, h_total);
+				}
+
+				/* Conifer apical leader crown spire + upper sub-apical whorls on the topmost trunk node */
+				if (is_massart_conifer && u->branch_order == 0u && u->next_in_axis == PLANT_INVALID_ID) {
+					float spire_r = w_total * 0.14f;
+					for (int sp = 0; sp < 4; sp++) {
+						float sp_ang = (float)sp * 1.5707963f + (float)(useed & 7u) * 0.35f;
+						float ca = cosf(sp_ang), sa = sinf(sp_ang);
+						nd_m3d_add_branchlet_card(b, x1, y1, z1 - spire_r * 0.25f,
+						                          ca * 0.48f, sa * 0.48f, 0.86f,
+						                          spire_r * 1.55f, spire_r * 0.14f, spire_r * 0.10f,
+						                          spire_r * 0.56f, spire_r * 0.10f, (sp & 1) ? 0.28f : -0.28f,
+						                          x1, y1, z1 - spire_r * 0.20f,
+						                          ND_MAT3D_FOL_CONIFER,
+						                          c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high, h_total);
+					}
+				}
+
+				uid = u->next_in_axis;
 			}
-		}
 
-		/* Skyrim Boreal/Alpine Conifer Whorl Tier on live crown trunk nodes (Pseudotsuga menziesii, Abies alba) */
-		if (is_massart_conifer && u->branch_order == 0u && (u->node_index >= 1u || trunk_node_count <= 2u)) {
-			float crown_den = (float)(trunk_node_count > 1u ? (trunk_node_count - 1u) : 1u);
-			float t = (float)(u->node_index > 0u ? (u->node_index - 1u) : 0u) / crown_den;
-			float z_tier0 = fmaxf(h_total * 0.16f, z0 * 0.94f);
-			float z_tier1 = fminf(h_total * 0.98f, fmaxf(z_tier0 + h_total * 0.10f, z1 * 1.05f));
-			float taper_k = (g->fruit.fruit_type == PLANT_FRUIT_CONE) ? 0.72f : 0.76f;
-			float r_sk = w_total * (0.45f * (1.0f - taper_k * t));
-			int tier_pts = (detail_level == 0u) ? ((u->node_index <= 3u) ? 5 : 4) : 4;
-			nd_m3d_add_conifer_tier(b, x1, y1, z_tier0, z_tier1, r_sk,
-			                        tier_pts,
-			                        c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
-			                        h_total, useed + (uint32_t)u->node_index * 89u);
-		}
+			/* Close tapered terminal twig apex so branch tips never look like hollow open cylinders */
+			if (n_pts >= 2 && n_pts < 24 && bark_class != ND_PLANT_BARK_RIBBED) {
+				float tx = pts[n_pts - 1][0] - pts[n_pts - 2][0];
+				float ty = pts[n_pts - 1][1] - pts[n_pts - 2][1];
+				float tz = pts[n_pts - 1][2] - pts[n_pts - 2][2];
+				float tlen = sqrtf(tx * tx + ty * ty + tz * tz);
+				if (tlen > 1e-4f) {
+					float cap_ext = fmaxf(0.45f, radii[n_pts - 1] * 0.90f);
+					pts[n_pts][0] = pts[n_pts - 1][0] + (tx / tlen) * cap_ext;
+					pts[n_pts][1] = pts[n_pts - 1][1] + (ty / tlen) * cap_ext;
+					pts[n_pts][2] = pts[n_pts - 1][2] + (tz / tlen) * cap_ext;
+					radii[n_pts]  = 0.08f;
+					n_pts++;
+				}
+			}
 
-		/* Rounded succulent apex cap on terminal cactus columns */
-		if (bark_class == ND_PLANT_BARK_RIBBED && u->next_in_axis == PLANT_INVALID_ID) {
-			nd_m3d_add_foliage_lobe(b, x1, y1, z1,
-			                        r1 * 0.96f, r1 * 0.96f, r1 * 0.72f,
-			                        6, 2, c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
-			                        h_total, useed + 97u, ND_MAT3D_FOLIAGE_CORE);
+			if (n_pts >= 2) {
+				int sides = (ax->order == 0u)
+					? ((bark_class == ND_PLANT_BARK_RIBBED) ? 8 : ((is_herb || is_graminoid) ? 5 : 8))
+					: ((ax->order == 1u) ? (is_massart_conifer ? 5 : 6) : 4);
+				uint32_t aseed = (uint32_t)(ax->topo_hash ^ (ax->topo_hash >> 32));
+				nd_m3d_add_axis_spline_tube(b, pts, radii, n_pts, sides,
+				                            (ax->order >= 1u) ? 1 : 0,
+				                            bd, bm, bl, bark_class, h_total, aseed);
+			}
 		}
 	}
 
 	/* 2. Traverse MTG PlantOrgans to emit species-accurate leaves, needles, flowers, and fruit */
-	uint32_t max_clusters = (detail_level == 0u) ? 52u : 28u;
+	uint32_t max_clusters = (detail_level == 0u) ? 30u : 15u;
 	for (uint32_t o_idx = 0u; o_idx < pheno->organ_count; o_idx++) {
 		const PlantOrgan *org = &pheno->organs[o_idx];
 		uint32_t oseed = (uint32_t)(org->topo_hash ^ (org->topo_hash >> 32));
@@ -1649,18 +2466,33 @@ plant_geometry_build(const PlantInstance *plant,
 		float ay = org->attachment_pos.y * wu_per_m;
 		float az = org->attachment_pos.z * wu_per_m;
 
-		float max_r = w_total * 0.43f;
-		float r_ha = sqrtf(ax * ax + ay * ay);
-		if (r_ha > max_r && r_ha > 1e-3f) {
-			ax *= max_r / r_ha;
-			ay *= max_r / r_ha;
+		/* Lock organ attachment directly to its parent unit's exact curved spine tip when available */
+		if (org->parent_unit != PLANT_INVALID_ID && org->parent_unit < PLANT_MAX_UNITS &&
+		    unit_tip_valid[org->parent_unit]) {
+			ax = unit_tip_pos[org->parent_unit][0];
+			ay = unit_tip_pos[org->parent_unit][1];
+			az = unit_tip_pos[org->parent_unit][2];
+		} else {
+			float r_ha = sqrtf(ax * ax + ay * ay);
+			if (r_ha > max_r_env * 0.75f && r_ha > 1e-3f) {
+				float excess = (r_ha - max_r_env * 0.75f) / (max_r_env * 0.25f);
+				float r_soft = max_r_env * (0.75f + 0.25f * tanhf(excess));
+				ax *= r_soft / r_ha;
+				ay *= r_soft / r_ha;
+			}
 		}
-		az = plant_clampf(az, 0.5f, h_total * 0.94f);
+		az = plant_clampf(az, 0.5f, h_total * 0.96f);
 
 		float olen = fmaxf(2.0f, org->length_m * wu_per_m);
 		float owid = fmaxf(1.2f, org->width_m * wu_per_m);
 		float dx = org->direction.x;
 		float dy = org->direction.y;
+		/* Align organ fan direction outward from the trunk along the actual curved branch vector */
+		if (hypotf(ax, ay) > 2.5f) {
+			float r_xy = hypotf(ax, ay);
+			dx = dx * 0.35f + (ax / r_xy) * 0.65f;
+			dy = dy * 0.35f + (ay / r_xy) * 0.65f;
+		}
 		float dlen_xy = sqrtf(dx * dx + dy * dy);
 		if (dlen_xy > 1e-4f) {
 			dx /= dlen_xy;
@@ -1681,21 +2513,72 @@ plant_geometry_build(const PlantInstance *plant,
 				/* Columnar cactus spine areoles are already represented on the ribbed stem */
 				continue;
 			} else if (is_massart_conifer) {
-				/* Pectinate needle-comb sheets on actual fractal order 1..3 conifer branches */
-				if (org->sub_index != 0u || !is_axis_tip || org->branch_order == 0u)
+				/* Skyrim Falkreath/Riverwood Conifer Bough Spire (Douglas Fir & Silver Fir):
+				 * Emits drooping, shingled skirt + cross-fin boughs along both primary whorl limbs
+				 * (order 1) and lateral sub-boughs (order 2), tapering smoothly into a conical spire
+				 * so successive whorls overlap and eliminate bare telephone-pole trunk gaps. */
+				if (org->sub_index != 0u || org->branch_order == 0u)
 					continue;
-				if (org->branch_order > max_order_draw)
+				if (org->branch_order > woody_order_cap)
 					continue;
-				float drop = olen * 0.32f;
-				float roll = ((oseed & 1u) ? 0.24f : -0.24f);
-				nd_m3d_add_branchlet_card(b, ax, ay, az,
-				                          dx, dy, -0.08f,
-				                          olen * 1.10f, olen * 0.16f, drop,
-				                          owid * 0.68f, olen * 0.14f, roll,
-				                          0.0f, 0.0f, az,
-				                          ND_MAT3D_FOL_CONIFER,
-				                          c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
-				                          h_total);
+				if (org->branch_order == 2u && !is_terminal_shoot && !is_axis_tip)
+					continue;
+				float h_t = plant_clampf(az / fmaxf(1.0f, h_total), 0.0f, 1.0f);
+				float cone_taper = powf(fmaxf(0.14f, 1.04f - 0.82f * h_t), 0.78f);
+				float rx = w_total * 0.30f * cone_taper;
+				float ry = rx * 0.94f;
+				float rz = rx * 0.48f;
+				if (bough_clusters_emitted < max_clusters) {
+					bough_clusters_emitted++;
+					nd_m3d_add_conifer_bough_fan(b, ax, ay, az,
+					                             dx, dy,
+					                             rx, ry, rz,
+					                             c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+					                             h_total, oseed);
+				}
+			} else if (is_scots_pine) {
+				/* Pinus sylvestris (Scots Pine):
+				 * Lower 55% of the salmon-orange trunk is self-pruned and bare; upper crown (58..95% H)
+				 * carries wide, domed/tabular pine needle cloud pads on the crooked upper branches. */
+				if (org->sub_index != 0u || !is_terminal_shoot)
+					continue;
+				if (az < h_total * 0.54f)
+					az = h_total * 0.56f + (az * 0.25f);
+				float rx = w_total * 0.23f;
+				float ry = rx * 0.94f;
+				float rz = rx * 0.44f;
+				if (bough_clusters_emitted < max_clusters) {
+					bough_clusters_emitted++;
+					nd_m3d_add_conifer_bough_fan(b, ax, ay, az,
+					                             dx, dy,
+					                             rx, ry, rz,
+					                             c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+					                             h_total, oseed);
+				}
+			} else if (is_acacia) {
+				/* Acacia senegal (Savannah Umbrella Thorn):
+				 * Prune all lower/mid-trunk foliage below the V-vase forks and emit wide, thin,
+				 * horizontally stratified tabular umbrella pads across the top canopy table (70..94% H)
+				 * using fine feathery bipinnate pinnae (ND_MAT3D_FOL_BLADE). */
+				if (org->sub_index != 0u || !is_terminal_shoot)
+					continue;
+				float r_xy = hypotf(ax, ay);
+				float r_norm = plant_clampf(r_xy / fmaxf(1.0f, w_total * 0.44f), 0.0f, 1.0f);
+				/* Stratified horizontal umbrella table at 74..92% H with slight peripheral rim lift */
+				float table_z = h_total * (0.76f + 0.14f * r_norm + ((oseed & 3u) == 0u ? -0.10f : 0.0f));
+				az = fmaxf(h_total * 0.64f, 0.25f * az + 0.75f * table_z);
+				float rx = w_total * 0.25f;
+				float ry = rx * 0.95f;
+				float rz = rx * 0.22f;
+				if (bough_clusters_emitted < max_clusters) {
+					bough_clusters_emitted++;
+					nd_m3d_add_tabular_umbrella_fan(b, ax, ay, az,
+					                                dx, dy,
+					                                rx, ry, rz,
+					                                ND_MAT3D_FOL_BLADE,
+					                                c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+					                                h_total, oseed);
+				}
 			} else if (is_graminoid) {
 				/* Graminoid basal sword-blades already emitted in step 0; add upper cauline blade on stem tips */
 				if (org->sub_index != 0u || !is_axis_tip)
@@ -1720,84 +2603,256 @@ plant_geometry_build(const PlantInstance *plant,
 				                            c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
 				                            h_total);
 			} else {
-				/* Broadleaf / Scots Pine / Birch / Willow / Acacia / Olive sub-crown bough clusters:
-				 * Placed strictly on true terminal shoots (!has_woody_child) so interior structural forks
-				 * remain visible through crown sky windows and 100% of outer twigs carry foliage. */
+				/* Broadleaf Trees (Birch, Oak, Willow, Sycamore Maple, Olive):
+				 * Placed strictly on true terminal shoots (!has_woody_child) with woody stems anchored into
+				 * the terminal fork and fanning outward along the branch growth vector (dx, dy). */
 				if (org->sub_index != 0u || !is_terminal_shoot)
 					continue;
-				bool is_flat_crown = (g->architecture.orthotropy < 0.14f && g->architecture.orthotropy >= -0.20f) ||
-				                     (g->leaf.complexity == PLANT_LEAF_NEEDLE);
-				float flat_aspect = is_flat_crown ? 0.38f : 0.62f;
-				float rx = fminf(w_total * 0.155f, fmaxf(w_total * 0.110f, olen * 0.85f));
-				float ry = rx * 0.92f;
+				float crown_scale = is_birch ? 0.19f : (is_olive ? 0.22f : 0.24f);
+				float flat_aspect = is_olive ? 0.42f : (is_birch ? 0.54f : 0.62f);
+				float rx = w_total * crown_scale;
+				float ry = rx * 0.94f;
 				float rz = rx * flat_aspect;
-				float cx = ax + dx * rx * 0.22f;
-				float cy = ay + dy * ry * 0.22f;
-				float cz = fminf(h_total * 0.93f, az + rz * 0.18f);
+				float cz = fminf(h_total * 0.94f, az + rz * 0.18f);
 
 				if (bough_clusters_emitted < max_clusters) {
 					bough_clusters_emitted++;
-					/* Full 3D botanical sub-crown rosette of 4 interlocking branchlet sheets (zero spheres) */
-					nd_m3d_add_foliage_bough_cluster_ex(b, cx, cy, cz,
-					                                    rx, ry, rz,
-					                                    tree_fol_base,
-					                                    c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
-					                                    h_total, oseed);
-					/* Weeping species (Salix babylonica, Betula pendula): cascading 3D weeping curtain streamers */
-					if (g->architecture.orthotropy < -0.25f && (bough_clusters_emitted & 1u)) {
-						bool is_willow = (g->architecture.orthotropy < -0.55f);
+					/* Branch-aligned 4-sheet shingled bough fan anchored directly at the terminal woody twig */
+					nd_m3d_add_foliage_bough_fan_ex(b, ax, ay, az,
+					                                dx, dy,
+					                                rx, ry, rz,
+					                                tree_fol_base,
+					                                c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+					                                h_total, oseed);
+					/* Weeping species (Salix babylonica, Betula pendula): cascading pendulous branchlet curtains
+					 * using alpha-cutout compound foliage cards pitched steeply downward along gravity */
+					if (g->architecture.orthotropy < -0.25f && (is_willow || (bough_clusters_emitted & 1u))) {
 						int n_curtains = is_willow ? 2 : 1;
 						for (int wc = 0; wc < n_curtains; wc++) {
-							float c_ang = atan2f(dy, dx) + (float)wc * 0.85f - 0.35f;
+							float c_ang = atan2f(dy, dx) + (float)wc * 0.95f - 0.42f;
 							float cca = cosf(c_ang), csa = sinf(c_ang);
-							float drop_h = is_willow
-								? (h_total * (0.44f + 0.08f * (float)(wc & 1)))
-								: (h_total * 0.24f);
-							float reach_w = is_willow ? (w_total * 0.10f) : (w_total * 0.13f);
-							float blade_hw = is_willow ? (w_total * 0.046f) : (w_total * 0.038f);
-							nd_m3d_add_arching_blade(b,
-							                         cx + cca * rx * 0.22f,
-							                         cy + csa * ry * 0.22f,
-							                         cz,
-							                         cca, csa,
-							                         reach_w, h_total * 0.03f, drop_h,
-							                         blade_hw,
-							                         c_leaf_deep, c_leaf_mid,
-							                         (wc & 1) ? c_leaf_high : c_leaf_lit,
-							                         h_total);
+							float drop_len = is_willow
+								? fminf(cz - h_total * 0.08f, h_total * (0.42f + 0.06f * (float)(wc & 1)))
+								: fminf(cz - h_total * 0.22f, h_total * 0.24f);
+							if (drop_len < h_total * 0.12f)
+								drop_len = h_total * 0.12f;
+							float card_hw = drop_len * (is_willow ? 0.42f : 0.46f);
+							float out_xy  = is_willow ? 0.34f : 0.48f;
+							float down_z  = is_willow ? -0.94f : -0.88f;
+							nd_m3d_add_branchlet_card(b,
+							                          ax + cca * (rx * 0.16f),
+							                          ay + csa * (ry * 0.16f),
+							                          az + rz * 0.08f,
+							                          cca * out_xy, csa * out_xy, down_z,
+							                          drop_len, w_total * 0.04f, -w_total * 0.03f,
+							                          card_hw, w_total * 0.03f,
+							                          (wc & 1) ? 0.32f : -0.32f,
+							                          0.0f, 0.0f, h_total * 0.55f,
+							                          is_willow ? ND_MAT3D_FOL_BLADE : tree_fol_base,
+							                          c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+							                          h_total);
 						}
 					}
 				}
 			}
 		} else if (org->type == PLANT_ORGAN_FLOWER) {
-			float frad = fmaxf(1.6f, org->length_m * 0.5f * wu_per_m);
-			float fh   = fmaxf(1.0f, org->thickness_m * wu_per_m);
-			if (g->flower.inflorescence == PLANT_INFLORESCENCE_SPIKE) {
-				/* Cylindrical velvety cattail spike */
-				nd_m3d_add_trunk_tube_ex(b, ax, ay, az * 0.58f, frad * 0.85f,
-				                         ax, ay, az * 0.88f, frad * 0.80f,
-				                         6, 2, c_fl_prim, c_fl_prim, c_fl_sec,
-				                         ND_PLANT_BARK_FISSURED, 0.01f, h_total, oseed);
-			} else {
-				nd_m3d_add_blossom_star(b, ax, ay, fminf(h_total * 0.94f, az + fh * 0.4f),
-				                        frad, fh,
+			const PlantGrowthUnit *pu = (org->parent_unit < pheno->unit_count)
+				? &pheno->units[org->parent_unit] : NULL;
+			/* Keep flower corollas botanically proportioned relative to overall plant crown width */
+			float max_frad = is_cactus
+				? (w_total * 0.075f)
+				: (is_herb ? (w_total * 0.125f) : (w_total * 0.045f));
+			float frad = plant_clampf(org->length_m * 0.45f * wu_per_m, 1.4f, max_frad);
+			float fh   = plant_clampf(org->thickness_m * 0.6f * wu_per_m, 0.6f, frad * 0.48f);
+			if (is_graminoid || g->flower.inflorescence == PLANT_INFLORESCENCE_SPIKE) {
+				/* Cylindrical dark-chocolate velvety cattail spadix spike (Typha latifolia) */
+				uint32_t c_spadix_dark = 0xFF12203Au;
+				uint32_t c_spadix_mid  = 0xFF1A2E52u;
+				uint32_t c_spadix_lit  = 0xFF28426Eu;
+				float sp_r = fmaxf(1.1f, w_total * 0.036f);
+				nd_m3d_add_trunk_tube_ex(b, ax, ay, h_total * 0.54f, sp_r,
+				                         ax, ay, h_total * 0.80f, sp_r * 0.92f,
+				                         6, 2, c_spadix_dark, c_spadix_mid, c_spadix_lit,
+				                         ND_PLANT_BARK_HERB, 0.005f, h_total, oseed);
+			} else if (g->flower.inflorescence == PLANT_INFLORESCENCE_UMBEL) {
+				/* Compound flat-topped lacy white wild carrot umbel (Daucus carota) */
+				float u_rad = fminf(w_total * 0.068f, frad * 0.65f);
+				float fz = fminf(h_total * 0.93f, az + fh * 0.3f);
+				nd_m3d_add_blossom_star(b, ax, ay, fz, u_rad, fh * 0.5f,
 				                        c_fl_prim, c_fl_sec, c_fl_sec, h_total);
+				for (int uf = 0; uf < 3; uf++) {
+					float uang = (float)uf * 2.0943951f + (float)(oseed & 7u) * 0.3f;
+					nd_m3d_add_blossom_star(b,
+					                        ax + cosf(uang) * u_rad * 1.15f,
+					                        ay + sinf(uang) * u_rad * 1.15f,
+					                        fz - fh * 0.15f,
+					                        u_rad * 0.78f, fh * 0.45f,
+					                        c_fl_prim, c_fl_sec, c_fl_prim, h_total);
+				}
+			} else {
+				/* Distinct white ray petals + golden central disc for daisy (Bellis perennis) */
+				bool is_daisy = (g->architecture.model == PLANT_ARCH_HOLTTUM);
+				uint32_t col_petal_lit   = is_daisy ? 0xFFF8FAFCu : c_fl_prim;
+				uint32_t col_petal_shade = is_daisy ? 0xFFD4DCE6u : c_fl_sec;
+				uint32_t col_center      = is_daisy ? 0xFF10B8F8u : c_fl_sec;
+				float fz = fminf(h_total * 0.94f, az + fh * 0.35f);
+				if (is_daisy) {
+					if (org->sub_index != 0u)
+						continue;
+					if (pu && pu->next_in_axis != PLANT_INVALID_ID)
+						continue;
+					frad = fmaxf(frad, w_total * 0.145f);
+					fz   = az + fh * 0.25f;
+				}
+				nd_m3d_add_blossom_star(b, ax, ay, fz,
+				                        frad, fh,
+				                        col_petal_lit, col_petal_shade, col_center, h_total);
 			}
 		} else if (org->type == PLANT_ORGAN_FRUIT) {
-			float flen = fmaxf(1.8f, org->length_m * wu_per_m);
-			float frad = fmaxf(1.2f, org->width_m * 0.5f * wu_per_m);
-			if (g->fruit.fruit_type == PLANT_FRUIT_CONE || g->fruit.fruit_type == PLANT_FRUIT_ACHENE) {
-				/* Upright conifer seed cone (Abies alba) or cattail spadix */
+			float max_frad = is_herb ? (w_total * 0.068f) : (w_total * 0.035f);
+			float frad = plant_clampf(org->width_m * 0.45f * wu_per_m, 1.1f, max_frad);
+			float flen = plant_clampf(org->length_m * 0.65f * wu_per_m, 1.6f, max_frad * 2.2f);
+			if (is_graminoid) {
+				/* Cattail spike already emitted by flower/culm */
+				continue;
+			} else if (g->fruit.fruit_type == PLANT_FRUIT_CONE || g->fruit.fruit_type == PLANT_FRUIT_ACHENE) {
+				/* Upright conifer seed cone (Abies alba) or woody pine cone */
 				nd_m3d_add_trunk_tube_ex(b, ax, ay, az, frad,
-				                         ax, ay, fminf(h_total * 0.95f, az + flen), frad * 0.78f,
+				                         ax, ay, fminf(h_total * 0.95f, az + flen), frad * 0.76f,
 				                         5, 1, c_fr_imm, c_fr_mat, c_fr_mat,
 				                         ND_PLANT_BARK_FISSURED, 0.01f, h_total, oseed);
 			} else {
-				/* Globose berry / drupe cluster (Solanum lycopersicum) */
-				nd_m3d_add_blossom_star(b, ax, ay, az,
-				                        frad, flen * 0.55f,
-				                        c_fr_mat, c_fr_imm, c_fr_mat, h_total);
+				/* Plump 3D spherical berry / tomato fruit (Solanum lycopersicum) */
+				uint32_t col_berry = ((oseed & 3u) == 0u) ? c_fr_imm : c_fr_mat;
+				nd_m3d_add_fruit_berry(b, ax, ay, fminf(h_total * 0.78f, az),
+				                       frad, col_berry, c_fr_imm, h_total);
 			}
+		}
+	}
+
+	/* 3. Conifer Inter-Whorl Crown Fill (Douglas Fir & Silver Fir):
+	 *    Because Massart conifers develop 6 primary trunk whorls, add intermediate offset
+	 *    drooping bough whorls along the upper-middle trunk (22%..86% H) so the conical
+	 *    spire has 10+ overlapping Skyrim pine/fir tiers with zero bare pole gaps. */
+	if (is_massart_conifer) {
+		int n_fill_tiers = (detail_level == 0u) ? 4 : 2;
+		for (int ft = 0; ft < n_fill_tiers; ft++) {
+			float h_t = 0.24f + 0.60f * ((float)ft / (float)fmaxf(1, n_fill_tiers - 1));
+			float tz = h_total * h_t;
+			/* Interpolate trunk centerline (x, y) at height tz */
+			float tx = 0.0f, ty = 0.0f;
+			for (uint32_t u_idx = 0u; u_idx < pheno->unit_count; u_idx++) {
+				const PlantGrowthUnit *u = &pheno->units[u_idx];
+				if (u->branch_order == 0u && unit_tip_valid[u_idx]) {
+					if (unit_tip_pos[u_idx][2] <= tz + h_total * 0.12f) {
+						tx = unit_tip_pos[u_idx][0];
+						ty = unit_tip_pos[u_idx][1];
+					}
+				}
+			}
+			float cone_taper = powf(fmaxf(0.14f, 1.04f - 0.82f * h_t), 0.78f);
+			float rx = w_total * 0.30f * cone_taper;
+			float ry = rx * 0.94f;
+			float rz = rx * 0.48f;
+			int n_arms = 3;
+			for (int a = 0; a < n_arms; a++) {
+				uint32_t fseed = nd_m3d_hash(inst_seed + (uint32_t)(ft * 313 + a * 97 + 19));
+				float ang = ((float)a / (float)n_arms) * 6.2831853f + (float)ft * 2.3999632f +
+				            (((float)(fseed & 0xFFu) / 255.0f) - 0.5f) * 0.25f;
+				float ca = cosf(ang), sa = sinf(ang);
+				float ax_f = tx + ca * (rx * 0.22f);
+				float ay_f = ty + sa * (rx * 0.22f);
+				nd_m3d_add_conifer_bough_fan(b, ax_f, ay_f, tz,
+				                             ca, sa,
+				                             rx, ry, rz,
+				                             c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+				                             h_total, fseed);
+			}
+		}
+	} else if (is_acacia) {
+		/* Acacia senegal Continuous Horizontal Savannah Umbrella Stratum:
+		 * Crowns the ascending V-vase limbs with a wide, flat, multi-pad horizontal tabletop
+		 * (82..90% H) plus a smaller offset lower tier (64..69% H) so both side and 55-deg
+		 * diorama views show an unmistakable East African flat-topped umbrella thorn silhouette. */
+		float rx = w_total * 0.28f;
+		float ry = rx * 0.92f;
+		float rz = rx * 0.18f;
+		/* Central upper tabletop pad closing the crown roof above the main V-fork */
+		nd_m3d_add_tabular_umbrella_fan(b, 0.0f, 0.0f, h_total * 0.86f,
+		                                1.0f, 0.0f,
+		                                rx * 1.08f, ry * 1.08f, rz,
+		                                ND_MAT3D_FOL_BLADE,
+		                                c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+		                                h_total, inst_seed + 401u);
+		int n_table = (detail_level == 0u) ? 5 : 3;
+		for (int tp = 0; tp < n_table; tp++) {
+			uint32_t tseed = nd_m3d_hash(inst_seed + (uint32_t)(tp * 229 + 83));
+			float ang = ((float)tp / (float)n_table) * 6.2831853f + (float)(inst_seed & 7u) * 0.3f;
+			float ca = cosf(ang), sa = sinf(ang);
+			float tx = ca * (w_total * 0.25f);
+			float ty = sa * (w_total * 0.25f) * 0.56f;
+			float tz = h_total * (0.83f + 0.025f * (float)(tp % 3));
+			nd_m3d_add_tabular_umbrella_fan(b, tx, ty, tz,
+			                                ca, sa,
+			                                rx, ry, rz,
+			                                ND_MAT3D_FOL_BLADE,
+			                                c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+			                                h_total, tseed);
+		}
+		/* Secondary offset lower savannah tier pad at 66% H */
+		float l_ang = (float)(inst_seed & 15u) * 0.42f;
+		nd_m3d_add_tabular_umbrella_fan(b,
+		                                cosf(l_ang) * (w_total * 0.22f),
+		                                sinf(l_ang) * (w_total * 0.22f) * 0.56f,
+		                                h_total * 0.66f,
+		                                cosf(l_ang), sinf(l_ang),
+		                                rx * 0.85f, ry * 0.85f, rz * 0.90f,
+		                                ND_MAT3D_FOL_BLADE,
+		                                c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+		                                h_total, inst_seed + 709u);
+	} else if (is_scots_pine) {
+		/* Pinus sylvestris Upper Crown Dome & Cloud Table Fill:
+		 * Closes the central upper pine dome (74..92% H) above the high salmon-barked trunk fork
+		 * so the 55-deg diorama view shows a full, billowing, layered Scots pine canopy. */
+		float rx = w_total * 0.28f;
+		float ry = rx * 0.94f;
+		float rz = rx * 0.44f;
+		int n_caps = (detail_level == 0u) ? 4 : 2;
+		for (int cp = 0; cp < n_caps; cp++) {
+			uint32_t pseed = nd_m3d_hash(inst_seed + (uint32_t)(cp * 193 + 61));
+			float ang = (float)cp * 2.3999632f + (float)(inst_seed & 7u) * 0.25f;
+			float ca = cosf(ang), sa = sinf(ang);
+			float rad = (cp == 0) ? (w_total * 0.03f) : (w_total * 0.14f);
+			float pz  = h_total * ((cp == 0) ? 0.91f : (0.78f + 0.04f * (float)cp));
+			nd_m3d_add_conifer_bough_fan(b, ca * rad, sa * rad * 0.68f, pz,
+			                             ca, sa,
+			                             rx, ry, rz,
+			                             c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+			                             h_total, pseed);
+		}
+	} else if (!is_herb && !is_graminoid && !is_cactus) {
+		/* Broadleaf Upper-Crown Dome Roof Fill (Birch, Oak, Willow, Maple, Olive):
+		 * Terminal shoots lie around the outer crown perimeter; adding 3 interior upper-crown
+		 * bough fans above the central scaffold fork (68..88% H) eliminates the top-down/55-deg
+		 * donut hole while preserving natural side-view branch windows below. */
+		float crown_scale = is_birch ? 0.21f : (is_olive ? 0.24f : 0.26f);
+		float flat_aspect = is_olive ? 0.42f : (is_birch ? 0.54f : 0.62f);
+		float rx = w_total * crown_scale;
+		float ry = rx * 0.94f;
+		float rz = rx * flat_aspect;
+		int n_roof = (detail_level == 0u) ? 3 : 2;
+		for (int rf = 0; rf < n_roof; rf++) {
+			uint32_t rseed = nd_m3d_hash(inst_seed + (uint32_t)(rf * 271 + 113));
+			float ang = (float)rf * 2.0943951f + (float)(inst_seed & 7u) * 0.3f;
+			float ca = cosf(ang), sa = sinf(ang);
+			float rad = (rf == 0) ? (w_total * 0.04f) : (w_total * 0.13f);
+			float rz_h = h_total * ((rf == 0) ? 0.84f : (0.72f + 0.05f * (float)rf));
+			nd_m3d_add_foliage_bough_fan_ex(b, ca * rad, sa * rad * 0.78f, rz_h,
+			                                ca, sa,
+			                                rx, ry, rz,
+			                                tree_fol_base,
+			                                c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
+			                                h_total, rseed);
 		}
 	}
 

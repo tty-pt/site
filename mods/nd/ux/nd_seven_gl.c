@@ -11,6 +11,7 @@
 #include "nd_seven_atlas.h"
 #include "nd_seven_atlas_draw.h"
 #include "nd_seven_ground.h"
+#include "nd_seven_foliage_atlas.h"
 #include <ttypt/webgl.h>
 #include <ttypt/areole.h>
 #include <ttypt/chaff_glsl.h>
@@ -19,6 +20,17 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+
+#ifndef GL_LINEAR_MIPMAP_LINEAR
+#define GL_LINEAR_MIPMAP_LINEAR 0x2703
+#endif
+#ifndef GL_TEXTURE_MAX_LEVEL
+#define GL_TEXTURE_MAX_LEVEL 0x813D
+#endif
+#ifndef GL_INVERT
+#define GL_INVERT 0x150A
+#endif
+#define ND_TREE_SHADOW_RES 1024
 
 /* Forward declaration for 2D hierarchical occlusion map builder */
 static void gl_build_occ2d_map(void);
@@ -105,6 +117,40 @@ static void gl_build_occ2d_map(void);
 	"    float anaSh = eval_planetary_cloud_shadow(fragXY, fragZ, anim_time, humidity, dist, fw);\n" \
 	"    float blend = max(smoothstep(140000.0, 180000.0, dist), smoothstep(0.88, 0.96, csmBox));\n" \
 	"    return mix(csmSh, anaSh, blend);\n" \
+	"}\n"
+
+/* Local 1024x1024 3D Directional Depth Shadow Map with 9-tap Interleaved-Gradient-Noise rotated Poisson PCF.
+ * Uses world-grid local coordinates (East, South, Up) relative to texel-snapped uTreeShadowOrigin so shadows
+ * never crawl on camera motion and cast true 3D botanical silhouettes onto uneven terrain and lower tree crowns. */
+#define ND_GLSL_TREE_SHADOW_FN \
+	"uniform sampler2D uTreeShadowTex;\n" \
+	"uniform vec3 uTreeShadowOrigin;\n" \
+	"uniform mat4 uTreeShadowVP;\n" \
+	"uniform float uTreeShadowActive;\n" \
+	"float nd_eval_tree_shadow(vec3 worldGridPos, float biasWu) {\n" \
+	"    if (uTreeShadowActive <= 0.001) return 1.0;\n" \
+	"    vec3 sc = (uTreeShadowVP * vec4(worldGridPos - uTreeShadowOrigin, 1.0)).xyz;\n" \
+	"    float edgeDist = max(abs(sc.x), abs(sc.y));\n" \
+	"    if (edgeDist >= 0.99 || abs(sc.z) >= 0.99) return 1.0;\n" \
+	"    vec2 uv = sc.xy * 0.5 + 0.5;\n" \
+	"    float refD = sc.z * 0.5 + 0.5 - (biasWu * (1.0 / 4096.0));\n" \
+	"    float ang = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853;\n" \
+	"    float ca = cos(ang), sa = sin(ang);\n" \
+	"    mat2 rot = mat2(ca, -sa, sa, ca);\n" \
+	"    const float rTexel = 1.65 / 1024.0;\n" \
+	"    float lit = 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2( 0.36,  0.14)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2(-0.34,  0.22)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2( 0.08, -0.40)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2( 0.78, -0.32)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2(-0.76, -0.36)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2( 0.52,  0.72)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2(-0.50,  0.74)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    lit += (refD <= texture(uTreeShadowTex, uv + (rot * vec2( 0.02, -0.92)) * rTexel).r) ? 1.0 : 0.0;\n" \
+	"    float vis = lit * (1.0 / 9.0);\n" \
+	"    float borderFade = smoothstep(0.985, 0.84, edgeDist);\n" \
+	"    return mix(1.0, vis, borderFade * uTreeShadowActive);\n" \
 	"}\n"
 
 /* Toroidal geometric self-eclipse raymarch:
@@ -1093,6 +1139,7 @@ static const char *s_fs_terrain =
 	ND_GLSL_CLOUD_SHADOW_FN
 	ND_GLSL_CSM_LOOKUP_FN
 	ND_GLSL_CLOUD_SHADOW_ENTRY_FN
+	ND_GLSL_TREE_SHADOW_FN
 	"void main() {\n"
 	"    float scale = (uHeightScale != 0.0) ? uHeightScale : 1.0;\n"
 	"    float effectiveScale = scale * 0.0625;\n"
@@ -1227,7 +1274,7 @@ static const char *s_fs_terrain =
 	"    float orbitLight = smoothstep(24000.0, 220000.0, vDistance);\n"
 	"    vec3 L_local = normalize(-0.577 * tangentU - 0.577 * tangentV + 0.816 * torusN);\n"
 	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
-	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_local;\n"
+	"    vec3 L_day = (sunLocal.z > -0.08) ? normalize(sunLocal.x * tangentU + sunLocal.y * tangentV + max(0.12, sunLocal.z) * torusN) : L_local;\n"
 	"    vec3 L_frag = normalize(mix(L_day, normalize(sDir + 0.35 * torusN), orbitLight));\n"
 	"    float sunDot = dot(torusN, sDir);\n"
 	"    vec3 P_torus = (uCameraPos - vViewDir) - uPlanetCenter;\n"
@@ -1237,6 +1284,9 @@ static const char *s_fs_terrain =
 	"    float effSun = sunDot * innerEclipse;\n"
 	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, effSun), 0.12, 1.0);\n"
 	"    float directSun = smoothstep(-0.06, 0.18, effSun);\n"
+	"    float treeShadowVis = (uTreeShadowActive > 0.001 && vDistance < 4400.0 && fragWaterDepth < 4.5)\n"
+	"                        ? nd_eval_tree_shadow(vec3(vWorldPos, fragZ), 1.8)\n"
+	"                        : 1.0;\n"
 	"    float twilight = smoothstep(0.32, -0.06, effSun) * smoothstep(-0.16, 0.12, effSun);\n"
 	"    vec3 sunColor = mix(vec3(1.0, 0.98, 0.92), mix(vec3(1.0, 0.62, 0.28), vec3(0.96, 0.38, 0.18), smoothstep(0.18, -0.06, effSun)), twilight);\n"
 	"    vec3 sunLitCol = mix(vec3(1.0), sunColor, twilight * 0.80);\n"
@@ -1246,8 +1296,8 @@ static const char *s_fs_terrain =
 	"    float nightMask = smoothstep(0.06, -0.16, effSun);\n"
 	"    float torusShine = nightMask * torusShineVisibility * oppSunlit * 0.16;\n"
 	"    vec3 torusShineCol = vec3(0.56, 0.68, 0.86);\n"
-	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans * directSun;\n"
-	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor)) + 0.55 * baseDiff + torusShine;\n"
+	"    float baseDiff = max(0.0, dot(fragNormal, L_frag)) * sunTrans * directSun * treeShadowVis;\n"
+	"    float effLighting = (0.45 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor) * mix(0.86, 1.0, treeShadowVis)) + 0.55 * baseDiff + torusShine;\n"
 	"    vec3 dryCol = baseCol.rgb;\n"
 	"    float dryLighting = effLighting;\n"
 	"    float slope = 1.0 - max(0.0, dot(fragNormal, torusN));\n"
@@ -1489,7 +1539,9 @@ static const char *s_fs_terrain =
 	"            /* Grazing-angle Schlick vegetative velvet sheen on grass & turf */\n"
 	"            float vegGrazingSheen = pow(clamp(1.0 - NdotV, 0.0, 1.0), 4.0) * NdotL * vegFactor * 0.16 * distFade;\n"
 	"            float cavityAO = clamp(1.0 - slope * 0.22 + h0 * 0.24 - microCavity * 0.42 - concavity * 0.14 - rockCrevice * 0.38 - canopyApronAO, 0.48, 1.06);\n"
-	"            float fragLit = ((0.40 * nd_amb_trans(cloudShadow)) + 0.60 * (orenNayarDiff + vegGrazingSheen) * sunTrans) * cavityAO;\n"
+	"            float fragLit = ((0.40 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor) * mix(0.85, 1.0, treeShadowVis)) +\n"
+	"                             0.60 * (orenNayarDiff + vegGrazingSheen) * sunTrans * directSun * treeShadowVis +\n"
+	"                             torusShine) * cavityAO;\n"
 	"            dryLighting = mix(dryLighting, fragLit, macroFade);\n"
 	"            float microShade = clamp(1.0 + h0 * (0.30 + 0.16 * closeZoom) * macroFade, 0.72, 1.28);\n"
 	"            dryCol *= microShade;\n"
@@ -1498,12 +1550,12 @@ static const char *s_fs_terrain =
 	"            dryCol *= (1.0 - shoreWetMoisture * 0.22);\n"
 	"            float subAerialMask = smoothstep(0.25, -0.02, fragWaterDepth);\n"
 	"            float wetSpecAngle = max(0.0, dot(N_frag, H_half));\n"
-	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.32 * wetSand + 0.34 * shoreWetMoisture + 0.42 * marshPoolMask) * subAerialMask;\n"
-	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.42 * subAerialMask;\n"
+	"            float wetFilmSpec = pow(wetSpecAngle, 36.0) * (0.32 * wetSand + 0.34 * shoreWetMoisture + 0.42 * marshPoolMask) * subAerialMask * treeShadowVis;\n"
+	"            float quartzGlint = pow(wetSpecAngle, 64.0) * sandSparkle * 0.42 * subAerialMask * treeShadowVis;\n"
 	"            dryCol += vec3((wetFilmSpec + quartzGlint) * (0.35 + 0.65 * max(sandFactor, marshPoolMask)) * distFade);\n"
 	"            if (rockFactor > 0.25 && distFade > 0.0) {\n"
 	"                float specAngle = max(0.0, dot(N_frag, H_half));\n"
-	"                float spec = pow(specAngle, 24.0) * (rockFactor * (0.20 + 0.12 * closeZoom) * (1.0 - rockCrevice) * distFade);\n"
+	"                float spec = pow(specAngle, 24.0) * (rockFactor * (0.20 + 0.12 * closeZoom) * (1.0 - rockCrevice) * distFade * treeShadowVis);\n"
 	"                dryCol += vec3(spec);\n"
 	"            }\n"
 	"        }\n"
@@ -1531,7 +1583,7 @@ static const char *s_fs_terrain =
 	"            vec3 N_sub = normalize(fragNormal - detail.y * (0.30 * distFade) * tangentU - detail.z * (0.30 * distFade) * tangentV);\n"
 	"            float subDiff = max(0.0, dot(N_sub, L_frag));\n"
 	"            float subCavity = clamp(1.0 + detail.x * 0.28 - detail.w * 0.38, 0.62, 1.18);\n"
-	"            subLighting = mix(subLighting, ((0.45 * nd_amb_trans(cloudShadow)) + 0.55 * subDiff * sunTrans) * subCavity, distFade);\n"
+	"            subLighting = mix(subLighting, ((0.45 * nd_amb_trans(cloudShadow) * (0.20 + 0.80 * dayFactor)) + 0.55 * subDiff * sunTrans * directSun * treeShadowVis + torusShine) * subCavity, distFade);\n"
 	"        }\n"
 	"    }\n"
 	"    /* Gradual transition from detailed shore substrate into deeper benthic sediment (0.35 .. 5.5 units) */\n"
@@ -1606,7 +1658,7 @@ static const char *s_fs_terrain =
 	"        subCol = mix(subCol, vec3(0.96, 0.98, 1.00), seaIce * 0.96);\n"
 	"    }\n"
 	"    vec3 baseAlbedo = mix(dryCol, subCol, submergedBlend);\n"
-	"    vec3 shadowCool = mix(vec3(1.0), vec3(0.85, 0.92, 1.05), cloudShadow * 0.45);\n"
+	"    vec3 shadowCool = mix(vec3(1.0), vec3(0.85, 0.92, 1.05), clamp(cloudShadow * 0.45 + (1.0 - treeShadowVis) * 0.34, 0.0, 0.65));\n"
 	"    vec3 lit = mix(dryCol * dryLighting * sunLitCol * shadowCool, subCol * subLighting, submergedBlend);\n"
 	"    if (uLambLight.w > 0.001) {\n"
 	"        vec3 toLamb = vec3((uLambLight.x - vWorldPos.x) * tangentU + (uLambLight.y - vWorldPos.y) * tangentV + (uLambLight.z + 10.0 - fragZ) * torusN);\n"
@@ -3248,6 +3300,8 @@ static const char *s_vs_mesh3d =
 	"uniform vec3 uSunDir;\n"
 	"uniform vec4 uLambLight;\n"
 	"uniform int uShadowPass;\n"
+	"uniform vec3 uTreeShadowWriteOrigin;\n"
+	"uniform mat4 uTreeShadowWriteVP;\n"
 	"out vec3 vWorldPos;\n"
 	"out vec3 vLocalPos;\n"
 	"out vec3 vNormal;\n"
@@ -3258,6 +3312,9 @@ static const char *s_vs_mesh3d =
 	"out float vAO;\n"
 	"out float vHeightAboveGround;\n"
 	"out vec2 vCardUV;\n"
+	"out vec3 vTorusN;\n"
+	"out vec3 vSunLocal;\n"
+	"out float vFlip;\n"
 	"void main() {\n"
 	"    float scXY = a_ibase.w;\n"
 	"    float scZ  = a_iE.w;\n"
@@ -3276,8 +3333,8 @@ static const char *s_vs_mesh3d =
 	"    float wind_sx = a_iS.w * wgt;\n"
 	"    float wind_sy = a_iN.w * wgt;\n"
 	"    float wind_dz = 0.06 * (a_iS.w * a_iS.w + a_iN.w * a_iN.w) * wgt;\n"
-	"    float lx = a_vpos.x * scXY + wind_sx;\n"
-	"    float ly = a_vpos.y * scXY + wind_sy;\n"
+	"    float lx = a_vpos.x * scXY;\n"
+	"    float ly = a_vpos.y * scXY;\n"
 	"    float lz = max(0.0, a_vpos.z * scZ - wind_dz);\n"
 	"    float tw = a_iterr.w;\n"
 	"    float flip = (tw < 0.0) ? -1.0 : 1.0;\n"
@@ -3285,11 +3342,37 @@ static const char *s_vs_mesh3d =
 	"    float shFlags = floor(atw + 1e-4);\n"
 	"    float yaw = (fract(atw) - 0.5) * 6.28318530718;\n"
 	"    float cy = cos(yaw), sy = sin(yaw);\n"
-	"    /* Recover unrotated world East/South vertex offsets (dx_e, dy_s) and tangent basis (E, S) */\n"
-	"    float dx_e = (cy * flip) * lx - sy * ly;\n"
-	"    float dy_s = (sy * flip) * lx + cy * ly;\n"
+	"    /* Recover unrotated world East/South vertex offsets (dx_e, dy_s), tangent basis (E, S), and rotated normal */\n"
+	"    float dx_e = (cy * flip) * lx - sy * ly + wind_sx;\n"
+	"    float dy_s = (sy * flip) * lx + cy * ly + wind_sy;\n"
 	"    vec3 E = (cy * flip) * a_iE.xyz - sy * a_iS.xyz;\n"
 	"    vec3 S = (sy * flip) * a_iE.xyz + cy * a_iS.xyz;\n"
+	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
+	"    vec3 sunLoc = vec3(dot(sDir, E), dot(sDir, S), dot(sDir, a_iN.xyz));\n"
+	"    vec3 rotLocalN = normalize(vec3((cy * flip) * a_vnorm.x - sy * a_vnorm.y,\n"
+	"                                    (sy * flip) * a_vnorm.x + cy * a_vnorm.y,\n"
+	"                                    a_vnorm.z));\n"
+	"    vTorusN = a_iN.xyz;\n"
+	"    vSunLocal = sunLoc;\n"
+	"    vFlip = flip;\n"
+	"    if (uShadowPass == 3) {\n"
+	"        if (a_itint.a <= 0.05) {\n"
+	"            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"            return;\n"
+	"        }\n"
+	"        vec3 wGrid = vec3(a_iparam.x + dx_e, a_iparam.y + dy_s, a_iparam.z + lz);\n"
+	"        vWorldPos = a_ibase.xyz + dx_e * E + dy_s * S + lz * a_iN.xyz;\n"
+	"        vLocalPos = wGrid;\n"
+	"        vNormal = a_iN.xyz;\n"
+	"        vLocalN = rotLocalN;\n"
+	"        vCol = a_vcol;\n"
+	"        vTint = a_itint;\n"
+	"        vParam = a_iparam;\n"
+	"        vAO = a_vnorm.w;\n"
+	"        vHeightAboveGround = lz;\n"
+	"        gl_Position = uTreeShadowWriteVP * vec4(wGrid - uTreeShadowWriteOrigin, 1.0);\n"
+	"        return;\n"
+	"    }\n"
 	"    if (uShadowPass > 0) {\n"
 	"        bool emitSun  = (shFlags >= 0.5 && (shFlags < 1.5 || shFlags >= 2.5));\n"
 	"        bool emitLamb = (shFlags >= 1.5);\n"
@@ -3299,18 +3382,13 @@ static const char *s_vs_mesh3d =
 	"        }\n"
 	"        float ray_dx = 0.0, ray_dy = 0.0, max_drop = 260.0, lift_z = 0.28;\n"
 	"        if (uShadowPass == 1) {\n"
-	"            float sun_e = -0.50, sun_s = -0.42, sun_n = 0.76;\n"
-	"            if (dot(uSunDir, uSunDir) > 1e-4) {\n"
-	"                float le = dot(uSunDir, E);\n"
-	"                float ls = dot(uSunDir, S);\n"
-	"                float ln = dot(uSunDir, a_iN.xyz);\n"
-	"                if (ln > -0.05) {\n"
-	"                    sun_e = -0.46 + 0.18 * le;\n"
-	"                    sun_s = -0.40 + 0.18 * ls;\n"
-	"                    sun_n = max(0.42, 0.65 + 0.25 * ln);\n"
-	"                }\n"
+	"            float sun_e = -0.577, sun_s = -0.577, sun_n = 0.816;\n"
+	"            if (sunLoc.z > -0.05) {\n"
+	"                sun_e = sunLoc.x;\n"
+	"                sun_s = sunLoc.y;\n"
+	"                sun_n = max(0.32, sunLoc.z);\n"
 	"            }\n"
-	"            float cast_scale = min(1.65, 0.74 / sun_n);\n"
+	"            float cast_scale = min(1.85, 1.0 / sun_n);\n"
 	"            ray_dx = -sun_e * cast_scale;\n"
 	"            ray_dy = -sun_s * cast_scale;\n"
 	"        } else {\n"
@@ -3339,7 +3417,7 @@ static const char *s_vs_mesh3d =
 	"        vWorldPos = p_sh;\n"
 	"        vLocalPos = vec3(a_iparam.x + sx, a_iparam.y + sy, a_iparam.z + dz_terr);\n"
 	"        vNormal = a_iN.xyz;\n"
-	"        vLocalN = normalize(a_vnorm.xyz);\n"
+	"        vLocalN = rotLocalN;\n"
 	"        vCol = a_vcol;\n"
 	"        vTint = a_itint;\n"
 	"        vParam = a_iparam;\n"
@@ -3348,26 +3426,22 @@ static const char *s_vs_mesh3d =
 	"        vec3 toCam = uCameraPos - p_sh;\n"
 	"        float dCam = length(toCam);\n"
 	"        vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
-	"        float shBias = (uShadowPass == 2) ? min(21.2, dCam * 0.073) : min(21.0, dCam * 0.072);\n"
+	"        float shBias = (uShadowPass == 2) ? 0.55 : 0.45;\n"
 	"        gl_Position = uMVP * vec4(p_sh + dirToCam * shBias, 1.0);\n"
 	"        return;\n"
 	"    }\n"
-	"    vec3 p = a_ibase.xyz + lx * a_iE.xyz + ly * a_iS.xyz + lz * a_iN.xyz;\n"
+	"    vec3 p = a_ibase.xyz + dx_e * E + dy_s * S + lz * a_iN.xyz;\n"
 	"    vec3 n = normalize(a_vnorm.x * a_iE.xyz + a_vnorm.y * a_iS.xyz + a_vnorm.z * a_iN.xyz);\n"
 	"    vWorldPos = p;\n"
 	"    vLocalPos = vec3(a_iparam.x + dx_e, a_iparam.y + dy_s, a_iparam.z + lz);\n"
 	"    vNormal = n;\n"
-	"    vLocalN = normalize(a_vnorm.xyz);\n"
+	"    vLocalN = rotLocalN;\n"
 	"    vCol = a_vcol;\n"
 	"    vTint = a_itint;\n"
 	"    vParam = a_iparam;\n"
 	"    vAO = a_vnorm.w;\n"
 	"    vHeightAboveGround = lz;\n"
-	"    vec3 toCam = uCameraPos - p;\n"
-	"    float dCam = length(toCam);\n"
-	"    vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
-	"    float bias = min(24.0, dCam * 0.08);\n"
-	"    gl_Position = uMVP * vec4(p + dirToCam * bias, 1.0);\n"
+	"    gl_Position = uMVP * vec4(p, 1.0);\n"
 	"}\n";
 
 static const char *s_fs_mesh3d =
@@ -3385,6 +3459,9 @@ static const char *s_fs_mesh3d =
 	"in float vAO;\n"
 	"in float vHeightAboveGround;\n"
 	"in vec2 vCardUV;\n"
+	"in vec3 vTorusN;\n"
+	"in vec3 vSunLocal;\n"
+	"in float vFlip;\n"
 	"uniform float uSeaLevel;\n"
 	"uniform float uAnimTime;\n"
 	"uniform vec3 uCameraPos;\n"
@@ -3395,13 +3472,51 @@ static const char *s_fs_mesh3d =
 	"uniform vec4 uLambLight;\n"
 	"uniform vec3 uSunDir;\n"
 	"uniform int uShadowPass;\n"
+	"uniform sampler2D uBranchletTex;\n"
 	"out vec4 FragColor;\n"
 	ND_GLSL_SCENE_LIGHT
 	ND_GLSL_CSM_LOOKUP_FN
+	ND_GLSL_TREE_SHADOW_FN
 	CHAFF_GLSL_HASH_FN
 	CHAFF_GLSL_GRAD_NOISE_FN
+	"vec4 nd_sample_branchlet(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
+	"    vec2 tileOff = isCon ? vec2(0.0, 0.0)\n"
+	"                 : (isOv ? vec2(0.5, 0.0)\n"
+	"                 : (isLob ? vec2(0.0, 0.5) : vec2(0.5, 0.5)));\n"
+	"    vec2 uv = tileOff + vec2(0.006 + clamp(cuv.x, 0.0, 1.0) * 0.488,\n"
+	"                             0.006 + clamp(cuv.y, 0.0, 1.0) * 0.488);\n"
+	"    return texture(uBranchletTex, uv);\n"
+	"}\n"
 	"void main() {\n"
 	"    if (vTint.a <= 0.01) discard;\n"
+	"    float mat = vCol.a;\n"
+	"    bool isBark    = (mat < 0.18);\n"
+	"    bool isFoliage = (mat >= 0.18 && mat <= 0.355);\n"
+	"    bool isFolCore = (mat >= 0.18 && mat < 0.195);\n"
+	"    bool isFolConifer = (mat >= 0.198 && mat < 0.239);\n"
+	"    bool isFolOvate   = (mat >= 0.239 && mat < 0.279);\n"
+	"    bool isFolLobed   = (mat >= 0.279 && mat < 0.319);\n"
+	"    bool isFolFringe  = (mat >= 0.28 && mat <= 0.355);\n"
+	"    bool isFlower  = (mat > 0.355 && mat <= 0.55);\n"
+	"    bool isRock    = (mat > 0.55 && mat < 0.85);\n"
+	"    bool isCrystal = (mat >= 0.85);\n"
+	"    if (uShadowPass == 3) {\n"
+	"        if (vTint.a <= 0.05) discard;\n"
+	"        if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 4.0) discard;\n"
+	"        if (isFoliage && !isFolCore) {\n"
+	"            if (vCardUV.x >= 0.0) {\n"
+	"                vec4 br = nd_sample_branchlet(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
+	"                if (br.a < 0.38) discard;\n"
+	"            } else {\n"
+	"                vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.58 + vec2(-vHeightAboveGround * 0.36, vLocalPos.x * 0.24), 0x464F4C32u);\n"
+	"                vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.45 + vec2(vHeightAboveGround * 0.95, vLocalPos.y * 0.75), 0x4C463333u);\n"
+	"                float poreField = 0.55 * gLeaf.x + 0.45 * gMicro.x;\n"
+	"                if (poreField < (isFolFringe ? 0.36 : 0.24)) discard;\n"
+	"            }\n"
+	"        }\n"
+	"        FragColor = vec4(0.0);\n"
+	"        return;\n"
+	"    }\n"
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
 	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    bool inWaterTile = (vParam.w >= 15.5);\n"
@@ -3413,45 +3528,12 @@ static const char *s_fs_mesh3d =
 	"        dWater = max(0.0, uSeaLevel - vLocalPos.z);\n"
 	"        isSubmerged = (dWater > 0.02);\n"
 	"    }\n"
-	"    float mat = vCol.a;\n"
-	"    bool isBark    = (mat < 0.18);\n"
-	"    bool isFoliage = (mat >= 0.18 && mat <= 0.355);\n"
-	"    bool isFolCore = (mat >= 0.18 && mat < 0.195);\n"
-	"    bool isFolConifer = (mat >= 0.198 && mat < 0.239);\n"
-	"    bool isFolOvate   = (mat >= 0.239 && mat < 0.279);\n"
-	"    bool isFolLobed   = (mat >= 0.279 && mat < 0.319);\n"
-	"    bool isFolBlade   = (mat >= 0.319 && mat <= 0.355);\n"
-	"    bool isFolFringe  = (mat >= 0.28 && mat <= 0.355);\n"
-	"    bool isFlower  = (mat > 0.355 && mat <= 0.55);\n"
-	"    bool isRock    = (mat > 0.55 && mat < 0.85);\n"
-	"    bool isCrystal = (mat >= 0.85);\n"
 	"    if (uShadowPass > 0) {\n"
 	"        if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 4.0) discard;\n"
 	"        if (isFoliage && !isFolCore && vDist < 3400.0) {\n"
 	"            if (vCardUV.x >= 0.0) {\n"
-	"                float cu = vCardUV.x;\n"
-	"                float dv = vCardUV.y - 0.5;\n"
-	"                float adv = abs(dv);\n"
-	"                if (isFolConifer) {\n"
-	"                    float envW = 0.48 * sin(min(1.0, cu * 1.15 + 0.12) * 2.85);\n"
-	"                    if (adv > envW || cu > 0.98) discard;\n"
-	"                    float uNeedle = cu - adv * 0.78;\n"
-	"                    float phase = uNeedle * 18.0 + ((dv > 0.0) ? 0.35 : 0.0);\n"
-	"                    float rFrac = adv / max(0.05, envW);\n"
-	"                    if (adv > 0.042 * (1.0 - 0.65 * cu) && sin(phase * 6.2831853) < -0.25 + 0.72 * rFrac) discard;\n"
-	"                } else if (isFolOvate || isFolLobed) {\n"
-	"                    float envW = 0.48 * sin(min(1.0, cu * 1.05 + 0.08) * 2.95);\n"
-	"                    if (adv > envW) discard;\n"
-	"                    if (adv >= 0.032 * (1.0 - 0.75 * cu) || cu >= 0.86) {\n"
-	"                        float uLeaf = cu * 5.2 - adv * 1.6;\n"
-	"                        float lf = fract(uLeaf + ((dv < 0.0) ? 0.48 * mod(abs(floor(uLeaf)), 2.0) : 0.0));\n"
-	"                        float rFrac = adv / max(0.05, envW);\n"
-	"                        float serrate = isFolLobed ? (0.14 * sin(rFrac * 15.7)) : (0.06 * sin(rFrac * 34.0));\n"
-	"                        if (abs(lf - 0.5) > 0.44 * sin(min(1.0, rFrac) * 3.05) + serrate) discard;\n"
-	"                    }\n"
-	"                } else if (isFolBlade) {\n"
-	"                    if (adv > 0.48 * (1.0 - 0.78 * cu * cu)) discard;\n"
-	"                }\n"
+	"                vec4 br = nd_sample_branchlet(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
+	"                if (br.a < 0.38) discard;\n"
 	"            } else {\n"
 	"                vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.58 + vec2(-vHeightAboveGround * 0.36, vLocalPos.x * 0.24), 0x464F4C32u);\n"
 	"                vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.45 + vec2(vHeightAboveGround * 0.95, vLocalPos.y * 0.75), 0x4C463333u);\n"
@@ -3460,9 +3542,7 @@ static const char *s_fs_mesh3d =
 	"                if (poreField < cutThresh) discard;\n"
 	"            }\n"
 	"        }\n"
-	"        float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
-	"        float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
-	"        vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
+	"        vec3 torusN = normalize(vTorusN);\n"
 	"        vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"        float sunDot = dot(torusN, sDir);\n"
 	"        float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
@@ -3486,13 +3566,20 @@ static const char *s_fs_mesh3d =
 	"        FragColor = vec4(shRgb, shAlpha);\n"
 	"        return;\n"
 	"    }\n"
+	"    /* Sample mipmapped SpeedTree botanical branchlet atlas for foliage cards */\n"
+	"    bool hasBrCard = (isFoliage && !isFolCore && vCardUV.x >= 0.0);\n"
+	"    vec4 brSample = vec4(0.55, 0.5, 0.0, 1.0);\n"
+	"    if (hasBrCard) {\n"
+	"        brSample = nd_sample_branchlet(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
+	"        float alphaCut = mix(0.42, 0.26, smoothstep(800.0, 3200.0, vDist));\n"
+	"        if (brSample.a < alphaCut) discard;\n"
+	"    }\n"
 	"    /* Diorama Sightline Canopy Cutaway: when tall overstory tree crowns (> 2.0 m = 90 wu)\n"
 	"     * pass between the 55-deg diorama camera and the 40 cm (18 wu) Lamb, screen-door dither\n"
 	"     * the upper foliage canopy so the Lamb remains clearly visible while lower trunks stay solid. */\n"
 	"    if (isFoliage && vHeightAboveGround > 90.0 && vDist < 900.0) {\n"
 	"        float dz = vLocalPos.z - (uLambLight.z + 9.0);\n"
 	"        if (dz > 36.0) {\n"
-	"            /* Project fragment along 55-deg south diorama view ray back to Lamb Z plane */\n"
 	"            vec2 rayAtLamb = vec2(vLocalPos.x, vLocalPos.y - dz * 0.7002075);\n"
 	"            float rSight = length(rayAtLamb - uLambLight.xy);\n"
 	"            if (rSight < 85.0) {\n"
@@ -3508,12 +3595,19 @@ static const char *s_fs_mesh3d =
 	"        vec3 plantScale = vTint.rgb * (255.0 / 128.0);\n"
 	"        float leafMask = isFoliage ? 0.85 : (isFlower ? 0.35 : 0.0);\n"
 	"        albedo = clamp(albedo * mix(vec3(1.0), plantScale, leafMask), 0.0, 1.0);\n"
+	"        /* Harmonize dark conifer/bark plant-model albedos with bright terrain turf */\n"
+	"        if (isFoliage) {\n"
+	"            albedo = clamp(pow(max(albedo, vec3(0.002)), vec3(0.84)) * 1.22, 0.0, 1.0);\n"
+	"        } else if (isBark) {\n"
+	"            albedo = clamp(pow(max(albedo, vec3(0.002)), vec3(0.90)) * 1.12, 0.0, 1.0);\n"
+	"        }\n"
 	"    } else {\n"
 	"        albedo *= vTint.rgb;\n"
 	"    }\n"
 	"    float distFade = clamp(1.0 - (vDist - 1800.0) / 36000.0, 0.0, 1.0);\n"
 	"    vec3 N_local = normalize(vLocalN);\n"
-	"    if (!gl_FrontFacing) {\n"
+	"    bool isFront = (vFlip >= 0.0) ? gl_FrontFacing : !gl_FrontFacing;\n"
+	"    if (!isFront) {\n"
 	"        if (isFoliage || isFlower) {\n"
 	"            /* Preserve upward/outward canopy dome normal on double-sided branchlet cards\n"
 	"             * so back-facing leaves never flip their dome normal downward into the ground. */\n"
@@ -3524,103 +3618,53 @@ static const char *s_fs_mesh3d =
 	"    }\n"
 	"    vec3 V_local = normalize(vec3(0.0, 0.573576, 0.819152));\n"
 	"    float microAO = 1.0;\n"
-	"    /* Procedural botanical & mineralogical micro-relief (continuous PBR detail & porous leaf/needle cutout) */\n"
+	"    /* Botanical & mineralogical micro-relief */\n"
 	"    if (distFade > 0.02) {\n"
 	"        if (isBark) {\n"
 	"            float furrow = chaff_grad_noise2d(vec2((vLocalPos.x + vLocalPos.y) * 0.58, vHeightAboveGround * 0.16), 0x4241524Bu).x - 0.5;\n"
 	"            float fFine  = chaff_grad_noise2d(vec2((vLocalPos.x - vLocalPos.y) * 1.85, vHeightAboveGround * 0.72), 0x42524B32u).x - 0.5;\n"
 	"            float fComb  = furrow * 0.68 + fFine * 0.32;\n"
-	"            N_local = normalize(N_local + vec3(fComb * 0.54, -fComb * 0.46, fFine * 0.18) * distFade);\n"
-	"            microAO = clamp(0.96 + fComb * 0.38 * distFade, 0.64, 1.16);\n"
+	"            N_local = normalize(N_local + vec3(fComb * 0.52, -fComb * 0.44, fFine * 0.18) * distFade);\n"
+	"            microAO = clamp(0.96 + fComb * 0.36 * distFade, 0.66, 1.16);\n"
 	"            albedo = clamp(albedo * (1.00 + fComb * 0.24 * distFade), 0.0, 1.0);\n"
 	"            /* Subtle Nordic forest-floor moss & lichen collar on lower trunk bases */\n"
 	"            float mossMask = smoothstep(14.0, 1.5, vHeightAboveGround) * smoothstep(-0.1, 0.45, furrow + 0.15) * distFade;\n"
-	"            albedo = mix(albedo, vec3(0.24, 0.38, 0.18), mossMask * 0.38);\n"
+	"            albedo = mix(albedo, vec3(0.26, 0.40, 0.19), mossMask * 0.36);\n"
 	"        } else if (isFoliage) {\n"
-	"            vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.18 + vec2(vHeightAboveGround * 0.14, -vHeightAboveGround * 0.10), 0x4C454146u);\n"
-	"            vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.62 + vec2(-vHeightAboveGround * 0.44, vLocalPos.x * 0.28), 0x464F4C32u);\n"
-	"            vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.65 + vec2(vHeightAboveGround * 1.15, vLocalPos.y * 0.85), 0x4C463333u);\n"
-	"            float leafCluster = 0.42 * gMacro.x + 0.36 * gLeaf.x + 0.22 * gMicro.x;\n"
-	"            if (vCardUV.x >= 0.0 && !isFolCore && vDist < 3800.0) {\n"
-	"                /* SpeedTree / Creation Engine UV-Space Botanical Silhouette & Venation Synthesizer */\n"
-	"                float cu = vCardUV.x;\n"
-	"                float dv = vCardUV.y - 0.5;\n"
-	"                float adv = abs(dv);\n"
-	"                if (isFolConifer) {\n"
-	"                    /* Pectinate Boreal Conifer Bough: resinous woody twig rachis + angled needle comb fascicles */\n"
-	"                    float rachisW = 0.042 * (1.0 - 0.65 * cu);\n"
-	"                    if (adv < rachisW) {\n"
-	"                        albedo = mix(vec3(0.36, 0.25, 0.16), albedo, 0.32);\n"
-	"                        microAO = 0.86;\n"
-	"                    } else {\n"
-	"                        float envW = 0.48 * sin(min(1.0, cu * 1.15 + 0.12) * 2.85);\n"
-	"                        if (adv > envW || cu > 0.98) discard;\n"
-	"                        float uNeedle = cu - adv * 0.78;\n"
-	"                        float phase = uNeedle * 18.0 + ((dv > 0.0) ? 0.35 : 0.0) + (gMicro.x - 0.5) * 0.18;\n"
-	"                        float comb = sin(phase * 6.2831853);\n"
-	"                        float rFrac = adv / max(0.05, envW);\n"
-	"                        if (comb < (-0.25 + 0.72 * rFrac) * distFade) discard;\n"
-	"                        float nRoll = cos(phase * 6.2831853) * 0.44;\n"
-	"                        N_local = normalize(N_local + vec3(nRoll, -nRoll * 0.65, 0.18 * comb) * distFade);\n"
-	"                        microAO = clamp(0.82 + 0.32 * (0.5 + 0.5 * comb), 0.72, 1.16);\n"
-	"                        albedo = clamp(albedo * (0.94 + 0.18 * rFrac + 0.10 * comb), 0.0, 1.0);\n"
-	"                    }\n"
-	"                } else if (isFolOvate || isFolLobed) {\n"
-	"                    /* Broadleaf Shoot Card: central woody twig + 5..9 alternate serrated/lobed leaf blades */\n"
-	"                    float stemW = 0.032 * (1.0 - 0.75 * cu);\n"
-	"                    if (adv < stemW && cu < 0.86) {\n"
-	"                        albedo = mix(vec3(0.38, 0.29, 0.18), albedo, 0.38);\n"
-	"                        microAO = 0.86;\n"
-	"                    } else {\n"
-	"                        float envW = 0.48 * sin(min(1.0, cu * 1.05 + 0.08) * 2.95);\n"
-	"                        if (adv > envW) discard;\n"
-	"                        float uLeaf = cu * 5.2 - adv * 1.6 + (gLeaf.x - 0.5) * 0.16;\n"
-	"                        float leafIdx = floor(uLeaf);\n"
-	"                        float lf = fract(uLeaf + ((dv < 0.0) ? 0.48 * mod(abs(leafIdx), 2.0) : 0.0));\n"
-	"                        float rFrac = adv / max(0.05, envW);\n"
-	"                        float serrate = isFolLobed ? (0.14 * sin(rFrac * 15.7)) : (0.06 * sin(rFrac * 34.0));\n"
-	"                        float leafHalfW = 0.44 * sin(min(1.0, rFrac) * 3.05) + serrate;\n"
-	"                        if (abs(lf - 0.5) > leafHalfW) discard;\n"
-	"                        float vein = (lf - 0.5) * 0.62;\n"
-	"                        float latVein = sin((rFrac * 8.0 - abs(lf - 0.5) * 5.0) * 6.2831853) * 0.14;\n"
-	"                        N_local = normalize(N_local + vec3(vein + latVein, -vein * 0.5, 0.24 - 0.48 * abs(lf - 0.5)) * distFade);\n"
-	"                        microAO = clamp(0.80 + 0.34 * (1.0 - abs(lf - 0.5) * 1.4), 0.70, 1.16);\n"
-	"                        albedo = clamp(albedo * (0.94 + 0.20 * (1.0 - abs(lf - 0.5) * 1.5) + 0.06 * latVein), 0.0, 1.0);\n"
-	"                    }\n"
-	"                } else if (isFolBlade) {\n"
-	"                    /* Tapered Sword / Rosette Leaf Blade with parallel vascular ridges */\n"
-	"                    float bladeHW = 0.48 * (1.0 - 0.78 * cu * cu);\n"
-	"                    if (adv > bladeHW) discard;\n"
-	"                    float ridge = sin(dv * 38.0) * 0.22;\n"
-	"                    N_local = normalize(N_local + vec3(ridge, -ridge * 0.5, 0.16 * (1.0 - adv / max(0.05, bladeHW))) * distFade);\n"
-	"                    microAO = clamp(0.82 + 0.30 * (1.0 - adv / max(0.05, bladeHW)), 0.72, 1.15);\n"
-	"                }\n"
+	"            if (hasBrCard) {\n"
+	"                float brShade  = brSample.r;\n"
+	"                float rollN    = (brSample.g - 0.5) * 2.0;\n"
+	"                float twigMask = brSample.b;\n"
+	"                vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.14 + vec2(vHeightAboveGround * 0.10, -vHeightAboveGround * 0.08), 0x4C454146u);\n"
+	"                vec3 twigCol = mix(albedo * 0.54, vec3(0.34, 0.26, 0.18), 0.55) * (0.86 + 0.28 * brShade);\n"
+	"                vec3 leafCol = clamp(albedo * (0.80 + 0.44 * brShade + (gMacro.x - 0.5) * 0.14), 0.0, 1.0);\n"
+	"                albedo = mix(leafCol, twigCol, twigMask * 0.88);\n"
+	"                N_local = normalize(N_local + vec3(rollN * 0.44, -rollN * 0.32, (brShade - 0.5) * 0.26) * distFade);\n"
+	"                microAO = clamp(0.78 + 0.42 * brShade, 0.70, 1.18);\n"
 	"            } else if (!isFolCore && vDist < 3400.0) {\n"
+	"                vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.18 + vec2(vHeightAboveGround * 0.14, -vHeightAboveGround * 0.10), 0x4C454146u);\n"
+	"                vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.62 + vec2(-vHeightAboveGround * 0.44, vLocalPos.x * 0.28), 0x464F4C32u);\n"
+	"                vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.65 + vec2(vHeightAboveGround * 1.15, vLocalPos.y * 0.85), 0x4C463333u);\n"
+	"                float leafCluster = 0.42 * gMacro.x + 0.36 * gLeaf.x + 0.22 * gMicro.x;\n"
 	"                float rim = 1.0 - abs(dot(N_local, V_local));\n"
 	"                float poreField = 0.55 * gLeaf.x + 0.45 * gMicro.x;\n"
 	"                float cutThresh = isFolFringe ? (0.30 + 0.18 * rim) : (0.14 + 0.28 * smoothstep(0.38, 0.86, rim));\n"
 	"                if (poreField < cutThresh * distFade) discard;\n"
 	"                vec2 dLeaf = gMacro.yz * 0.34 + gLeaf.yz * 0.44 + gMicro.yz * 0.22;\n"
 	"                N_local = normalize(N_local + vec3(dLeaf.x * 0.58, dLeaf.y * 0.58, (leafCluster - 0.45) * 0.48) * distFade);\n"
-	"                microAO = clamp(0.76 + 0.44 * leafCluster, 0.68, 1.16);\n"
+	"                microAO = clamp(0.78 + 0.42 * leafCluster, 0.70, 1.16);\n"
 	"                albedo = clamp(albedo * (0.92 + 0.24 * leafCluster), 0.0, 1.0);\n"
 	"            }\n"
 	"        } else if (isRock) {\n"
-	"            /* Phaneritic mineral grain speckle (quartz/feldspar/mica micro-facets) */\n"
 	"            float grain = chaff_grad_noise2d(vLocalPos.xy * 0.85 + vec2(vHeightAboveGround * 0.70), 0x524F434Bu).x - 0.5;\n"
 	"            N_local = normalize(N_local + vec3(grain * 0.32, -grain * 0.28, grain * 0.18) * distFade);\n"
 	"            albedo = clamp(albedo * (1.0 + grain * 0.22 * distFade), 0.0, 1.0);\n"
 	"        } else if (isCrystal) {\n"
-	"            /* Crystallographic horizontal growth striations along prism faces */\n"
 	"            float stria = sin(vHeightAboveGround * 12.0) * 0.06 * (1.0 - abs(N_local.z));\n"
 	"            N_local = normalize(N_local + vec3(0.0, 0.0, stria * distFade));\n"
 	"        }\n"
 	"    }\n"
-	"    float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
-	"    float lonTheta = 6.28318530718 * (vLocalPos.x / 8388608.0);\n"
-	"    vec3 torusN = vec3(cos(lonTheta) * cos(latPhi), sin(lonTheta) * cos(latPhi), sin(latPhi));\n"
-	"    vec3 tangentU = vec3(-sin(lonTheta), cos(lonTheta), 0.0);\n"
-	"    vec3 tangentV = vec3(cos(lonTheta) * sin(latPhi), sin(lonTheta) * sin(latPhi), -cos(latPhi));\n"
+	"    vec3 torusN = normalize(vTorusN);\n"
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float sunDot = dot(torusN, sDir);\n"
 	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
@@ -3628,6 +3672,7 @@ static const char *s_fs_mesh3d =
 	"    float twilight = smoothstep(0.32, -0.06, sunDot) * smoothstep(-0.16, 0.12, sunDot);\n"
 	"    vec3 sunColor = mix(vec3(1.0, 0.98, 0.92), mix(vec3(1.0, 0.62, 0.28), vec3(0.96, 0.38, 0.18), smoothstep(0.18, -0.06, sunDot)), twilight);\n"
 	"    vec3 sunLitCol = mix(vec3(1.0), sunColor, twilight * 0.80);\n"
+	"    float latPhi = 6.28318530718 * ((64.0 - vLocalPos.y) / 8388608.0);\n"
 	"    float innerHole = max(0.0, -cos(latPhi));\n"
 	"    float torusShineVis = clamp(innerHole * 1.4 + 0.18 * max(0.0, torusN.z), 0.0, 1.0);\n"
 	"    float oppSunlit = clamp(0.30 + 0.70 * smoothstep(-0.25, 0.45, -sDir.z + 0.5 * innerHole), 0.20, 1.0);\n"
@@ -3635,23 +3680,25 @@ static const char *s_fs_mesh3d =
 	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
 	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vParam.z, vDist);\n"
 	"    float sunTrans = nd_sun_trans(cloudSh);\n"
-	"    vec3 shadowCool = mix(vec3(1.0), vec3(0.85, 0.92, 1.05), cloudSh * 0.45);\n"
-	"    /* Unified Terrain-Matched Solar & Hemispheric Canopy Illumination:\n"
-	"     * Uses the exact solar vector L_local/L_day, ambient/sun energy balance, twilight chromaticity,\n"
-	"     * and cloud shadow cooling as s_fs_terrain, while preserving 3D sub-canopy depth and chlorophyll SSS. */\n"
+	"    /* Unified Terrain-Matched Solar & Hemispheric Canopy Illumination + 3D Self-Shadowing */\n"
 	"    vec3 L_default = normalize(vec3(-0.577, -0.577, 0.816));\n"
-	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
-	"    vec3 L_local = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_default;\n"
+	"    vec3 L_local = (vSunLocal.z > -0.08) ? normalize(vec3(vSunLocal.xy, max(0.12, vSunLocal.z))) : L_default;\n"
 	"    float ndotl = max(0.0, dot(N_local, L_local));\n"
-	"    float wrapDiff = clamp((dot(N_local, L_local) + 0.38) / 1.38, 0.0, 1.0);\n"
-	"    float diff = mix(ndotl, wrapDiff, isFoliage ? 0.36 : 0.18);\n"
+	"    float wrapDiff = clamp((dot(N_local, L_local) + 0.42) / 1.42, 0.0, 1.0);\n"
+	"    float diff = mix(ndotl, wrapDiff, isFoliage ? 0.44 : 0.20);\n"
+	"    float treeShadowVis = (uTreeShadowActive > 0.001 && vDist < 4200.0)\n"
+	"                        ? nd_eval_tree_shadow(vLocalPos, isFoliage ? (5.2 + 3.0 * (1.0 - ndotl)) : (3.4 + 2.8 * (1.0 - ndotl)))\n"
+	"                        : 1.0;\n"
+	"    /* Foliage transmits partial dappled light through upper layers; trunks receive crisp cast shadows */\n"
+	"    float selfShadowVis = isFoliage ? mix(0.38, 1.0, treeShadowVis) : mix(0.14, 1.0, treeShadowVis);\n"
+	"    vec3 shadowCool = mix(vec3(1.0), vec3(0.85, 0.92, 1.05), clamp(cloudSh * 0.45 + (1.0 - treeShadowVis) * 0.24, 0.0, 0.60));\n"
 	"    float hemiSky = clamp(0.5 + 0.5 * N_local.z, 0.0, 1.0);\n"
-	"    vec3 ambCol = mix(vec3(0.76, 0.80, 0.74), vec3(1.04, 1.06, 1.08), hemiSky);\n"
-	"    float contactAO = mix(0.86, 1.0, smoothstep(0.0, 5.0, vHeightAboveGround));\n"
-	"    float cavityAO = isFoliage ? mix(0.62, 1.06, clamp(vAO, 0.0, 1.0)) : mix(0.66, 1.04, clamp(vAO, 0.0, 1.0));\n"
-	"    float sunSelfShadow = isFoliage ? (0.60 + 0.40 * smoothstep(0.18, 0.78, vAO)) : (0.64 + 0.36 * smoothstep(0.15, 0.70, vAO));\n"
-	"    float ao = clamp(cavityAO * contactAO * microAO, 0.52, 1.12);\n"
-	"    vec3 lightTerm = (ambCol * (0.45 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor)) +\n"
+	"    vec3 ambCol = mix(vec3(0.80, 0.84, 0.78), vec3(1.04, 1.06, 1.08), hemiSky);\n"
+	"    float contactAO = mix(0.88, 1.0, smoothstep(0.0, 5.0, vHeightAboveGround));\n"
+	"    float cavityAO = isFoliage ? mix(0.68, 1.06, clamp(vAO, 0.0, 1.0)) : mix(0.70, 1.04, clamp(vAO, 0.0, 1.0));\n"
+	"    float sunSelfShadow = (isFoliage ? (0.64 + 0.36 * smoothstep(0.18, 0.78, vAO)) : (0.68 + 0.32 * smoothstep(0.15, 0.70, vAO))) * selfShadowVis;\n"
+	"    float ao = clamp(cavityAO * contactAO * microAO, 0.56, 1.14);\n"
+	"    vec3 lightTerm = (ambCol * (0.44 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor)) +\n"
 	"                      vec3(0.62 * diff * sunTrans * directSun * sunSelfShadow) +\n"
 	"                      vec3(torusShine)) * ao * sunLitCol * shadowCool;\n"
 	"    vec3 lit = albedo * lightTerm;\n"
@@ -3663,17 +3710,17 @@ static const char *s_fs_mesh3d =
 	"        float backTrans = max(0.0, dot(-N_local, L_local) + 0.42);\n"
 	"        float rimTrans = (1.0 - ndotv) * max(0.0, L_local.z);\n"
 	"        float sss = (0.65 * backTrans + 0.35 * rimTrans) * (0.45 + 0.55 * smoothstep(0.25, 0.90, vAO)) * (isFolCore ? 0.40 : 1.0);\n"
-	"        lit += albedo * vec3(0.46, 0.62, 0.16) * (sss * 0.44 * sunTrans * directSun * sunLitCol) * distFade;\n"
+	"        lit += albedo * vec3(0.46, 0.62, 0.16) * (sss * 0.46 * selfShadowVis * sunTrans * directSun * sunLitCol) * distFade;\n"
 	"        float leafFresnel = 0.04 + 0.22 * pow(1.0 - ndotv, 4.0);\n"
 	"        lit += mix(albedo, vec3(1.0, 0.99, 0.92), 0.35) * (pow(specAngle, 20.0) * leafFresnel * 0.40 * sunSelfShadow * sunTrans * directSun * sunLitCol) * distFade;\n"
 	"    } else if (isCrystal) {\n"
 	"        float f0 = 0.06;\n"
 	"        float fresnel = f0 + (1.0 - f0) * pow(clamp(1.0 - ndotv, 0.0, 1.0), 5.0);\n"
-	"        float spec = pow(specAngle, 48.0) * 0.72 * nd_sun_trans(cloudSh) * directSun;\n"
+	"        float spec = pow(specAngle, 48.0) * 0.72 * nd_sun_trans(cloudSh) * directSun * selfShadowVis;\n"
 	"        float internalGlow = max(0.0, dot(-N_local, L_local) + 0.50) * 0.28 * directSun;\n"
 	"        lit += vec3(1.0, 0.99, 0.95) * spec * distFade + albedo * (fresnel * 0.38 + internalGlow);\n"
 	"    } else if (isRock) {\n"
-	"        float micaSparkle = pow(specAngle, 28.0) * 0.20 * nd_sun_trans(cloudSh) * directSun;\n"
+	"        float micaSparkle = pow(specAngle, 28.0) * 0.20 * nd_sun_trans(cloudSh) * directSun * selfShadowVis;\n"
 	"        lit += vec3(micaSparkle * distFade);\n"
 	"    }\n"
 	"    /* Warm point-light illumination from the glowing Lamb */\n"
@@ -5802,6 +5849,10 @@ typedef struct {
 	GLint uLambWakeVel1;
 	GLint uWorldId;
 	GLint uSeaOffsetQ12_4;
+	GLint uTreeShadowTex;
+	GLint uTreeShadowOrigin;
+	GLint uTreeShadowVP;
+	GLint uTreeShadowActive;
 	GLint aGridUV;
 } gl_terrain_pipe_t;
 
@@ -5887,6 +5938,13 @@ typedef struct {
 	GLint uCloudShadowMap;
 	GLint uCsm;
 	GLint uShadowPass;
+	GLint uBranchletTex;
+	GLint uTreeShadowTex;
+	GLint uTreeShadowOrigin;
+	GLint uTreeShadowVP;
+	GLint uTreeShadowActive;
+	GLint uTreeShadowWriteOrigin;
+	GLint uTreeShadowWriteVP;
 } gl_mesh3d_pipe_t;
 
 typedef struct {
@@ -6061,6 +6119,19 @@ static struct {
 	GLuint mesh3d_vbo;
 	GLuint mesh3d_ibo;
 	GLuint mesh3d_inst_vbo;
+	GLuint fol_atlas_tex;
+	GLuint tree_shadow_fbo[2];
+	GLuint tree_shadow_tex[2];
+	int    tree_shadow_read_idx;
+	bool   tree_shadow_ready;
+	bool   tree_shadow_failed;
+	bool   tree_shadow_read_valid;
+	bool   tree_shadow_write_draws;
+	float  tree_shadow_read_origin[3];
+	float  tree_shadow_read_vp[16];
+	float  tree_shadow_write_origin[3];
+	float  tree_shadow_write_vp[16];
+	float  tree_shadow_active;
 	GLuint atlas_tex;
 	GLuint atlas_norm_tex;
 	uint32_t atlas_ver;
@@ -6268,6 +6339,40 @@ static void init_grid_buffers(void)
 	s_gl.mesh3d_inst_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
 	glBufferData(GL_ARRAY_BUFFER, NULL, MAX_BB_INSTANCES * sizeof(nd_seven_gl_mesh3d_inst_t), GL_DYNAMIC_DRAW);
+
+	/* Bake and upload 512x512 RGBA8 Skyrim/SpeedTree botanical branchlet atlas with 8 CPU mip levels */
+	if (!s_gl.fol_atlas_tex) {
+		uint8_t *buf_a = (uint8_t *)malloc((size_t)ND_FOL_ATLAS_SIZE * (size_t)ND_FOL_ATLAS_SIZE * 4u);
+		uint8_t *buf_b = (uint8_t *)malloc((size_t)(ND_FOL_ATLAS_SIZE / 2) * (size_t)(ND_FOL_ATLAS_SIZE / 2) * 4u);
+		if (buf_a && buf_b) {
+			nd_foliage_atlas_bake_level0(buf_a);
+			s_gl.fol_atlas_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 3);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_FOL_MIP_LEVELS - 1);
+			int cur_w = ND_FOL_ATLAS_SIZE;
+			const uint8_t *src = buf_a;
+			uint8_t *dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_FOL_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1;
+				nd_foliage_atlas_downsample(src, cur_w, cur_w, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glActiveTexture(GL_TEXTURE0);
+		}
+		free(buf_a);
+		free(buf_b);
+	}
 }
 
 static void init_pipelines(void)
@@ -6313,39 +6418,43 @@ static bool check_pipelines_ready(void)
 			s_gl.terrain_pipe.prog = 0;
 		} else {
 			GLuint p = s_gl.terrain_pipe.prog;
-			s_gl.terrain_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-			s_gl.terrain_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
-			s_gl.terrain_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
-			s_gl.terrain_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
-			s_gl.terrain_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-			s_gl.terrain_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
-			s_gl.terrain_pipe.uRefTrig        = glGetUniformLocation(p, "uRefTrig", 8);
-			s_gl.terrain_pipe.uHeightScale    = glGetUniformLocation(p, "uHeightScale", 12);
-			s_gl.terrain_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.terrain_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-			s_gl.terrain_pipe.uPlanetCenter   = glGetUniformLocation(p, "uPlanetCenter", 13);
-			s_gl.terrain_pipe.uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
-			s_gl.terrain_pipe.uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-			s_gl.terrain_pipe.uWorldDim       = glGetUniformLocation(p, "uWorldDim", 9);
-			s_gl.terrain_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-			s_gl.terrain_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-			s_gl.terrain_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.terrain_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-			s_gl.terrain_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-			s_gl.terrain_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
-			s_gl.terrain_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.terrain_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.terrain_pipe.uBaseSeaLevel   = glGetUniformLocation(p, "uBaseSeaLevel", 13);
-			s_gl.terrain_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.terrain_pipe.uMoonDir        = glGetUniformLocation(p, "uMoonDir", 8);
-			s_gl.terrain_pipe.uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
-			s_gl.terrain_pipe.uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
-			s_gl.terrain_pipe.uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
-			s_gl.terrain_pipe.uLambWakeVel0   = glGetUniformLocation(p, "uLambWakeVel0", 13);
-			s_gl.terrain_pipe.uLambWakeVel1   = glGetUniformLocation(p, "uLambWakeVel1", 13);
-			s_gl.terrain_pipe.uWorldId        = glGetUniformLocation(p, "uWorldId", 8);
-			s_gl.terrain_pipe.uSeaOffsetQ12_4 = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
-			s_gl.terrain_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+			s_gl.terrain_pipe.uMVP              = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.terrain_pipe.uHeightTex        = glGetUniformLocation(p, "uHeightTex", 10);
+			s_gl.terrain_pipe.uSubstrateTex     = glGetUniformLocation(p, "uSubstrateTex", 13);
+			s_gl.terrain_pipe.uChunkOrigin      = glGetUniformLocation(p, "uChunkOrigin", 12);
+			s_gl.terrain_pipe.uChunkRelOrigin   = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+			s_gl.terrain_pipe.uChunkSpan        = glGetUniformLocation(p, "uChunkSpan", 10);
+			s_gl.terrain_pipe.uRefTrig          = glGetUniformLocation(p, "uRefTrig", 8);
+			s_gl.terrain_pipe.uHeightScale      = glGetUniformLocation(p, "uHeightScale", 12);
+			s_gl.terrain_pipe.uSeaLevel         = glGetUniformLocation(p, "uSeaLevel", 9);
+			s_gl.terrain_pipe.uCameraPos        = glGetUniformLocation(p, "uCameraPos", 10);
+			s_gl.terrain_pipe.uPlanetCenter     = glGetUniformLocation(p, "uPlanetCenter", 13);
+			s_gl.terrain_pipe.uBodyRot          = glGetUniformLocation(p, "uBodyRot", 8);
+			s_gl.terrain_pipe.uTorusRadii       = glGetUniformLocation(p, "uTorusRadii", 11);
+			s_gl.terrain_pipe.uWorldDim         = glGetUniformLocation(p, "uWorldDim", 9);
+			s_gl.terrain_pipe.uFogStart         = glGetUniformLocation(p, "uFogStart", 9);
+			s_gl.terrain_pipe.uFogEnd           = glGetUniformLocation(p, "uFogEnd", 7);
+			s_gl.terrain_pipe.uAnimTime         = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.terrain_pipe.uSkyColor         = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.terrain_pipe.uAtmoIntensity    = glGetUniformLocation(p, "uAtmoIntensity", 14);
+			s_gl.terrain_pipe.uLambLight        = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.terrain_pipe.uCloudShadowMap   = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.terrain_pipe.uCsm              = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.terrain_pipe.uBaseSeaLevel     = glGetUniformLocation(p, "uBaseSeaLevel", 13);
+			s_gl.terrain_pipe.uSunDir           = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.terrain_pipe.uMoonDir          = glGetUniformLocation(p, "uMoonDir", 8);
+			s_gl.terrain_pipe.uLambWakeHead     = glGetUniformLocation(p, "uLambWakeHead", 13);
+			s_gl.terrain_pipe.uLambWakeXYT0     = glGetUniformLocation(p, "uLambWakeXYT0", 13);
+			s_gl.terrain_pipe.uLambWakeXYT1     = glGetUniformLocation(p, "uLambWakeXYT1", 13);
+			s_gl.terrain_pipe.uLambWakeVel0     = glGetUniformLocation(p, "uLambWakeVel0", 13);
+			s_gl.terrain_pipe.uLambWakeVel1     = glGetUniformLocation(p, "uLambWakeVel1", 13);
+			s_gl.terrain_pipe.uWorldId          = glGetUniformLocation(p, "uWorldId", 8);
+			s_gl.terrain_pipe.uSeaOffsetQ12_4   = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
+			s_gl.terrain_pipe.uTreeShadowTex    = glGetUniformLocation(p, "uTreeShadowTex", 14);
+			s_gl.terrain_pipe.uTreeShadowOrigin = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
+			s_gl.terrain_pipe.uTreeShadowVP     = glGetUniformLocation(p, "uTreeShadowVP", 13);
+			s_gl.terrain_pipe.uTreeShadowActive = glGetUniformLocation(p, "uTreeShadowActive", 17);
+			s_gl.terrain_pipe.aGridUV           = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
 
@@ -6435,19 +6544,26 @@ static bool check_pipelines_ready(void)
 			s_gl.mesh3d_pipe.prog = 0;
 		} else {
 			GLuint p = s_gl.mesh3d_pipe.prog;
-			s_gl.mesh3d_pipe.uMVP            = glGetUniformLocation(p, "uMVP", 4);
-			s_gl.mesh3d_pipe.uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.mesh3d_pipe.uAnimTime       = glGetUniformLocation(p, "uAnimTime", 9);
-			s_gl.mesh3d_pipe.uCameraPos      = glGetUniformLocation(p, "uCameraPos", 10);
-			s_gl.mesh3d_pipe.uFogStart       = glGetUniformLocation(p, "uFogStart", 9);
-			s_gl.mesh3d_pipe.uFogEnd         = glGetUniformLocation(p, "uFogEnd", 7);
-			s_gl.mesh3d_pipe.uSkyColor       = glGetUniformLocation(p, "uSkyColor", 9);
-			s_gl.mesh3d_pipe.uAtmoIntensity  = glGetUniformLocation(p, "uAtmoIntensity", 14);
-			s_gl.mesh3d_pipe.uLambLight      = glGetUniformLocation(p, "uLambLight", 10);
-			s_gl.mesh3d_pipe.uSunDir         = glGetUniformLocation(p, "uSunDir", 7);
-			s_gl.mesh3d_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.mesh3d_pipe.uCsm            = glGetUniformLocation(p, "uCsm", 4);
-			s_gl.mesh3d_pipe.uShadowPass     = glGetUniformLocation(p, "uShadowPass", 11);
+			s_gl.mesh3d_pipe.uMVP                   = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.mesh3d_pipe.uSeaLevel              = glGetUniformLocation(p, "uSeaLevel", 9);
+			s_gl.mesh3d_pipe.uAnimTime              = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.mesh3d_pipe.uCameraPos             = glGetUniformLocation(p, "uCameraPos", 10);
+			s_gl.mesh3d_pipe.uFogStart              = glGetUniformLocation(p, "uFogStart", 9);
+			s_gl.mesh3d_pipe.uFogEnd                = glGetUniformLocation(p, "uFogEnd", 7);
+			s_gl.mesh3d_pipe.uSkyColor              = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.mesh3d_pipe.uAtmoIntensity         = glGetUniformLocation(p, "uAtmoIntensity", 14);
+			s_gl.mesh3d_pipe.uLambLight             = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.mesh3d_pipe.uSunDir                = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.mesh3d_pipe.uCloudShadowMap        = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.mesh3d_pipe.uCsm                   = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.mesh3d_pipe.uShadowPass            = glGetUniformLocation(p, "uShadowPass", 11);
+			s_gl.mesh3d_pipe.uBranchletTex          = glGetUniformLocation(p, "uBranchletTex", 13);
+			s_gl.mesh3d_pipe.uTreeShadowTex         = glGetUniformLocation(p, "uTreeShadowTex", 14);
+			s_gl.mesh3d_pipe.uTreeShadowOrigin      = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
+			s_gl.mesh3d_pipe.uTreeShadowVP          = glGetUniformLocation(p, "uTreeShadowVP", 13);
+			s_gl.mesh3d_pipe.uTreeShadowActive      = glGetUniformLocation(p, "uTreeShadowActive", 17);
+			s_gl.mesh3d_pipe.uTreeShadowWriteOrigin = glGetUniformLocation(p, "uTreeShadowWriteOrigin", 22);
+			s_gl.mesh3d_pipe.uTreeShadowWriteVP     = glGetUniformLocation(p, "uTreeShadowWriteVP", 18);
 		}
 	}
 
@@ -7156,6 +7272,149 @@ static void gl_bind_scene_target(void)
 	glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
 }
 
+static bool gl_ensure_tree_shadow_targets(void)
+{
+	if (s_gl.tree_shadow_ready) return true;
+	if (s_gl.tree_shadow_failed) return false;
+
+	glActiveTexture(GL_TEXTURE0 + 12);
+	for (int i = 0; i < 2; i++) {
+		s_gl.tree_shadow_tex[i] = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, s_gl.tree_shadow_tex[i]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F,
+		             ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES, 0,
+		             GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+
+		s_gl.tree_shadow_fbo[i] = glCreateFramebuffer();
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[i]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		                       GL_TEXTURE_2D, s_gl.tree_shadow_tex[i], 0);
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glBindTexture(GL_TEXTURE_2D, 0);
+			for (int j = 0; j <= i; j++) {
+				if (s_gl.tree_shadow_fbo[j]) { glDeleteFramebuffer(s_gl.tree_shadow_fbo[j]); s_gl.tree_shadow_fbo[j] = 0; }
+				if (s_gl.tree_shadow_tex[j]) { glDeleteTexture(s_gl.tree_shadow_tex[j]); s_gl.tree_shadow_tex[j] = 0; }
+			}
+			glActiveTexture(GL_TEXTURE0);
+			gl_bind_scene_target();
+			s_gl.tree_shadow_failed = true;
+			return false;
+		}
+		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+		glDepthMask(GL_TRUE);
+		glClear(GL_DEPTH_BUFFER_BIT);
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	gl_bind_scene_target();
+	s_gl.tree_shadow_ready = true;
+	s_gl.tree_shadow_read_idx = 0;
+	s_gl.tree_shadow_read_valid = false;
+	return true;
+}
+
+static void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
+                                         const float E[3], const float S[3], const float N[3])
+{
+	s_gl.tree_shadow_write_draws = false;
+	float dist_fade = fminf(1.0f, fmaxf(0.0f, (4200.0f - s_gl.cur_dist) / 1000.0f));
+	if (dist_fade <= 0.001f || !s_gl.pipelines_ready) {
+		s_gl.tree_shadow_active = 0.0f;
+		return;
+	}
+	if (!gl_ensure_tree_shadow_targets()) {
+		s_gl.tree_shadow_active = 0.0f;
+		return;
+	}
+
+	/* Express sun vector in world-grid (East, South, Up) local coordinates matching s_fs_terrain & s_fs_mesh3d */
+	float se = s_gl.cur_sun_dir[0] * E[0] + s_gl.cur_sun_dir[1] * E[1] + s_gl.cur_sun_dir[2] * E[2];
+	float ss = s_gl.cur_sun_dir[0] * S[0] + s_gl.cur_sun_dir[1] * S[1] + s_gl.cur_sun_dir[2] * S[2];
+	float sn = s_gl.cur_sun_dir[0] * N[0] + s_gl.cur_sun_dir[1] * N[1] + s_gl.cur_sun_dir[2] * N[2];
+	float lx, ly, lz;
+	if (sn > -0.08f) {
+		lx = se;
+		ly = ss;
+		lz = fmaxf(0.20f, sn);
+	} else {
+		lx = -0.577f;
+		ly = -0.577f;
+		lz = 0.816f;
+	}
+	float inv_l = 1.0f / sqrtf(lx * lx + ly * ly + lz * lz);
+	lx *= inv_l; ly *= inv_l; lz *= inv_l;
+
+	/* Orthonormal light-space basis (R, U, L) in (East, South, Up) coordinates */
+	float hx = 0.0f, hy = (fabsf(lz) > 0.96f) ? 1.0f : 0.0f, hz = (fabsf(lz) > 0.96f) ? 0.0f : 1.0f;
+	float rx = hy * lz - hz * ly;
+	float ry = hz * lx - hx * lz;
+	float rz = hx * ly - hy * lx;
+	float inv_r = 1.0f / sqrtf(rx * rx + ry * ry + rz * rz);
+	rx *= inv_r; ry *= inv_r; rz *= inv_r;
+
+	float ux = ly * rz - lz * ry;
+	float uy = lz * rx - lx * rz;
+	float uz = lx * ry - ly * rx;
+
+	/* Quantized orthographic half-extent + light-space texel snapping eliminates shadow shimmering on camera pan */
+	float raw_half = fminf(1152.0f, fmaxf(352.0f, s_gl.cur_dist * 0.92f));
+	float half_xy = floorf(raw_half / 64.0f + 0.5f) * 64.0f;
+	const float half_z = 2048.0f;
+	float texel = (2.0f * half_xy) / (float)ND_TREE_SHADOW_RES;
+
+	float pr = tx * rx + ty * ry + tz * rz;
+	float pu = tx * ux + ty * uy + tz * uz;
+	float pl = tx * lx + ty * ly + tz * lz;
+	float spr = floorf(pr / texel + 0.5f) * texel;
+	float spu = floorf(pu / texel + 0.5f) * texel;
+
+	s_gl.tree_shadow_write_origin[0] = spr * rx + spu * ux + pl * lx;
+	s_gl.tree_shadow_write_origin[1] = spr * ry + spu * uy + pl * ly;
+	s_gl.tree_shadow_write_origin[2] = spr * rz + spu * uz + pl * lz;
+
+	float inv_xy = 1.0f / half_xy;
+	float inv_z  = 1.0f / half_z;
+	float *m = s_gl.tree_shadow_write_vp;
+	/* Column-major mat4: x = dot(p, R)/half_xy, y = dot(p, U)/half_xy, z = -dot(p, L)/half_z (smaller depth closer to sun) */
+	m[0]  = rx * inv_xy;  m[1]  = ux * inv_xy;  m[2]  = -lx * inv_z;  m[3]  = 0.0f;
+	m[4]  = ry * inv_xy;  m[5]  = uy * inv_xy;  m[6]  = -ly * inv_z;  m[7]  = 0.0f;
+	m[8]  = rz * inv_xy;  m[9]  = uz * inv_xy;  m[10] = -lz * inv_z;  m[11] = 0.0f;
+	m[12] = 0.0f;         m[13] = 0.0f;         m[14] = 0.0f;         m[15] = 1.0f;
+
+	s_gl.tree_shadow_active = s_gl.tree_shadow_read_valid ? dist_fade : 0.0f;
+
+	/* Clear write shadow map depth buffer to 1.0 (unoccluded) */
+	int write_idx = 1 - s_gl.tree_shadow_read_idx;
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
+	glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	glDepthMask(GL_TRUE);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	gl_bind_scene_target();
+}
+
+static void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActive)
+{
+	if (uActive < 0) return;
+	if (s_gl.tree_shadow_ready && s_gl.tree_shadow_read_valid && s_gl.tree_shadow_active > 0.001f) {
+		glActiveTexture(GL_TEXTURE0 + 12);
+		glBindTexture(GL_TEXTURE_2D, s_gl.tree_shadow_tex[s_gl.tree_shadow_read_idx]);
+		if (uTex >= 0) glUniform1i(uTex, 12);
+		if (uOrigin >= 0) glUniform3fv(uOrigin, 1, s_gl.tree_shadow_read_origin);
+		if (uVP >= 0) glUniformMatrix4fv(uVP, 1, GL_FALSE, s_gl.tree_shadow_read_vp);
+		glUniform1f(uActive, s_gl.tree_shadow_active);
+		glActiveTexture(GL_TEXTURE0);
+	} else {
+		glUniform1f(uActive, 0.0f);
+	}
+}
+
 /* Resolve the multisampled scene into the sampleable colour (and depth) textures. */
 static void gl_resolve_scene(GLbitfield mask)
 {
@@ -7171,6 +7430,16 @@ void nd_seven_gl_end_frame(void)
 {
 	if (!s_gl.frame_open) return;
 	s_gl.frame_open = false;
+	if (s_gl.tree_shadow_ready) {
+		if (s_gl.tree_shadow_write_draws) {
+			s_gl.tree_shadow_read_idx = 1 - s_gl.tree_shadow_read_idx;
+			memcpy(s_gl.tree_shadow_read_origin, s_gl.tree_shadow_write_origin, sizeof(s_gl.tree_shadow_read_origin));
+			memcpy(s_gl.tree_shadow_read_vp, s_gl.tree_shadow_write_vp, sizeof(s_gl.tree_shadow_read_vp));
+			s_gl.tree_shadow_read_valid = true;
+		} else {
+			s_gl.tree_shadow_read_valid = false;
+		}
+	}
 	if (!s_gl.scene_ok) return;
 	gl_resolve_scene(GL_COLOR_BUFFER_BIT);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
@@ -7704,11 +7973,13 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	glStencilMask(0xFF);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-	if (s_gl.pipelines_ready)
+	if (s_gl.pipelines_ready) {
 		gl_render_cloud_shadow_map();
-	else {
+		gl_prepare_tree_shadow_frame(tx, ty, tz, E, S, N);
+	} else {
 		s_gl.csm_valid = false;
 		s_gl.csm_clear_sky = false;
+		s_gl.tree_shadow_active = 0.0f;
 	}
 }
 
@@ -7979,6 +8250,10 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
 	glUniform1i(s_gl.terrain_pipe.uSubstrateTex, 1);
 	gl_bind_csm(s_gl.terrain_pipe.uCloudShadowMap, s_gl.terrain_pipe.uCsm);
+	gl_bind_tree_shadow_read(s_gl.terrain_pipe.uTreeShadowTex,
+	                         s_gl.terrain_pipe.uTreeShadowOrigin,
+	                         s_gl.terrain_pipe.uTreeShadowVP,
+	                         s_gl.terrain_pipe.uTreeShadowActive);
 
 	glUniformMatrix4fv(s_gl.terrain_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform2f(s_gl.terrain_pipe.uChunkOrigin, (float)ox, (float)oy);
@@ -8804,7 +9079,7 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 		-sy * E[2] + cy * S[2]
 	};
 
-	float wind_sx = (basis->flora_sway_scale > 0.0f) ? (basis->grass_sx * flip) : 0.0f;
+	float wind_sx = (basis->flora_sway_scale > 0.0f) ? basis->grass_sx : 0.0f;
 	float wind_sy = (basis->flora_sway_scale > 0.0f) ? basis->grass_sy : 0.0f;
 
 	/* Center the 3D trunk/rock base at (o->x, o->y - o->hh * 0.5f) along North (-S)
@@ -8892,6 +9167,12 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	glUseProgram(s_gl.mesh3d_pipe.prog);
 	gl_bind_csm(s_gl.mesh3d_pipe.uCloudShadowMap, s_gl.mesh3d_pipe.uCsm);
+	if (s_gl.fol_atlas_tex && s_gl.mesh3d_pipe.uBranchletTex >= 0) {
+		glActiveTexture(GL_TEXTURE0 + 3);
+		glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
+		glUniform1i(s_gl.mesh3d_pipe.uBranchletTex, 3);
+		glActiveTexture(GL_TEXTURE0);
+	}
 	glUniformMatrix4fv(s_gl.mesh3d_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform1f(s_gl.mesh3d_pipe.uSeaLevel, bb_sea_level);
 	glUniform1f(s_gl.mesh3d_pipe.uAnimTime, s_gl.cur_anim_time);
@@ -8923,18 +9204,65 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	}
 	glBufferData(GL_ARRAY_BUFFER, s_mesh3d_sorted, running * sizeof(nd_seven_gl_mesh3d_inst_t), GL_DYNAMIC_DRAW);
 
+	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
+	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops. */
+	if (s_gl.tree_shadow_ready && s_gl.cur_dist < 4200.0f) {
+		int write_idx = 1 - s_gl.tree_shadow_read_idx;
+		glActiveTexture(GL_TEXTURE0 + 12);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0);
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
+		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glDisable(GL_BLEND);
+		glDisable(GL_STENCIL_TEST);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glDepthMask(GL_TRUE);
+		if (s_gl.mesh3d_pipe.uTreeShadowActive >= 0)
+			glUniform1f(s_gl.mesh3d_pipe.uTreeShadowActive, 0.0f);
+		if (s_gl.mesh3d_pipe.uTreeShadowWriteOrigin >= 0)
+			glUniform3fv(s_gl.mesh3d_pipe.uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
+		if (s_gl.mesh3d_pipe.uTreeShadowWriteVP >= 0)
+			glUniformMatrix4fv(s_gl.mesh3d_pipe.uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
+		glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 3);
+		for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
+			uint32_t icnt = s_mesh3d_counts[m];
+			if (icnt == 0) continue;
+			const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
+			if (!sl || sl->idx_count == 0) continue;
+
+			size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
+			for (GLuint a = 0; a < 7; a++) {
+				glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
+				                      sizeof(nd_seven_gl_mesh3d_inst_t),
+				                      inst_base_bytes + (size_t)(a * 16));
+			}
+			glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+			                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
+		}
+		s_gl.tree_shadow_write_draws = true;
+		gl_bind_scene_target();
+	}
+
+	/* Bind read-side 3D directional shadow map for main 3D tree self-shadowing */
+	gl_bind_tree_shadow_read(s_gl.mesh3d_pipe.uTreeShadowTex,
+	                         s_gl.mesh3d_pipe.uTreeShadowOrigin,
+	                         s_gl.mesh3d_pipe.uTreeShadowVP,
+	                         s_gl.mesh3d_pipe.uTreeShadowActive);
+
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_STENCIL_TEST);
 
-	/* Pass 1 & 2: True 3D ray-projected ground shadows (uShadowPass = 1 for sun, 2 for Lamb point light).
-	 * Uses stencil bit 0x02 (for sun) and 0x04 (for Lamb) so overlapping 3D branches and leaf cutouts
-	 * composite cleanly onto the curved terrain surface without double-darkening self-overlap artifacts. */
-	if (any_sun_shadow || any_lamb_shadow) {
+	/* Pass B: Radial Lamb point-light ground shadow (uShadowPass = 2), plus planar sun shadow
+	 * fallback (uShadowPass = 1) only if the 3D directional depth shadow FBO is unavailable. */
+	bool run_planar_sun = any_sun_shadow && !s_gl.tree_shadow_ready;
+	if (run_planar_sun || any_lamb_shadow) {
 		glDepthMask(GL_FALSE);
 		for (int sp = 1; sp <= 2; sp++) {
-			if (sp == 1 && !any_sun_shadow) continue;
+			if (sp == 1 && !run_planar_sun) continue;
 			if (sp == 2 && !any_lamb_shadow) continue;
 			GLuint sbit = (sp == 1) ? 0x02u : 0x04u;
 			glUniform1i(s_gl.mesh3d_pipe.uShadowPass, sp);
@@ -8959,7 +9287,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		}
 	}
 
-	/* Pass 0: Main 3D mesh geometry pass */
+	/* Pass C: Main 3D mesh geometry pass */
 	glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 0);
 	glDepthMask(GL_TRUE);
 	glStencilMask(0x01);
