@@ -3513,7 +3513,15 @@ static const char *s_fs_mesh3d =
 	"    }\n"
 	"    float distFade = clamp(1.0 - (vDist - 1800.0) / 36000.0, 0.0, 1.0);\n"
 	"    vec3 N_local = normalize(vLocalN);\n"
-	"    if (!gl_FrontFacing) N_local = -N_local;\n"
+	"    if (!gl_FrontFacing) {\n"
+	"        if (isFoliage || isFlower) {\n"
+	"            /* Preserve upward/outward canopy dome normal on double-sided branchlet cards\n"
+	"             * so back-facing leaves never flip their dome normal downward into the ground. */\n"
+	"            N_local = normalize(vec3(N_local.xy * 0.45, max(0.28, abs(N_local.z))));\n"
+	"        } else {\n"
+	"            N_local = -N_local;\n"
+	"        }\n"
+	"    }\n"
 	"    vec3 V_local = normalize(vec3(0.0, 0.573576, 0.819152));\n"
 	"    float microAO = 1.0;\n"
 	"    /* Procedural botanical & mineralogical micro-relief (continuous PBR detail & porous leaf/needle cutout) */\n"
@@ -3523,11 +3531,11 @@ static const char *s_fs_mesh3d =
 	"            float fFine  = chaff_grad_noise2d(vec2((vLocalPos.x - vLocalPos.y) * 1.85, vHeightAboveGround * 0.72), 0x42524B32u).x - 0.5;\n"
 	"            float fComb  = furrow * 0.68 + fFine * 0.32;\n"
 	"            N_local = normalize(N_local + vec3(fComb * 0.54, -fComb * 0.46, fFine * 0.18) * distFade);\n"
-	"            microAO = clamp(0.95 + fComb * 0.46 * distFade, 0.44, 1.18);\n"
-	"            albedo = clamp(albedo * (0.98 + fComb * 0.30 * distFade), 0.0, 1.0);\n"
+	"            microAO = clamp(0.96 + fComb * 0.38 * distFade, 0.64, 1.16);\n"
+	"            albedo = clamp(albedo * (1.00 + fComb * 0.24 * distFade), 0.0, 1.0);\n"
 	"            /* Subtle Nordic forest-floor moss & lichen collar on lower trunk bases */\n"
 	"            float mossMask = smoothstep(14.0, 1.5, vHeightAboveGround) * smoothstep(-0.1, 0.45, furrow + 0.15) * distFade;\n"
-	"            albedo = mix(albedo, vec3(0.22, 0.36, 0.16), mossMask * 0.38);\n"
+	"            albedo = mix(albedo, vec3(0.24, 0.38, 0.18), mossMask * 0.38);\n"
 	"        } else if (isFoliage) {\n"
 	"            vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.18 + vec2(vHeightAboveGround * 0.14, -vHeightAboveGround * 0.10), 0x4C454146u);\n"
 	"            vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.62 + vec2(-vHeightAboveGround * 0.44, vLocalPos.x * 0.28), 0x464F4C32u);\n"
@@ -3542,8 +3550,8 @@ static const char *s_fs_mesh3d =
 	"                    /* Pectinate Boreal Conifer Bough: resinous woody twig rachis + angled needle comb fascicles */\n"
 	"                    float rachisW = 0.042 * (1.0 - 0.65 * cu);\n"
 	"                    if (adv < rachisW) {\n"
-	"                        albedo = mix(vec3(0.32, 0.22, 0.14), albedo, 0.28);\n"
-	"                        microAO = 0.72;\n"
+	"                        albedo = mix(vec3(0.36, 0.25, 0.16), albedo, 0.32);\n"
+	"                        microAO = 0.86;\n"
 	"                    } else {\n"
 	"                        float envW = 0.48 * sin(min(1.0, cu * 1.15 + 0.12) * 2.85);\n"
 	"                        if (adv > envW || cu > 0.98) discard;\n"
@@ -3554,15 +3562,15 @@ static const char *s_fs_mesh3d =
 	"                        if (comb < (-0.25 + 0.72 * rFrac) * distFade) discard;\n"
 	"                        float nRoll = cos(phase * 6.2831853) * 0.44;\n"
 	"                        N_local = normalize(N_local + vec3(nRoll, -nRoll * 0.65, 0.18 * comb) * distFade);\n"
-	"                        microAO = clamp(0.64 + 0.48 * (0.5 + 0.5 * comb), 0.46, 1.18);\n"
-	"                        albedo = clamp(albedo * (0.84 + 0.28 * rFrac + 0.14 * comb), 0.0, 1.0);\n"
+	"                        microAO = clamp(0.82 + 0.32 * (0.5 + 0.5 * comb), 0.72, 1.16);\n"
+	"                        albedo = clamp(albedo * (0.94 + 0.18 * rFrac + 0.10 * comb), 0.0, 1.0);\n"
 	"                    }\n"
 	"                } else if (isFolOvate || isFolLobed) {\n"
 	"                    /* Broadleaf Shoot Card: central woody twig + 5..9 alternate serrated/lobed leaf blades */\n"
 	"                    float stemW = 0.032 * (1.0 - 0.75 * cu);\n"
 	"                    if (adv < stemW && cu < 0.86) {\n"
-	"                        albedo = mix(vec3(0.34, 0.26, 0.16), albedo, 0.35);\n"
-	"                        microAO = 0.74;\n"
+	"                        albedo = mix(vec3(0.38, 0.29, 0.18), albedo, 0.38);\n"
+	"                        microAO = 0.86;\n"
 	"                    } else {\n"
 	"                        float envW = 0.48 * sin(min(1.0, cu * 1.05 + 0.08) * 2.95);\n"
 	"                        if (adv > envW) discard;\n"
@@ -3576,8 +3584,8 @@ static const char *s_fs_mesh3d =
 	"                        float vein = (lf - 0.5) * 0.62;\n"
 	"                        float latVein = sin((rFrac * 8.0 - abs(lf - 0.5) * 5.0) * 6.2831853) * 0.14;\n"
 	"                        N_local = normalize(N_local + vec3(vein + latVein, -vein * 0.5, 0.24 - 0.48 * abs(lf - 0.5)) * distFade);\n"
-	"                        microAO = clamp(0.62 + 0.52 * (1.0 - abs(lf - 0.5) * 1.4), 0.44, 1.18);\n"
-	"                        albedo = clamp(albedo * (0.82 + 0.32 * (1.0 - abs(lf - 0.5) * 1.5) + 0.08 * latVein), 0.0, 1.0);\n"
+	"                        microAO = clamp(0.80 + 0.34 * (1.0 - abs(lf - 0.5) * 1.4), 0.70, 1.16);\n"
+	"                        albedo = clamp(albedo * (0.94 + 0.20 * (1.0 - abs(lf - 0.5) * 1.5) + 0.06 * latVein), 0.0, 1.0);\n"
 	"                    }\n"
 	"                } else if (isFolBlade) {\n"
 	"                    /* Tapered Sword / Rosette Leaf Blade with parallel vascular ridges */\n"
@@ -3585,7 +3593,7 @@ static const char *s_fs_mesh3d =
 	"                    if (adv > bladeHW) discard;\n"
 	"                    float ridge = sin(dv * 38.0) * 0.22;\n"
 	"                    N_local = normalize(N_local + vec3(ridge, -ridge * 0.5, 0.16 * (1.0 - adv / max(0.05, bladeHW))) * distFade);\n"
-	"                    microAO = clamp(0.68 + 0.42 * (1.0 - adv / max(0.05, bladeHW)), 0.48, 1.16);\n"
+	"                    microAO = clamp(0.82 + 0.30 * (1.0 - adv / max(0.05, bladeHW)), 0.72, 1.15);\n"
 	"                }\n"
 	"            } else if (!isFolCore && vDist < 3400.0) {\n"
 	"                float rim = 1.0 - abs(dot(N_local, V_local));\n"
@@ -3594,8 +3602,8 @@ static const char *s_fs_mesh3d =
 	"                if (poreField < cutThresh * distFade) discard;\n"
 	"                vec2 dLeaf = gMacro.yz * 0.34 + gLeaf.yz * 0.44 + gMicro.yz * 0.22;\n"
 	"                N_local = normalize(N_local + vec3(dLeaf.x * 0.58, dLeaf.y * 0.58, (leafCluster - 0.45) * 0.48) * distFade);\n"
-	"                microAO = clamp(0.58 + 0.68 * leafCluster, 0.42, 1.18);\n"
-	"                albedo = clamp(albedo * (0.78 + 0.42 * leafCluster), 0.0, 1.0);\n"
+	"                microAO = clamp(0.76 + 0.44 * leafCluster, 0.68, 1.16);\n"
+	"                albedo = clamp(albedo * (0.92 + 0.24 * leafCluster), 0.0, 1.0);\n"
 	"            }\n"
 	"        } else if (isRock) {\n"
 	"            /* Phaneritic mineral grain speckle (quartz/feldspar/mica micro-facets) */\n"
@@ -3616,42 +3624,48 @@ static const char *s_fs_mesh3d =
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float sunDot = dot(torusN, sDir);\n"
 	"    float dayFactor = clamp(0.12 + 0.88 * smoothstep(-0.16, 0.22, sunDot), 0.12, 1.0);\n"
-	"    float directSun = smoothstep(-0.06, 0.16, sunDot);\n"
+	"    float directSun = smoothstep(-0.06, 0.18, sunDot);\n"
+	"    float twilight = smoothstep(0.32, -0.06, sunDot) * smoothstep(-0.16, 0.12, sunDot);\n"
+	"    vec3 sunColor = mix(vec3(1.0, 0.98, 0.92), mix(vec3(1.0, 0.62, 0.28), vec3(0.96, 0.38, 0.18), smoothstep(0.18, -0.06, sunDot)), twilight);\n"
+	"    vec3 sunLitCol = mix(vec3(1.0), sunColor, twilight * 0.80);\n"
+	"    float innerHole = max(0.0, -cos(latPhi));\n"
+	"    float torusShineVis = clamp(innerHole * 1.4 + 0.18 * max(0.0, torusN.z), 0.0, 1.0);\n"
+	"    float oppSunlit = clamp(0.30 + 0.70 * smoothstep(-0.25, 0.45, -sDir.z + 0.5 * innerHole), 0.20, 1.0);\n"
+	"    float torusShine = smoothstep(0.06, -0.16, sunDot) * torusShineVis * oppSunlit * 0.16;\n"
 	"    vec3 sky = ((length(uSkyColor) > 0.001) ? uSkyColor : vec3(0.55, 0.70, 0.85)) * (0.16 + 0.84 * dayFactor);\n"
 	"    float cloudSh = nd_cloud_shadow_map(vLocalPos.xy, vParam.z, vDist);\n"
-	"    /* Da Vinci 4-Zone Volumetric Canopy Chiaroscuro:\n"
-	"     *   Zone 1: Sunlit outer crown dome with crisp directional contrast & cuticle gloss\n"
-	"     *   Zone 2: Warm yellow-green chlorophyll subsurface transmittance on back/rim-lit outer leaves\n"
-	"     *   Zone 3: Cool zenith sky-dome hemisphere illumination on upward shaded foliage\n"
-	"     *   Zone 4: Deep multi-scattered sub-canopy cavity umbra on interior boughs & undersides */\n"
-	"    vec3 L_default = normalize(vec3(-0.50, -0.50, 0.7071));\n"
+	"    float sunTrans = nd_sun_trans(cloudSh);\n"
+	"    vec3 shadowCool = mix(vec3(1.0), vec3(0.85, 0.92, 1.05), cloudSh * 0.45);\n"
+	"    /* Unified Terrain-Matched Solar & Hemispheric Canopy Illumination:\n"
+	"     * Uses the exact solar vector L_local/L_day, ambient/sun energy balance, twilight chromaticity,\n"
+	"     * and cloud shadow cooling as s_fs_terrain, while preserving 3D sub-canopy depth and chlorophyll SSS. */\n"
+	"    vec3 L_default = normalize(vec3(-0.577, -0.577, 0.816));\n"
 	"    vec3 sunLocal = vec3(dot(sDir, tangentU), dot(sDir, tangentV), dot(sDir, torusN));\n"
-	"    vec3 L_day = (sunLocal.z > 0.05) ? normalize(vec3(sunLocal.xy, max(0.35, sunLocal.z))) : L_default;\n"
-	"    vec3 L_local = normalize(mix(L_default, L_day, 0.45));\n"
+	"    vec3 L_local = (sunLocal.z > -0.08) ? normalize(vec3(sunLocal.xy, max(0.12, sunLocal.z))) : L_default;\n"
 	"    float ndotl = max(0.0, dot(N_local, L_local));\n"
-	"    float wrapDiff = clamp((dot(N_local, L_local) + 0.30) / 1.30, 0.0, 1.0);\n"
-	"    float diff = mix(ndotl, wrapDiff, isFoliage ? 0.24 : 0.14);\n"
-	"    float hemiSky = 0.5 + 0.5 * N_local.z;\n"
-	"    vec3 ambCol = mix(vec3(0.38, 0.44, 0.54), vec3(0.78, 0.84, 0.92), hemiSky);\n"
-	"    vec3 sunCol = vec3(1.12, 1.05, 0.94);\n"
-	"    float contactAO = mix(0.80, 1.0, smoothstep(0.0, 5.0, vHeightAboveGround));\n"
-	"    float cavityAO = isFoliage ? pow(clamp(vAO, 0.14, 1.0), 1.36) : clamp(vAO, 0.18, 1.0);\n"
-	"    float sunSelfShadow = isFoliage ? smoothstep(0.22, 0.86, vAO) : smoothstep(0.16, 0.72, vAO);\n"
-	"    float ao = clamp(cavityAO * contactAO * microAO, 0.14, 1.08);\n"
-	"    vec3 lightTerm = ambCol * (0.50 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor) * ao) +\n"
-	"                     sunCol * (0.86 * diff * nd_sun_trans(cloudSh) * directSun * sunSelfShadow * clamp(microAO, 0.65, 1.12));\n"
+	"    float wrapDiff = clamp((dot(N_local, L_local) + 0.38) / 1.38, 0.0, 1.0);\n"
+	"    float diff = mix(ndotl, wrapDiff, isFoliage ? 0.36 : 0.18);\n"
+	"    float hemiSky = clamp(0.5 + 0.5 * N_local.z, 0.0, 1.0);\n"
+	"    vec3 ambCol = mix(vec3(0.76, 0.80, 0.74), vec3(1.04, 1.06, 1.08), hemiSky);\n"
+	"    float contactAO = mix(0.86, 1.0, smoothstep(0.0, 5.0, vHeightAboveGround));\n"
+	"    float cavityAO = isFoliage ? mix(0.62, 1.06, clamp(vAO, 0.0, 1.0)) : mix(0.66, 1.04, clamp(vAO, 0.0, 1.0));\n"
+	"    float sunSelfShadow = isFoliage ? (0.60 + 0.40 * smoothstep(0.18, 0.78, vAO)) : (0.64 + 0.36 * smoothstep(0.15, 0.70, vAO));\n"
+	"    float ao = clamp(cavityAO * contactAO * microAO, 0.52, 1.12);\n"
+	"    vec3 lightTerm = (ambCol * (0.45 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor)) +\n"
+	"                      vec3(0.62 * diff * sunTrans * directSun * sunSelfShadow) +\n"
+	"                      vec3(torusShine)) * ao * sunLitCol * shadowCool;\n"
 	"    vec3 lit = albedo * lightTerm;\n"
 	"    /* Physical Subsurface Transmittance (Foliage/Crystals) & Schlick Fresnel Specular */\n"
 	"    vec3 H_local = normalize(L_local + V_local);\n"
 	"    float specAngle = max(0.0, dot(N_local, H_local));\n"
 	"    float ndotv = max(0.0, dot(N_local, V_local));\n"
 	"    if (isFoliage || isFlower) {\n"
-	"        float backTrans = max(0.0, dot(-N_local, L_local) + 0.35);\n"
+	"        float backTrans = max(0.0, dot(-N_local, L_local) + 0.42);\n"
 	"        float rimTrans = (1.0 - ndotv) * max(0.0, L_local.z);\n"
-	"        float sss = (0.70 * backTrans + 0.30 * rimTrans) * smoothstep(0.45, 0.96, vAO) * (isFolCore ? 0.35 : 1.0);\n"
-	"        lit += albedo * vec3(0.42, 0.56, 0.12) * (sss * 0.48 * nd_sun_trans(cloudSh) * directSun) * distFade;\n"
-	"        float leafFresnel = 0.04 + 0.24 * pow(1.0 - ndotv, 4.0);\n"
-	"        lit += mix(albedo, vec3(1.0, 0.99, 0.92), 0.38) * (pow(specAngle, 22.0) * leafFresnel * 0.48 * sunSelfShadow * nd_sun_trans(cloudSh) * directSun) * distFade;\n"
+	"        float sss = (0.65 * backTrans + 0.35 * rimTrans) * (0.45 + 0.55 * smoothstep(0.25, 0.90, vAO)) * (isFolCore ? 0.40 : 1.0);\n"
+	"        lit += albedo * vec3(0.46, 0.62, 0.16) * (sss * 0.44 * sunTrans * directSun * sunLitCol) * distFade;\n"
+	"        float leafFresnel = 0.04 + 0.22 * pow(1.0 - ndotv, 4.0);\n"
+	"        lit += mix(albedo, vec3(1.0, 0.99, 0.92), 0.35) * (pow(specAngle, 20.0) * leafFresnel * 0.40 * sunSelfShadow * sunTrans * directSun * sunLitCol) * distFade;\n"
 	"    } else if (isCrystal) {\n"
 	"        float f0 = 0.06;\n"
 	"        float fresnel = f0 + (1.0 - f0) * pow(clamp(1.0 - ndotv, 0.0, 1.0), 5.0);\n"
@@ -8755,6 +8769,8 @@ static uint32_t s_mesh3d_cursors[ND_MESH3D_TOTAL];
 static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const billboard_basis_t *basis,
                                         const nd_mesh3d_slice_t *sl,
+                                        bool want_shadow,
+                                        bool want_lamb_shadow,
                                         nd_seven_gl_mesh3d_inst_t *out)
 {
 	float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
@@ -8768,7 +8784,8 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	h ^= h >> 16;
 	h *= 0x7FEB352Du;
 	h ^= h >> 15;
-	float yaw = (((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f) * TWO_PI_F;
+	float yaw_norm = ((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f;
+	float yaw = yaw_norm * TWO_PI_F;
 	float cy = cosf(yaw), sy = sinf(yaw);
 	float flip = (b->u0 > b->u1) ? -1.0f : 1.0f;
 
@@ -8793,6 +8810,9 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	/* Center the 3D trunk/rock base at (o->x, o->y - o->hh * 0.5f) along North (-S)
 	 * so the physical 3D mesh base aligns with the center of ndw_obj_rect and the shadow quad. */
 	float north_shift = (b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float bx = b->x;
+	float by = b->y - north_shift;
+	float bz = b->z - b->water_z_off;
 	out->base_scale[0] = basis->base_pos[0] - S[0] * north_shift;
 	out->base_scale[1] = basis->base_pos[1] - S[1] * north_shift;
 	out->base_scale[2] = basis->base_pos[2] - S[2] * north_shift;
@@ -8819,13 +8839,33 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	out->tint[2] = fminf(1.0f, (float)((b->tint_rgba >> 8)  & 0xFFu) / 255.0f + sheen * 0.5f);
 	out->tint[3] = (float)(b->tint_rgba & 0xFFu) / 255.0f;
 
-	out->param[0] = b->x;
-	out->param[1] = b->y - north_shift;
-	out->param[2] = b->z - b->water_z_off;
+	out->param[0] = bx;
+	out->param[1] = by;
+	out->param[2] = bz;
 	out->param[3] = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f);
+
+	/* Local terrain plane (gx, gy, curv) and packed 3D shadow flags + yaw01 in a_iterr */
+	float gx = 0.0f, gy = 0.0f, curv = 0.0f;
+	if ((want_shadow || want_lamb_shadow) && nd_seven_get_chunk_sys()) {
+		const float step = 16.0f;
+		float dz_e = shadow_corner_terrain_dz(bx + step, by, bz, step, 0.0f);
+		float dz_w = shadow_corner_terrain_dz(bx - step, by, bz, -step, 0.0f);
+		float dz_s = shadow_corner_terrain_dz(bx, by + step, bz, 0.0f, step);
+		float dz_n = shadow_corner_terrain_dz(bx, by - step, bz, 0.0f, -step);
+		gx = (dz_e - dz_w) * (0.5f / step);
+		gy = (dz_s - dz_n) * (0.5f / step);
+		curv = (dz_e + dz_w + dz_s + dz_n) * (0.25f / (step * step));
+	}
+	float sh_flags = (want_shadow ? 1.0f : 0.0f) + (want_lamb_shadow ? 2.0f : 0.0f);
+	float yaw01 = fminf(0.999f, fmaxf(0.001f, yaw_norm + 0.5f));
+	out->terr[0] = gx;
+	out->terr[1] = gy;
+	out->terr[2] = curv;
+	out->terr[3] = flip * (sh_flags + yaw01);
 }
 
-static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float space_t)
+static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float space_t,
+                                 bool any_sun_shadow, bool any_lamb_shadow)
 {
 	if (mesh3d_n == 0 || !s_gl.mesh3d_pipe.prog || !s_gl.mesh3d_vbo || !s_gl.mesh3d_ibo || !s_gl.mesh3d_inst_vbo)
 		return;
@@ -8877,7 +8917,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	}
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
-	for (GLuint a = 3; a < 9; a++) {
+	for (GLuint a = 3; a < 10; a++) {
 		glEnableVertexAttribArray(a);
 		glVertexAttribDivisor(a, 1);
 	}
@@ -8886,10 +8926,44 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthMask(GL_TRUE);
 	glEnable(GL_STENCIL_TEST);
-	glStencilMask(0xFF);
-	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+
+	/* Pass 1 & 2: True 3D ray-projected ground shadows (uShadowPass = 1 for sun, 2 for Lamb point light).
+	 * Uses stencil bit 0x02 (for sun) and 0x04 (for Lamb) so overlapping 3D branches and leaf cutouts
+	 * composite cleanly onto the curved terrain surface without double-darkening self-overlap artifacts. */
+	if (any_sun_shadow || any_lamb_shadow) {
+		glDepthMask(GL_FALSE);
+		for (int sp = 1; sp <= 2; sp++) {
+			if (sp == 1 && !any_sun_shadow) continue;
+			if (sp == 2 && !any_lamb_shadow) continue;
+			GLuint sbit = (sp == 1) ? 0x02u : 0x04u;
+			glUniform1i(s_gl.mesh3d_pipe.uShadowPass, sp);
+			glStencilMask(sbit);
+			glStencilFunc(GL_EQUAL, 0, sbit);
+			glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
+			for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
+				uint32_t icnt = s_mesh3d_counts[m];
+				if (icnt == 0) continue;
+				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
+				if (!sl || sl->idx_count == 0) continue;
+
+				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
+				for (GLuint a = 0; a < 7; a++) {
+					glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
+					                      sizeof(nd_seven_gl_mesh3d_inst_t),
+					                      inst_base_bytes + (size_t)(a * 16));
+				}
+				glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+				                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
+			}
+		}
+	}
+
+	/* Pass 0: Main 3D mesh geometry pass */
+	glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 0);
+	glDepthMask(GL_TRUE);
+	glStencilMask(0x01);
+	glStencilFunc(GL_ALWAYS, 1, 0x01);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
 	for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
@@ -8899,7 +8973,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		if (!sl || sl->idx_count == 0) continue;
 
 		size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
-		for (GLuint a = 0; a < 6; a++) {
+		for (GLuint a = 0; a < 7; a++) {
 			glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
 			                      sizeof(nd_seven_gl_mesh3d_inst_t),
 			                      inst_base_bytes + (size_t)(a * 16));
@@ -8916,8 +8990,9 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		}
 	}
 
+	glStencilMask(0xFF);
 	glDisable(GL_STENCIL_TEST);
-	for (GLuint a = 3; a < 9; a++) {
+	for (GLuint a = 3; a < 10; a++) {
 		glVertexAttribDivisor(a, 0);
 		glDisableVertexAttribArray(a);
 	}
@@ -9032,11 +9107,12 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	}
 
 	/* Sprites and 3D meshes are drawn in the same depth buffer as terrain and water:
-	 *   - 3D meshes (batch[i].mesh_id > 0): instanced 3D triangle draws via s_gl.mesh3d_pipe;
+	 *   - 3D meshes (batch[i].mesh_id > 0): instanced 3D triangle draws + 3D projected shadows via s_gl.mesh3d_pipe;
 	 *   - pass 0 (core)   opaque 2D sprite pixels (alpha >= 0.5): depth write + stencil mark;
 	 *   - pass 1 (fringe) anti-aliased edges of 2D sprites (alpha < 0.5), blended, no depth write;
-	 *   - pass 2 (other)  ground contact shadows, glow auras and spray particles, blended, no depth write. */
+	 *   - pass 2 (other)  2D sprite ground contact shadows, glow auras and spray particles, blended, no depth write. */
 	uint32_t core_n = 0, other_n = 0, mesh3d_n = 0;
+	bool mesh3d_any_sun_sh = false, mesh3d_any_lamb_sh = false;
 	for (uint32_t i = 0; i <= count; i++) {
 		bool last = (i == count);
 		bool is_other = false, is_mesh3d = false, want_shadow = false, want_lamb_shadow = false;
@@ -9088,13 +9164,18 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			}
 			need_core   = (is_other || is_mesh3d) ? 0u : 1u;
 			need_mesh3d = is_mesh3d ? 1u : 0u;
-			need_other  = (is_other ? 1u : 0u) + (want_shadow ? 1u : 0u) + (want_lamb_shadow ? 1u : 0u);
+			need_other  = (is_other ? 1u : 0u) +
+			              ((!is_mesh3d && want_shadow) ? 1u : 0u) +
+			              ((!is_mesh3d && want_lamb_shadow) ? 1u : 0u);
 		}
 		if (last || core_n + need_core > MAX_BB_INSTANCES || other_n + need_other > MAX_BB_INSTANCES ||
 		    mesh3d_n + need_mesh3d > MAX_BB_INSTANCES) {
 			if (mesh3d_n > 0) {
-				flush_mesh3d_staging(mesh3d_n, bb_sea_level, space_t);
+				flush_mesh3d_staging(mesh3d_n, bb_sea_level, space_t,
+				                     mesh3d_any_sun_sh, mesh3d_any_lamb_sh);
 				mesh3d_n = 0;
+				mesh3d_any_sun_sh = false;
+				mesh3d_any_lamb_sh = false;
 			}
 			if (core_n > 0) {
 				glBufferData(GL_ARRAY_BUFFER, s_bb_instances, core_n * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
@@ -9104,10 +9185,11 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glDisable(GL_BLEND);
 				glDepthMask(GL_TRUE);
 				glEnable(GL_STENCIL_TEST);
-				glStencilMask(0xFF);
-				glStencilFunc(GL_ALWAYS, 1, 0xFF);
+				glStencilMask(0x01);
+				glStencilFunc(GL_ALWAYS, 1, 0x01);
 				glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
+				glStencilMask(0xFF);
 				glDisable(GL_STENCIL_TEST);
 				/* pass 1: anti-aliased fringe */
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
@@ -9148,18 +9230,23 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		if (last) break;
 		billboard_basis_t basis;
 		eval_billboard_basis(&batch[i], &s_gl.cur_pdef, s_gl.cur_origin, &basis);
-		if (want_shadow) {
-			pack_bb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n++]);
-		}
-		if (want_lamb_shadow) {
-			if (pack_bb_lamb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n]))
-				other_n++;
+		if (!is_mesh3d) {
+			if (want_shadow) {
+				pack_bb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n++]);
+			}
+			if (want_lamb_shadow) {
+				if (pack_bb_lamb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n]))
+					other_n++;
+			}
 		}
 		if (is_other) {
 			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_other_instances[other_n++]);
 		} else if (is_mesh3d) {
+			if (want_shadow) mesh3d_any_sun_sh = true;
+			if (want_lamb_shadow) mesh3d_any_lamb_sh = true;
 			s_mesh3d_staging_ids[mesh3d_n] = batch[i].mesh_id;
-			pack_mesh3d_instance(&batch[i], &basis, m3d_slice, &s_mesh3d_staging[mesh3d_n++]);
+			pack_mesh3d_instance(&batch[i], &basis, m3d_slice, want_shadow, want_lamb_shadow,
+			                     &s_mesh3d_staging[mesh3d_n++]);
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
 			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
