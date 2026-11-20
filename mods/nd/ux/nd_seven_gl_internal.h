@@ -54,7 +54,7 @@
 #define GL_TOTAL_VERTS_HI (GL_GRID_VERTS_HI * GL_GRID_VERTS_HI)
 #define GL_TOTAL_INDICES_HI (GL_GRID_QUADS_HI * GL_GRID_QUADS_HI * 6)
 
-#define MAX_CHUNK_TEXTURES 192
+#define MAX_CHUNK_TEXTURES 384
 #define MAX_WATER_QUEUE_BASE 192
 #define MAX_BB_VERTS 65536
 #define MAX_BB_OTHER_VERTS 32768
@@ -397,6 +397,7 @@ typedef struct {
 	GLuint fol_atlas_norm_tex;
 	GLuint tree_shadow_fbo[2];
 	GLuint tree_shadow_tex[2];
+	GLuint tree_shadow_dummy_tex;
 	int    tree_shadow_read_idx;
 	bool   tree_shadow_ready;
 	bool   tree_shadow_failed;
@@ -540,6 +541,7 @@ void gl_resolve_scene(GLbitfield mask);
 bool gl_build_hiz_pyramid(void);
 void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
                                   const float E[3], const float S[3], const float N[3]);
+GLuint gl_ensure_tree_shadow_dummy(void);
 void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActive);
 void gl_render_cloud_shadow_map(void);
 void gl_bind_csm(GLint loc_tex, GLint loc_csm);

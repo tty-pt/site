@@ -304,17 +304,21 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 		need_list_upload = false;
 		s_gl.active_cluster_count = ND_CLUSTER_TOTAL;
 	} else {
-		/* Clear cluster light lists (stride = 33 bytes per cluster: byte 0 = count, bytes 1..32 = light indices) */
-		for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++)
-			s_gl.cluster_list_tex_data[c * stride] = 0u;
+		/* Fast initialize all 6,144 clusters with the 2 primary directional lights (Sun=0, Moon=1) */
+		for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
+			uint8_t *entry = &s_gl.cluster_list_tex_data[c * stride];
+			entry[0] = 2u;
+			entry[1] = 0u;
+			entry[2] = 1u;
+		}
 
-		/* Assign active lights to 16x16x24 clusters */
+		/* Assign remaining active lights (li >= 2) to 16x16x24 clusters */
 		const float *mvp = s_gl.cur_mvp;
-		for (uint32_t li = 0; li < count; li++) {
+		for (uint32_t li = 2; li < count; li++) {
 			const nd_cluster_light_t *L = &s_gl.active_lights[li];
 			int ltype = (int)(L->type + 0.5f);
 			if (ltype == ND_LIGHT_TYPE_DIRECTIONAL) {
-				/* Directional lights illuminate all clusters */
+				/* Additional directional lights illuminate all clusters */
 				for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
 					uint8_t *entry = &s_gl.cluster_list_tex_data[c * stride];
 					uint8_t n = entry[0];
@@ -394,12 +398,7 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 			}
 		}
 
-		uint32_t active_clusters = 0;
-		for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
-			if (s_gl.cluster_list_tex_data[c * stride] > 0)
-				active_clusters++;
-		}
-		s_gl.active_cluster_count = active_clusters;
+		s_gl.active_cluster_count = ND_CLUSTER_TOTAL;
 		s_gl.cluster_dirs_only_cached = (count == 2);
 	}
 
@@ -633,5 +632,6 @@ void nd_seven_gl_flush_clouds(void)
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
+	glActiveTexture(GL_TEXTURE0);
 	s_gl.cloud_count = 0;
 }

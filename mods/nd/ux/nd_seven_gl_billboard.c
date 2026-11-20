@@ -768,9 +768,13 @@ static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
 
 	float c_dx[4] = { -half_w, half_w, -half_w + cast_dx + sway_dx, half_w + cast_dx + sway_dx };
 	float c_dy[4] = { -base_pad_y, -base_pad_y, cast_dy + sway_dy, cast_dy + sway_dy };
-	float c_zn[4];
-	for (int k = 0; k < 4; k++)
-		c_zn[k] = lift_z + shadow_corner_terrain_dz(bx + c_dx[k], by + c_dy[k], b->z, c_dx[k], c_dy[k]);
+	float c_zn[4] = { lift_z, lift_z, lift_z, lift_z };
+	float dx_cam = bx - s_gl.cur_tx;
+	float dy_cam = by - s_gl.cur_ty;
+	if (s_gl.cur_dist < 850.0f && (dx_cam * dx_cam + dy_cam * dy_cam) < (850.0f * 850.0f)) {
+		for (int k = 0; k < 4; k++)
+			c_zn[k] = lift_z + shadow_corner_terrain_dz(bx + c_dx[k], by + c_dy[k], b->z, c_dx[k], c_dy[k]);
+	}
 
 	out->pos0[0] = base_pos[0] + c_dx[0] * E[0] + c_dy[0] * S[0] + c_zn[0] * N[0];
 	out->pos0[1] = base_pos[1] + c_dx[0] * E[1] + c_dy[0] * S[1] + c_zn[0] * N[1];
@@ -992,7 +996,8 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 
 	/* Local terrain plane (gx, gy, curv) and packed 3D shadow flags + yaw01 in a_iterr */
 	float gx = 0.0f, gy = 0.0f, curv = 0.0f;
-	if ((want_shadow || want_lamb_shadow) && nd_seven_get_chunk_sys()) {
+	bool need_terr_plane = want_lamb_shadow || (want_shadow && !s_gl.tree_shadow_ready);
+	if (need_terr_plane && nd_seven_get_chunk_sys()) {
 		const float step = 16.0f;
 		float dz_e = shadow_corner_terrain_dz(bx + step, by, bz, step, 0.0f);
 		float dz_w = shadow_corner_terrain_dz(bx - step, by, bz, -step, 0.0f);
@@ -1082,10 +1087,13 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
 	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops. */
-	if (s_gl.tree_shadow_ready && s_gl.cur_dist < 4200.0f) {
+	if (s_gl.tree_shadow_ready && s_gl.cur_dist < 2300.0f) {
 		int write_idx = 1 - s_gl.tree_shadow_read_idx;
+		GLuint dummy = gl_ensure_tree_shadow_dummy();
 		glActiveTexture(GL_TEXTURE0 + 12);
-		glBindTexture(GL_TEXTURE_2D, 0);
+		glBindTexture(GL_TEXTURE_2D, dummy);
+		if (s_gl.mesh3d_pipe.uTreeShadowTex >= 0)
+			glUniform1i(s_gl.mesh3d_pipe.uTreeShadowTex, 12);
 		glActiveTexture(GL_TEXTURE0);
 		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
 		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
@@ -1334,9 +1342,15 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
 			if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
-				m3d_slice = nd_seven_mesh3d_slice(batch[i].mesh_id);
-				if (m3d_slice && m3d_slice->idx_count > 0)
-					is_mesh3d = true;
+				float dx_m = batch[i].x - s_gl.cur_tx;
+				float dy_m = batch[i].y - s_gl.cur_ty;
+				float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
+				float max_m3d_dist = fmaxf(750.0f, 1150.0f * det_scale);
+				if (d2_m <= max_m3d_dist * max_m3d_dist) {
+					m3d_slice = nd_seven_mesh3d_slice(batch[i].mesh_id);
+					if (m3d_slice && m3d_slice->idx_count > 0)
+						is_mesh3d = true;
+				}
 			}
 			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
 				float gr = (float)(batch[i].tint_rgba & 0xFFu) / 255.0f;

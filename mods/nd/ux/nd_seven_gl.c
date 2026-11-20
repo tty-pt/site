@@ -431,7 +431,7 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uCloudDeck      = glGetUniformLocation(p, "uCloudDeck", 10);
 			s_gl.cloud_pipe.uSunDir               = glGetUniformLocation(p, "uSunDir", 7);
 			s_gl.cloud_pipe.uCloudShadowMap       = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.cloud_pipe.uCloudShadowMapHistory = glGetUniformLocation(p, "uCloudShadowMapHistory", 20);
+			s_gl.cloud_pipe.uCloudShadowMapHistory = glGetUniformLocation(p, "uCloudShadowMapHistory", 22);
 			s_gl.cloud_pipe.uCsm                  = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.cloud_pipe.uPrevCsm              = glGetUniformLocation(p, "uPrevCsm", 8);
 			s_gl.cloud_pipe.uPrevSunDir           = glGetUniformLocation(p, "uPrevSunDir", 11);
@@ -741,6 +741,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	gl_chunk_tex_t *slot = &s_gl.chunk_cache[slot_idx];
 
 	if (!slot->height_tex) {
+		glActiveTexture(GL_TEXTURE0);
 		slot->height_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, slot->height_tex);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -749,6 +750,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	}
 	if (!slot->substrate_tex) {
+		glActiveTexture(GL_TEXTURE1);
 		slot->substrate_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -758,7 +760,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	}
 
 	bool needs_upload = (!slot->active || slot->rev != rev ||
-	                     slot->world != world || slot->ox != ox || slot->oy != oy ||
+	                     slot->world != world || slot->level != level ||
+	                     slot->ox != ox || slot->oy != oy ||
+	                     slot->span_w != span_w || slot->span_h != span_h ||
 	                     slot->tex_w != chunk_w || slot->tex_h != chunk_h);
 
 	if (needs_upload) {
@@ -1074,5 +1078,6 @@ void nd_seven_gl_flush_water(void)
 	glDisable(GL_STENCIL_TEST);
 	glStencilMask(0xFF);
 	glEnable(GL_BLEND);
+	glActiveTexture(GL_TEXTURE0);
 	s_gl.water_count = 0;
 }

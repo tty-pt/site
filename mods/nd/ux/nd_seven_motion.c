@@ -648,8 +648,6 @@ int nd_seven_rect_is_pure_virgin(const nd_client_state_t *st, int16_t world, int
                                  int16_t px_min, int16_t px_max,
                                  int16_t py_min, int16_t py_max)
 {
-	if (s_scenery_synth_budget < 64u)
-		return 0;
 	if (st && st->map_data.width > 0 && st->map_data.height > 0 &&
 	    st->map_data.pos[2] == rz && st->map_data.pos[3] == world) {
 		int mx0 = (int)st->map_data.pos[0] - (int)st->map_data.player_x;

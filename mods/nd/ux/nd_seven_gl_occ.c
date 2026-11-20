@@ -591,6 +591,25 @@ void gl_bind_scene_target(void)
 	glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
 }
 
+GLuint gl_ensure_tree_shadow_dummy(void)
+{
+	if (s_gl.tree_shadow_dummy_tex)
+		return s_gl.tree_shadow_dummy_tex;
+	static const uint8_t white[4] = { 255, 255, 255, 255 };
+	s_gl.tree_shadow_dummy_tex = glCreateTexture();
+	glActiveTexture(GL_TEXTURE0 + 12);
+	glBindTexture(GL_TEXTURE_2D, s_gl.tree_shadow_dummy_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	return s_gl.tree_shadow_dummy_tex;
+}
+
 static bool gl_ensure_tree_shadow_targets(void)
 {
 	if (s_gl.tree_shadow_ready) return true;
@@ -720,18 +739,19 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 
 void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActive)
 {
-	if (uActive < 0) return;
-	if (s_gl.tree_shadow_ready && s_gl.tree_shadow_read_valid && s_gl.tree_shadow_active > 0.001f) {
-		glActiveTexture(GL_TEXTURE0 + 12);
-		glBindTexture(GL_TEXTURE_2D, s_gl.tree_shadow_tex[s_gl.tree_shadow_read_idx]);
-		if (uTex >= 0) glUniform1i(uTex, 12);
+	GLuint dummy = gl_ensure_tree_shadow_dummy();
+	bool active = (s_gl.tree_shadow_ready && s_gl.tree_shadow_read_valid && s_gl.tree_shadow_active > 0.001f);
+	glActiveTexture(GL_TEXTURE0 + 12);
+	glBindTexture(GL_TEXTURE_2D, active ? s_gl.tree_shadow_tex[s_gl.tree_shadow_read_idx] : dummy);
+	if (uTex >= 0) glUniform1i(uTex, 12);
+	if (active) {
 		if (uOrigin >= 0) glUniform3fv(uOrigin, 1, s_gl.tree_shadow_read_origin);
 		if (uVP >= 0) glUniformMatrix4fv(uVP, 1, GL_FALSE, s_gl.tree_shadow_read_vp);
-		glUniform1f(uActive, s_gl.tree_shadow_active);
-		glActiveTexture(GL_TEXTURE0);
+		if (uActive >= 0) glUniform1f(uActive, s_gl.tree_shadow_active);
 	} else {
-		glUniform1f(uActive, 0.0f);
+		if (uActive >= 0) glUniform1f(uActive, 0.0f);
 	}
+	glActiveTexture(GL_TEXTURE0);
 }
 
 /* Resolve the multisampled scene into the sampleable colour (and depth) textures. */

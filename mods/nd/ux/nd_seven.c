@@ -1518,6 +1518,7 @@ typedef struct {
 	uint16_t      count;
 	int16_t       world, rz, w_level;
 	uint8_t       node_level, valid;
+	uint8_t       bw, bh;
 	uint8_t       staging_idx;
 	stl_wq_task_t async_task;
 	const ar_node_t *async_node;
@@ -1543,12 +1544,14 @@ static void seven_async_block_bb_worker(void *ctx)
 	float max_dim = 0.0f;
 	int32_t bx0 = slot->bx0;
 	int32_t by0 = slot->by0;
+	int32_t bw  = (slot->bw > 0 && slot->bw <= 8) ? (int32_t)slot->bw : 8;
+	int32_t bh  = (slot->bh > 0 && slot->bh <= 8) ? (int32_t)slot->bh : 8;
 	int16_t world = slot->world;
 	int16_t rz = slot->rz;
 	int16_t w_level = slot->w_level;
 
-	for (int32_t ry_grid = by0; ry_grid < by0 + 8; ry_grid++) {
-		for (int32_t rx_grid = bx0; rx_grid < bx0 + 8; rx_grid++) {
+	for (int32_t ry_grid = by0; ry_grid < by0 + bh; ry_grid++) {
+		for (int32_t rx_grid = bx0; rx_grid < bx0 + bw; rx_grid++) {
 			int16_t pos[4] = {
 				(int16_t)rx_grid,
 				(int16_t)(-ry_grid),
@@ -1577,7 +1580,8 @@ static void seven_async_block_bb_worker(void *ctx)
 				int16_t elev_q = 0, local_wl = w_level;
 				seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 				int16_t wz = nd_field_elevation_to_block(elev_q);
-				if (wz <= local_wl && node->level >= 2) {
+				if (wz <= local_wl && node->level >= 2 &&
+				    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS) {
 					int16_t canon_elev = nd_field_sample((uint16_t)world, 0, wx, wy).elevation;
 					if (canon_elev > local_wl)
 						wz = canon_elev;
@@ -1608,9 +1612,7 @@ static void seven_async_block_bb_worker(void *ctx)
 				seven_apply_obj_billboard_style(&raw_objs[k], &sr_val, 0xFFFFFFFFu, &bb);
 				if ((bb.style == ND_BB_STYLE_STANDARD || bb.style == ND_BB_STYLE_MINERAL) &&
 				    z_f < (float)local_wl - 0.05f) {
-					int16_t true_wl = 0;
-					if (seven_has_water_at((uint16_t)world, wx, wy, &true_wl) && z_f < (float)true_wl - 0.05f)
-						bb.pad0 |= 0x80u;
+					bb.pad0 |= 0x80u;
 				}
 				dst[cnt++] = bb;
 			}
@@ -1688,7 +1690,8 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 		int16_t wz = nd_field_elevation_to_block(elev_q);
 
-		if (wz <= local_wl && node->level >= 2) {
+		if (wz <= local_wl && node->level >= 2 &&
+		    raw_objs[k].kind >= NDW_K_DECID && raw_objs[k].kind <= NDW_K_CACTUS) {
 			int16_t canon_elev = nd_field_sample((uint16_t)pos[3], 0, wx, wy).elevation;
 			if (canon_elev > local_wl)
 				wz = canon_elev;
@@ -1719,9 +1722,7 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		seven_apply_obj_billboard_style(&raw_objs[k], sr, 0xFFFFFFFFu, &bb);
 		if ((bb.style == ND_BB_STYLE_STANDARD || bb.style == ND_BB_STYLE_MINERAL) &&
 		    z_f < (float)local_wl - 0.05f) {
-			int16_t true_wl = 0;
-			if (seven_has_water_at((uint16_t)pos[3], wx, wy, &true_wl) && z_f < (float)true_wl - 0.05f)
-				bb.pad0 |= 0x80u;
+			bb.pad0 |= 0x80u;
 		}
 
 		if (arena_dst && inout_arena_cnt) {
@@ -2829,7 +2830,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	int near_flushed = 0;
 	uint32_t tint_scenery = (s_cam_dist < max_scenery_cull) ? 0xFFFFFFFFu : 0u;
 	if (tint_scenery != 0) {
-		nd_seven_set_scenery_synth_budget(512);
+		nd_seven_set_scenery_synth_budget(0xFFFFFFFFu);
 		uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t w_level = nd_field_water_level(world);
 		int16_t base_rx = st ? st->map_data.pos[0] : 0;
@@ -2869,6 +2870,10 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		int32_t full_y0 = center_ry_grid - rad_ry;
 		int32_t full_y1 = center_ry_grid + rad_ry;
 
+		uint32_t cur_atlas_ver = atlas_rgba_version();
+		uint32_t cur_forget_seq = nd_seven_get_forget_seq();
+		uint32_t sync_block_builds = 0;
+
 		for (size_t m = 0; m < s_visible_leaf_count; m++) {
 			const ar_node_t *node = s_visible_leaves[m];
 			if (!node || !node->values || node->w <= 0 || node->h <= 0)
@@ -2900,10 +2905,6 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			int32_t cx1 = (rx1 < full_x1 + 1) ? rx1 : (full_x1 + 1);
 			int32_t cy0 = (ry0 > full_y0) ? ry0 : full_y0;
 			int32_t cy1 = (ry1 < full_y1 + 1) ? ry1 : (full_y1 + 1);
-
-			uint32_t cur_atlas_ver = atlas_rgba_version();
-			uint32_t cur_forget_seq = nd_seven_get_forget_seq();
-			uint32_t sync_block_builds = 0;
 
 			for (int32_t by0 = cy0; by0 < cy1; by0 += 8) {
 				int32_t by1 = (by0 + 8 < cy1) ? (by0 + 8) : cy1;
@@ -2952,19 +2953,27 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						  by1 - 1 < center_ry_grid + obj_j0   ||
 						  by0     > center_ry_grid + obj_j1);
 
+					uint8_t blk_w = (uint8_t)(bx1 - bx0);
+					uint8_t blk_h = (uint8_t)(by1 - by0);
 					if (b_frustum_state == 2 && tint_scenery != 0 &&
-					    (bx1 - bx0) == 8 && (by1 - by0) == 8 &&
+					    blk_w >= 1u && blk_w <= 8u && blk_h >= 1u && blk_h <= 8u &&
 					    !overlaps_near && !straddles_near_flush &&
 					    nd_seven_rect_is_pure_virgin(st, (int16_t)world, base_rz,
 					                                 (int16_t)bx0, (int16_t)(bx1 - 1),
 					                                 (int16_t)(-(by1 - 1)), (int16_t)(-by0))) {
 						uint32_t slot_idx =
-							((((uint32_t)(bx0 >> 3) & 63u) |
-							  (((uint32_t)(by0 >> 3) & 63u) << 6)) ^
-							 (((uint32_t)world & 3u) << 10)) & (BLOCK_BB_CACHE_SLOTS - 1u);
+							(blk_w == 8u && blk_h == 8u)
+							? (((((uint32_t)(bx0 >> 3) & 63u) |
+							     (((uint32_t)(by0 >> 3) & 63u) << 6)) ^
+							    (((uint32_t)world & 3u) << 10)) & (BLOCK_BB_CACHE_SLOTS - 1u))
+							: (((((uint32_t)bx0 & 63u) |
+							     (((uint32_t)by0 & 63u) << 6)) ^
+							    (((uint32_t)node->level & 3u) << 10) ^
+							    (((uint32_t)world & 3u) << 8)) & (BLOCK_BB_CACHE_SLOTS - 1u));
 						block_bb_cache_slot_t *slot = &s_block_bb_cache[slot_idx];
 						if (stl_wq_done(&slot->async_task)) {
 							if (slot->bx0 == bx0 && slot->by0 == by0 &&
+							    slot->bw == blk_w && slot->bh == blk_h &&
 							    slot->world == (int16_t)world && slot->rz == base_rz &&
 							    slot->node_ox == node->ox && slot->node_oy == node->oy &&
 							    slot->staging_idx < BLOCK_BB_STAGING_SLOTS) {
@@ -2999,6 +3008,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						}
 						if (slot->valid &&
 						    slot->bx0 == bx0 && slot->by0 == by0 &&
+						    slot->bw == blk_w && slot->bh == blk_h &&
 						    slot->world == (int16_t)world && slot->rz == base_rz &&
 						    slot->w_level == w_level &&
 						    slot->node_level == node->level &&
@@ -3015,15 +3025,28 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 								float bsz = (cached[ci].width > cached[ci].height) ? cached[ci].width : cached[ci].height;
 								if (bsz <= min_vis_sz)
 									break;
+								if (b_frustum_state == 1) {
+									int32_t r_xg = ndw_fdiv((int32_t)cached[ci].x, NDW_TILE_W);
+									int32_t r_yg = ndw_fdiv((int32_t)cached[ci].y, NDW_TILE_H);
+									float rmin_x = (float)(r_xg * NDW_TILE_W) - 320.0f;
+									float rmax_x = (float)((r_xg + 1) * NDW_TILE_W) + 320.0f;
+									float rmin_y = (float)(r_yg * NDW_TILE_H) - 320.0f;
+									float rmax_y = (float)((r_yg + 1) * NDW_TILE_H) + 320.0f;
+									if (!seven_test_frustum_xy(rmin_x, rmin_y, rmax_x, rmax_y,
+									                           (float)lwx, (float)lwy, nz_min, nz_max))
+										continue;
+								}
 								seven_stream_faded_billboard(&cached[ci]);
 							}
 							continue;
 						}
 
-						if (s_seven_wq && sync_block_builds >= 4u) {
+						if (s_seven_wq && sync_block_builds >= 1024u) {
 							uint8_t sidx = (uint8_t)(s_block_bb_staging_cursor++ & (BLOCK_BB_STAGING_SLOTS - 1u));
 							slot->bx0 = bx0;
 							slot->by0 = by0;
+							slot->bw = blk_w;
+							slot->bh = blk_h;
 							slot->node_ox = node->ox;
 							slot->node_oy = node->oy;
 							slot->node_rev = node->rev;
@@ -3074,12 +3097,25 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 									? arena_dst[ci].width : arena_dst[ci].height;
 								if (bsz <= min_vis_sz)
 									break;
+								if (b_frustum_state == 1) {
+									int32_t r_xg = ndw_fdiv((int32_t)arena_dst[ci].x, NDW_TILE_W);
+									int32_t r_yg = ndw_fdiv((int32_t)arena_dst[ci].y, NDW_TILE_H);
+									float rmin_x = (float)(r_xg * NDW_TILE_W) - 320.0f;
+									float rmax_x = (float)((r_xg + 1) * NDW_TILE_W) + 320.0f;
+									float rmin_y = (float)(r_yg * NDW_TILE_H) - 320.0f;
+									float rmax_y = (float)((r_yg + 1) * NDW_TILE_H) + 320.0f;
+									if (!seven_test_frustum_xy(rmin_x, rmin_y, rmax_x, rmax_y,
+									                           (float)lwx, (float)lwy, nz_min, nz_max))
+										continue;
+								}
 								seven_stream_faded_billboard(&arena_dst[ci]);
 							}
 						}
 						s_block_bb_arena_cursor += (uint64_t)arena_cnt;
 						slot->bx0 = bx0;
 						slot->by0 = by0;
+						slot->bw = blk_w;
+						slot->bh = blk_h;
 						slot->node_ox = node->ox;
 						slot->node_oy = node->oy;
 						slot->node_rev = node->rev;
