@@ -1110,43 +1110,42 @@ nd_m3d_add_foliage_bough_cluster_ex(nd_mesh3d_builder_t *b,
 	float ang0 = ((float)(hk & 0xFFu) / 255.0f) * 6.2831853f;
 	float dome_cz = cz - rz * 0.18f;
 
-	/* Tier 1: 4 lower spreading skirt branchlet sheets pitched outward with alternating axial roll */
-	for (int s = 0; s < 4; s++) {
+	/* Tier 1: 3 lower spreading skirt branchlet sheets pitched outward at 120 deg with alternating axial roll */
+	for (int s = 0; s < 3; s++) {
 		uint32_t hs = nd_m3d_hash(seed + (uint32_t)(s * 179 + 43));
 		float jitter = (((float)(hs & 0xFFu) / 255.0f) - 0.5f) * 0.42f;
-		float sang = ang0 + (float)s * 1.5707963f + jitter;
+		float sang = ang0 + (float)s * 2.0943951f + jitter;
 		float sca = cosf(sang), ssa = sinf(sang);
 		float roll = ((s & 1) ? 0.48f : -0.48f) + jitter * 0.35f;
-		float sx = cx + sca * rx * 0.10f;
-		float sy = cy + ssa * ry * 0.10f;
+		float sx = cx + sca * rx * 0.08f;
+		float sy = cy + ssa * ry * 0.08f;
 		float sz = cz - rz * 0.08f + ((float)(s & 1) * rz * 0.10f);
-		float card_len = fmaxf(rx, ry) * (0.96f + 0.14f * ((float)((hs >> 8) & 0x3Fu) / 63.0f));
-		float card_hw  = card_len * 0.58f;
+		float card_len = fmaxf(rx, ry) * (0.98f + 0.14f * ((float)((hs >> 8) & 0x3Fu) / 63.0f));
+		float card_hw  = card_len * 0.62f;
 		nd_m3d_add_branchlet_card(b, sx, sy, sz,
 		                          sca, ssa, 0.14f,
-		                          card_len, rz * 0.32f, rz * 0.46f,
+		                          card_len, rz * 0.34f, rz * 0.46f,
 		                          card_hw, rz * 0.18f, roll,
 		                          cx, cy, dome_cz,
 		                          fol_base,
 		                          col_deep, col_mid, col_lit, col_high, total_h);
 	}
 
-	/* Tier 2: 3 upper pitched crown-cap branchlet sheets intersecting across the sub-crown apex */
-	for (int f = 0; f < 3; f++) {
-		uint32_t hf = nd_m3d_hash(seed + (uint32_t)(f * 193 + 71));
+	/* Tier 2: Pitched crown-cap branchlet sheet intersecting across the sub-crown apex */
+	{
+		uint32_t hf = nd_m3d_hash(seed + 71u);
 		float jitter = (((float)(hf & 0xFFu) / 255.0f) - 0.5f) * 0.45f;
-		float fang = ang0 + 0.52f + (float)f * 2.0943951f + jitter;
+		float fang = ang0 + 1.0471976f + jitter;
 		float fca = cosf(fang), fsa = sinf(fang);
-		float roll = ((f == 0) ? 0.34f : ((f == 1) ? -0.42f : 0.22f));
-		float fx = cx - fca * rx * 0.12f;
-		float fy = cy - fsa * ry * 0.12f;
-		float fz = cz + rz * (0.20f + 0.08f * (float)f);
-		float card_len = fmaxf(rx, ry) * 0.92f;
-		float card_hw  = card_len * 0.60f;
+		float fx = cx - fca * rx * 0.14f;
+		float fy = cy - fsa * ry * 0.14f;
+		float fz = cz + rz * 0.22f;
+		float card_len = fmaxf(rx, ry) * 0.96f;
+		float card_hw  = card_len * 0.64f;
 		nd_m3d_add_branchlet_card(b, fx, fy, fz,
-		                          fca, fsa, 0.28f,
-		                          card_len, rz * 0.36f, rz * 0.38f,
-		                          card_hw, rz * 0.16f, roll,
+		                          fca, fsa, 0.26f,
+		                          card_len, rz * 0.38f, rz * 0.38f,
+		                          card_hw, rz * 0.16f, 0.32f,
 		                          cx, cy, dome_cz,
 		                          fol_base,
 		                          col_deep, col_mid, col_lit, col_high, total_h);
@@ -1450,7 +1449,6 @@ plant_geometry_build(const PlantInstance *plant,
 	uint8_t bark_class = g->allometry.bark_class;
 	float crook_mag = 0.03f + 0.14f * g->architecture.tortuosity;
 	uint8_t max_order_draw = (detail_level >= 2u) ? 1u : ((detail_level == 0u) ? 3u : 2u);
-	uint32_t bough_cluster_budget = (detail_level == 0u) ? 16u : 10u;
 	uint32_t bough_clusters_emitted = 0u;
 	uint32_t inst_seed = (uint32_t)(plant->instance_id ^ (plant->genome.genetic_seed >> 17));
 	bool is_massart_conifer = (g->leaf.complexity == PLANT_LEAF_NEEDLE &&
@@ -1506,12 +1504,20 @@ plant_geometry_build(const PlantInstance *plant,
 		}
 	}
 
-	/* Count primary trunk nodes for conical conifer whorl tapering */
+	/* Count primary trunk nodes & identify true terminal shoots (units with no drawn woody child branches) */
 	uint32_t trunk_node_count = 0u;
+	bool has_woody_child[PLANT_MAX_UNITS];
+	memset(has_woody_child, 0, sizeof(has_woody_child));
 	for (uint32_t u_idx = 0u; u_idx < pheno->unit_count; u_idx++) {
-		if (pheno->units[u_idx].branch_order == 0u &&
-		    (uint32_t)(pheno->units[u_idx].node_index + 1u) > trunk_node_count) {
-			trunk_node_count = (uint32_t)(pheno->units[u_idx].node_index + 1u);
+		const PlantGrowthUnit *u = &pheno->units[u_idx];
+		if (u->branch_order == 0u &&
+		    (uint32_t)(u->node_index + 1u) > trunk_node_count) {
+			trunk_node_count = (uint32_t)(u->node_index + 1u);
+		}
+		if (u->branch_order <= max_order_draw &&
+		    u->parent_unit != PLANT_INVALID_ID &&
+		    u->parent_unit < PLANT_MAX_UNITS) {
+			has_woody_child[u->parent_unit] = true;
 		}
 	}
 	if (trunk_node_count == 0u)
@@ -1549,14 +1555,14 @@ plant_geometry_build(const PlantInstance *plant,
 			y0 *= r_soft / r_h0;
 		}
 
-		float r0 = fmaxf(0.55f, u->base_radius_m * wu_per_m);
-		float r1 = fmaxf(0.40f, u->tip_radius_m * wu_per_m);
+		float r0 = fmaxf(0.50f, u->base_radius_m * wu_per_m);
+		float r1 = fmaxf(0.36f, u->tip_radius_m * wu_per_m);
 		int sides = (u->branch_order == 0u)
-			? ((bark_class == ND_PLANT_BARK_RIBBED) ? 8 : ((is_herb || is_graminoid) ? 5 : 8))
-			: ((u->branch_order == 1u) ? 6 : 4);
+			? ((bark_class == ND_PLANT_BARK_RIBBED) ? 8 : ((is_herb || is_graminoid) ? 5 : 7))
+			: ((u->branch_order == 1u) ? 5 : 4);
 		int rings = (u->branch_order == 0u && !is_herb && !is_graminoid)
-			? ((detail_level == 0u) ? 3 : 2)
-			: ((u->branch_order == 1u && detail_level == 0u && !is_herb && !is_graminoid) ? 2 : 1);
+			? 2
+			: ((u->branch_order == 1u && detail_level == 0u && !is_herb && !is_graminoid && !is_massart_conifer) ? 2 : 1);
 		uint32_t useed = (uint32_t)(u->topo_hash ^ (u->topo_hash >> 32));
 
 		uint32_t bd = (bark_class == ND_PLANT_BARK_RIBBED) ? c_leaf_deep : c_bark_dark;
@@ -1610,35 +1616,19 @@ plant_geometry_build(const PlantInstance *plant,
 			}
 		}
 
-		/* Skyrim Boreal/Alpine Conifer Whorl Tier on monopodial trunk nodes (Pseudotsuga menziesii, Abies alba) */
-		if (is_massart_conifer && u->branch_order == 0u) {
-			float t = (float)u->node_index / (float)trunk_node_count;
-			float z_tier0 = fmaxf(h_total * 0.11f, z0 * 0.92f);
-			float z_tier1 = fminf(h_total * 0.96f, fmaxf(z_tier0 + h_total * 0.11f, z1 * 1.06f));
-			float taper_k = (g->fruit.fruit_type == PLANT_FRUIT_CONE) ? 0.66f : 0.72f;
+		/* Skyrim Boreal/Alpine Conifer Whorl Tier on live crown trunk nodes (Pseudotsuga menziesii, Abies alba) */
+		if (is_massart_conifer && u->branch_order == 0u && (u->node_index >= 1u || trunk_node_count <= 2u)) {
+			float crown_den = (float)(trunk_node_count > 1u ? (trunk_node_count - 1u) : 1u);
+			float t = (float)(u->node_index > 0u ? (u->node_index - 1u) : 0u) / crown_den;
+			float z_tier0 = fmaxf(h_total * 0.16f, z0 * 0.94f);
+			float z_tier1 = fminf(h_total * 0.98f, fmaxf(z_tier0 + h_total * 0.10f, z1 * 1.05f));
+			float taper_k = (g->fruit.fruit_type == PLANT_FRUIT_CONE) ? 0.72f : 0.76f;
 			float r_sk = w_total * (0.45f * (1.0f - taper_k * t));
-			int tier_pts = (detail_level == 0u) ? ((u->node_index < 3u) ? 6 : 5) : 4;
+			int tier_pts = (detail_level == 0u) ? ((u->node_index <= 3u) ? 5 : 4) : 4;
 			nd_m3d_add_conifer_tier(b, x1, y1, z_tier0, z_tier1, r_sk,
 			                        tier_pts,
 			                        c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
 			                        h_total, useed + (uint32_t)u->node_index * 89u);
-			/* Radial drooping conifer needle-bough skirts emerging from each whorl */
-			int n_skirts = (u->node_index + 1u < trunk_node_count) ? 3 : 2;
-			for (int s = 0; s < n_skirts; s++) {
-				float sang = ((float)s / (float)n_skirts) * 6.2831853f + (float)u->node_index * 0.95f;
-				float ca = cosf(sang), sa = sinf(sang);
-				float dz_tier = z_tier1 - z_tier0;
-				nd_m3d_add_arching_blade(b,
-				                         x1 + ca * r_sk * 0.18f,
-				                         y1 + sa * r_sk * 0.18f,
-				                         z_tier0 + dz_tier * 0.36f,
-				                         ca, sa,
-				                         r_sk * 0.92f, dz_tier * 0.08f, dz_tier * 0.30f,
-				                         r_sk * 0.28f,
-				                         c_leaf_deep, c_leaf_mid,
-				                         (s & 1) ? c_leaf_high : c_leaf_lit,
-				                         h_total);
-			}
 		}
 
 		/* Rounded succulent apex cap on terminal cactus columns */
@@ -1651,6 +1641,7 @@ plant_geometry_build(const PlantInstance *plant,
 	}
 
 	/* 2. Traverse MTG PlantOrgans to emit species-accurate leaves, needles, flowers, and fruit */
+	uint32_t max_clusters = (detail_level == 0u) ? 52u : 28u;
 	for (uint32_t o_idx = 0u; o_idx < pheno->organ_count; o_idx++) {
 		const PlantOrgan *org = &pheno->organs[o_idx];
 		uint32_t oseed = (uint32_t)(org->topo_hash ^ (org->topo_hash >> 32));
@@ -1658,13 +1649,13 @@ plant_geometry_build(const PlantInstance *plant,
 		float ay = org->attachment_pos.y * wu_per_m;
 		float az = org->attachment_pos.z * wu_per_m;
 
-		float max_r = w_total * 0.42f;
+		float max_r = w_total * 0.43f;
 		float r_ha = sqrtf(ax * ax + ay * ay);
 		if (r_ha > max_r && r_ha > 1e-3f) {
 			ax *= max_r / r_ha;
 			ay *= max_r / r_ha;
 		}
-		az = plant_clampf(az, 0.5f, h_total * 0.93f);
+		az = plant_clampf(az, 0.5f, h_total * 0.94f);
 
 		float olen = fmaxf(2.0f, org->length_m * wu_per_m);
 		float owid = fmaxf(1.2f, org->width_m * wu_per_m);
@@ -1684,21 +1675,23 @@ plant_geometry_build(const PlantInstance *plant,
 			const PlantGrowthUnit *pu = (org->parent_unit < pheno->unit_count)
 				? &pheno->units[org->parent_unit] : NULL;
 			bool is_axis_tip = (!pu || pu->next_in_axis == PLANT_INVALID_ID);
-			bool is_outer_branch = (org->branch_order >= 2u) ||
-			                       (org->branch_order == 1u && is_axis_tip);
+			bool is_terminal_shoot = (!pu || (pu->id < PLANT_MAX_UNITS && !has_woody_child[pu->id]));
 
 			if (g->leaf.complexity == PLANT_LEAF_SCALE) {
 				/* Columnar cactus spine areoles are already represented on the ribbed stem */
 				continue;
 			} else if (is_massart_conifer) {
-				/* Outer lateral bough tip needle-comb sheets between trunk whorls */
-				if (org->sub_index != 0u || !is_axis_tip || org->branch_order != 1u)
+				/* Pectinate needle-comb sheets on actual fractal order 1..3 conifer branches */
+				if (org->sub_index != 0u || !is_axis_tip || org->branch_order == 0u)
 					continue;
-				float drop = olen * 0.34f;
+				if (org->branch_order > max_order_draw)
+					continue;
+				float drop = olen * 0.32f;
+				float roll = ((oseed & 1u) ? 0.24f : -0.24f);
 				nd_m3d_add_branchlet_card(b, ax, ay, az,
 				                          dx, dy, -0.08f,
-				                          olen * 1.12f, olen * 0.16f, drop,
-				                          owid * 0.68f, olen * 0.14f, 0.22f,
+				                          olen * 1.10f, olen * 0.16f, drop,
+				                          owid * 0.68f, olen * 0.14f, roll,
 				                          0.0f, 0.0f, az,
 				                          ND_MAT3D_FOL_CONIFER,
 				                          c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
@@ -1727,42 +1720,44 @@ plant_geometry_build(const PlantInstance *plant,
 				                            c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
 				                            h_total);
 			} else {
-				/* Broadleaf / Scots Pine / Birch / Willow / Acacia / Olive sub-crown bough clusters */
-				if (org->sub_index != 0u)
+				/* Broadleaf / Scots Pine / Birch / Willow / Acacia / Olive sub-crown bough clusters:
+				 * Placed strictly on true terminal shoots (!has_woody_child) so interior structural forks
+				 * remain visible through crown sky windows and 100% of outer twigs carry foliage. */
+				if (org->sub_index != 0u || !is_terminal_shoot)
 					continue;
 				bool is_flat_crown = (g->architecture.orthotropy < 0.14f && g->architecture.orthotropy >= -0.20f) ||
 				                     (g->leaf.complexity == PLANT_LEAF_NEEDLE);
-				float flat_aspect = is_flat_crown ? 0.40f : 0.64f;
-				float rx = fminf(w_total * 0.19f, fmaxf(w_total * 0.125f, olen * 0.95f));
+				float flat_aspect = is_flat_crown ? 0.38f : 0.62f;
+				float rx = fminf(w_total * 0.155f, fmaxf(w_total * 0.110f, olen * 0.85f));
 				float ry = rx * 0.92f;
 				float rz = rx * flat_aspect;
-				float cx = ax + dx * rx * 0.18f;
-				float cy = ay + dy * ry * 0.18f;
-				float cz = fminf(h_total * 0.92f, az + rz * 0.18f);
+				float cx = ax + dx * rx * 0.22f;
+				float cy = ay + dy * ry * 0.22f;
+				float cz = fminf(h_total * 0.93f, az + rz * 0.18f);
 
-				if (is_axis_tip && is_outer_branch && bough_clusters_emitted < bough_cluster_budget) {
+				if (bough_clusters_emitted < max_clusters) {
 					bough_clusters_emitted++;
-					/* Full compound 3D botanical sub-crown rosette of 7 crossed branchlet sheets (zero spheres) */
+					/* Full 3D botanical sub-crown rosette of 4 interlocking branchlet sheets (zero spheres) */
 					nd_m3d_add_foliage_bough_cluster_ex(b, cx, cy, cz,
 					                                    rx, ry, rz,
 					                                    tree_fol_base,
 					                                    c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
 					                                    h_total, oseed);
 					/* Weeping species (Salix babylonica, Betula pendula): cascading 3D weeping curtain streamers */
-					if (g->architecture.orthotropy < -0.25f) {
+					if (g->architecture.orthotropy < -0.25f && (bough_clusters_emitted & 1u)) {
 						bool is_willow = (g->architecture.orthotropy < -0.55f);
 						int n_curtains = is_willow ? 2 : 1;
 						for (int wc = 0; wc < n_curtains; wc++) {
 							float c_ang = atan2f(dy, dx) + (float)wc * 0.85f - 0.35f;
 							float cca = cosf(c_ang), csa = sinf(c_ang);
 							float drop_h = is_willow
-								? (h_total * (0.46f + 0.08f * (float)(wc & 1)))
-								: (h_total * 0.26f);
-							float reach_w = is_willow ? (w_total * 0.11f) : (w_total * 0.14f);
-							float blade_hw = is_willow ? (w_total * 0.048f) : (w_total * 0.040f);
+								? (h_total * (0.44f + 0.08f * (float)(wc & 1)))
+								: (h_total * 0.24f);
+							float reach_w = is_willow ? (w_total * 0.10f) : (w_total * 0.13f);
+							float blade_hw = is_willow ? (w_total * 0.046f) : (w_total * 0.038f);
 							nd_m3d_add_arching_blade(b,
-							                         cx + cca * rx * 0.24f,
-							                         cy + csa * ry * 0.24f,
+							                         cx + cca * rx * 0.22f,
+							                         cy + csa * ry * 0.22f,
 							                         cz,
 							                         cca, csa,
 							                         reach_w, h_total * 0.03f, drop_h,
@@ -1772,24 +1767,6 @@ plant_geometry_build(const PlantInstance *plant,
 							                         h_total);
 						}
 					}
-				} else if (is_axis_tip) {
-					/* Interior/secondary scaffold crossed branchlet pair (zero spheres) */
-					nd_m3d_add_branchlet_card(b, ax, ay, az,
-					                          dx, dy, 0.16f,
-					                          rx * 0.92f, rz * 0.28f, rz * 0.38f,
-					                          ry * 0.56f, rz * 0.16f, 0.42f,
-					                          cx, cy, cz - rz * 0.15f,
-					                          tree_fol_base,
-					                          c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
-					                          h_total);
-					nd_m3d_add_branchlet_card(b, ax, ay, az + rz * 0.12f,
-					                          -dy * 0.4f + dx * 0.8f, dx * 0.4f + dy * 0.8f, 0.22f,
-					                          rx * 0.84f, rz * 0.26f, rz * 0.34f,
-					                          ry * 0.52f, rz * 0.14f, -0.46f,
-					                          cx, cy, cz - rz * 0.15f,
-					                          tree_fol_base,
-					                          c_leaf_deep, c_leaf_mid, c_leaf_lit, c_leaf_high,
-					                          h_total);
 				}
 			}
 		} else if (org->type == PLANT_ORGAN_FLOWER) {
