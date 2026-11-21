@@ -58,6 +58,7 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
                                            int32_t wx, int32_t wy, int16_t base_wl,
                                            const nd_field_sample_t *pfs, ar_sample_t *out)
 {
+	(void)level;
 	nd_field_sample_t fs = *pfs;
 	uint8_t water_depth = fs.is_water ? (uint8_t)(fs.depth > 255 ? 255 : fs.depth) : 0;
 
@@ -70,20 +71,21 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 	out->attr[5] = 0;
 	out->attr[6] = 0;
 	out->attr[7] = 0;
-	/* Include shoreline micro-relief envelope (wz <= water_level + 4.0 units) so any chunk
-	 * where sub-texel shoreline relief or capillary wet sand can reach sea level sets flag bit 0.
-	 * On coarse chunks (level >= 2), ignore perched mountain-lake water overrides (fs.water_level > base_wl)
-	 * so a single isolated mountain lake sample does not raise the sea level of an entire continental chunk. */
-	uint8_t river_carve_q4 = (level <= 8) ? fs.river_carve_q4 : 0;
-	int16_t eff_wl = (level <= 5 || river_carve_q4 > 0) ? fs.water_level : base_wl;
-	bool eff_is_water = (level <= 5 || river_carve_q4 > 0) ? fs.is_water : ((fs.elevation_q12_4 >> 4) < base_wl);
+	/* Canonical LOD-invariant sample packing:
+	 * Because libareole reuses parent vertex samples across quadtree subdivisions
+	 * and interpolates children across LOD levels, every vertex sample at (wx, wy)
+	 * must depend ONLY on (world, wx, wy) and never on the quadtree level at which
+	 * it was first populated. */
+	uint8_t river_carve_q4 = fs.river_carve_q4;
+	int16_t eff_wl = fs.water_level;
+	bool eff_is_water = fs.is_water;
 	int32_t eff_depth = eff_is_water ? ((int32_t)eff_wl - (fs.elevation_q12_4 >> 4)) : 0;
 	if (eff_depth < 0) eff_depth = 0;
 	out->attr[3] = (uint8_t)(eff_depth > 255 ? 255 : eff_depth);
 	out->attr[6] = river_carve_q4;
 	int32_t shore_ceil_q12_4 = ((int32_t)eff_wl + 4) << 4;
 	uint8_t flags = (eff_depth > 0 || (int32_t)fs.elevation_q12_4 <= shore_ceil_q12_4 || river_carve_q4 > 0) ? 1u : 0u;
-	if (level <= 5 && fs.water_level > base_wl && fs.river_carve_q4 == 0)
+	if (fs.water_level > base_wl && fs.river_carve_q4 == 0)
 		flags |= 2u;
 	out->flags = flags;
 	if (flags) {
@@ -95,7 +97,7 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 	uint32_t c1 = ndw_biome_base_rgb(fs.bio);
 	uint32_t c2 = ndw_biome_base_rgb(fs.bio2);
 	uint8_t blend = fs.blend;
-	if (level <= 5 && blend > 0 && fs.bio != fs.bio2) {
+	if (blend > 0 && fs.bio != fs.bio2) {
 		/* Natural ecological ecotone mosaic: modulate smooth Whittaker blend (0..128)
 		 * with multi-scale spatial patches and micro-relief (hollows vs rises) so
 		 * adjacent biomes interdigitate organically without hard seams or flat washes. */
@@ -166,10 +168,10 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
                                      int32_t wx, int32_t wy, ar_sample_t *out)
 {
 	(void)user_ctx;
-	int32_t step_q16 = (level <= 5)
-		? 0
-		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 14) / 48);
-	nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
+	/* Always evaluate the canonical multi-octave field (step_q16 = 0) at every quadtree
+	 * level so H(wx, wy) is 100% invariant across all LOD levels and parent-child
+	 * vertex reuse in libareole is exact and contamination-free. */
+	nd_field_sample_t fs = nd_field_sample_step(world, 0, wx, wy);
 	seven_pack_field_sample(world, level, wx, wy, nd_field_water_level(world), &fs, out);
 }
 
@@ -180,14 +182,11 @@ static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_
 	(void)user_ctx;
 	if (!out_row || count == 0)
 		return;
-	int32_t step_q16 = (level <= 5)
-		? 0
-		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 14) / 48);
 	int16_t base_wl = nd_field_water_level(world);
 	int32_t gdim = (count > 1u) ? (int32_t)(count - 1u) : 1;
 	nd_field_sample_t row_fs[64];
 	if (count <= 64u) {
-		nd_field_sample_row_step(world, step_q16, wy, ox, span_w, count, row_fs);
+		nd_field_sample_row_step(world, 0, wy, ox, span_w, count, row_fs);
 		for (uint32_t c = 0; c < count; c++) {
 			int32_t wx = ox + (int32_t)(((int64_t)c * span_w) / gdim);
 			seven_pack_field_sample(world, level, wx, wy, base_wl, &row_fs[c], &out_row[c]);
@@ -195,7 +194,7 @@ static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_
 	} else {
 		for (uint32_t c = 0; c < count; c++) {
 			int32_t wx = ox + (int32_t)(((int64_t)c * span_w) / gdim);
-			nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
+			nd_field_sample_t fs = nd_field_sample_step(world, 0, wx, wy);
 			seven_pack_field_sample(world, level, wx, wy, base_wl, &fs, &out_row[c]);
 		}
 	}
@@ -204,9 +203,6 @@ static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
-		if (!s_seven_wq) {
-			s_seven_wq = stl_wq_create("nd-seven", 0, 256);
-		}
 		ar_config_t cfg;
 		memset(&cfg, 0, sizeof(cfg));
 		cfg.base_w = NDW_TILE_W;
@@ -215,13 +211,13 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.sampler = seven_macro_chunk_sampler;
 		cfg.row_sampler = seven_macro_chunk_row_sampler;
 		cfg.max_active = 160;
-		cfg.pool_capacity = 384;
+		cfg.pool_capacity = 512;
 		cfg.max_levels = 17;
 		cfg.default_rgba = 0xFF3C804Eu;
 		cfg.period_x = 6.2831853f * 2000000.0f;
 		cfg.period_y = 6.2831853f * 1335000.0f;
-		cfg.max_populates_per_frame = 96;
-		cfg.wq = s_seven_wq;
+		cfg.max_populates_per_frame = 0;
+		cfg.wq = NULL;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;
@@ -582,7 +578,9 @@ int nd_seven_is_alt_planet_occluded(const float eye_3d[3], float dist,
 static const ar_node_t *s_visible_leaves[SEVEN_MAX_VISIBLE_LEAVES];
 static size_t s_visible_leaf_count = 0;
 typedef struct {
-	int32_t ox, oy, w, h;
+	int32_t  ox, oy, w, h;
+	uint8_t  level;
+	uint32_t rev;
 } seven_leaf_bounds_t;
 static seven_leaf_bounds_t s_front_leaf_bounds[SEVEN_MAX_VISIBLE_LEAVES];
 static size_t s_front_leaf_count = 0;
@@ -749,14 +747,11 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	                        pdef, mvp_3d, eye_3d, NULL, NULL);
 
 	float r_planet = pdef->minor_r;
-	float z_min_cull = lwz_est - 256.0f;
-	float z_max_cull = lwz_est + 320.0f;
-	float cull_margin = 96.0f;
-	if (dist >= 1200.0f) {
-		z_min_cull = -2600.0f;
-		z_max_cull = 3200.0f;
-		cull_margin = 180.0f;
-	}
+	/* Always use canonical world Z bounds regardless of zoom or lamb Z so chunks at high or low
+	 * elevation relative to the lamb are never falsely frustum-culled or blocked from splitting. */
+	float z_min_cull = -2600.0f;
+	float z_max_cull = 3200.0f;
+	float cull_margin = 180.0f;
 	s_frame_sag_radius = r_planet;
 
 	float target_quad_px = 2.0f * (32.0f / 48.0f);
@@ -788,18 +783,11 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	primary_bctx.eye_3d[2] = eye_3d[2];
 
 	bool use_3d_primary = (dist >= 250000.0f);
-	bool use_horizon_cull = (dist >= 8000.0f);
 
 	s_frame_detail_scale = nd_seven_get_detail_scale();
-	bool is_normal_zoom = (dist <= 650.0f);
-	if (!is_normal_zoom && s_frame_detail_scale < 0.99f) {
+	if (dist > 650.0f && s_frame_detail_scale < 0.99f) {
 		target_quad_px /= fmaxf(0.35f, s_frame_detail_scale);
 	}
-	uint32_t max_pop = is_normal_zoom
-		? 96u
-		: ((s_frame_detail_scale < 0.99f)
-			? (uint32_t)(48.0f * fmaxf(0.25f, s_frame_detail_scale))
-			: 48u);
 
 	ar_cull_opts_t opts = {
 		.z_min = z_min_cull,
@@ -807,9 +795,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.sag_radius = r_planet,
 		.focal_x = (float)lwx,
 		.focal_y = (float)lwy,
+		.focal_z = lwz_est,
 		.bounds_3d_fn = use_3d_primary ? seven_torus_bounds_3d_cb : NULL,
-		.cull_3d_fn = (use_3d_primary || use_horizon_cull) ? seven_torus_cull_3d_cb : NULL,
-		.bounds_ctx = (use_3d_primary || use_horizon_cull) ? &primary_bctx : NULL,
+		.cull_3d_fn = use_3d_primary ? seven_torus_cull_3d_cb : NULL,
+		.bounds_ctx = use_3d_primary ? &primary_bctx : NULL,
 		.margin = cull_margin,
 		.target_quad_px = target_quad_px,
 		.viewport_w = (float)w,
@@ -817,8 +806,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.min_level = min_lvl,
 		.max_level = 14,
 		.view_id = 0,
-		.max_populates_per_query = max_pop,
-		.split_hysteresis = is_normal_zoom ? 0.0f : 0.14f
+		.max_populates_per_query = 0,
+		.split_hysteresis = 0.0f
 	};
 
 	ar_system_begin_frame(cs);
@@ -1033,15 +1022,22 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	 * (maximizing GPU Early-Z rejection) and populate the 1D CPU ridge-line horizon buffer. */
 	float cam_flat_x = (float)lwx;
 	float cam_flat_y = (float)lwy + dist * 0.5735764f; /* cos(55 deg) */
-	if (macro_count > 1) {
+	if (macro_count >= 1) {
 		float leaf_d2[SEVEN_MAX_VISIBLE_LEAVES];
 		size_t sort_n = (macro_count <= SEVEN_MAX_VISIBLE_LEAVES) ? macro_count : SEVEN_MAX_VISIBLE_LEAVES;
 		for (size_t a = 0; a < sort_n; a++) {
 			const ar_node_t *nd = s_visible_leaves[a];
 			if (!nd) {
 				leaf_d2[a] = 1e30f;
+				memset(&s_front_leaf_bounds[a], 0, sizeof(s_front_leaf_bounds[a]));
 				continue;
 			}
+			s_front_leaf_bounds[a].ox = nd->ox;
+			s_front_leaf_bounds[a].oy = nd->oy;
+			s_front_leaf_bounds[a].w  = nd->w;
+			s_front_leaf_bounds[a].h  = nd->h;
+			s_front_leaf_bounds[a].level = nd->level;
+			s_front_leaf_bounds[a].rev   = nd->rev;
 			if (use_3d_primary) {
 				float c3d[3];
 				seven_torus_bounds_3d_cb(&primary_bctx, (float)nd->ox, (float)nd->oy,
@@ -1062,14 +1058,17 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 		for (size_t a = 1; a < sort_n; a++) {
 			const ar_node_t *key_node = s_visible_leaves[a];
+			seven_leaf_bounds_t key_bnd = s_front_leaf_bounds[a];
 			float key_d2 = leaf_d2[a];
 			size_t b = a;
 			while (b > 0 && leaf_d2[b - 1] > key_d2) {
 				s_visible_leaves[b] = s_visible_leaves[b - 1];
+				s_front_leaf_bounds[b] = s_front_leaf_bounds[b - 1];
 				leaf_d2[b] = leaf_d2[b - 1];
 				b--;
 			}
 			s_visible_leaves[b] = key_node;
+			s_front_leaf_bounds[b] = key_bnd;
 			leaf_d2[b] = key_d2;
 		}
 	}
@@ -1146,6 +1145,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 		if (!terrain_ridge_occluded) {
 			s_visible_leaves[kept_count] = node;
+			s_front_leaf_bounds[kept_count] = s_front_leaf_bounds[m];
 			kept_count++;
 		}
 
@@ -1241,17 +1241,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_last_ridge_culled_count = (uint32_t)(macro_count - kept_count);
 	s_visible_leaf_count = kept_count;
 	s_front_leaf_count = (kept_count <= SEVEN_MAX_VISIBLE_LEAVES) ? kept_count : SEVEN_MAX_VISIBLE_LEAVES;
-	for (size_t a = 0; a < s_front_leaf_count; a++) {
-		const ar_node_t *nd = s_visible_leaves[a];
-		if (nd) {
-			s_front_leaf_bounds[a].ox = nd->ox;
-			s_front_leaf_bounds[a].oy = nd->oy;
-			s_front_leaf_bounds[a].w  = nd->w;
-			s_front_leaf_bounds[a].h  = nd->h;
-		} else {
-			memset(&s_front_leaf_bounds[a], 0, sizeof(s_front_leaf_bounds[a]));
-		}
-	}
 	s_last_alt_planet_chunk_count = 0;
 
 	/* Multi-Planet 3D Manifold Rendering:

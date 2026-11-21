@@ -2346,26 +2346,22 @@ int main(void)
 		ar_system_t *cs = nd_seven_get_chunk_sys();
 		assert(cs != NULL);
 
-		/* Level 0 uses 48x48 quads (4,608 triangles, 2.25x density); Level 1..2 use 32x32 quads (2,048 triangles);
-		 * Level 3+ and macro low-zoom (cam_dist >= 5000) use 16x16 quads (512 triangles, 4x lighter) */
+		/* Unified single-abstraction mesh fidelity: every chunk at every LOD level and zoom uses
+		 * the 48x48 quad mesh (exact 1:1 texel alignment with the 49x49 chunk heightmap texture)
+		 * so 3D vertex relief is never decimated or flattened to 16x16. */
 		assert(nd_seven_gl_grid_quads_for_level(0) == 48);
-		assert(nd_seven_gl_grid_quads_for_level(1) == 32);
-		assert(nd_seven_gl_grid_quads_for_level(2) == 32);
-		assert(nd_seven_gl_grid_quads_for_level(3) == 16);
+		assert(nd_seven_gl_grid_quads_for_level(1) == 48);
+		assert(nd_seven_gl_grid_quads_for_level(2) == 48);
+		assert(nd_seven_gl_grid_quads_for_level(3) == 48);
 
-		/* Close-up and macro zoom polygon scaling: mid-near zoom (> 340) uses 48x48 (4,608 tris),
-		 * normal/close zoom (<= 340, including 1.0x at 280) scales to 96x96 (18,432 tris),
-		 * close/ultra-close zoom (<= 220) scales to 144x144 (41,472 tris),
-		 * and low zoom (14 < x < 25, cam_dist >= 5000) scales down to 16x16 (512 tris) */
-		/* Fixed performance budget: level 0 never subdivides past 48x48 quads at any zoom */
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 380.0f)   == 48);
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 280.0f)   == 48);
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 200.0f)   == 48);
 		assert(nd_seven_gl_grid_quads_for_zoom(0, 80.0f)    == 48);
-		assert(nd_seven_gl_grid_quads_for_zoom(1, 80.0f)    == 32);
-		assert(nd_seven_gl_grid_quads_for_zoom(1, 6500.0f)  == 16);
-		assert(nd_seven_gl_grid_quads_for_zoom(2, 20000.0f) == 16);
-		assert(nd_seven_gl_grid_quads_for_zoom(4, 280.0f)   == 16);
+		assert(nd_seven_gl_grid_quads_for_zoom(1, 80.0f)    == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(1, 6500.0f)  == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(2, 20000.0f) == 48);
+		assert(nd_seven_gl_grid_quads_for_zoom(4, 280.0f)   == 48);
 
 		/* Verify adjacent 160x128 chunks at grid_dim=48 share identical perimeter sample values,
 		 * including across large world coordinates where 16-bit signed rotation would wrap */
@@ -3917,8 +3913,10 @@ int main(void)
 			nd_seven_render(fb, 1280, 720, &st);
 			uint32_t mid_leaves = nd_seven_last_visible_leaf_count();
 			assert(mid_leaves > 4);
-			float cam_fx = 80.0f;
-			float cam_fy = -64.0f + (ND_SEVEN_CAM_DIST / 0.02f) * 0.5735764f;
+			int64_t lwx_cur = 0, lwy_cur = 0;
+			nd_seven_world_pos(&st, &lwx_cur, &lwy_cur);
+			float cam_fx = (float)lwx_cur;
+			float cam_fy = (float)lwy_cur + (ND_SEVEN_CAM_DIST / 0.02f) * 0.5735764f;
 			float prev_d2 = -1.0f;
 			for (uint32_t li = 0; li < mid_leaves; li++) {
 				int32_t lox = 0, loy = 0, lw = 0, lh = 0;
@@ -3958,15 +3956,15 @@ int main(void)
 					assert(row_out[k].bio == pt_k.bio);
 				}
 
-				/* Verify sub-texel band-pass, canonical GPU fine-octave relief, and Nyquist-gated cloud noises in shaders */
+				/* Verify sub-texel band-pass, canonical heightmap-only elevation, and Nyquist-gated cloud noises in shaders */
 				assert(strstr(nd_seven_gl_fs_terrain(), "chaff_band_weight") != NULL);
 				assert(strstr(nd_seven_gl_fs_terrain(), "max_sub_wl") != NULL);
 				assert(strstr(nd_seven_gl_fs_terrain(), "texelSpan = max(3.333333, chunkTexelSpan)") != NULL);
 				assert(strstr(nd_seven_gl_fs_terrain(), "spanBlend = smoothstep(5.0, 14.0, chunkTexelSpan)") != NULL);
 				assert(strstr(nd_seven_gl_fs_terrain(), "distBlend = smoothstep(3200.0, 8400.0, vDistance)") != NULL);
 				assert(strstr(nd_seven_gl_fs_terrain(), "normalExag = mix(2.4, 1.15") != NULL);
-				assert(strstr(nd_seven_gl_fs_terrain(), "diffPreserve * 0.90") == NULL);
-				assert(strstr(nd_seven_gl_fs_terrain(), "texelSpan * 4.5 <= 100.0") == NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "nd_gpu_eval_canonical_field(worldPos") == NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "fragZ += macroDetail.x") == NULL);
 				assert(strstr(nd_seven_gl_fs_cloud(), "wPsi1") != NULL);
 				assert(strstr(nd_seven_gl_fs_cloud(), "wCir0") != NULL);
 				assert(strstr(nd_seven_gl_fs_cloud(), "wAlto0") != NULL);
@@ -4311,6 +4309,118 @@ int main(void)
 				assert(max_chunk_relief_q4 > 0);
 				printf("PASS: Multi-frame approach LOD progression refines to %zu non-deferred Level-0 chunks (max relief=%.2f wu)\n",
 				       lvl0_real_count, (float)max_chunk_relief_q4 / 16.0f);
+			}
+
+			/* Unified Terrain LOD Architecture Invariant Suite:
+			 *   1. Field LOD Invariance & Parent-Child Cache Contamination Prevention:
+			 *      Every quadtree chunk sample at (wx, wy) evaluates the exact canonical field
+			 *      regardless of which LOD level (0..12) populated it first.
+			 *   2. Lamb-Z & Zoom Independence (No Flat Rooms across lowland, coast, or high mountain peak):
+			 *      Across diverse room coordinates and zoom levels, active chunks are never deferred,
+			 *      always refine to Level 0 around the focal room at normal zoom, and maintain full
+			 *      canonical 3D relief matching nd_field_sample(world, 3, wx, wy).
+			 *   3. Shader Elevation Invariants:
+			 *      Both s_vs_terrain and s_fs_terrain derive elevation strictly from sampleHeightSmooth
+			 *      without vertex planetSmooth flattening or GPU field/macroDetail elevation overrides. */
+			{
+				ar_system_t *cs = nd_seven_get_chunk_sys();
+				assert(cs != NULL);
+
+				/* Invariant 1: Parent-to-child population from Level 10 down to Level 0 must produce
+				 * 100% identical vertex elevations and RGBA colors as direct canonical nd_field_sample */
+				const int32_t test_rooms[4][2] = {
+					{ 0, 0 },
+					{ 128, -96 },
+					{ -320, 240 },
+					{ 1024, 512 }
+				};
+				for (int ri = 0; ri < 4; ri++) {
+					int32_t rx = test_rooms[ri][0];
+					int32_t ry = test_rooms[ri][1];
+					int32_t ox0 = rx * NDW_TILE_W;
+					int32_t oy0 = ry * NDW_TILE_H;
+
+					/* Populate coarse ancestors first (Levels 10 down to 1) to force parent-child sample reuse */
+					for (int lvl = 10; lvl >= 1; lvl--) {
+						int32_t span_w = NDW_TILE_W << lvl;
+						int32_t span_h = NDW_TILE_H << lvl;
+						int32_t a_ox = (ox0 >= 0) ? ((ox0 / span_w) * span_w) : (-(((-ox0 + span_w - 1) / span_w) * span_w));
+						int32_t a_oy = (oy0 >= 0) ? ((oy0 / span_h) * span_h) : (-(((-oy0 + span_h - 1) / span_h) * span_h));
+						const ar_node_t *anc = ar_system_ensure(cs, 0, (uint8_t)lvl, a_ox, a_oy);
+						assert(anc != NULL);
+						assert((anc->flags & AR_NODE_FLAG_DEFERRED) == 0);
+					}
+
+					/* Now populate Level 0 child and verify every single vertex against canonical nd_field_sample */
+					const ar_node_t *leaf0 = ar_system_ensure(cs, 0, 0, ox0, oy0);
+					assert(leaf0 != NULL);
+					assert((leaf0->flags & AR_NODE_FLAG_DEFERRED) == 0);
+					assert(leaf0->vert_dim == 49 && leaf0->grid_dim == 48);
+
+					for (uint32_t r = 0; r <= 48; r += 6) {
+						int32_t wy = oy0 + (int32_t)(((int64_t)r * NDW_TILE_H) / 48);
+						for (uint32_t c = 0; c <= 48; c += 6) {
+							int32_t wx = ox0 + (int32_t)(((int64_t)c * NDW_TILE_W) / 48);
+							nd_field_sample_t canon = nd_field_sample(0, 3, wx, wy);
+							int16_t node_val = leaf0->values[r * 49 + c];
+							assert(node_val == canon.elevation_q12_4);
+						}
+					}
+				}
+
+				/* Invariant 2: Continuous Zoom-Out Sweep & Lamb-Z Independence across diverse rooms & elevations */
+				const float test_zooms[] = {
+					1.50f, 1.00f, 0.85f, 0.70f, 0.55f, 0.40f, 0.30f, 0.20f, 0.15f,
+					0.11f, 0.08f, 0.05f, 0.03f, 0.02f, 0.01f, 0.005f, 0.002f, 0.001f
+				};
+				for (int ri = 0; ri < 4; ri++) {
+					int32_t rx = test_rooms[ri][0];
+					int32_t ry = test_rooms[ri][1];
+					set_map(rx, ry, 10, 0x1B, 0, 0, 0, 0);
+					nd_seven_sync_origin(&st);
+					nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+
+					for (size_t zi = 0; zi < sizeof(test_zooms) / sizeof(test_zooms[0]); zi++) {
+						nd_seven_set_zoom(test_zooms[zi]);
+						nd_seven_render(fb, 640, 480, &st);
+						size_t act_cnt = ar_system_get_active_count(cs);
+						assert(act_cnt > 0);
+						bool focal_covered = false;
+						int32_t max_relief_q12_4 = 0;
+						int64_t focal_wx64 = 0, focal_wy64 = 0;
+						nd_seven_world_pos(&st, &focal_wx64, &focal_wy64);
+						int32_t focal_wx = (int32_t)focal_wx64;
+						int32_t focal_wy = (int32_t)focal_wy64;
+						for (size_t li = 0; li < act_cnt; li++) {
+							const ar_node_t *ln = ar_system_get_active_node(cs, li);
+							assert(ln != NULL);
+							assert((ln->flags & AR_NODE_FLAG_DEFERRED) == 0);
+							int32_t relief = (int32_t)ln->max_val - (int32_t)ln->min_val;
+							if (relief > max_relief_q12_4)
+								max_relief_q12_4 = relief;
+							if (focal_wx >= ln->ox && focal_wx <= ln->ox + ln->w &&
+							    focal_wy >= ln->oy && focal_wy <= ln->oy + ln->h) {
+								focal_covered = true;
+								if (test_zooms[zi] >= 0.60f)
+									assert(ln->level == 0);
+							}
+						}
+						assert(focal_covered);
+						assert(max_relief_q12_4 > 0);
+					}
+				}
+				nd_seven_set_zoom(1.0f);
+
+				/* Invariant 3: Shader elevation source, sub-texel normal gradient & day/night relief invariants */
+				assert(strstr(nd_seven_gl_vs_terrain(), "planetSmooth") == NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "fragZ = mix(fragZ, gpuField.x") == NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "fragZ += macroDetail.x") == NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "worldSlopeGrad = mix(worldSlopeGrad, gpuField.yz, gpuFieldBlend)") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "float dirRelief = mix(0.22 + 0.78 * dayFactor, 1.0, directSun)") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "STAGE 1: Canonical Heightmap & Slope Gradient Reconstruction") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "STAGE 9: Atmospheric Perspective") != NULL);
+
+				printf("PASS: Unified Terrain LOD Architecture Invariants (field LOD invariance, lamb-Z/zoom independence, 1:1 48x48 mesh, shader invariants) verified\n");
 			}
 		}
 	}

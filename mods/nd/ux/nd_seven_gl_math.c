@@ -393,18 +393,18 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
 
 uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist)
 {
-	if (level >= 3 || cam_dist >= 5000.0f)
-		return GL_GRID_QUADS_MACRO; /* 16x16 quads = 512 triangles (4x lighter macro mesh) */
-	if (level > 0)
-		return GL_GRID_QUADS_LO;    /* 32x32 quads = 2,048 triangles */
-	/* Fixed performance budget: level 0 never subdivides past 48x48 quads (4,608 triangles) at any zoom */
+	/* Single unified LOD system: the libareole quadtree determines chunk spatial scale
+	 * from 3D camera distance, while every chunk's 3D vertex mesh always matches its
+	 * 49x49 heightmap texture 1:1 (48x48 quads) so no heightmap vertices are ever discarded. */
+	(void)level;
 	(void)cam_dist;
 	return GL_GRID_QUADS_HI;
 }
 
 uint32_t nd_seven_gl_grid_quads_for_level(uint8_t level)
 {
-	return nd_seven_gl_grid_quads_for_zoom(level, 400.0f);
+	(void)level;
+	return GL_GRID_QUADS_HI;
 }
 
 float nd_seven_gl_eval_terrain_detail(float wx, float wy,

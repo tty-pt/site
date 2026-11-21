@@ -661,28 +661,17 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                 GLuint *out_vbo, GLuint *out_ibo, GLsizei *out_indices)
 {
-	/* Compute distance from camera focal point to nearest point on chunk box */
-	float min_x = (float)ox, max_x = (float)(ox + span_w);
-	float min_y = (float)oy, max_y = (float)(oy + span_h);
-	float dx = 0.0f, dy = 0.0f;
-	if (s_gl.cur_tx < min_x) dx = min_x - s_gl.cur_tx;
-	else if (s_gl.cur_tx > max_x) dx = s_gl.cur_tx - max_x;
-	if (s_gl.cur_ty < min_y) dy = min_y - s_gl.cur_ty;
-	else if (s_gl.cur_ty > max_y) dy = s_gl.cur_ty - max_y;
-	float eff_dist = sqrtf(s_gl.cur_dist * s_gl.cur_dist + dx * dx + dy * dy);
-
-	uint32_t quads = nd_seven_gl_grid_quads_for_zoom(level, eff_dist);
-	if (quads >= GL_GRID_QUADS_LO) {
-		/* Always use the 48x48 grid (exact 1:1 texel alignment with 49x49 chunk heightmaps)
-		 * for all near/mid chunks (Level 0..2), so 2:1 LOD borders share exact vertex stations. */
-		*out_vbo = s_gl.grid_vbo_hi;
-		*out_ibo = s_gl.grid_ibo_hi;
-		*out_indices = GL_TOTAL_INDICES_HI;
-	} else {
-		*out_vbo = s_gl.grid_vbo_macro;
-		*out_ibo = s_gl.grid_ibo_macro;
-		*out_indices = GL_TOTAL_INDICES_MACRO;
-	}
+	/* Always bind the 48x48 quad mesh (exact 1:1 vertex alignment with the 49x49 chunk
+	 * heightmap texture) across all quadtree LOD levels so 3D vertex relief is never
+	 * decimated or flattened and 2:1 LOD borders share exact vertex stations. */
+	(void)level;
+	(void)ox;
+	(void)oy;
+	(void)span_w;
+	(void)span_h;
+	*out_vbo = s_gl.grid_vbo_hi;
+	*out_ibo = s_gl.grid_ibo_hi;
+	*out_indices = GL_TOTAL_INDICES_HI;
 }
 
 void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev,

@@ -161,7 +161,7 @@
 	"        float k2 = h11 - h01 - k0;\n" \
 	"        float interpH = h00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n" \
 	"        vec2 interpGrad = vec2((k0 + k2 * u.y) * du.x / 160.0, -(k1 + k2 * u.x) * du.y / 128.0);\n" \
-	"        float roomBlend = smoothstep(180.0, 90.0, fw);\n" \
+	"        float roomBlend = (1.0 - smoothstep(90.0, 180.0, fw));\n" \
 	"        coarseH = mix(texZ, interpH, roomBlend);\n" \
 	"        coarseGrad = mix(texGrad, interpGrad, roomBlend);\n" \
 	"    }\n" \
