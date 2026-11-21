@@ -84,7 +84,7 @@
 	"    float coarse_q12_4 = 0.0;\n" \
 	"    for (int s = 15; s >= 2; s--) {\n" \
 	"        float cell_w = float(1 << s) * 144.0;\n" \
-	"        float w_oct = nd_octave_weight(cell_w, fw);\n" \
+	"        float w_oct = (s >= 5) ? 1.0 : nd_octave_weight(cell_w, fw);\n" \
 	"        if (w_oct <= 0.001) break;\n" \
 	"        int amp = chaff_octave_amplitude_ex(s, 2, 1);\n" \
 	"        uint oct_seed = seed ^ (uint(s) * 0x85EBCA77u + 1u);\n" \
@@ -144,36 +144,30 @@
 	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n" \
 	"    float coarseH = texZ;\n" \
 	"    vec2 coarseGrad = texGrad;\n" \
-	"    if (texelSpan > 320.0) {\n" \
+	"    if (texelSpan > 320.0 && fw < 180.0) {\n" \
 	"        float rx_f = (worldPos.x - 80.0) / 160.0;\n" \
 	"        float ry_f = (64.0 - worldPos.y) / 128.0;\n" \
 	"        int rx0 = int(floor(rx_f));\n" \
 	"        int ry0 = int(floor(ry_f));\n" \
-	"        int corner_limit = (fw < 120.0) ? 4 : 1;\n" \
-	"        float h_c[4];\n" \
-	"        for (int c = 0; c < corner_limit; c++) {\n" \
-	"            h_c[c] = nd_gpu_room_hyp_coarse(seed, rx0 + (c & 1), ry0 + (c >> 1), fw);\n" \
-	"        }\n" \
-	"        if (corner_limit == 4) {\n" \
-	"            vec2 f = vec2(rx_f - floor(rx_f), ry_f - floor(ry_f));\n" \
-	"            vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n" \
-	"            vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n" \
-	"            float h00 = h_c[0];\n" \
-	"            float h10 = h_c[1];\n" \
-	"            float h01 = h_c[2];\n" \
-	"            float h11 = h_c[3];\n" \
-	"            float k0 = h10 - h00;\n" \
-	"            float k1 = h01 - h00;\n" \
-	"            float k2 = h11 - h01 - k0;\n" \
-	"            coarseH = h00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n" \
-	"            coarseGrad = vec2((k0 + k2 * u.y) * du.x / 160.0, -(k1 + k2 * u.x) * du.y / 128.0);\n" \
-	"        } else {\n" \
-	"            coarseH = h_c[0];\n" \
-	"            coarseGrad = texGrad;\n" \
-	"        }\n" \
+	"        float h00 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0,     fw);\n" \
+	"        float h10 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0,     fw);\n" \
+	"        float h01 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0 + 1, fw);\n" \
+	"        float h11 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0 + 1, fw);\n" \
+	"        vec2 f = vec2(rx_f - floor(rx_f), ry_f - floor(ry_f));\n" \
+	"        vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n" \
+	"        vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n" \
+	"        float k0 = h10 - h00;\n" \
+	"        float k1 = h01 - h00;\n" \
+	"        float k2 = h11 - h01 - k0;\n" \
+	"        float interpH = h00 + k0 * u.x + k1 * u.y + k2 * u.x * u.y;\n" \
+	"        vec2 interpGrad = vec2((k0 + k2 * u.y) * du.x / 160.0, -(k1 + k2 * u.x) * du.y / 128.0);\n" \
+	"        float roomBlend = smoothstep(180.0, 90.0, fw);\n" \
+	"        coarseH = mix(texZ, interpH, roomBlend);\n" \
+	"        coarseGrad = mix(texGrad, interpGrad, roomBlend);\n" \
 	"    }\n" \
 	"    /* Compute exact active sub-texel octave window [s_min, s_max] in [3..9] before evaluating ruggedness */\n" \
-	"    if (fw * OCTAVE_MIN_PX >= 512.0 || texelSpan * 3.2 <= 8.0 || chaff_band_weight(512.0, fw, texelSpan) <= 0.001) {\n" \
+	"    float max_sub_wl = (texelSpan <= 320.0) ? min(512.0, texelSpan * 3.2) : 512.0;\n" \
+	"    if (fw * OCTAVE_MIN_PX >= max_sub_wl || texelSpan * 3.2 <= 8.0 || nd_octave_weight(max_sub_wl, fw) <= 0.001) {\n" \
 	"        out_fine_elev = 0.0;\n" \
 	"        return vec3(coarseH, coarseGrad.x, coarseGrad.y);\n" \
 	"    }\n" \
@@ -195,13 +189,15 @@
 	"        float oct_wl = float(1 << s);\n" \
 	"        float wNyq = nd_octave_weight(oct_wl, fw);\n" \
 	"        if (wNyq <= 0.001) break;\n" \
-	"        float wSubTex = smoothstep(texelSpan * 3.2, texelSpan * 1.2, oct_wl);\n" \
-	"        if (wSubTex <= 0.001) {\n" \
-	"            cur_p = rotAtan * cur_p;\n" \
-	"            cur_inv = cur_inv * irotAtan;\n" \
-	"            continue;\n" \
+	"        if (texelSpan <= 320.0) {\n" \
+	"            float wSubTex = smoothstep(texelSpan * 3.2, texelSpan * 1.2, oct_wl);\n" \
+	"            if (wSubTex <= 0.001) {\n" \
+	"                cur_p = rotAtan * cur_p;\n" \
+	"                cur_inv = cur_inv * irotAtan;\n" \
+	"                continue;\n" \
+	"            }\n" \
+	"            wNyq *= wSubTex;\n" \
 	"        }\n" \
-	"        wNyq *= wSubTex;\n" \
 	"        int amp_b = chaff_octave_amplitude_ex(s, 3, 1);\n" \
 	"        uint b_seed = seed ^ (uint(s) * 0x85EBCA77u + 0xBEEFu);\n" \
 	"        vec3 gb = chaff_wpoint_2d_grad_f(cur_p, s, b_seed);\n" \

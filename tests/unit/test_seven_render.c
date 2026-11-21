@@ -3958,11 +3958,36 @@ int main(void)
 					assert(row_out[k].bio == pt_k.bio);
 				}
 
-				/* Verify sub-texel band-pass and Nyquist-gated cloud noises in shaders */
+				/* Verify sub-texel band-pass, canonical GPU fine-octave relief, and Nyquist-gated cloud noises in shaders */
 				assert(strstr(nd_seven_gl_fs_terrain(), "chaff_band_weight") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "max_sub_wl") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "texelSpan = max(3.333333, chunkTexelSpan)") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "spanBlend = smoothstep(5.0, 14.0, chunkTexelSpan)") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "distBlend = smoothstep(3200.0, 8400.0, vDistance)") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "normalExag = mix(2.4, 1.15") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "diffPreserve * 0.90") == NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "texelSpan * 4.5 <= 100.0") == NULL);
 				assert(strstr(nd_seven_gl_fs_cloud(), "wPsi1") != NULL);
 				assert(strstr(nd_seven_gl_fs_cloud(), "wCir0") != NULL);
 				assert(strstr(nd_seven_gl_fs_cloud(), "wAlto0") != NULL);
+
+				/* Verify Level 6..8 step_q16 (< 2048 << 16) interpolates smoothly between rooms rather than nearest-room stair-stepping,
+				 * and preserves full coarse room hypsometry and macro ridged fine octaves in 3D vertex heights */
+				{
+					int32_t step_l7 = (int32_t)(((int64_t)(NDW_TILE_W << 7) << 14) / 48);
+					int32_t step_l8 = (int32_t)(((int64_t)(NDW_TILE_W << 8) << 14) / 48);
+					int32_t h_a = nd_field_sample_step(0, step_l8, 12880, -9600).coarse_elev;
+					int32_t h_b = nd_field_sample_step(0, step_l8, 12960, -9600).coarse_elev;
+					int32_t h_c = nd_field_sample_step(0, step_l8, 13040, -9600).coarse_elev;
+					assert((h_a <= h_b && h_b <= h_c) || (h_a >= h_b && h_b >= h_c));
+					assert(h_b == nd_field_sample_step(0, 0, 12960, -9600).coarse_elev);
+					int found_l7_fine = 0;
+					for (int k = 0; k < 32; k++) {
+						if (nd_field_sample_step(0, step_l7, 12800 + k * 73, -9600 + k * 59).fine_elev != 0)
+							found_l7_fine++;
+					}
+					assert(found_l7_fine > 0);
+				}
 
 				/* Verify nd_seven_sort_billboards_by_size sorts by descending max(width, height) and painter Y tie-break */
 				lam_billboard_gpu_t test_bbs[4] = {

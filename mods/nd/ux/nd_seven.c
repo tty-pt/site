@@ -168,7 +168,7 @@ static void seven_macro_chunk_sampler(void *user_ctx, uint16_t world, uint8_t le
 	(void)user_ctx;
 	int32_t step_q16 = (level <= 5)
 		? 0
-		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
+		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 14) / 48);
 	nd_field_sample_t fs = nd_field_sample_step(world, step_q16, wx, wy);
 	seven_pack_field_sample(world, level, wx, wy, nd_field_water_level(world), &fs, out);
 }
@@ -182,7 +182,7 @@ static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_
 		return;
 	int32_t step_q16 = (level <= 5)
 		? 0
-		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 16) / 48);
+		: (int32_t)(((int64_t)(NDW_TILE_W << (level > 15 ? 15 : level)) << 14) / 48);
 	int16_t base_wl = nd_field_water_level(world);
 	int32_t gdim = (count > 1u) ? (int32_t)(count - 1u) : 1;
 	nd_field_sample_t row_fs[64];

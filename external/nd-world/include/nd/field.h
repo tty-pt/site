@@ -1047,7 +1047,7 @@ nd_field_eval_coarse_unwrapped_step_q12_4(uint32_t seed, int32_t room_step_q16, 
 	}
 
 	for (uint8_t s = 8; s >= ND_FIELD_SHIFT_REGIONAL_MIN; s--) {
-		uint32_t w_oct = chaff_octave_weight_q16(s, room_step_q16);
+		uint32_t w_oct = (s >= 5) ? 65536u : chaff_octave_weight_q16(s, room_step_q16);
 		if (w_oct == 0u)
 			break;
 		int16_t amp = chaff_octave_amplitude(s);
@@ -1135,7 +1135,7 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 	int32_t fine_q12_4 = 0;
 
 	if (out_coarse_q12_4 != NULL || out_fine_q12_4 == NULL) {
-		int32_t room_step_q16 = (step_q16 >= (640 << 16)) ? (step_q16 / ND_FIELD_ROOM_W) : 0;
+		int32_t room_step_q16 = (step_q16 >= (2048 << 16)) ? (step_q16 / ND_FIELD_ROOM_W) : 0;
 		uint16_t uy = (uint16_t)((uint16_t)ry - 32512u);
 		if (uy < 512u) {
 			int32_t ry_hi = 32512 + (int32_t)uy;
@@ -1254,7 +1254,7 @@ nd_field_room_hyp_coarse(uint16_t world, int16_t rx, int16_t ry)
 static inline int16_t
 nd_field_room_hyp_coarse_step(uint16_t world, int32_t step_q16, int16_t rx, int16_t ry)
 {
-	if (step_q16 < (640 << 16))
+	if (step_q16 < (2048 << 16))
 		return nd_field_room_hyp_coarse(world, rx, ry);
 	int32_t r_wx = (int32_t)rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
 	int32_t r_wy = -(int32_t)ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
@@ -1296,9 +1296,27 @@ nd_field_interp_coarse_step_q12_4(uint16_t world, int32_t step_q16, int32_t rx_q
 {
 	if (step_q16 < (640 << 16))
 		return nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
-	int16_t rx = (int16_t)((rx_q16 + 32768) >> 16);
-	int16_t ry = (int16_t)((ry_q16 + 32768) >> 16);
-	return (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx, ry) << 4;
+	int16_t rx = (int16_t)(rx_q16 >> 16);
+	int16_t ry = (int16_t)(ry_q16 >> 16);
+	uint32_t fx = (uint32_t)(rx_q16 & 0xFFFF);
+	uint32_t fy = (uint32_t)(ry_q16 & 0xFFFF);
+
+	int32_t q00 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx, ry) << 4;
+	if ((fx == 0 && fy == 0) || step_q16 >= (2048 << 16))
+		return q00;
+
+	uint32_t tx = noise_wfade5(fx, 16);
+	uint32_t ty = noise_wfade5(fy, 16);
+
+	int16_t rx_next = (int16_t)(rx + 1);
+	int16_t ry_next = (int16_t)(ry + 1);
+	int32_t q10 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx_next, ry) << 4;
+	int32_t q01 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx, ry_next) << 4;
+	int32_t q11 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx_next, ry_next) << 4;
+
+	int32_t q0 = q00 + (int32_t)(((int64_t)(q10 - q00) * tx) >> 16);
+	int32_t q1 = q01 + (int32_t)(((int64_t)(q11 - q01) * tx) >> 16);
+	return q0 + (int32_t)(((int64_t)(q1 - q0) * ty) >> 16);
 }
 
 static inline void
@@ -2064,7 +2082,7 @@ nd_field_sample_at_azimuth_step(uint16_t world, uint8_t lod, int32_t step_q16,
 	/* Volcanic Hotspots: Rare localized tectonic rifts/calderas on dry land (~0.2% of terrain),
 	 * centered on the true room coordinates (true_rx, true_ry) with a smooth radial transition
 	 * to the surrounding highland biome at the room edges. */
-	if (step_q16 <= (160 << 16) && !s.is_water && s.elevation > s.water_level + 20) {
+	if (step_q16 <= (256 << 16) && !s.is_water && s.elevation > s.water_level + 20) {
 		int16_t true_rx = (lod > 0) ? (int16_t)((rx_q16 + 32768) >> 16) : room_x;
 		int16_t true_ry = (lod > 0) ? (int16_t)((ry_q16 + 32768) >> 16) : room_y;
 		uint32_t v_caldera = chaff_sample_torus_macro((int32_t)true_rx, (int32_t)true_ry, 6, 0x564F4C43u);
