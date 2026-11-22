@@ -204,7 +204,12 @@ bool gl_build_hiz_pyramid(void)
 {
 	if (!s_gl.scene_ok || !s_gl.hiz_valid || s_gl.hiz_levels <= 1) return false;
 	GLuint prog = s_gl.hiz_downsample_prog;
-	if (!prog) return false;
+	if (!prog || !glGetProgramParameter(prog, GL_COMPLETION_STATUS_KHR)) return false;
+	if (!glGetProgramParameter(prog, GL_LINK_STATUS)) {
+		glDeleteProgram(prog);
+		s_gl.hiz_downsample_prog = 0;
+		return false;
+	}
 
 	/* Resolve current terrain depth buffer into s_gl.res_depth_tex (level 0) */
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
