@@ -850,6 +850,7 @@ static bud_node *mount_seven_stage(void)
 			lx_attr("data-bud-key", "seven-stage-canvas"),
 			lx_attr("data-bud-canvas", "1"),
 			lx_attr("data-bud-canvas-fit", "1"),
+			lx_attr("data-bud-webgl", "1"),
 			lx_attr("width", "640"),
 			lx_attr("height", "480"),
 			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))),

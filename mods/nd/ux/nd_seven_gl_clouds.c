@@ -402,6 +402,7 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 		s_gl.cluster_dirs_only_cached = (count == 2);
 	}
 
+	glActiveTexture(GL_TEXTURE0);
 	if (!s_gl.cluster_ssbo_valid) {
 		s_gl.cluster_light_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);

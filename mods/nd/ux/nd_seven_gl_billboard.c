@@ -1239,6 +1239,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		uint16_t dirty_y0 = 0, dirty_h = 0;
 		int has_dirty = atlas_take_dirty_rows(&dirty_y0, &dirty_h);
 
+		glActiveTexture(GL_TEXTURE0);
 		if (first_alloc || !has_dirty) {
 			if (!s_gl.atlas_tex)
 				s_gl.atlas_tex = glCreateTexture();

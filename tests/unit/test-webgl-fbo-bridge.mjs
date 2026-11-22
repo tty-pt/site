@@ -46,7 +46,8 @@ function makeGl(log) {
 		deleteRenderbuffer: (r) => log.push(['deleteRenderbuffer', r.n]),
 		bindFramebuffer: (t, f) => log.push(['bindFramebuffer', t, f ? f.n : null]),
 		bindRenderbuffer: (t, r) => log.push(['bindRenderbuffer', t, r ? r.n : null]),
-		bindTexture: () => {}, texParameteri: () => {},
+		bindTexture: (t, tex) => log.push(['bindTexture', t, tex ? tex.n : null]),
+		texParameteri: (t, p, v) => log.push(['texParameteri', t, p, v]),
 		texImage2D: (...a) => {
 			const px = a[8];
 			if (px && a[3] > 0 && a[4] > 0) {
@@ -70,7 +71,11 @@ function makeGl(log) {
 		stencilFunc: (...a) => log.push(['stencilFunc', ...a]), stencilOp: (...a) => log.push(['stencilOp', ...a]),
 		stencilMask: (...a) => log.push(['stencilMask', ...a]), clearStencil: (...a) => log.push(['clearStencil', ...a]),
 		viewport: (...a) => log.push(['viewport', ...a]),
-		getExtension: () => null, activeTexture: () => {},
+		disable: () => {}, colorMask: () => {}, depthMask: () => {},
+		clearColor: () => {}, clearDepth: () => {},
+		clear: (mask) => log.push(['clear', mask]),
+		getExtension: () => null,
+		activeTexture: (u) => log.push(['activeTexture', u]),
 	};
 	return gl;
 }
@@ -219,3 +224,54 @@ assert.ok(log.some((e) => e[0] === 'uniform1i' && e[2] === 'uMVP' && e[3] === 7)
 assert.equal(log.filter((e) => e[0] === 'attachShader').length, 2, 'each shader attached exactly once on context swap');
 console.log('PASS: program link, active program binding, uniform locations, and instanced draw survive context transfer');
 
+// FBO-backed null-pixel textures are cleared during rebuildContextResources (prevents WebGL LAZY_INIT).
+assert.ok(restored.some((e) => e[0] === 'clear' && (e[1] & 0x4100) === 0x4100), 'FBO attached to null texture is cleared on context swap');
+console.log('PASS: null-pixel FBO attachments are cleared on context rebuild');
+
+// Per-unit glActiveTexture + glBindTexture isolation across unbinds on other units and across context swaps.
+const tU0 = imp.glCreateTexture();
+const tU1 = imp.glCreateTexture();
+imp.glActiveTexture(0x84C0);
+imp.glBindTexture(0x0DE1, tU0);
+imp.glTexImage2D(0x0DE1, 0, 0x8058, 4, 4, 0, 0x1908, 0x1401, 64);
+imp.glActiveTexture(0x84C1);
+imp.glBindTexture(0x0DE1, tU1);
+imp.glTexImage2D(0x0DE1, 0, 0x8229, 8, 8, 0, 0x1903, 0x1401, 64);
+imp.glActiveTexture(0x84CC); // TEXTURE12
+imp.glBindTexture(0x0DE1, 0); // Unbinding TEXTURE12 must NOT clobber TEXTURE0 or TEXTURE1
+imp.glActiveTexture(0x84C0);
+imp.glTexParameteri(0x0DE1, 0x2801, 0x2600);
+imp.glActiveTexture(0x84C1);
+imp.glTexParameteri(0x0DE1, 0x2801, 0x2601);
+log.length = 0;
+canvas = canvasB;
+imp.glViewport(0, 0, 800, 600);
+assert.ok(log.some((e) => e[0] === 'texImage2D' && e[4] === 4 && e[5] === 4), 'unit 0 texture metadata preserved across unit 12 unbind');
+assert.ok(log.some((e) => e[0] === 'texImage2D' && e[4] === 8 && e[5] === 8), 'unit 1 texture metadata preserved across unit 12 unbind');
+const postBindU0 = log.findIndex((e, i) => e[0] === 'activeTexture' && e[1] === 0x84C0 && log[i + 1] && log[i + 1][0] === 'bindTexture' && log[i + 1][2] !== null);
+const postBindU1 = log.findIndex((e, i) => e[0] === 'activeTexture' && e[1] === 0x84C1 && log[i + 1] && log[i + 1][0] === 'bindTexture' && log[i + 1][2] !== null);
+assert.ok(postBindU0 >= 0 && postBindU1 >= 0, 'per-unit TEXTURE0 and TEXTURE1 bindings restored on context swap');
+assert.equal(log.filter((e) => e[0] === 'activeTexture').at(-1)[1], 0x84C1, 'currentActiveTextureUnit restored after rebuild');
+console.log('PASS: per-unit texture bindings survive unrelated unit unbinds and context swaps');
+
+// glCreateTexture returns 0 when underlying c.createTexture() returns null (never poisons slots).
+const origCreateTexB = glB.createTexture;
+glB.createTexture = () => null;
+assert.equal(imp.glCreateTexture(), 0, 'glCreateTexture returns 0 on null allocation');
+glB.createTexture = origCreateTexB;
+console.log('PASS: glCreateTexture returns 0 when underlying context returns null');
+
+// DOM mode findCanvas() must NEVER hijack a plain [data-bud-canvas] (e.g. #room-map-canvas in non-Seven area).
+const prevDoc = globalThis.document;
+let mapCtxRequested = false;
+const fakeMapCanvas = { isConnected: true, getContext: () => { mapCtxRequested = true; return makeGl([]); } };
+globalThis.document = {
+	querySelector: (sel) => (sel === '[data-bud-canvas]' || sel === 'canvas') ? fakeMapCanvas : null,
+	querySelectorAll: () => [fakeMapCanvas],
+};
+const nonSevenBridge = createWebGlBridge(null, () => ({ memory }));
+const nonSevenImp = nonSevenBridge.makeImports();
+assert.equal(nonSevenImp.glCreateTexture(), 0, 'DOM bridge stays unbound when only [data-bud-canvas] exists');
+assert.equal(mapCtxRequested, false, 'DOM bridge must never request WebGL context on plain [data-bud-canvas]');
+globalThis.document = prevDoc;
+console.log('PASS: DOM WebGL bridge never hijacks plain [data-bud-canvas] in non-Seven areas');

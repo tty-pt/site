@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <nd/plant.h>
@@ -534,7 +535,9 @@ nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
 	if (W <= 0 || H <= 0 || W > 256 || H > 256)
 		return;
 
-	float zbuf[256 * 256];
+	float *zbuf = (float *)malloc((size_t)W * (size_t)H * sizeof(float));
+	if (!zbuf)
+		return;
 	for (int y = 0; y < H; y++) {
 		for (int x = 0; x < W; x++) {
 			out_albedo_rgba[(uint32_t)y * out_stride_px + (uint32_t)x] = 0u;
@@ -795,6 +798,7 @@ nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
 			}
 		}
 	}
+	free(zbuf);
 }
 
 #endif /* ND_SEVEN_MESH3D_H */

@@ -90,6 +90,47 @@ int main(void)
 	assert(strcmp(ent_out.art, "golem_stone") == 0);
 	printf("PASS: entity message pack & unpack\n");
 
+	/* 4b. Fast-path 144-byte binary nd_entity_packet_t unpack (mineral art paths + canary) */
+	struct {
+		nd_entity_desc_t desc;
+		uint8_t canary;
+	} checked_ent;
+	memset(&checked_ent, 0, sizeof(checked_ent));
+	checked_ent.canary = 0xA5;
+
+	uint8_t fpbuf[3 + sizeof(nd_entity_packet_t)];
+	fpbuf[0] = ND_BCP_MAGIC_0;
+	fpbuf[1] = ND_BCP_MAGIC_1;
+	fpbuf[2] = ND_BCP_ITEM;
+	nd_entity_packet_t pkt = {
+		.ref = 701,
+		.location = 181,
+		.type = 2,
+		.actions = 1,
+		.fg = 0x0A,
+		.flags = ND_EF_MINERAL,
+		.dynflags = 0,
+		.ch = '*',
+		.side = 0,
+		.name = "Boulder Musgo",
+		.unparse = "Boulder Musgo",
+		.art = "mineral/tropical_rainforest/BoulderMusgo_albedo.png",
+	};
+	memcpy(fpbuf + 3, &pkt, sizeof(pkt));
+	assert(nd_bcp_unpack_entity_msg(fpbuf, sizeof(fpbuf), &checked_ent.desc) == 1);
+	assert(checked_ent.canary == 0xA5);
+	assert(strcmp(checked_ent.desc.art, "mineral/tropical_rainforest/BoulderMusgo_albedo.png") == 0);
+
+	snprintf(pkt.art, sizeof(pkt.art), "%s",
+	         "mineral/temperate_rainforest/ClusterSeixosMolhados_albedo.png");
+	memcpy(fpbuf + 3, &pkt, sizeof(pkt));
+	memset(&checked_ent.desc, 0, sizeof(checked_ent.desc));
+	assert(nd_bcp_unpack_entity_msg(fpbuf, sizeof(fpbuf), &checked_ent.desc) == 1);
+	assert(checked_ent.canary == 0xA5);
+	assert(strcmp(checked_ent.desc.art,
+	              "mineral/temperate_rainforest/ClusterSeixosMolhados_albedo.png") == 0);
+	printf("PASS: entity 144-byte fast-path unpack & mineral art paths\n");
+
 	/* 5. Full client state decode via nd_bcp_decode */
 	nd_client_state_t st;
 	memset(&st, 0, sizeof(st));
