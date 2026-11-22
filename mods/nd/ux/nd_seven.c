@@ -3003,7 +3003,6 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						    slot->node_level == node->level &&
 						    slot->node_ox == node->ox && slot->node_oy == node->oy &&
 						    slot->node_rev == node->rev &&
-						    slot->atlas_ver == cur_atlas_ver &&
 						    slot->forget_seq == cur_forget_seq &&
 						    (s_block_bb_arena_cursor - slot->arena_seq) <= BLOCK_BB_ARENA_CAP) {
 							if (slot->max_dim <= min_vis_sz)

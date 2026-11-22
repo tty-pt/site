@@ -35,6 +35,7 @@ const uint8_t *atlas_px(void);
 const uint32_t *atlas_rgba(void);
 const uint32_t *atlas_norm_rgba(void);
 uint32_t atlas_rgba_version(void);
+int atlas_take_dirty_rows(uint16_t *out_y0, uint16_t *out_h);
 int nd_seven_plant_rect(uint8_t plant_id, nd_seven_sprite_rect_t *out_rect);
 int nd_seven_plant_has_normal(uint8_t plant_id);
 int nd_seven_stone_rect(const ndw_obj_t *o, nd_seven_sprite_rect_t *out_rect);

@@ -14,6 +14,8 @@ static uint32_t s_atlas_ver = 1;
 static uint16_t s_shelf_x = 0;
 static uint16_t s_shelf_y = ND_SEVEN_ATLAS_H_PX + 24;
 static uint16_t s_shelf_h = 0;
+static uint16_t s_atlas_dirty_y0 = ND_SEVEN_RUNTIME_ATLAS_H;
+static uint16_t s_atlas_dirty_y1 = 0;
 
 static const nd_seven_sprite_rect_t s_botanical_rects[NDB_COUNT] = {
 	[NDB_GRASS_TUFT_1] = { 0,   ND_SEVEN_ATLAS_H_PX, 20, 18 },
@@ -454,6 +456,10 @@ bake_mesh3d_into_slot(flora_dyn_slot_t *slot, uint8_t mesh_id)
 	slot->rect.y      = s_shelf_y;
 	slot->rect.w      = (uint16_t)slot_w;
 	slot->rect.h      = (uint16_t)slot_h;
+	if (s_shelf_y < s_atlas_dirty_y0)
+		s_atlas_dirty_y0 = s_shelf_y;
+	if ((uint16_t)(s_shelf_y + slot_h) > s_atlas_dirty_y1)
+		s_atlas_dirty_y1 = (uint16_t)(s_shelf_y + slot_h);
 	s_shelf_x         = (uint16_t)(s_shelf_x + slot_w);
 	if (slot_h > s_shelf_h)
 		s_shelf_h = (uint16_t)slot_h;
@@ -508,6 +514,24 @@ uint32_t atlas_rgba_version(void)
 {
 	atlas_load();
 	return s_atlas_ver;
+}
+
+int atlas_take_dirty_rows(uint16_t *out_y0, uint16_t *out_h)
+{
+	if (s_atlas_dirty_y1 <= s_atlas_dirty_y0 || s_atlas_dirty_y0 >= ND_SEVEN_RUNTIME_ATLAS_H) {
+		s_atlas_dirty_y0 = ND_SEVEN_RUNTIME_ATLAS_H;
+		s_atlas_dirty_y1 = 0;
+		return 0;
+	}
+	uint16_t y0 = s_atlas_dirty_y0;
+	uint16_t y1 = s_atlas_dirty_y1;
+	if (y1 > ND_SEVEN_RUNTIME_ATLAS_H)
+		y1 = ND_SEVEN_RUNTIME_ATLAS_H;
+	s_atlas_dirty_y0 = ND_SEVEN_RUNTIME_ATLAS_H;
+	s_atlas_dirty_y1 = 0;
+	if (out_y0) *out_y0 = y0;
+	if (out_h)  *out_h  = (uint16_t)(y1 - y0);
+	return 1;
 }
 
 int nd_seven_plant_has_normal(uint8_t plant_id)

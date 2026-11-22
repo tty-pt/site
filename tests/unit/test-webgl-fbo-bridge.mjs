@@ -12,7 +12,9 @@ function makeGl(log) {
 		deleteRenderbuffer: (r) => log.push(['deleteRenderbuffer', r.n]),
 		bindFramebuffer: (t, f) => log.push(['bindFramebuffer', t, f ? f.n : null]),
 		bindRenderbuffer: (t, r) => log.push(['bindRenderbuffer', t, r ? r.n : null]),
-		bindTexture: () => {}, texParameteri: () => {}, texImage2D: (...a) => log.push(['texImage2D', a[0], a[2], a[3], a[4]]),
+		bindTexture: () => {}, texParameteri: () => {},
+		texImage2D: (...a) => log.push(['texImage2D', a[0], a[1], a[2], a[3], a[4], a[8] ? a[8].byteLength : 0]),
+		texSubImage2D: (...a) => log.push(['texSubImage2D', a[0], a[1], a[2], a[3], a[4], a[5], a[8] ? a[8].byteLength : 0]),
 		renderbufferStorageMultisample: (t, s, f, w, h) => log.push(['rbStorageMS', s, f, w, h]),
 		framebufferRenderbuffer: (t, a, rt, r) => log.push(['fbRb', a, r ? r.n : null]),
 		framebufferTexture2D: (t, a, tt, tex, l) => log.push(['fbTex', a, tex ? tex.n : null, l]),
@@ -102,3 +104,23 @@ imp.glViewport(0, 0, 1600, 900);
 assert.equal(canvasB.width, 1600, 'default FBO 0 viewport resizes fit canvas width');
 assert.equal(canvasB.height, 900, 'default FBO 0 viewport resizes fit canvas height');
 console.log('PASS: offscreen FBO glViewport preserves canvas swapchain dimensions');
+
+// Multi-mip pyramid replay and R8 single-channel byte length safety near end of WASM linear memory.
+const mipTex = imp.glCreateTexture();
+imp.glBindTexture(0x0DE1, mipTex);
+imp.glTexImage2D(0x0DE1, 0, 0x8058, 8, 8, 0, 0x1908, 0x1401, 64);
+imp.glTexImage2D(0x0DE1, 1, 0x8058, 4, 4, 0, 0x1908, 0x1401, 64);
+imp.glTexSubImage2D(0x0DE1, 0, 0, 2, 8, 2, 0x1908, 0x1401, 64);
+// R8 texture placed 64 bytes before the end of the 1024-byte buffer (4x16 = 64 bytes; 4*16*4 would RangeError).
+const r8Tex = imp.glCreateTexture();
+imp.glBindTexture(0x0DE1, r8Tex);
+imp.glTexImage2D(0x0DE1, 0, 0x8229, 4, 16, 0, 0x1903, 0x1401, 1024 - 64);
+log.length = 0;
+canvas = canvasA;
+imp.glActiveTexture(0x84C0);
+const mipRestored = log.filter((e) => e[0] === 'texImage2D');
+assert.ok(mipRestored.some((e) => e[2] === 0 && e[4] === 8 && e[5] === 8 && e[6] === 256), 'mip level 0 restored');
+assert.ok(mipRestored.some((e) => e[2] === 1 && e[4] === 4 && e[5] === 4 && e[6] === 64), 'mip level 1 restored');
+assert.ok(mipRestored.some((e) => e[3] === 0x8229 && e[4] === 4 && e[5] === 16 && e[6] === 64), 'R8 single-channel texture restored with 1-byte stride');
+console.log('PASS: multi-mip pyramids, glTexSubImage2D, and R8 1-byte textures survive context transfer');
+

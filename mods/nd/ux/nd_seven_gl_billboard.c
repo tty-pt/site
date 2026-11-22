@@ -1234,29 +1234,50 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 	uint32_t cur_ver = atlas_rgba_version();
 	if ((!s_gl.atlas_tex || !s_gl.atlas_norm_tex || s_gl.atlas_ver != cur_ver) && atlas_rgba) {
-		if (!s_gl.atlas_tex)
-			s_gl.atlas_tex = glCreateTexture();
-		glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ND_SEVEN_ATLAS_W, ND_SEVEN_RUNTIME_ATLAS_H, 0,
-		             GL_RGBA, GL_UNSIGNED_BYTE, atlas_rgba);
-
 		const uint32_t *norm_rgba = atlas_norm_rgba();
-		if (norm_rgba) {
-			if (!s_gl.atlas_norm_tex)
-				s_gl.atlas_norm_tex = glCreateTexture();
-			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_norm_tex);
+		bool first_alloc = (!s_gl.atlas_tex || !s_gl.atlas_norm_tex || s_gl.atlas_ver == 0);
+		uint16_t dirty_y0 = 0, dirty_h = 0;
+		int has_dirty = atlas_take_dirty_rows(&dirty_y0, &dirty_h);
+
+		if (first_alloc || !has_dirty) {
+			if (!s_gl.atlas_tex)
+				s_gl.atlas_tex = glCreateTexture();
+			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ND_SEVEN_ATLAS_W, ND_SEVEN_RUNTIME_ATLAS_H, 0,
-			             GL_RGBA, GL_UNSIGNED_BYTE, norm_rgba);
+			             GL_RGBA, GL_UNSIGNED_BYTE, atlas_rgba);
+
+			if (norm_rgba) {
+				if (!s_gl.atlas_norm_tex)
+					s_gl.atlas_norm_tex = glCreateTexture();
+				glBindTexture(GL_TEXTURE_2D, s_gl.atlas_norm_tex);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ND_SEVEN_ATLAS_W, ND_SEVEN_RUNTIME_ATLAS_H, 0,
+				             GL_RGBA, GL_UNSIGNED_BYTE, norm_rgba);
+			}
+		} else {
+			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)dirty_y0,
+			                ND_SEVEN_ATLAS_W, (GLsizei)dirty_h,
+			                GL_RGBA, GL_UNSIGNED_BYTE,
+			                &atlas_rgba[(size_t)dirty_y0 * ND_SEVEN_ATLAS_W]);
+			if (norm_rgba) {
+				glBindTexture(GL_TEXTURE_2D, s_gl.atlas_norm_tex);
+				glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)dirty_y0,
+				                ND_SEVEN_ATLAS_W, (GLsizei)dirty_h,
+				                GL_RGBA, GL_UNSIGNED_BYTE,
+				                &norm_rgba[(size_t)dirty_y0 * ND_SEVEN_ATLAS_W]);
+			}
 		}
 		s_gl.atlas_ver = cur_ver;
 	}
