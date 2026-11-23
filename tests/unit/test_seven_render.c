@@ -14,6 +14,7 @@
 #include "nd_seven_gl.h"
 #include "nd_lamina.h"
 #include <ttypt/webgl.h>
+#include <ttypt/corolla.h>
 #include <math.h>
 
 #define MAXW 1920
@@ -2244,7 +2245,9 @@ int main(void)
 					small_mid_zoom++;
 			}
 		}
-		assert(ring_4_12_mid_zoom > 100);
+		/* Outer-equator 3D torus culling accurately matches the 2.0x East-West GPU metric
+		 * (eliminating off-screen flat_mvp waste while keeping 100% of on-screen billboards). */
+		assert(ring_4_12_mid_zoom > 80);
 		assert(ring_4_12_large_mid_zoom > 50);
 		assert(small_mid_zoom > 0);
 
@@ -2255,7 +2258,7 @@ int main(void)
 		nd_seven_render(fb, 1280, 720, &st);
 
 		uint32_t mid_cnt = nd_seven_last_mid_billboard_count();
-		assert(mid_cnt > 400);
+		assert(mid_cnt > 250);
 
 		int ring_4_12_far_zoom = 0;
 		int ring_4_12_large_far_zoom = 0;
@@ -2289,9 +2292,9 @@ int main(void)
 		}
 		assert(ring_4_12_large_far_zoom >= ring_4_12_large_mid_zoom);
 		assert(small_far_zoom == 0);
-		assert(far_horizon_cnt > 100);
+		assert(far_horizon_cnt > 50);
 		assert(max_cheb_seen > 16 && max_cheb_seen <= 96);
-		assert(unscaled_cnt > 400 && unscaled_cnt == (int)(mid_cnt < 262144 ? mid_cnt : 262144));
+		assert(unscaled_cnt > 250 && unscaled_cnt == (int)(mid_cnt < 262144 ? mid_cnt : 262144));
 
 		/* At orbital zoom (-22x, 0.00738f, cam_dist = 37,940 wu), linear size/distance culling
 		 * cleanly culls all billboards so zero room scenery scans or billboard draws occur. */
@@ -3922,19 +3925,43 @@ int main(void)
 			assert(mid_leaves > 4);
 			int64_t lwx_cur = 0, lwy_cur = 0;
 			nd_seven_world_pos(&st, &lwx_cur, &lwy_cur);
-			float cam_fx = (float)lwx_cur;
-			float cam_fy = (float)lwy_cur + (ND_SEVEN_CAM_DIST / 0.02f) * 0.5735764f;
+			float lwz_cur = nd_seven_ground_elevation_f((int32_t)lwx_cur, (int32_t)lwy_cur);
+			float eye_rel_13d[3];
+			double ref_orig_13d[3];
+			nd_seven_gl_compute_mvp_rel_ex(1280, 720, (float)lwx_cur, (float)lwy_cur, lwz_cur,
+			                               ND_SEVEN_CAM_DIST / 0.02f, 0.0f, ND_SEVEN_DIORAMA_PITCH,
+			                               ND_SEVEN_CAM_FOV, p1, NULL, ref_orig_13d, eye_rel_13d, NULL);
+			corolla_surface_t surf_13d = corolla_torus((double)p1->major_r, (double)p1->minor_r);
+			corolla_pose_t pose_13d = {0};
+			for (int k = 0; k < 9; k++) pose_13d.rot[k] = (double)p1->rot[k];
+			for (int k = 0; k < 3; k++) pose_13d.center[k] = (double)p1->center[k];
+			float wl_13d = (float)nd_field_water_level(0);
 			float prev_d2 = -1.0f;
 			for (uint32_t li = 0; li < mid_leaves; li++) {
 				int32_t lox = 0, loy = 0, lw = 0, lh = 0;
 				assert(nd_seven_last_visible_leaf_bounds(li, &lox, &loy, &lw, &lh) == 1);
-				float dx = 0.0f, dy = 0.0f;
-				if (cam_fx < (float)lox) dx = (float)lox - cam_fx;
-				else if (cam_fx > (float)(lox + lw)) dx = cam_fx - (float)(lox + lw);
-				if (cam_fy < (float)loy) dy = (float)loy - cam_fy;
-				else if (cam_fy > (float)(loy + lh)) dy = cam_fy - (float)(loy + lh);
-				float d2 = dx * dx + dy * dy;
-				assert(d2 + 1e-2f >= prev_d2);
+				float z0 = -2150.0f, z1 = 2000.0f;
+				float az0 = z0, az1 = z1;
+				nd_field_elevation_bounds(0, lox, loy, lw, lh, &az0, &az1);
+				if (az0 > z0) z0 = az0;
+				if (az1 < z1) z1 = az1;
+				if (z0 <= wl_13d + 8.0f && z1 < wl_13d + 8.0f) z1 = wl_13d + 8.0f;
+				if (z0 > z1) z0 = z1;
+				double u0 = (double)lox / (double)ND_SEVEN_WORLD_DIM_W;
+				double du = (double)lw / (double)ND_SEVEN_WORLD_DIM_W;
+				double v0 = ((double)loy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
+				double dv = (double)lh / (double)ND_SEVEN_WORLD_DIM_H;
+				double bmin[3], bmax[3];
+				corolla_patch_aabb(&surf_13d, &pose_13d, ref_orig_13d, u0, v0, du, dv,
+				                   (double)z0, (double)z1, bmin, bmax);
+				float dx = (eye_rel_13d[0] < (float)bmin[0]) ? ((float)bmin[0] - eye_rel_13d[0])
+				         : ((eye_rel_13d[0] > (float)bmax[0]) ? (eye_rel_13d[0] - (float)bmax[0]) : 0.0f);
+				float dy = (eye_rel_13d[1] < (float)bmin[1]) ? ((float)bmin[1] - eye_rel_13d[1])
+				         : ((eye_rel_13d[1] > (float)bmax[1]) ? (eye_rel_13d[1] - (float)bmax[1]) : 0.0f);
+				float dz = (eye_rel_13d[2] < (float)bmin[2]) ? ((float)bmin[2] - eye_rel_13d[2])
+				         : ((eye_rel_13d[2] > (float)bmax[2]) ? (eye_rel_13d[2] - (float)bmax[2]) : 0.0f);
+				float d2 = dx * dx + dy * dy + dz * dz;
+				assert(d2 + 1.0f >= prev_d2);
 				prev_d2 = d2;
 			}
 
@@ -4998,6 +5025,207 @@ int main(void)
 				printf("PASS: Realism Passes 0-4 (RGBA/pad0 packing, unified substrate & slope-normal grounding, billboard+terrain shadows, fallen logs & GLSL validation) verified\n");
 			}
 		}
+	}
+
+	/* Test A: Analytical nd_field_elevation_bounds exact containment & tightness oracle (20,000 patches, 500,000 samples) */
+	{
+		static const int32_t patch_sizes[9][2] = {
+			{    160,    128 },
+			{    320,    256 },
+			{    640,    512 },
+			{   1280,   1024 },
+			{   2560,   2048 },
+			{   5120,   4096 },
+			{  20480,  16384 },
+			{  81920,  65536 },
+			{ 327680, 262144 }
+		};
+		uint64_t rng = 0x5EED12349ABCDEF0ULL;
+		uint64_t violations = 0;
+		uint64_t total_checks = 0;
+		double fine_span_sum = 0.0;
+		uint64_t fine_span_cnt = 0;
+		double ocean_span_sum = 0.0;
+		uint64_t ocean_span_cnt = 0;
+
+		for (int p = 0; p < 20000; p++) {
+			rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+			uint16_t wld = (uint16_t)(rng % 3ULL);
+			int sidx = (int)((rng >> 4) % 9ULL);
+			int32_t pw = patch_sizes[sidx][0];
+			int32_t ph = patch_sizes[sidx][1];
+			int32_t ox, oy;
+			if (p < 400) {
+				/* Stress world wrap seam near +/- 5,242,880 */
+				ox = (p & 1) ? (5242880 - pw / 2) : (-5242880 - pw / 2);
+				oy = (int32_t)((int64_t)(rng % 8388608ULL) - 4194304LL);
+			} else {
+				ox = (int32_t)((int64_t)(rng % 10485760ULL) - 5242880LL);
+				rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+				oy = (int32_t)((int64_t)(rng % 8388608ULL) - 4194304LL);
+			}
+			float zmin = 0.0f, zmax = 0.0f;
+			nd_field_elevation_bounds(wld, ox, oy, pw, ph, &zmin, &zmax);
+			assert(isfinite(zmin) && isfinite(zmax) && zmin <= zmax);
+
+			if (sidx <= 3) {
+				fine_span_sum += (double)(zmax - zmin);
+				fine_span_cnt++;
+				if (zmax <= 0.0f) {
+					ocean_span_sum += (double)(zmax - zmin);
+					ocean_span_cnt++;
+				}
+			}
+
+			int lod = (sidx <= 2) ? 3 : ((sidx <= 4) ? 2 : ((sidx <= 6) ? 1 : 0));
+			for (int gy = 0; gy < 5; gy++) {
+				int32_t sy = oy + (int32_t)(((int64_t)ph * gy) / 4);
+				for (int gx = 0; gx < 5; gx++) {
+					int32_t sx = ox + (int32_t)(((int64_t)pw * gx) / 4);
+					nd_field_sample_t smp = nd_field_sample(wld, lod, sx, sy);
+					float elev = (float)smp.elevation_q12_4 * 0.0625f;
+					total_checks++;
+					if (elev < zmin - 1e-3f || elev > zmax + 1e-3f)
+						violations++;
+				}
+			}
+		}
+		double mean_fine_span = fine_span_sum / (double)(fine_span_cnt > 0 ? fine_span_cnt : 1);
+		double mean_ocean_span = ocean_span_cnt > 0 ? (ocean_span_sum / (double)ocean_span_cnt) : 0.0;
+		assert(violations == 0);
+		assert(mean_fine_span < 1800.0); /* Much tighter than legacy 5800 wu global slab */
+		printf("PASS: nd_field_elevation_bounds oracle verified (%llu checks, violations=%llu, fine_span=%.1f wu, ocean_span=%.1f wu)\n",
+		       (unsigned long long)total_checks, (unsigned long long)violations,
+		       mean_fine_span, mean_ocean_span);
+	}
+
+	/* Test B: 360-deg yaw x grazing-to-steep pitch x torus latitudes (outer / polar / concave inner hub)
+	 * zero-false-negative focal coverage & concave inner-hub horizontal span verification */
+	{
+		static const int lat_rooms[3] = { 0, -16384, -32768 }; /* outer equator, polar, concave inner hub */
+		static const float pitches[3] = { 10.0f, 25.0f, 45.0f };
+		int total_poses = 0;
+		int focal_misses = 0;
+		double outer_ew_span = 0.0, inner_ew_span = 0.0;
+
+		for (int li = 0; li < 3; li++) {
+			nd_seven_forget();
+			set_map(10, lat_rooms[li], 10, 0x1B, 0, 0, 0, 0);
+			nd_seven_sync_origin(&st);
+			nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+			int64_t lwx_b = 0, lwy_b = 0;
+			nd_seven_world_pos(&st, &lwx_b, &lwy_b);
+
+			for (int yi = 0; yi < 12; yi++) {
+				float yaw = (float)yi * 30.0f;
+				for (int pi = 0; pi < 3; pi++) {
+					nd_seven_set_zoom(0.15f);
+					nd_seven_set_cam_angles(yaw, pitches[pi]);
+					for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+					nd_seven_render(fb, 1280, 720, &st);
+					uint32_t lcnt = nd_seven_last_visible_leaf_count();
+					assert(lcnt > 0);
+					int covered = 0;
+					int32_t min_ox = 0x7FFFFFFF, max_ox = -0x7FFFFFFF;
+					for (uint32_t k = 0; k < lcnt; k++) {
+						int32_t lox = 0, loy = 0, lw = 0, lh = 0;
+						assert(nd_seven_last_visible_leaf_bounds(k, &lox, &loy, &lw, &lh) == 1);
+						if ((int64_t)lox <= lwx_b && lwx_b <= (int64_t)lox + (int64_t)lw &&
+						    (int64_t)loy <= lwy_b && lwy_b <= (int64_t)loy + (int64_t)lh)
+							covered = 1;
+						if (lox < min_ox) min_ox = lox;
+						if (lox + lw > max_ox) max_ox = lox + lw;
+					}
+					if (!covered)
+						focal_misses++;
+					if (yi == 0 && pi == 2) {
+						double span = (double)max_ox - (double)min_ox;
+						if (li == 0) outer_ew_span = span;
+						if (li == 2) inner_ew_span = span;
+					}
+					total_poses++;
+				}
+			}
+		}
+		nd_seven_reset_cam();
+		for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+		nd_seven_set_zoom(1.0f);
+		assert(focal_misses == 0);
+		/* Concave inner hub has 0.40x East-West torus metric vs 2.00x at outer equator, so
+		 * true 3D frustum culling must cover significantly wider East-West world span there. */
+		assert(inner_ew_span > outer_ew_span * 1.8);
+		printf("PASS: 360-deg yaw x pitch x torus latitude coverage verified (%d poses, focal_misses=%d, outer_ew=%.0f vs inner_ew=%.0f wu)\n",
+		       total_poses, focal_misses, outer_ew_span, inner_ew_span);
+	}
+
+	/* Test C: Close-up lamb + companion planet (alt_world) visibility & horizon/eclipse occlusion */
+	{
+		nd_seven_forget();
+		set_map(10, 10, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_reset_cam();
+		for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+
+		/* Close-up diorama view looking downward at lamb: companion planet cannot leak through ground */
+		nd_seven_set_zoom(1.0f);
+		nd_seven_render(fb, 1280, 720, &st);
+		assert(nd_seven_last_visible_leaf_count() > 0);
+		assert(nd_seven_last_alt_planet_chunk_count() == 0);
+
+		/* Low grazing close-up view (pitch 12 deg, yaw sweep) around lamb: primary terrain stays
+		 * watertight, no NaNs, and ridge/horizon occluder runs cleanly without false-culled focal leaf */
+		for (int yi = 0; yi < 4; yi++) {
+			nd_seven_set_cam_angles((float)yi * 90.0f, 12.0f);
+			for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+			nd_seven_render(fb, 1280, 720, &st);
+			assert(nd_seven_last_visible_leaf_count() > 0);
+		}
+		uint32_t last_occ = nd_seven_last_ridge_culled_count();
+		nd_seven_reset_cam();
+		for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+		printf("PASS: close-up lamb + companion planet occlusion & low-pitch sweep verified (ridge_culled=%u)\n",
+		       last_occ);
+	}
+
+	/* Test D: 360-deg water occlusion (nd_seven_is_water_occluded_at) — zero false occlusion on visible
+	 * foreground water and positive occlusion on deeply buried subterranean water boxes */
+	{
+		nd_seven_forget();
+		set_map(10, 10, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_sync_origin(&st);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_set_zoom(0.25f);
+
+		int64_t lwx_w = 0, lwy_w = 0;
+		nd_seven_world_pos(&st, &lwx_w, &lwy_w);
+		float gz_w = nd_seven_ground_elevation_f((int32_t)lwx_w, (int32_t)lwy_w);
+		int fg_false_occ = 0;
+		int buried_occ_hits = 0;
+
+		const nd_planet_def_t *p1_w = nd_seven_get_planet(1);
+		for (int yi = 0; yi < 8; yi++) {
+			nd_seven_set_cam_angles((float)yi * 45.0f, 45.0f);
+			for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+			nd_seven_render(fb, 1280, 720, &st);
+
+			/* Water surface at/above local ground right at focal chunk must NEVER be falsely occluded */
+			if (nd_seven_is_water_occluded_at((int32_t)lwx_w - 80, (int32_t)lwy_w - 64, 160, 128,
+			                                  gz_w + 16.0f, p1_w))
+				fg_false_occ++;
+
+			/* Water box buried 250 wu underneath the rendered focal terrain (> -900 sentinel) must be occluded */
+			if (nd_seven_is_water_occluded_at((int32_t)lwx_w - 40, (int32_t)lwy_w - 32, 80, 64,
+			                                  gz_w - 250.0f, p1_w))
+				buried_occ_hits++;
+		}
+		nd_seven_reset_cam();
+		for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+		nd_seven_set_zoom(1.0f);
+		assert(fg_false_occ == 0);
+		assert(buried_occ_hits == 8);
+		printf("PASS: 360-deg water occlusion verified (fg_false_occ=%d, buried_occ_hits=%d/8)\n",
+		       fg_false_occ, buried_occ_hits);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

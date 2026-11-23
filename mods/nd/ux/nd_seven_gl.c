@@ -1529,9 +1529,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue the water surface of this chunk for the submerged-object pass */
 	if (terrain_sea_lvl > -900.0f && s_gl.water_count < (uint32_t)nd_seven_gl_max_water_queue()) {
-		if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
-		                                     s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-		                                     s_gl.cur_pdef.minor_r)) {
+		if (nd_seven_is_water_occluded_at(ox, oy, span_w, span_h, terrain_sea_lvl, eff_pdef)) {
+			s_gl.water_culled_occ2d++;
 			return; /* Don't queue this water chunk */
 		}
 		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];

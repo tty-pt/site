@@ -462,6 +462,7 @@ test-graphics:
 	@sh tests/unit/run-test-lamina-bridge.sh
 	@sh tests/unit/run-test-axil-ws-multiplex.sh
 	@sh tests/unit/run-test-torus-planetary-renderer.sh
+	@sh tests/unit/run-test-areole-chaff-occlusion.sh
 	@sh tests/unit/run-xylem-wasm.sh
 
 pages-test: all

@@ -259,6 +259,83 @@ void nd_seven_gl_compute_mvp(uint32_t vp_w, uint32_t vp_h,
 	                           pdef, out_mvp, out_eye, out_target, out_up);
 }
 
+void nd_seven_gl_compute_mvp_rel_ex(uint32_t vp_w, uint32_t vp_h,
+                                    float tx, float ty, float tz,
+                                    float dist, float yaw_deg, float pitch_deg, float fov_deg,
+                                    const nd_planet_def_t *pdef,
+                                    float out_mvp[16],
+                                    double out_origin_d[3],
+                                    float out_eye_rel[3],
+                                    float out_eye_abs[3])
+{
+	double origin_d[3];
+	float E[3], S[3], N[3];
+	torus_frame_double((double)tx, (double)ty, 0.0, pdef, origin_d, E, S, N);
+
+	float yaw_rad = yaw_deg * (PI_F / 180.0f);
+	float cos_y = cosf(yaw_rad);
+	float sin_y = sinf(yaw_rad);
+	float pitch_rad = pitch_deg * (PI_F / 180.0f);
+	float cos_p = cosf(pitch_rad);
+	float sin_p = sinf(pitch_rad);
+	float d = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
+
+	float horiz[3] = {
+		sin_y * E[0] + cos_y * S[0],
+		sin_y * E[1] + cos_y * S[1],
+		sin_y * E[2] + cos_y * S[2]
+	};
+	float target_rel[3] = {
+		tz * N[0],
+		tz * N[1],
+		tz * N[2]
+	};
+	float view_to_eye[3] = {
+		cos_p * horiz[0] + sin_p * N[0],
+		cos_p * horiz[1] + sin_p * N[1],
+		cos_p * horiz[2] + sin_p * N[2]
+	};
+	float eye_rel[3] = {
+		target_rel[0] + d * view_to_eye[0],
+		target_rel[1] + d * view_to_eye[1],
+		target_rel[2] + d * view_to_eye[2]
+	};
+	float up[3] = {
+		-sin_p * horiz[0] + cos_p * N[0],
+		-sin_p * horiz[1] + cos_p * N[1],
+		-sin_p * horiz[2] + cos_p * N[2]
+	};
+
+	if (out_origin_d) {
+		out_origin_d[0] = origin_d[0];
+		out_origin_d[1] = origin_d[1];
+		out_origin_d[2] = origin_d[2];
+	}
+	if (out_eye_rel) {
+		out_eye_rel[0] = eye_rel[0];
+		out_eye_rel[1] = eye_rel[1];
+		out_eye_rel[2] = eye_rel[2];
+	}
+	if (out_eye_abs) {
+		out_eye_abs[0] = (float)(origin_d[0] + (double)eye_rel[0]);
+		out_eye_abs[1] = (float)(origin_d[1] + (double)eye_rel[1]);
+		out_eye_abs[2] = (float)(origin_d[2] + (double)eye_rel[2]);
+	}
+
+	if (out_mvp) {
+		float modelview[16], proj[16];
+		ar_mat4_lookat_lh(modelview, eye_rel, target_rel, up);
+
+		float fov_rad = fov_deg * (PI_F / 180.0f);
+		float aspect = (vp_h > 0) ? ((float)vp_w / (float)vp_h) : 1.333333f;
+		float near_z = (d * 0.005f > 2.0f) ? (d * 0.005f) : 2.0f;
+		float far_z = (d * 20.0f > 80000000.0f) ? (d * 20.0f) : 80000000.0f;
+
+		ar_mat4_perspective(proj, fov_rad, aspect, near_z, far_z);
+		ar_mat4_multiply(out_mvp, proj, modelview);
+	}
+}
+
 void nd_seven_gl_compute_flat_mvp_ex(uint32_t vp_w, uint32_t vp_h,
                                      float tx, float ty, float tz,
                                      float dist, float yaw_deg, float pitch_deg, float fov_deg,

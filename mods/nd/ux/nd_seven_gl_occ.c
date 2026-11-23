@@ -4,10 +4,43 @@
 
 #include "nd_seven_gl_internal.h"
 
-float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
-int s_ridge_occlusion_valid = 0;
-float s_ridge_cam_flat_y = 0.0f;
-int s_ridge_use_occlusion = 0;
+static ar_occluder_t   s_terrain_occ;
+static int             s_terrain_occ_valid = 0;
+static double          s_terrain_occ_origin[3];
+static nd_planet_def_t s_terrain_occ_pdef;
+static uint32_t        s_terrain_occ_culled = 0;
+
+ar_occluder_t *nd_seven_gl_begin_terrain_occluder(const float mvp[16],
+                                                  const double ref_origin[3],
+                                                  const nd_planet_def_t *pdef)
+{
+	if (mvp)
+		ar_occluder_reset(&s_terrain_occ, mvp, 1.0f, 0.01f);
+	else
+		memset(&s_terrain_occ, 0, sizeof(s_terrain_occ));
+	s_terrain_occ_valid = 0;
+	s_terrain_occ_culled = 0;
+	if (ref_origin) {
+		s_terrain_occ_origin[0] = ref_origin[0];
+		s_terrain_occ_origin[1] = ref_origin[1];
+		s_terrain_occ_origin[2] = ref_origin[2];
+	} else {
+		s_terrain_occ_origin[0] = 0.0;
+		s_terrain_occ_origin[1] = 0.0;
+		s_terrain_occ_origin[2] = 0.0;
+	}
+	if (pdef)
+		s_terrain_occ_pdef = *pdef;
+	else
+		memset(&s_terrain_occ_pdef, 0, sizeof(s_terrain_occ_pdef));
+	return &s_terrain_occ;
+}
+
+void nd_seven_gl_end_terrain_occluder(bool valid, uint32_t culled_count)
+{
+	s_terrain_occ_valid = (valid && s_terrain_occ.valid) ? 1 : 0;
+	s_terrain_occ_culled = culled_count;
+}
 
 bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_window_t *out)
 {
@@ -352,58 +385,52 @@ int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius)
     return 0;
 }
 
-/* Ridge occlusion query for water queue gating: returns 1 if the water chunk at
- * (ox, oy, span_w, span_h) would be fully occluded by the current ridge buffer. */
+/* 3D 2D-Hi-Z terrain occlusion query for water queue gating (works at all 360-deg yaws & pitches):
+ * Returns 1 if the chunk's curved-torus water surface AABB at sea_level is 100% occluded by
+ * foreground terrain/planetary limb in s_terrain_occ. */
+int nd_seven_is_water_occluded_at(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                  float sea_level, const nd_planet_def_t *pdef)
+{
+	if (!s_terrain_occ_valid || !s_terrain_occ.valid || sea_level <= -900.0f)
+		return 0;
+
+	const nd_planet_def_t *eff = pdef ? pdef : &s_terrain_occ_pdef;
+	if (eff->major_r <= 1.0f || eff->minor_r <= 1.0f)
+		return 0;
+
+	corolla_surface_t surf = corolla_torus((double)eff->major_r, (double)eff->minor_r);
+	corolla_pose_t pose;
+	memset(&pose, 0, sizeof(pose));
+	for (int i = 0; i < 9; i++)
+		pose.rot[i] = (double)eff->rot[i];
+	pose.center[0] = (double)eff->center[0];
+	pose.center[1] = (double)eff->center[1];
+	pose.center[2] = (double)eff->center[2];
+
+	double u0 = (double)ox / (double)ND_SEVEN_WORLD_DIM_W;
+	double du = (double)span_w / (double)ND_SEVEN_WORLD_DIM_W;
+	double v0 = ((double)oy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
+	double dv = (double)span_h / (double)ND_SEVEN_WORLD_DIM_H;
+
+	double bmin[3], bmax[3];
+	/* Pad vertically by [-8..+16] wu for waves/swash so visible water is never falsely culled */
+	corolla_patch_aabb(&surf, &pose, s_terrain_occ_origin, u0, v0, du, dv,
+	                   (double)sea_level - 8.0, (double)sea_level + 16.0, bmin, bmax);
+
+	float bmin_f[3] = { (float)bmin[0], (float)bmin[1], (float)bmin[2] };
+	float bmax_f[3] = { (float)bmax[0], (float)bmax[1], (float)bmax[2] };
+	return ar_occluder_test_box(&s_terrain_occ, bmin_f, bmax_f) ? 1 : 0;
+}
+
 int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                      const float flat_mvp[16], float lwx, float lwy, float r_planet)
 {
-    (void)lwx;
-    (void)lwy;
-    (void)r_planet;
-    if (!s_ridge_occlusion_valid || !s_ridge_use_occlusion)
-        return 0;
-
-    /* Only check if the water chunk is behind the camera (farther than lamb) */
-    float cam_flat_y = s_ridge_cam_flat_y;
-    if (oy + span_h >= cam_flat_y - 64.0f)
-        return 0;
-
-    float x0 = (float)ox, x1 = (float)(ox + span_w);
-    float y0 = (float)oy, y1 = (float)(oy + span_h);
-    float z_top = 96.0f; /* water surface margin for occlusion test */
-    float corners[4][2] = { { x0, y0 }, { x1, y0 }, { x0, y1 }, { x1, y1 } };
-    float min_nx = 2.0f, max_nx = -2.0f, max_ny = -2.0f;
-    bool all_front = true;
-    for (int c = 0; c < 4; c++) {
-        float cx = corners[c][0], cy = corners[c][1];
-        float cw = flat_mvp[3] * cx + flat_mvp[7] * cy + flat_mvp[11] * z_top + flat_mvp[15];
-        if (cw <= 1.0f) {
-            all_front = false;
-            break;
-        }
-        float inv_w = 1.0f / cw;
-        float nx = (flat_mvp[0] * cx + flat_mvp[4] * cy + flat_mvp[8] * z_top + flat_mvp[12]) * inv_w;
-        float ny = (flat_mvp[1] * cx + flat_mvp[5] * cy + flat_mvp[9] * z_top + flat_mvp[13]) * inv_w;
-        if (nx < min_nx) min_nx = nx;
-        if (nx > max_nx) max_nx = nx;
-        if (ny > max_ny) max_ny = ny;
-    }
-    if (!all_front || max_nx < -1.0f || min_nx > 1.0f || max_ny >= 1.0f)
-        return 0;
-
-    int b0 = (int)floorf((fmaxf(-1.0f, min_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
-    int b1 = (int)ceilf((fminf(1.0f, max_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
-    if (b0 < 0) b0 = 0;
-    if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
-    if (b0 > b1)
-        return 0;
-
-    for (int b = b0; b <= b1; b++) {
-        if (max_ny + 0.015f >= s_ridge_horizon_ndc_y[b]) {
-            return 0;
-        }
-    }
-    return 1;
+	(void)flat_mvp;
+	(void)lwx;
+	(void)lwy;
+	(void)r_planet;
+	return nd_seven_is_water_occluded_at(ox, oy, span_w, span_h,
+	                                     s_gl.cur_sea_level, &s_terrain_occ_pdef);
 }
 
 int nd_seven_hiz_test_cloud_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,

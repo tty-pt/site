@@ -110,6 +110,26 @@ void nd_seven_gl_compute_mvp(uint32_t vp_w, uint32_t vp_h,
                              float out_target[3],
                              float out_up[3]);
 
+/* Camera-origin-relative 3D Torus Camera MVP Matrix (matches nd_seven_gl_begin_frame_ex bit-for-bit):
+ * Shifts world geometry by double-precision out_origin_d = torus_frame_double(tx, ty, 0) so
+ * near-field and orbital 3D culling share zero float32 cancellation with the GPU shader. */
+void nd_seven_gl_compute_mvp_rel_ex(uint32_t vp_w, uint32_t vp_h,
+                                    float tx, float ty, float tz,
+                                    float dist, float yaw_deg, float pitch_deg, float fov_deg,
+                                    const nd_planet_def_t *pdef,
+                                    float out_mvp[16],
+                                    double out_origin_d[3],
+                                    float out_eye_rel[3],
+                                    float out_eye_abs[3]);
+
+/* Shared 2D Hi-Z terrain & water occluder lifecycle (backed by libareole ar_occluder_t) */
+ar_occluder_t *nd_seven_gl_begin_terrain_occluder(const float mvp[16],
+                                                  const double ref_origin[3],
+                                                  const nd_planet_def_t *pdef);
+void nd_seven_gl_end_terrain_occluder(bool valid, uint32_t culled_count);
+int nd_seven_is_water_occluded_at(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
+                                  float sea_level, const nd_planet_def_t *pdef);
+
 /* Pure-C Flat Tangent-Space Camera MVP Matrix for libareole quadtree culling:
  * Uses identical left-handed convention (ar_mat4_lookat_lh) and
  * dynamic near/far depth planes. */

@@ -1218,6 +1218,107 @@ chaff_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
 	return nd_field_elevation_q12_4(world, lod, wx, wy, out_coarse_q12_4, out_fine_q12_4);
 }
 
+/* Conservative O(1) analytical elevation bounds [out_z_min, out_z_max] (in world units)
+ * over the continuous world-space rectangle [ox, ox + w] x [oy, oy + h] for ALL LODs.
+ * Evaluates coarse elevation once at the patch center room, adds exact C2 quintic
+ * Lipschitz bounds across coarse octaves (shifts 15..2), maps through the strictly
+ * monotonic bimodal hypsometry curve, and adds the fine amplitude & hydrology budgets.
+ * Guaranteed conservative (zero false negatives) while dramatically tightening vertical
+ * bounding boxes over ocean basins, lowlands, and plains. */
+static inline void
+nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int32_t h,
+                          float *out_z_min, float *out_z_max)
+{
+	const float global_min = -2150.0f;
+	const float global_max =  2000.0f;
+
+	if (w < 0) { ox += w; w = -w; }
+	if (h < 0) { oy += h; h = -h; }
+
+	int32_t rw = nd_field_get_room_w();
+	int32_t rh = nd_field_get_room_h();
+	if (rw <= 0) rw = ND_FIELD_DEFAULT_ROOM_W;
+	if (rh <= 0) rh = ND_FIELD_DEFAULT_ROOM_H;
+
+	/* Room stencil touched by nd_field_interp_coarse_q12_4 over [ox..ox+w] x [oy..oy+h] */
+	int64_t rx0 = nd_field_fdiv64((int64_t)ox - (int64_t)(rw / 2), (int64_t)rw);
+	int64_t rx1 = nd_field_fdiv64((int64_t)ox + (int64_t)w - (int64_t)(rw / 2), (int64_t)rw) + 1;
+	int64_t ry0 = nd_field_fdiv64((int64_t)(rh / 2) - ((int64_t)oy + (int64_t)h), (int64_t)rh);
+	int64_t ry1 = nd_field_fdiv64((int64_t)(rh / 2) - (int64_t)oy, (int64_t)rh) + 1;
+
+	int64_t span_rx = rx1 - rx0;
+	int64_t span_ry = ry1 - ry0;
+
+	/* Very large planetary quadrants or patches straddling the torus wrap seam [32512..33023]
+	 * (which also covers int16 wrap +/-32768) fall back to the exact global envelope. */
+	if (span_rx >= 8192 || span_ry >= 8192 ||
+	    (uint16_t)((uint16_t)rx0 - 32512u) < 512u || (uint16_t)(32512u - (uint16_t)rx0) <= (uint32_t)span_rx ||
+	    (uint16_t)((uint16_t)ry0 - 32512u) < 512u || (uint16_t)(32512u - (uint16_t)ry0) <= (uint32_t)span_ry) {
+		if (out_z_min) *out_z_min = global_min;
+		if (out_z_max) *out_z_max = global_max;
+		return;
+	}
+
+	int16_t rx_mid = (int16_t)(rx0 + (span_rx >> 1));
+	int16_t ry_mid = (int16_t)(ry0 + (span_ry >> 1));
+	int32_t r_wx = (int32_t)rx_mid * rw + (rw / 2);
+	int32_t r_wy = -(int32_t)ry_mid * rh + (rh / 2);
+	int32_t c_mid_q12_4 = 0;
+	nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c_mid_q12_4, NULL);
+
+	double hx = 0.5 * (double)span_rx + 1.5;
+	double hy = 0.5 * (double)span_ry + 1.5;
+	double r_rooms = sqrt(hx * hx + hy * hy);
+	double l1_max = 1.4142135623730951 * r_rooms;
+	int32_t r_guard = (int32_t)ceil(r_rooms + 4.0);
+
+	/* Track rotated coordinates to detect any int16 wrap in regional octaves (shifts 8..2).
+	 * C2 quintic value noise on spacing 2^s has max derivative (15/8) * 255 / 128 = 3.7354 * amp / 2^s
+	 * along each axis; 3.76 provides exact rounding headroom. */
+	int32_t cur_rx = (int32_t)rx_mid;
+	int32_t cur_ry = (int32_t)ry_mid;
+	double delta_wu = 5.0; /* +4 wu for step_q16 attenuation of s=2..4, +1 wu for >> 4 truncation */
+
+	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_REGIONAL_MIN; s--) {
+		double amp = (double)chaff_octave_amplitude(s);
+		double max_span = 2.0 * amp;
+		double lip = (3.76 * amp * l1_max) / (double)(1u << s);
+		if (s <= 8u) {
+			int32_t ax = (int32_t)(int16_t)cur_rx;
+			int32_t ay = (int32_t)(int16_t)cur_ry;
+			if (ax < 0) ax = -ax;
+			if (ay < 0) ay = -ay;
+			if (ax + r_guard >= 32760 || ay + r_guard >= 32760)
+				lip = max_span;
+		}
+		delta_wu += (lip < max_span) ? lip : max_span;
+		chaff_rot2d_i32_q15(&cur_rx, &cur_ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	}
+
+	int32_t c_mid_wu = c_mid_q12_4 >> 4;
+	int32_t d_wu = (int32_t)ceil(delta_wu) + 2;
+	int32_t c_lo = c_mid_wu - d_wu;
+	int32_t c_hi = c_mid_wu + d_wu;
+	if (c_lo < -3000) c_lo = -3000;
+	if (c_hi >  3000) c_hi =  3000;
+
+	int16_t hyp_min = nd_field_bimodal_hypsometry((int16_t)c_lo);
+	int16_t hyp_max = nd_field_bimodal_hypsometry((int16_t)c_hi);
+	int16_t sea_lvl = nd_field_water_level(world);
+
+	/* Fine detail is strictly clamped to +/-ND_FIELD_FINE_AMP_BUDGET (127 wu), and halved
+	 * below sea_lvl - 8. Mountain lakes & rivers only carve downward (never raise coarse). */
+	float fine_max = (hyp_max <= sea_lvl - 8) ? 64.0f : (float)ND_FIELD_FINE_AMP_BUDGET;
+	float carve_pad = (hyp_min > sea_lvl - 16) ? 64.0f : 2.0f;
+
+	float z_min = (float)hyp_min - fine_max - carve_pad;
+	float z_max = (float)hyp_max + fine_max + 2.0f;
+	if (z_min < global_min) z_min = global_min;
+	if (z_max > global_max) z_max = global_max;
+	if (out_z_min) *out_z_min = z_min;
+	if (out_z_max) *out_z_max = z_max;
+}
+
 typedef struct {
 	uint16_t world;
 	int16_t rx;

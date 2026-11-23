@@ -214,8 +214,8 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.pool_capacity = 512;
 		cfg.max_levels = 17;
 		cfg.default_rgba = 0xFF3C804Eu;
-		cfg.period_x = 6.2831853f * 2000000.0f;
-		cfg.period_y = 6.2831853f * 1335000.0f;
+		cfg.period_x = (int32_t)ND_SEVEN_WORLD_DIM_W;
+		cfg.period_y = (int32_t)ND_SEVEN_WORLD_DIM_H;
 		cfg.max_populates_per_frame = 0;
 		cfg.wq = NULL;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
@@ -408,8 +408,15 @@ void nd_seven_eval_planet_at_time(uint16_t world, uint16_t observer_world,
 
 typedef struct {
 	corolla_surface_t surf;
-	corolla_pose_t pose;
-	float eye_3d[3];
+	corolla_pose_t    pose;
+	double            ref_origin[3];
+	double            tube_center[3];
+	double            tube_r_solid;
+	float             eye_abs[3];
+	uint16_t          world;
+	float             water_level;
+	bool              use_analytical_bounds;
+	bool              has_tube_occ;
 } seven_bounds_3d_ctx_t;
 
 static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float w, float h,
@@ -419,14 +426,30 @@ static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float
                                      float *out_span_w, float *out_span_h)
 {
 	const seven_bounds_3d_ctx_t *ctx = (const seven_bounds_3d_ctx_t *)bounds_ctx;
+	float z0 = z_min, z1 = z_max;
+	if (ctx->use_analytical_bounds) {
+		float az0 = z0, az1 = z1;
+		nd_field_elevation_bounds(ctx->world,
+		                          (int32_t)floorf(ox), (int32_t)floorf(oy),
+		                          (int32_t)ceilf(w), (int32_t)ceilf(h),
+		                          &az0, &az1);
+		if (az0 > z0) z0 = az0;
+		if (az1 < z1) z1 = az1;
+	}
+	/* Preserve ocean / sea surface within the bounding volume so water chunks are never clipped */
+	if (z0 <= ctx->water_level + 8.0f && z1 < ctx->water_level + 8.0f)
+		z1 = ctx->water_level + 8.0f;
+	if (z0 > z1)
+		z0 = z1;
+
 	double u0 = (double)ox / (double)ND_SEVEN_WORLD_DIM_W;
 	double du = (double)w / (double)ND_SEVEN_WORLD_DIM_W;
 	double v0 = ((double)oy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
 	double dv = (double)h / (double)ND_SEVEN_WORLD_DIM_H;
 
 	double bmin[3], bmax[3];
-	corolla_patch_aabb(&ctx->surf, &ctx->pose, NULL, u0, v0, du, dv,
-	                   (double)z_min, (double)z_max, bmin, bmax);
+	corolla_patch_aabb(&ctx->surf, &ctx->pose, ctx->ref_origin, u0, v0, du, dv,
+	                   (double)z0, (double)z1, bmin, bmax);
 	if (out_min) {
 		out_min[0] = (float)bmin[0];
 		out_min[1] = (float)bmin[1];
@@ -440,29 +463,47 @@ static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float
 	if (out_center) {
 		double u_mid = u0 + 0.5 * du;
 		double v_mid = v0 + 0.5 * dv;
-		double h_mid = 0.5 * ((double)z_min + (double)z_max);
+		double h_mid = 0.5 * ((double)z0 + (double)z1);
 		corolla_frame_t fr = {0};
 		corolla_eval_frame(&ctx->surf, u_mid, v_mid, h_mid, &fr);
 		double p_world[3];
 		corolla_pose_point_to_inertial(&ctx->pose, fr.pos, p_world);
-		out_center[0] = (float)p_world[0];
-		out_center[1] = (float)p_world[1];
-		out_center[2] = (float)p_world[2];
+		out_center[0] = (float)(p_world[0] - ctx->ref_origin[0]);
+		out_center[1] = (float)(p_world[1] - ctx->ref_origin[1]);
+		out_center[2] = (float)(p_world[2] - ctx->ref_origin[2]);
 	}
 	double R_maj = ctx->surf.r_major;
 	double r_min = ctx->surf.r_minor;
-	if (out_span_w) *out_span_w = (float)(COROLLA_TWO_PI * R_maj * fabs(du));
+	double theta_mid = COROLLA_TWO_PI * (v0 + 0.5 * dv - 0.5);
+	double r_ring = R_maj + r_min * cos(theta_mid);
+	if (out_span_w) *out_span_w = (float)(COROLLA_TWO_PI * r_ring * fabs(du));
 	if (out_span_h) *out_span_h = (float)(COROLLA_TWO_PI * r_min * fabs(dv));
+}
+
+static void seven_torus_point_3d_cb(void *bounds_ctx, float wx, float wy, float wz,
+                                    float out_xyz[3])
+{
+	const seven_bounds_3d_ctx_t *ctx = (const seven_bounds_3d_ctx_t *)bounds_ctx;
+	double u = (double)wx / (double)ND_SEVEN_WORLD_DIM_W;
+	double v = ((double)wy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
+	corolla_frame_t fr = {0};
+	corolla_eval_frame(&ctx->surf, u, v, (double)wz, &fr);
+	double p_world[3];
+	corolla_pose_point_to_inertial(&ctx->pose, fr.pos, p_world);
+	out_xyz[0] = (float)(p_world[0] - ctx->ref_origin[0]);
+	out_xyz[1] = (float)(p_world[1] - ctx->ref_origin[1]);
+	out_xyz[2] = (float)(p_world[2] - ctx->ref_origin[2]);
 }
 
 /* Planetary Normal-Cone / Horizon Limb Culling Callback:
  * Rejects manifold quadtree nodes whose entire surface normal cone faces away from the camera eye
- * (beyond the planetary horizon limb or on the far side of the torus). */
+ * (beyond the planetary horizon limb or on the far side of the torus), accounting for normal
+ * curvature alpha, finite patch parallax asin(r_patch / vlen), and analytical mountain limb dip. */
 static bool seven_torus_cull_3d_cb(void *bounds_ctx, float ox, float oy, float w, float h,
                                    float z_min, float z_max,
                                    const float center_xyz[3], float span_w, float span_h)
 {
-	(void)center_xyz; (void)span_w; (void)span_h;
+	(void)center_xyz;
 	const seven_bounds_3d_ctx_t *ctx = (const seven_bounds_3d_ctx_t *)bounds_ctx;
 	if (!ctx)
 		return true;
@@ -486,15 +527,46 @@ static bool seven_torus_cull_3d_cb(void *bounds_ctx, float ox, float oy, float w
 	corolla_pose_point_to_inertial(&ctx->pose, fr.pos, p_world);
 	corolla_pose_vec_to_inertial(&ctx->pose, fr.norm, n_world);
 
-	double vx = (double)ctx->eye_3d[0] - p_world[0];
-	double vy = (double)ctx->eye_3d[1] - p_world[1];
-	double vz = (double)ctx->eye_3d[2] - p_world[2];
+	double vx = (double)ctx->eye_abs[0] - p_world[0];
+	double vy = (double)ctx->eye_abs[1] - p_world[1];
+	double vz = (double)ctx->eye_abs[2] - p_world[2];
 	double vlen = sqrt(vx * vx + vy * vy + vz * vz);
-	if (vlen < 1.0)
-		return true;
+	double r_patch = 0.5 * sqrt((double)span_w * (double)span_w + (double)span_h * (double)span_h) +
+	                 0.5 * fabs((double)(z_max - z_min)) + 64.0;
+	if (vlen <= r_patch * 1.15)
+		return true; /* Eye is inside or adjacent to patch bounding sphere: never horizon-cull */
+
+	/* Exact inscribed solid-rock tube-ball eclipse test:
+	 * The ball B(tube_center, r_min - 2500) centered on the torus core ring directly beneath the
+	 * camera lies 100% inside solid planetary rock at every latitude (outer, polar, and concave inner)
+	 * whenever R > r + 2500. Any patch whose bounding sphere lies inside its shadow cone is invisible. */
+	if (ctx->has_tube_occ && ctx->tube_r_solid > 1.0) {
+		double ux = ctx->tube_center[0] - (double)ctx->eye_abs[0];
+		double uy = ctx->tube_center[1] - (double)ctx->eye_abs[1];
+		double uz = ctx->tube_center[2] - (double)ctx->eye_abs[2];
+		double dc = sqrt(ux * ux + uy * uy + uz * uz);
+		double sag_pad = (1.0 - cos(0.5 * (double)alpha)) * (ctx->surf.r_major + ctx->surf.r_minor);
+		double r_occ_patch = r_patch * 1.05 + sag_pad;
+		if (dc > ctx->tube_r_solid && vlen > dc && vlen > r_occ_patch * 1.05) {
+			double cos_gamma = -(vx * ux + vy * uy + vz * uz) / (vlen * dc);
+			if (cos_gamma > 0.0) {
+				double theta_occ = asin(ctx->tube_r_solid / dc);
+				double sin_p = r_occ_patch / vlen;
+				if (sin_p < 1.0) {
+					double theta_p = asin(sin_p);
+					if (theta_occ > theta_p + 0.01 &&
+					    cos_gamma > cos(theta_occ - theta_p - 0.01)) {
+						return false;
+					}
+				}
+			}
+		}
+	}
 
 	double dot_vn = (vx * n_world[0] + vy * n_world[1] + vz * n_world[2]) / vlen;
-	float max_ang = alpha + 0.10f; /* +0.10 rad safety margin for mountain relief & horizon dip */
+	double r_min = (ctx->surf.r_minor > 1.0) ? ctx->surf.r_minor : 1335000.0;
+	float limb_dip = (z_max > 0.0f) ? acosf(fminf(1.0f, (float)(r_min / (r_min + (double)z_max)))) : 0.0f;
+	float max_ang = alpha + limb_dip + 0.03f;
 	if (max_ang >= 1.55f)
 		return true;
 	return dot_vn >= (double)(-sinf(max_ang));
@@ -590,16 +662,6 @@ static ar_frustum_t s_frame_frustum;
 static float s_frame_sag_radius = 16000.0f;
 static int s_frame_frustum_valid = 0;
 
-/* Global ridge occlusion buffer for water queue gating */
-#define SEVEN_HORIZON_BINS 128
-static float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
-static int s_ridge_occlusion_valid = 0;
-static float s_ridge_lwx = 0.0f, s_ridge_lwy = 0.0f, s_ridge_r_planet = 16000.0f;
-static float s_ridge_flat_mvp[16];
-static float s_ridge_cam_flat_y = 0.0f;
-static int s_ridge_use_occlusion = 0;
-static float s_ridge_dist = 0.0f;
-
 static inline bool seven_test_frustum_xy(float min_x, float min_y, float max_x, float max_y,
                                          float fx, float fy, float base_z_min, float base_z_max)
 {
@@ -612,8 +674,8 @@ static inline bool seven_test_frustum_xy(float min_x, float min_y, float max_x, 
 	float r2_max = mx + my;
 	float sag = r2_max * (1.0f / 2000000.0f);
 	return ar_frustum_test_box(&s_frame_frustum,
-	                           min_x, min_y, base_z_min - sag - 256.0f,
-	                           max_x, max_y, base_z_max + 720.0f);
+	                           dx0, dy0, base_z_min - sag - 256.0f,
+	                           dx1, dy1, base_z_max + 720.0f);
 }
 
 /* 3-state frustum test for 8x8 room blocks:
@@ -639,14 +701,14 @@ static inline int seven_test_frustum_xy_state(float min_x, float min_y, float ma
 		float b = s_frame_frustum.planes[i][1];
 		float c = s_frame_frustum.planes[i][2];
 		float d = s_frame_frustum.planes[i][3];
-		float px = (a > 0.0f) ? max_x : min_x;
-		float py = (b > 0.0f) ? max_y : min_y;
+		float px = (a > 0.0f) ? dx1 : dx0;
+		float py = (b > 0.0f) ? dy1 : dy0;
 		float pz = (c > 0.0f) ? max_z : min_z;
 		if (a * px + b * py + c * pz + d < 0.0f)
 			return 0;
 		if (all_inside) {
-			float nx = (a > 0.0f) ? min_x : max_x;
-			float ny = (b > 0.0f) ? min_y : max_y;
+			float nx = (a > 0.0f) ? dx0 : dx1;
+			float ny = (b > 0.0f) ? dy0 : dy1;
 			float nz = (c > 0.0f) ? min_z : max_z;
 			if (a * nx + b * ny + c * nz + d < 0.0f)
 				all_inside = 0;
@@ -753,24 +815,36 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	float cos_p = cosf(pitch_rad);
 	float sin_p = sinf(pitch_rad);
 
-	/* Compute canonical left-handed flat tangent-space MVP for near-field scenery culling */
+	/* Compute origin-relative torus-Jacobian-calibrated tangent-space MVP for near-field scenery
+	 * culling so horizontal/vertical frustum bounds match the 3D torus GPU projection at every
+	 * latitude (2.0x East-West metric at outer equator, 0.40x at concave inner hub). */
+	double theta_cam = 6.28318530717958647692 * ((double)lwy / (double)ND_SEVEN_WORLD_DIM_H);
+	float torus_sx = (float)((6.28318530717958647692 * ((double)pdef->major_r + (double)pdef->minor_r * cos(theta_cam))) /
+	                         (double)ND_SEVEN_WORLD_DIM_W);
+	float torus_sy = (float)((6.28318530717958647692 * (double)pdef->minor_r) / (double)ND_SEVEN_WORLD_DIM_H);
+	if (torus_sx < 0.05f) torus_sx = 0.05f;
+	if (torus_sy < 0.05f) torus_sy = 0.05f;
 	float flat_mvp[16];
-	nd_seven_gl_compute_flat_mvp_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz_est,
+	nd_seven_gl_compute_flat_mvp_ex((uint32_t)w, (uint32_t)h, 0.0f, 0.0f, lwz_est,
 	                                dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV, flat_mvp);
+	for (int r = 0; r < 4; r++) {
+		flat_mvp[0 + r] *= torus_sx;
+		flat_mvp[4 + r] *= torus_sy;
+	}
 	ar_frustum_from_matrix(&s_frame_frustum, flat_mvp);
 	s_frame_frustum_valid = 1;
 
-	/* Compute true 3D curved-torus camera MVP for 3D manifold frustum culling */
-	float mvp_3d[16], eye_3d[3];
-	nd_seven_gl_compute_mvp_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz_est,
-	                           dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV,
-	                           pdef, mvp_3d, eye_3d, NULL, NULL);
+	/* Compute camera-origin-relative 3D curved-torus camera MVP (matches nd_seven_gl_begin_frame_ex bit-for-bit) */
+	float mvp_3d[16], eye_rel[3], eye_abs[3];
+	double ref_origin[3];
+	nd_seven_gl_compute_mvp_rel_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz_est,
+	                               dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV,
+	                               pdef, mvp_3d, ref_origin, eye_rel, eye_abs);
 
 	float r_planet = pdef->minor_r;
-	/* Always use canonical world Z bounds regardless of zoom or lamb Z so chunks at high or low
-	 * elevation relative to the lamb are never falsely frustum-culled or blocked from splitting. */
-	float z_min_cull = -2600.0f;
-	float z_max_cull = 3200.0f;
+	/* Global analytical Z ceiling tightened per patch by nd_field_elevation_bounds & cached node bounds */
+	float z_min_cull = -2150.0f;
+	float z_max_cull =  2000.0f;
 	float cull_margin = 180.0f;
 	s_frame_sag_radius = r_planet;
 
@@ -791,23 +865,46 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	}
 
 	seven_bounds_3d_ctx_t primary_bctx;
+	memset(&primary_bctx, 0, sizeof(primary_bctx));
 	primary_bctx.surf = corolla_torus((double)pdef->major_r, (double)pdef->minor_r);
-	memset(&primary_bctx.pose, 0, sizeof(primary_bctx.pose));
 	for (int i = 0; i < 9; i++)
 		primary_bctx.pose.rot[i] = (double)pdef->rot[i];
 	primary_bctx.pose.center[0] = (double)pdef->center[0];
 	primary_bctx.pose.center[1] = (double)pdef->center[1];
 	primary_bctx.pose.center[2] = (double)pdef->center[2];
-	primary_bctx.eye_3d[0] = eye_3d[0];
-	primary_bctx.eye_3d[1] = eye_3d[1];
-	primary_bctx.eye_3d[2] = eye_3d[2];
-
-	bool use_3d_primary = (dist >= 250000.0f);
+	primary_bctx.ref_origin[0] = ref_origin[0];
+	primary_bctx.ref_origin[1] = ref_origin[1];
+	primary_bctx.ref_origin[2] = ref_origin[2];
+	primary_bctx.eye_abs[0] = eye_abs[0];
+	primary_bctx.eye_abs[1] = eye_abs[1];
+	primary_bctx.eye_abs[2] = eye_abs[2];
+	primary_bctx.world = world;
+	primary_bctx.water_level = (float)nd_field_water_level(world);
+	primary_bctx.use_analytical_bounds = true;
+	if ((double)pdef->major_r > (double)pdef->minor_r + 2500.0 && (double)pdef->minor_r > 2500.0) {
+		double u_cam = (double)lwx / (double)ND_SEVEN_WORLD_DIM_W;
+		double v_cam = ((double)lwy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
+		corolla_frame_t cam_fr = {0};
+		corolla_eval_frame(&primary_bctx.surf, u_cam, v_cam, 0.0, &cam_fr);
+		double cam_p[3], cam_n[3];
+		corolla_pose_point_to_inertial(&primary_bctx.pose, cam_fr.pos, cam_p);
+		corolla_pose_vec_to_inertial(&primary_bctx.pose, cam_fr.norm, cam_n);
+		double r_min_d = (double)pdef->minor_r;
+		primary_bctx.tube_center[0] = cam_p[0] - r_min_d * cam_n[0];
+		primary_bctx.tube_center[1] = cam_p[1] - r_min_d * cam_n[1];
+		primary_bctx.tube_center[2] = cam_p[2] - r_min_d * cam_n[2];
+		primary_bctx.tube_r_solid = r_min_d - 2500.0;
+		primary_bctx.has_tube_occ = true;
+	}
 
 	s_frame_detail_scale = nd_seven_get_detail_scale();
 	if (dist > 650.0f && s_frame_detail_scale < 0.99f) {
 		target_quad_px /= fmaxf(0.35f, s_frame_detail_scale);
 	}
+
+	ar_occluder_t *occ = nd_seven_gl_begin_terrain_occluder(mvp_3d, ref_origin, pdef);
+	float prim_inner_r = pdef->major_r - pdef->minor_r;
+	if (prim_inner_r < 1.0f) prim_inner_r = 1.0f;
 
 	ar_cull_opts_t opts = {
 		.z_min = z_min_cull,
@@ -816,9 +913,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.focal_x = (float)lwx,
 		.focal_y = (float)lwy,
 		.focal_z = lwz_est,
-		.bounds_3d_fn = use_3d_primary ? seven_torus_bounds_3d_cb : NULL,
-		.cull_3d_fn = use_3d_primary ? seven_torus_cull_3d_cb : NULL,
-		.bounds_ctx = use_3d_primary ? &primary_bctx : NULL,
+		.bounds_3d_fn = seven_torus_bounds_3d_cb,
+		.cull_3d_fn = seven_torus_cull_3d_cb,
+		.point_3d_fn = seven_torus_point_3d_cb,
+		.bounds_ctx = &primary_bctx,
 		.margin = cull_margin,
 		.target_quad_px = target_quad_px,
 		.viewport_w = (float)w,
@@ -827,13 +925,24 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.max_level = 14,
 		.view_id = 0,
 		.max_populates_per_query = 0,
-		.split_hysteresis = 0.0f
+		.split_hysteresis = 0.0f,
+		.occluder = occ,
+		.occluder_z_bias = 1.5f,
+		.occluder_texel_bias = 0.0f,
+		.occluder_concave_inv_r = 1.0f / prim_inner_r,
+		.occluder_box_z_pad = 16.0f,
+		.occluder_no_write = false,
+		.use_cached_bounds = true,
+		.cached_bounds_max_level = 3,
+		.cached_bounds_pad = 32.0f
 	};
 
 	ar_system_begin_frame(cs);
-	s_visible_leaf_count = ar_system_query_matrix(cs, world, use_3d_primary ? mvp_3d : flat_mvp,
+	s_visible_leaf_count = ar_system_query_matrix(cs, world, mvp_3d,
 	                                              &opts, s_visible_leaves, max_leaves);
 	size_t macro_count = s_visible_leaf_count;
+	s_last_ridge_culled_count = occ ? occ->culled_count : 0u;
+	nd_seven_gl_end_terrain_occluder(occ != NULL, s_last_ridge_culled_count);
 
 	/* Re-evaluate focal elevation on the newly active View 0 leaves */
 	float lwz = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
@@ -1036,9 +1145,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 	/* Sort s_visible_leaves strictly front-to-back relative to the 3D camera eye position
 	 * so foreground mountains & front torus surfaces render first into the hardware Z-buffer
-	 * (maximizing GPU Early-Z rejection) and populate the 1D CPU ridge-line horizon buffer. */
-	float cam_flat_x = (float)lwx + dist * cos_p * sin_y;
-	float cam_flat_y = (float)lwy + dist * cos_p * cos_y;
+	 * (maximizing GPU Early-Z rejection). */
+	(void)cos_p;
 	if (macro_count >= 1) {
 		float leaf_d2[SEVEN_MAX_VISIBLE_LEAVES];
 		size_t sort_n = (macro_count <= SEVEN_MAX_VISIBLE_LEAVES) ? macro_count : SEVEN_MAX_VISIBLE_LEAVES;
@@ -1055,23 +1163,17 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			s_front_leaf_bounds[a].h  = nd->h;
 			s_front_leaf_bounds[a].level = nd->level;
 			s_front_leaf_bounds[a].rev   = nd->rev;
-			if (use_3d_primary) {
-				float c3d[3];
-				seven_torus_bounds_3d_cb(&primary_bctx, (float)nd->ox, (float)nd->oy,
-				                         (float)nd->w, (float)nd->h, z_min_cull, z_max_cull,
-				                         NULL, NULL, c3d, NULL, NULL);
-				float dx = c3d[0] - eye_3d[0];
-				float dy = c3d[1] - eye_3d[1];
-				float dz = c3d[2] - eye_3d[2];
-				leaf_d2[a] = dx * dx + dy * dy + dz * dz;
-			} else {
-				float kdx = 0.0f, kdy = 0.0f;
-				if (cam_flat_x < (float)nd->ox) kdx = (float)nd->ox - cam_flat_x;
-				else if (cam_flat_x > (float)(nd->ox + nd->w)) kdx = cam_flat_x - (float)(nd->ox + nd->w);
-				if (cam_flat_y < (float)nd->oy) kdy = (float)nd->oy - cam_flat_y;
-				else if (cam_flat_y > (float)(nd->oy + nd->h)) kdy = cam_flat_y - (float)(nd->oy + nd->h);
-				leaf_d2[a] = kdx * kdx + kdy * kdy;
-			}
+			float bmin[3], bmax[3];
+			seven_torus_bounds_3d_cb(&primary_bctx, (float)nd->ox, (float)nd->oy,
+			                         (float)nd->w, (float)nd->h, z_min_cull, z_max_cull,
+			                         bmin, bmax, NULL, NULL, NULL);
+			float dx = (eye_rel[0] < bmin[0]) ? (bmin[0] - eye_rel[0])
+			         : ((eye_rel[0] > bmax[0]) ? (eye_rel[0] - bmax[0]) : 0.0f);
+			float dy = (eye_rel[1] < bmin[1]) ? (bmin[1] - eye_rel[1])
+			         : ((eye_rel[1] > bmax[1]) ? (eye_rel[1] - bmax[1]) : 0.0f);
+			float dz = (eye_rel[2] < bmin[2]) ? (bmin[2] - eye_rel[2])
+			         : ((eye_rel[2] > bmax[2]) ? (eye_rel[2] - bmax[2]) : 0.0f);
+			leaf_d2[a] = dx * dx + dy * dy + dz * dz;
 		}
 		for (size_t a = 1; a < sort_n; a++) {
 			const ar_node_t *key_node = s_visible_leaves[a];
@@ -1090,81 +1192,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 
-	/* 1D Screen-Space Ridge-Line Horizon Occlusion Buffer (128 columns across NDC [-1, 1]):
-	 * Tracks the guaranteed solid terrain ridge height in NDC Y as chunks are drawn front-to-back. */
-	#define SEVEN_HORIZON_BINS 128
-	bool use_ridge_occlusion = (!use_3d_primary && dist < 12000.0f && fabsf(yaw_deg) < 1.0f && pitch_deg >= 38.0f);
-	if (use_ridge_occlusion) {
-		for (int hb = 0; hb < SEVEN_HORIZON_BINS; hb++)
-			s_ridge_horizon_ndc_y[hb] = -1.0f;
-		s_ridge_occlusion_valid = 1;
-		s_ridge_lwx = (float)lwx;
-		s_ridge_lwy = (float)lwy;
-		s_ridge_r_planet = r_planet;
-		s_ridge_cam_flat_y = cam_flat_y;
-		s_ridge_use_occlusion = 1;
-		s_ridge_dist = dist;
-		memcpy(s_ridge_flat_mvp, flat_mvp, sizeof(flat_mvp));
-	} else {
-		s_ridge_occlusion_valid = 0;
-		s_ridge_use_occlusion = 0;
-	}
-
-	size_t kept_count = 0;
 	for (size_t m = 0; m < macro_count; m++) {
 		const ar_node_t *node = s_visible_leaves[m];
 		if (!node) continue;
-
-		/* Test if this chunk (and its tallest trees/billboards) is 100% hidden behind a foreground mountain ridge */
-		bool terrain_ridge_occluded = false;
-		if (use_ridge_occlusion && node->oy + node->h < cam_flat_y - 64.0f) {
-			float x0 = (float)node->ox, x1 = (float)(node->ox + node->w);
-			float y0 = (float)node->oy, y1 = (float)(node->oy + node->h);
-			float z_top = ((float)node->max_val / 16.0f) + 96.0f; /* +96 wu margin for tallest trees & sprites */
-			float corners[4][2] = { { x0, y0 }, { x1, y0 }, { x0, y1 }, { x1, y1 } };
-			float min_nx = 2.0f, max_nx = -2.0f, max_ny = -2.0f;
-			bool all_front = true;
-			for (int c = 0; c < 4; c++) {
-				float cx = corners[c][0], cy = corners[c][1];
-				float cw = flat_mvp[3] * cx + flat_mvp[7] * cy + flat_mvp[11] * z_top + flat_mvp[15];
-				if (cw <= 1.0f) {
-					all_front = false;
-					break;
-				}
-				float inv_w = 1.0f / cw;
-				float nx = (flat_mvp[0] * cx + flat_mvp[4] * cy + flat_mvp[8] * z_top + flat_mvp[12]) * inv_w;
-				float ny = (flat_mvp[1] * cx + flat_mvp[5] * cy + flat_mvp[9] * z_top + flat_mvp[13]) * inv_w;
-				if (nx < min_nx) min_nx = nx;
-				if (nx > max_nx) max_nx = nx;
-				if (ny > max_ny) max_ny = ny;
-			}
-			if (all_front && max_nx >= -1.0f && min_nx <= 1.0f && max_ny < 1.0f) {
-				int b0 = (int)floorf((fmaxf(-1.0f, min_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
-				int b1 = (int)ceilf((fminf(1.0f, max_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
-				if (b0 < 0) b0 = 0;
-				if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
-				if (b0 <= b1) {
-					bool occluded = true;
-					for (int b = b0; b <= b1; b++) {
-						if (max_ny + 0.015f >= s_ridge_horizon_ndc_y[b]) {
-							occluded = false;
-							break;
-						}
-					}
-					if (occluded) {
-						terrain_ridge_occluded = true;
-						if (dist <= 480.0f)
-							continue; /* Clouds inactive at dist <= 480: skip chunk completely */
-					}
-				}
-			}
-		}
-
-		if (!terrain_ridge_occluded) {
-			s_visible_leaves[kept_count] = node;
-			s_front_leaf_bounds[kept_count] = s_front_leaf_bounds[m];
-			kept_count++;
-		}
 
 		int16_t w_lvl_i = nd_field_water_level(world);
 		bool has_water = ((node->flags & 1) != 0 || node->min_val <= ((int32_t)(w_lvl_i + 8) << 4));
@@ -1205,65 +1235,15 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                                vdim, vdim,
 		                                (uint32_t)w, (uint32_t)h,
 		                                sea_lvl, pdef);
-
-		/* Update 1D horizon buffer with the solid ridge line of this chunk */
-		if (use_ridge_occlusion && node->values && vdim >= 9 &&
-		    node->oy + (node->h / 2) < cam_flat_y - 32.0f) {
-			uint32_t mid_row = vdim / 2;
-			const int16_t *row_vals = &node->values[mid_row * vdim];
-			float wy_ridge = (float)node->oy + (float)node->h * 0.5f;
-			float dx_ridge = (wy_ridge - (float)lwy);
-			float r2_y = dx_ridge * dx_ridge;
-			uint32_t step = (vdim - 1) / 8;
-			if (step < 1) step = 1;
-			float prev_nx = 0.0f, prev_ny = 0.0f;
-			bool has_prev = false;
-			for (uint32_t col = 0; col < vdim; col += step) {
-				int16_t min_v = row_vals[col];
-				for (uint32_t s = 1; s <= step && col + s < vdim; s++) {
-					if (row_vals[col + s] < min_v)
-						min_v = row_vals[col + s];
-				}
-				float wx_pt = (float)node->ox + ((float)col / (float)(vdim - 1)) * (float)node->w;
-				float dx_x = wx_pt - (float)lwx;
-				float sag = (dx_x * dx_x + r2_y) / (2.0f * r_planet);
-				float wz_pt = ((float)min_v / 16.0f) - sag;
-				float cw = flat_mvp[3] * wx_pt + flat_mvp[7] * wy_ridge + flat_mvp[11] * wz_pt + flat_mvp[15];
-				if (cw <= 1.0f) {
-					has_prev = false;
-					continue;
-				}
-				float inv_w = 1.0f / cw;
-				float nx = (flat_mvp[0] * wx_pt + flat_mvp[4] * wy_ridge + flat_mvp[8] * wz_pt + flat_mvp[12]) * inv_w;
-				float ny = (flat_mvp[1] * wx_pt + flat_mvp[5] * wy_ridge + flat_mvp[9] * wz_pt + flat_mvp[13]) * inv_w;
-				if (has_prev) {
-					float lx = (prev_nx < nx) ? prev_nx : nx;
-					float rx = (prev_nx > nx) ? prev_nx : nx;
-					float min_seg_y = (prev_ny < ny) ? prev_ny : ny;
-					if (rx >= -1.0f && lx <= 1.0f && rx - lx < 0.5f) {
-						int b0 = (int)ceilf((fmaxf(-1.0f, lx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
-						int b1 = (int)floorf((fminf(1.0f, rx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS)) - 1;
-						for (int b = b0; b <= b1; b++) {
-							if (b >= 0 && b < SEVEN_HORIZON_BINS && min_seg_y > s_ridge_horizon_ndc_y[b])
-								s_ridge_horizon_ndc_y[b] = min_seg_y;
-						}
-					}
-				}
-				prev_nx = nx;
-				prev_ny = ny;
-				has_prev = true;
-			}
-		}
 	}
-	s_last_ridge_culled_count = (uint32_t)(macro_count - kept_count);
-	s_visible_leaf_count = kept_count;
-	s_front_leaf_count = (kept_count <= SEVEN_MAX_VISIBLE_LEAVES) ? kept_count : SEVEN_MAX_VISIBLE_LEAVES;
+	s_visible_leaf_count = macro_count;
+	s_front_leaf_count = (macro_count <= SEVEN_MAX_VISIBLE_LEAVES) ? macro_count : SEVEN_MAX_VISIBLE_LEAVES;
 	s_last_alt_planet_chunk_count = 0;
 
 	/* Multi-Planet 3D Manifold Rendering:
 	 * Evaluate the companion body's dynamic 3D Keplerian orbit & tilted spin pose at anim_t,
-	 * and query libareole with true 3D curved-torus bounding boxes (seven_torus_bounds_3d_cb)
-	 * and normal-cone horizon culling (seven_torus_cull_3d_cb) against the 3D camera frustum. */
+	 * and query libareole in camera-origin-relative space with true 3D curved-torus bounding boxes,
+	 * normal-cone horizon culling, and the primary planet's shared 2D Hi-Z occluder (occluder_no_write). */
 	{
 		uint16_t alt_world = (world == 2) ? 1 : 2;
 		nd_planet_def_t alt_pdef;
@@ -1272,26 +1252,38 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		ar_frustum_t frustum_3d;
 		ar_frustum_from_matrix(&frustum_3d, mvp_3d);
 		float body_rad = alt_pdef.major_r + alt_pdef.minor_r + 8000.0f;
-		if (!nd_seven_is_alt_planet_occluded(eye_3d, dist, (float)lwx, (float)lwy, lwz,
+		float alt_cx = (float)((double)alt_pdef.center[0] - ref_origin[0]);
+		float alt_cy = (float)((double)alt_pdef.center[1] - ref_origin[1]);
+		float alt_cz = (float)((double)alt_pdef.center[2] - ref_origin[2]);
+		if (!nd_seven_is_alt_planet_occluded(eye_abs, dist, (float)lwx, (float)lwy, lwz,
 		                                     pdef, &alt_pdef, body_rad) &&
 		    ar_frustum_test_box(&frustum_3d,
-		                        alt_pdef.center[0] - body_rad,
-		                        alt_pdef.center[1] - body_rad,
-		                        alt_pdef.center[2] - body_rad,
-		                        alt_pdef.center[0] + body_rad,
-		                        alt_pdef.center[1] + body_rad,
-		                        alt_pdef.center[2] + body_rad)) {
+		                        alt_cx - body_rad,
+		                        alt_cy - body_rad,
+		                        alt_cz - body_rad,
+		                        alt_cx + body_rad,
+		                        alt_cy + body_rad,
+		                        alt_cz + body_rad)) {
 			seven_bounds_3d_ctx_t alt_bctx;
+			memset(&alt_bctx, 0, sizeof(alt_bctx));
 			alt_bctx.surf = corolla_torus((double)alt_pdef.major_r, (double)alt_pdef.minor_r);
-			memset(&alt_bctx.pose, 0, sizeof(alt_bctx.pose));
 			for (int i = 0; i < 9; i++)
 				alt_bctx.pose.rot[i] = (double)alt_pdef.rot[i];
 			alt_bctx.pose.center[0] = (double)alt_pdef.center[0];
 			alt_bctx.pose.center[1] = (double)alt_pdef.center[1];
 			alt_bctx.pose.center[2] = (double)alt_pdef.center[2];
-			alt_bctx.eye_3d[0] = eye_3d[0];
-			alt_bctx.eye_3d[1] = eye_3d[1];
-			alt_bctx.eye_3d[2] = eye_3d[2];
+			alt_bctx.ref_origin[0] = ref_origin[0];
+			alt_bctx.ref_origin[1] = ref_origin[1];
+			alt_bctx.ref_origin[2] = ref_origin[2];
+			alt_bctx.eye_abs[0] = eye_abs[0];
+			alt_bctx.eye_abs[1] = eye_abs[1];
+			alt_bctx.eye_abs[2] = eye_abs[2];
+			alt_bctx.world = alt_world;
+			alt_bctx.water_level = (float)nd_field_water_level(alt_world);
+			alt_bctx.use_analytical_bounds = true;
+
+			float alt_inner_r = alt_pdef.major_r - alt_pdef.minor_r;
+			if (alt_inner_r < 1.0f) alt_inner_r = 1.0f;
 
 			ar_cull_opts_t alt_opts = opts;
 			alt_opts.view_id = 2;
@@ -1299,11 +1291,19 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			alt_opts.max_level = 14;
 			alt_opts.bounds_3d_fn = seven_torus_bounds_3d_cb;
 			alt_opts.cull_3d_fn = seven_torus_cull_3d_cb;
+			alt_opts.point_3d_fn = seven_torus_point_3d_cb;
 			alt_opts.bounds_ctx = &alt_bctx;
+			alt_opts.occluder = occ;
+			alt_opts.occluder_no_write = true;
+			alt_opts.occluder_concave_inv_r = 1.0f / alt_inner_r;
+			alt_opts.occluder_box_z_pad = 0.0f;
+			alt_opts.use_cached_bounds = false;
 
 			const ar_node_t *alt_visible[32];
 			size_t alt_count = ar_system_query_matrix(cs, alt_world, mvp_3d, &alt_opts, alt_visible, 32);
 			s_last_alt_planet_chunk_count = (uint32_t)alt_count;
+			if (occ)
+				s_last_ridge_culled_count = occ->culled_count;
 			int16_t alt_wl_i = nd_field_water_level(alt_world);
 			for (size_t m = 0; m < alt_count; m++) {
 				const ar_node_t *node = alt_visible[m];

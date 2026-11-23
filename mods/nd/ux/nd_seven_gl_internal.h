@@ -668,11 +668,6 @@ extern float s_bb_ref_trig[4];
 extern float s_shadow_sun_dir[3];
 extern float s_lamb_shadow_light[4];
 
-extern float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
-extern int s_ridge_occlusion_valid;
-extern float s_ridge_cam_flat_y;
-extern int s_ridge_use_occlusion;
-
 /* Shader string declarations (defined in nd_seven_gl_shaders.c) */
 extern const char *s_vs_sky;
 extern const char *s_fs_sky;
