@@ -116,6 +116,131 @@ static void create_static_grid(int quads, float *uv_buf, uint16_t *idx_buf,
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_buf, (GLsizei)((size_t)i_idx * sizeof(uint16_t)), GL_STATIC_DRAW);
 }
 
+typedef struct {
+	float pos_h[4];  /* xyz = local tuft pos, w = heightT [0..1] */
+	float norm_t[4]; /* xyz = curved normal, w = bladeKind (0=outer, 0.5=inner, 1=clover) */
+} gl_grass_vert_t;
+
+static void create_grass_tuft_mesh(void)
+{
+	/* 5 gracefully arching tapered 3D grass blades (7 verts, 5 tris each) +
+	 * 2 low broad ground-hugging clover leaves (4 verts, 2 tris each) = 43 verts, 29 tris (87 indices). */
+	gl_grass_vert_t verts[48];
+	uint16_t idx[96];
+	int vc = 0, ic = 0;
+
+	static const float b_ang[5]  = { 0.12f, 1.38f, 2.61f, 3.89f, 5.14f };
+	static const float b_rad[5]  = { 0.30f, 0.14f, 0.34f, 0.20f, 0.28f };
+	static const float b_h[5]    = { 1.00f, 0.84f, 0.94f, 0.74f, 0.88f };
+	static const float b_lean[5] = { 0.44f, 0.24f, 0.48f, 0.32f, 0.40f };
+	static const float b_w[5]    = { 0.145f, 0.130f, 0.150f, 0.125f, 0.138f };
+	static const float b_kind[5] = { 0.0f, 0.5f, 0.0f, 0.5f, 0.0f };
+	static const float seg_t[3]  = { 0.0f, 0.36f, 0.72f };
+	static const float seg_w[3]  = { 1.0f, 0.76f, 0.42f };
+
+	for (int b = 0; b < 5; b++) {
+		float ca = cosf(b_ang[b]), sa = sinf(b_ang[b]);
+		float px = -sa, py = ca; /* transverse width axis */
+		float rx = ca * b_rad[b], ry = sa * b_rad[b];
+		int base = vc;
+
+		for (int s = 0; s < 3; s++) {
+			float t = seg_t[s];
+			float arch = t * t * b_lean[b];
+			float z = t * b_h[b] * (1.0f - 0.14f * t * t);
+			float hw = b_w[b] * seg_w[s];
+			/* Tangent along blade spine -> outward normal */
+			float tx = ca * (2.0f * t * b_lean[b]);
+			float ty = sa * (2.0f * t * b_lean[b]);
+			float tz = b_h[b] * (1.0f - 0.42f * t * t);
+			float nx0 = ca * tz, ny0 = sa * tz, nz0 = -(tx * ca + ty * sa) + 0.55f;
+			float nlen = sqrtf(nx0 * nx0 + ny0 * ny0 + nz0 * nz0 + 1e-6f);
+			nx0 /= nlen; ny0 /= nlen; nz0 /= nlen;
+
+			for (int side = -1; side <= 1; side += 2) {
+				float sf = (float)side;
+				gl_grass_vert_t *v = &verts[vc++];
+				v->pos_h[0] = rx + ca * arch + px * (hw * sf);
+				v->pos_h[1] = ry + sa * arch + py * (hw * sf);
+				v->pos_h[2] = z;
+				v->pos_h[3] = t * b_h[b];
+				/* V-fold normal bevel across blade width catches grazing specular light */
+				float bnx = nx0 + px * (0.28f * sf);
+				float bny = ny0 + py * (0.28f * sf);
+				float bnz = nz0;
+				float bl = sqrtf(bnx * bnx + bny * bny + bnz * bnz + 1e-6f);
+				v->norm_t[0] = bnx / bl;
+				v->norm_t[1] = bny / bl;
+				v->norm_t[2] = bnz / bl;
+				v->norm_t[3] = b_kind[b];
+			}
+		}
+		/* Pointed tip vertex */
+		{
+			gl_grass_vert_t *v = &verts[vc++];
+			v->pos_h[0] = rx + ca * b_lean[b];
+			v->pos_h[1] = ry + sa * b_lean[b];
+			v->pos_h[2] = b_h[b] * 0.86f;
+			v->pos_h[3] = b_h[b];
+			float bnx = ca * 0.45f, bny = sa * 0.45f, bnz = 0.89f;
+			float bl = sqrtf(bnx * bnx + bny * bny + bnz * bnz + 1e-6f);
+			v->norm_t[0] = bnx / bl;
+			v->norm_t[1] = bny / bl;
+			v->norm_t[2] = bnz / bl;
+			v->norm_t[3] = b_kind[b];
+		}
+
+		/* 2 quads (4 tris) + 1 tip cap tri = 5 tris */
+		for (int s = 0; s < 2; s++) {
+			uint16_t a0 = (uint16_t)(base + s * 2);
+			uint16_t a1 = (uint16_t)(a0 + 1);
+			uint16_t b0 = (uint16_t)(a0 + 2);
+			uint16_t b1 = (uint16_t)(a0 + 3);
+			idx[ic++] = a0; idx[ic++] = a1; idx[ic++] = b1;
+			idx[ic++] = a0; idx[ic++] = b1; idx[ic++] = b0;
+		}
+		idx[ic++] = (uint16_t)(base + 4);
+		idx[ic++] = (uint16_t)(base + 5);
+		idx[ic++] = (uint16_t)(base + 6);
+	}
+
+	/* 2 low broad ground-hugging clover / forest-turf leaves */
+	static const float c_ang[2] = { 0.82f, 3.96f };
+	for (int c = 0; c < 2; c++) {
+		float ca = cosf(c_ang[c]), sa = sinf(c_ang[c]);
+		float px = -sa, py = ca;
+		int base = vc;
+		float pts[4][4] = {
+			{ ca * 0.08f, sa * 0.08f, 0.10f, 0.14f },
+			{ ca * 0.44f - px * 0.34f, sa * 0.44f - py * 0.34f, 0.24f, 0.26f },
+			{ ca * 0.44f + px * 0.34f, sa * 0.44f + py * 0.34f, 0.24f, 0.26f },
+			{ ca * 0.82f, sa * 0.82f, 0.19f, 0.30f }
+		};
+		for (int k = 0; k < 4; k++) {
+			gl_grass_vert_t *v = &verts[vc++];
+			v->pos_h[0] = pts[k][0];
+			v->pos_h[1] = pts[k][1];
+			v->pos_h[2] = pts[k][2];
+			v->pos_h[3] = pts[k][3];
+			v->norm_t[0] = ca * 0.22f;
+			v->norm_t[1] = sa * 0.22f;
+			v->norm_t[2] = 0.975f;
+			v->norm_t[3] = 1.0f;
+		}
+		idx[ic++] = (uint16_t)(base + 0); idx[ic++] = (uint16_t)(base + 1); idx[ic++] = (uint16_t)(base + 2);
+		idx[ic++] = (uint16_t)(base + 1); idx[ic++] = (uint16_t)(base + 3); idx[ic++] = (uint16_t)(base + 2);
+	}
+
+	s_gl.grass_vbo = glCreateBuffer();
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grass_vbo);
+	glBufferData(GL_ARRAY_BUFFER, verts, (GLsizei)((size_t)vc * sizeof(gl_grass_vert_t)), GL_STATIC_DRAW);
+
+	s_gl.grass_ibo = glCreateBuffer();
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grass_ibo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx, (GLsizei)((size_t)ic * sizeof(uint16_t)), GL_STATIC_DRAW);
+	s_gl.grass_idx_count = (GLsizei)ic;
+}
+
 static void init_grid_buffers(void)
 {
 	static float grid_uv_scratch[(GL_TOTAL_VERTS_HI + 4 * (GL_GRID_QUADS_HI + 1)) * 2];
@@ -124,6 +249,7 @@ static void init_grid_buffers(void)
 	create_static_grid(GL_GRID_QUADS_MACRO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_macro, &s_gl.grid_ibo_macro);
 	create_static_grid(GL_GRID_QUADS_LO, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo, &s_gl.grid_ibo);
 	create_static_grid(GL_GRID_QUADS_HI, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_hi, &s_gl.grid_ibo_hi);
+	create_grass_tuft_mesh();
 
 	s_gl.bb_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
@@ -163,6 +289,7 @@ static void init_grid_buffers(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_FOL_MIP_LEVELS - 1);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
 			int cur_w = ND_FOL_ATLAS_SIZE;
 			const uint8_t *src = buf_a;
 			uint8_t *dst = buf_b;
@@ -187,6 +314,7 @@ static void init_grid_buffers(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_FOL_MIP_LEVELS - 1);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
 			cur_w = ND_FOL_ATLAS_SIZE;
 			src = buf_n;
 			dst = buf_b;
@@ -227,6 +355,7 @@ static void init_grid_buffers(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_GRASS_MIP_LEVELS - 1);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
 			int cur_w = ND_GRASS_ATLAS_W, cur_h = ND_GRASS_ATLAS_H;
 			const uint8_t *src = buf_a;
 			uint8_t *dst = buf_b;
@@ -252,6 +381,7 @@ static void init_grid_buffers(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_GRASS_MIP_LEVELS - 1);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
 			cur_w = ND_GRASS_ATLAS_W;
 			cur_h = ND_GRASS_ATLAS_H;
 			src = buf_n;
@@ -294,6 +424,7 @@ static void init_grid_buffers(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_BARK_MIP_LEVELS - 1);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
 			int cur_w = ND_BARK_ATLAS_SIZE;
 			const uint8_t *src = buf_a;
 			uint8_t *dst = buf_b;
@@ -318,6 +449,7 @@ static void init_grid_buffers(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_BARK_MIP_LEVELS - 1);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
 			cur_w = ND_BARK_ATLAS_SIZE;
 			src = buf_n;
 			dst = buf_b;
@@ -411,6 +543,7 @@ static void init_pipelines(void)
 	s_gl.water_pipe.prog      = create_program_async(s_vs_water, s_fs_water);
 	s_gl.bb_pipe.prog         = create_program_async(s_vs_billboard, s_fs_billboard);
 	s_gl.mesh3d_pipe.prog     = create_program_async(s_vs_mesh3d, s_fs_mesh3d);
+	s_gl.grass_pipe.prog      = create_program_async(s_vs_grass, s_fs_grass);
 	s_gl.cloud_pipe.prog      = create_program_async(s_vs_cloud, s_fs_cloud);
 	s_gl.cloud_comp_pipe.prog = create_program_async(s_vs_csm, s_fs_cloud_comp);
 	s_gl.csm_pipe.prog        = create_program_async(s_vs_csm, s_fs_csm);
@@ -439,6 +572,8 @@ static bool check_pipelines_ready(void)
 	if (s_gl.bb_pipe.prog && !glGetProgramParameter(s_gl.bb_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.mesh3d_pipe.prog && !glGetProgramParameter(s_gl.mesh3d_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.grass_pipe.prog && !glGetProgramParameter(s_gl.grass_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.cloud_pipe.prog && !glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
@@ -662,6 +797,44 @@ static bool check_pipelines_ready(void)
 		}
 	}
 
+	/* GPU-Instanced Chunk Grass & Clover pipeline */
+	if (s_gl.grass_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.grass_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.grass_pipe.prog);
+			s_gl.grass_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.grass_pipe.prog;
+			s_gl.grass_pipe.uMVP              = glGetUniformLocation(p, "uMVP", 4);
+			s_gl.grass_pipe.uHeightTex        = glGetUniformLocation(p, "uHeightTex", 10);
+			s_gl.grass_pipe.uSubstrateTex     = glGetUniformLocation(p, "uSubstrateTex", 13);
+			s_gl.grass_pipe.uChunkOrigin      = glGetUniformLocation(p, "uChunkOrigin", 12);
+			s_gl.grass_pipe.uChunkRelOrigin   = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+			s_gl.grass_pipe.uChunkSpan        = glGetUniformLocation(p, "uChunkSpan", 10);
+			s_gl.grass_pipe.uRefTrig          = glGetUniformLocation(p, "uRefTrig", 8);
+			s_gl.grass_pipe.uHeightScale      = glGetUniformLocation(p, "uHeightScale", 12);
+			s_gl.grass_pipe.uSeaLevel         = glGetUniformLocation(p, "uSeaLevel", 9);
+			s_gl.grass_pipe.uCameraPos        = glGetUniformLocation(p, "uCameraPos", 10);
+			s_gl.grass_pipe.uPlanetCenter     = glGetUniformLocation(p, "uPlanetCenter", 13);
+			s_gl.grass_pipe.uBodyRot          = glGetUniformLocation(p, "uBodyRot", 8);
+			s_gl.grass_pipe.uTorusRadii       = glGetUniformLocation(p, "uTorusRadii", 11);
+			s_gl.grass_pipe.uWorldDim         = glGetUniformLocation(p, "uWorldDim", 9);
+			s_gl.grass_pipe.uGridN            = glGetUniformLocation(p, "uGridN", 6);
+			s_gl.grass_pipe.uFogStart         = glGetUniformLocation(p, "uFogStart", 9);
+			s_gl.grass_pipe.uFogEnd           = glGetUniformLocation(p, "uFogEnd", 7);
+			s_gl.grass_pipe.uAnimTime         = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.grass_pipe.uSkyColor         = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.grass_pipe.uAtmoIntensity    = glGetUniformLocation(p, "uAtmoIntensity", 14);
+			s_gl.grass_pipe.uLambLight        = glGetUniformLocation(p, "uLambLight", 10);
+			s_gl.grass_pipe.uSunDir           = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.grass_pipe.uCloudShadowMap   = glGetUniformLocation(p, "uCloudShadowMap", 15);
+			s_gl.grass_pipe.uCsm              = glGetUniformLocation(p, "uCsm", 4);
+			s_gl.grass_pipe.uTreeShadowTex    = glGetUniformLocation(p, "uTreeShadowTex", 14);
+			s_gl.grass_pipe.uTreeShadowOrigin = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
+			s_gl.grass_pipe.uTreeShadowVP     = glGetUniformLocation(p, "uTreeShadowVP", 13);
+			s_gl.grass_pipe.uTreeShadowActive = glGetUniformLocation(p, "uTreeShadowActive", 17);
+		}
+	}
+
 	/* Cloud pipeline */
 	if (s_gl.cloud_pipe.prog) {
 		if (!glGetProgramParameter(s_gl.cloud_pipe.prog, GL_LINK_STATUS)) {
@@ -874,6 +1047,7 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	s_gl.frame_count++;
 	s_gl.water_count = 0;
 	s_gl.cloud_count = 0;
+	s_gl.grass_q_count = 0;
 	s_gl.sprites_in_water = false;
 	s_gl.water_culled_occ2d = 0;
 	s_gl.cloud_culled_hiz = 0;
@@ -1306,6 +1480,32 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		}
 	}
 
+	/* Enqueue primary-world near-field chunks (Level <= 1) for GPU-instanced 3D grass & clover carpet */
+	if (world == s_gl.cur_pdef.world_id && level <= 1 &&
+	    s_gl.grass_pipe.prog && s_gl.grass_idx_count > 0 &&
+	    s_gl.cur_dist < 1800.0f && s_gl.grass_q_count < MAX_GRASS_CHUNKS) {
+		float g_pad = 720.0f + (float)span_w * 0.5f;
+		float cx = (float)ox + (float)span_w * 0.5f;
+		float cy = (float)oy + (float)span_h * 0.5f;
+		if (fabsf(cx - s_gl.cur_tx) <= g_pad && fabsf(cy - s_gl.cur_ty) <= g_pad) {
+			gl_grass_chunk_t *gq = &s_gl.grass_q[s_gl.grass_q_count++];
+			gq->height_tex = slot->height_tex;
+			gq->substrate_tex = slot->substrate_tex;
+			gq->ox = ox;
+			gq->oy = oy;
+			gq->span_w = span_w;
+			gq->span_h = span_h;
+			gq->level = level;
+			gq->sea_level = terrain_sea_lvl;
+			gq->rel_center[0] = rel_center[0];
+			gq->rel_center[1] = rel_center[1];
+			gq->rel_center[2] = rel_center[2];
+			for (int k = 0; k < 16; k++) gq->rot_mat4[k] = rot_mat4[k];
+			gq->major_r = eff_pdef->major_r;
+			gq->minor_r = eff_pdef->minor_r;
+		}
+	}
+
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
 	if (s_gl.cloud_count < (uint32_t)nd_seven_gl_max_water_queue() &&
@@ -1350,6 +1550,96 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		wq->major_r = eff_pdef->major_r;
 		wq->minor_r = eff_pdef->minor_r;
 	}
+}
+
+void nd_seven_gl_flush_grass(void)
+{
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.grass_pipe.prog ||
+	    s_gl.grass_q_count == 0 || s_gl.grass_idx_count <= 0 || s_gl.cur_dist >= 1800.0f) {
+		s_gl.grass_q_count = 0;
+		return;
+	}
+
+	float det_scale = nd_seven_get_detail_scale();
+	int l0_n = (det_scale < 0.75f) ? 36 : ((det_scale < 0.90f) ? 52 : 64);
+	int l1_n = (det_scale < 0.75f) ? 24 : ((det_scale < 0.90f) ? 36 : 44);
+
+	glUseProgram(s_gl.grass_pipe.prog);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_STENCIL_TEST);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	gl_bind_csm(s_gl.grass_pipe.uCloudShadowMap, s_gl.grass_pipe.uCsm);
+	gl_bind_tree_shadow_read(s_gl.grass_pipe.uTreeShadowTex,
+	                         s_gl.grass_pipe.uTreeShadowOrigin,
+	                         s_gl.grass_pipe.uTreeShadowVP,
+	                         s_gl.grass_pipe.uTreeShadowActive);
+
+	glUniformMatrix4fv(s_gl.grass_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
+	glUniform4f(s_gl.grass_pipe.uRefTrig,
+	            s_gl.cur_ref_trig[0], s_gl.cur_ref_trig[1],
+	            s_gl.cur_ref_trig[2], s_gl.cur_ref_trig[3]);
+	glUniform1f(s_gl.grass_pipe.uHeightScale, 1.0f);
+	glUniform3fv(s_gl.grass_pipe.uCameraPos, 1, s_gl.cur_eye);
+	glUniform2f(s_gl.grass_pipe.uWorldDim, ND_SEVEN_WORLD_DIM_W, ND_SEVEN_WORLD_DIM_H);
+	glUniform1f(s_gl.grass_pipe.uFogStart, s_gl.cur_dist * 1.5f);
+	glUniform1f(s_gl.grass_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
+	glUniform1f(s_gl.grass_pipe.uAnimTime, s_gl.cur_anim_time);
+	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+	glUniform3f(s_gl.grass_pipe.uSkyColor,
+	            0.55f * (1.0f - space_t) + 0.012f * space_t,
+	            0.70f * (1.0f - space_t) + 0.016f * space_t,
+	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	glUniform1f(s_gl.grass_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+	glUniform4f(s_gl.grass_pipe.uLambLight,
+	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
+	glUniform3fv(s_gl.grass_pipe.uSunDir, 1, s_gl.cur_sun_dir);
+
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grass_vbo);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(gl_grass_vert_t), 0);
+	glVertexAttribDivisor(0, 0);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(gl_grass_vert_t), 16);
+	glVertexAttribDivisor(1, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grass_ibo);
+
+	for (uint32_t i = 0; i < s_gl.grass_q_count; i++) {
+		const gl_grass_chunk_t *gq = &s_gl.grass_q[i];
+		int grid_n = (gq->level == 0) ? l0_n : l1_n;
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, gq->height_tex);
+		glUniform1i(s_gl.grass_pipe.uHeightTex, 0);
+
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, gq->substrate_tex);
+		glUniform1i(s_gl.grass_pipe.uSubstrateTex, 1);
+
+		glUniform3fv(s_gl.grass_pipe.uPlanetCenter, 1, gq->rel_center);
+		glUniformMatrix4fv(s_gl.grass_pipe.uBodyRot, 1, GL_FALSE, gq->rot_mat4);
+		glUniform2f(s_gl.grass_pipe.uTorusRadii, gq->major_r, gq->minor_r);
+		glUniform2f(s_gl.grass_pipe.uChunkOrigin, (float)gq->ox, (float)gq->oy);
+		glUniform2f(s_gl.grass_pipe.uChunkRelOrigin,
+		            (float)((double)gq->ox - (double)s_gl.cur_tx),
+		            (float)((double)gq->oy - (double)s_gl.cur_ty));
+		glUniform2f(s_gl.grass_pipe.uChunkSpan, (float)gq->span_w, (float)gq->span_h);
+		glUniform1f(s_gl.grass_pipe.uSeaLevel, gq->sea_level);
+		glUniform1i(s_gl.grass_pipe.uGridN, grid_n);
+
+		glDrawElementsInstanced(GL_TRIANGLES, s_gl.grass_idx_count, GL_UNSIGNED_SHORT, 0,
+		                        (GLsizei)(grid_n * grid_n));
+	}
+
+	glDisableVertexAttribArray(1);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+	glActiveTexture(GL_TEXTURE0);
+	s_gl.grass_q_count = 0;
 }
 
 void nd_seven_gl_flush_water(void)

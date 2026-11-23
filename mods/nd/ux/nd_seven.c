@@ -1993,9 +1993,7 @@ static int meadow_lookup_rect(int zone, unsigned biome, uint32_t h, nd_seven_spr
 
 static uint32_t meadow_biome_tint(unsigned biome, int zone, uint32_t h, uint8_t alpha)
 {
-	if (zone == ND_MEADOW_WILDFLOWER)
-		return 0xFFFFFF00u | (uint32_t)alpha;
-
+	(void)zone;
 	uint32_t rgb = 0xFAFFF400u;
 	uint32_t idx = h & 3u;
 	if (biome == 2u) {
@@ -2812,8 +2810,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						int64_t clwx = 0, clwy = 0;
 						nd_seven_world_pos(st, &clwx, &clwy);
 
-						/* 3D Flared Mossy Root Buttress Mound around trunk base (~58% of trees) */
-						if (is_tree_anchor && ((ch >> 1u) % 100u) < 58u && all_gpu_count < ALL_GPU_MAX_DRAW) {
+						/* 3D Flared Mossy Root Buttress Mound around trunk base (100% of mature trees) */
+						if (is_tree_anchor && all_gpu_count < ALL_GPU_MAX_DRAW) {
 							float bang = ((float)((ch >> 5u) & 255u) / 255.0f) * 6.2831853f;
 							float brad = 3.0f + ((float)((ch >> 13u) & 7u) / 7.0f) * 4.5f;
 							int32_t bwx = dr[a].wx + (int32_t)(cosf(bang) * brad);
@@ -2857,8 +2855,9 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 							}
 						}
 
-						if ((ch % 100u) < (is_tree_anchor ? 62u : 48u)) {
-							int n_collars = (is_tree_anchor && ((ch >> 3u) % 3u) == 0u) ? 2 : 1;
+						/* 100% of mature trees and 72% of boulders receive clustered base flora (ferns, stones, shrubs) */
+						if (is_tree_anchor || ((ch % 100u) < 72u)) {
+							int n_collars = is_tree_anchor ? (((ch >> 3u) % 3u == 0u) ? 3 : 2) : 1;
 							for (int ci = 0; ci < n_collars && all_gpu_count < ALL_GPU_MAX_DRAW; ci++) {
 								uint32_t ch_i = ch ^ ((uint32_t)ci * 0x9E3779B1u);
 								float ang = ((float)(ch_i & 255u) / 255.0f) * 6.2831853f;
@@ -3646,7 +3645,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float glwx_f = (float)glwx;
 		float glwy_f = (float)glwy;
 
-		const int32_t geobreak_step = 76;
+		const int32_t geobreak_step = 52;
 		const int32_t geobreak_rad  = 1140;
 		int32_t gcx0 = ndw_fdiv(glwx - geobreak_rad, geobreak_step) * geobreak_step;
 		int32_t gcy0 = ndw_fdiv(glwy - geobreak_rad, geobreak_step) * geobreak_step;
@@ -3662,7 +3661,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				continue;
 			for (int32_t gx = gcx0; gx <= glwx + geobreak_rad && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; gx += geobreak_step) {
 				uint32_t gh = meadow_hash32(gx, gy, 0x47454F42u);
-				if ((gh % 3u) != 0u)
+				if ((gh % 100u) >= 64u)
 					continue;
 				int32_t wx = gx + (int32_t)((gh >> 4u) % 41u) - 20;
 				int32_t wy = gy + (int32_t)((gh >> 10u) % 41u) - 20;
@@ -4241,7 +4240,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (!near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
-	/* Water pass over submerged sprites (refraction, absorption, surface layer), then clouds and present */
+	/* GPU-instanced 3D grass & clover carpet, then water pass over submerged sprites, clouds, and present */
+	nd_seven_gl_flush_grass();
 	nd_seven_gl_flush_water();
 	nd_seven_gl_flush_clouds();
 	nd_seven_gl_end_frame();

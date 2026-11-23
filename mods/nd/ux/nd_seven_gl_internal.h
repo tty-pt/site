@@ -33,6 +33,12 @@
 #ifndef GL_INVERT
 #define GL_INVERT 0x150A
 #endif
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
+#ifndef GL_SAMPLE_ALPHA_TO_COVERAGE
+#define GL_SAMPLE_ALPHA_TO_COVERAGE 0x809E
+#endif
 #define ND_TREE_SHADOW_RES 1024
 
 #define PI_F 3.14159265358979323846f
@@ -275,6 +281,53 @@ typedef struct {
 	GLint uTreeShadowWriteVP;
 } gl_mesh3d_pipe_t;
 
+#define MAX_GRASS_CHUNKS 32
+
+typedef struct {
+	GLuint prog;
+	GLint uMVP;
+	GLint uHeightTex;
+	GLint uSubstrateTex;
+	GLint uChunkOrigin;
+	GLint uChunkRelOrigin;
+	GLint uChunkSpan;
+	GLint uRefTrig;
+	GLint uHeightScale;
+	GLint uSeaLevel;
+	GLint uCameraPos;
+	GLint uPlanetCenter;
+	GLint uBodyRot;
+	GLint uTorusRadii;
+	GLint uWorldDim;
+	GLint uGridN;
+	GLint uFogStart;
+	GLint uFogEnd;
+	GLint uAnimTime;
+	GLint uSkyColor;
+	GLint uAtmoIntensity;
+	GLint uLambLight;
+	GLint uSunDir;
+	GLint uCloudShadowMap;
+	GLint uCsm;
+	GLint uTreeShadowTex;
+	GLint uTreeShadowOrigin;
+	GLint uTreeShadowVP;
+	GLint uTreeShadowActive;
+} gl_grass_pipe_t;
+
+typedef struct {
+	GLuint height_tex;
+	GLuint substrate_tex;
+	int32_t ox, oy;
+	int32_t span_w, span_h;
+	uint8_t level;
+	float sea_level;
+	float rel_center[3];
+	float rot_mat4[16];
+	float major_r;
+	float minor_r;
+} gl_grass_chunk_t;
+
 typedef struct {
 	GLuint prog;
 	GLint uMVP;
@@ -392,6 +445,7 @@ typedef struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_mesh3d_pipe_t mesh3d_pipe;
+	gl_grass_pipe_t grass_pipe;
 	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipe;
 	gl_cloud_comp_pipe_t cloud_comp_pipe;
@@ -508,6 +562,11 @@ typedef struct {
 	gl_terrain_shadow_pipe_t terrain_shadow_pipe;
 	gl_terr_shadow_chunk_t   terr_shadow_q[MAX_TERR_SHADOW_QUEUE];
 	uint32_t                 terr_shadow_q_count;
+	GLuint                   grass_vbo;
+	GLuint                   grass_ibo;
+	GLsizei                  grass_idx_count;
+	gl_grass_chunk_t         grass_q[MAX_GRASS_CHUNKS];
+	uint32_t                 grass_q_count;
 	GLuint atlas_tex;
 	GLuint atlas_norm_tex;
 	uint32_t atlas_ver;
@@ -625,6 +684,8 @@ extern const char *s_vs_billboard;
 extern const char *s_fs_billboard;
 extern const char *s_vs_mesh3d;
 extern const char *s_fs_mesh3d;
+extern const char *s_vs_grass;
+extern const char *s_fs_grass;
 extern const char *s_vs_csm;
 extern const char *s_fs_csm;
 extern const char *s_vs_csm_reproj;

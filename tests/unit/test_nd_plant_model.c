@@ -451,9 +451,9 @@ main(void)
 		free(fol_norm);
 		free(fol_mip1);
 
-		/* 5c. Verify 1024x512 Grass Tuft Atlas, Terrain Micro-Detail Atlas & Seamless 256x256 Bark Atlas */
+		/* 5c. Verify 1024x512 Grass Tuft Atlas, Terrain Micro-Detail Atlas & Seamless 512x512 Bark Atlas */
 		assert(ND_GRASS_ATLAS_W == 1024 && ND_GRASS_ATLAS_H == 512 && ND_GRASS_MIP_LEVELS == 9);
-		assert(ND_BARK_ATLAS_SIZE == 256 && ND_BARK_MIP_LEVELS == 8);
+		assert(ND_BARK_ATLAS_SIZE == 512 && ND_BARK_MIP_LEVELS == 9);
 		assert(ND_TERR_ATLAS_SIZE == 256 && ND_TERR_MIP_LEVELS == 8);
 		size_t grass_bytes = (size_t)ND_GRASS_ATLAS_W * (size_t)ND_GRASS_ATLAS_H * 4u;
 		uint8_t *grass_alb  = (uint8_t *)malloc(grass_bytes);

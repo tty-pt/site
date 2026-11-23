@@ -1260,6 +1260,8 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			glUniformMatrix4fv(s_gl.mesh3d_pipe.uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
 		glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 3);
 		for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
+			if (m >= ND_MESH3D_MEADOW_BASE && m < ND_MESH3D_MEADOW_BASE + ND_MESH3D_MEADOW_COUNT)
+				continue;
 			uint32_t icnt = s_mesh3d_counts[m];
 			if (icnt == 0) continue;
 			const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);

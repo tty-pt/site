@@ -40,3 +40,4 @@ tests/unit/mpfd_contract_test
 /tmp
 .lease.json
 *.lease.json
+/.mm

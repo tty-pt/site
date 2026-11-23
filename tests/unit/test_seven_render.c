@@ -2719,18 +2719,19 @@ int main(void)
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 11 WebGL2 shader programs (terrain, water, billboard, mesh3d, cloud, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
+		/* 5. Verify all 12 WebGL2 shader programs (terrain, water, billboard, mesh3d, grass, cloud, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[11] = {
+			} progs[12] = {
 				{ "terrain",        nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain()        },
 				{ "water",          nd_seven_gl_vs_water(),          nd_seven_gl_fs_water()          },
 				{ "billboard",      nd_seven_gl_vs_billboard(),      nd_seven_gl_fs_billboard()      },
 				{ "mesh3d",         nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d()         },
+				{ "grass",          nd_seven_gl_vs_grass(),          nd_seven_gl_fs_grass()          },
 				{ "cloud",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()          },
 				{ "csm",            nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()            },
 				{ "sky",            nd_seven_gl_vs_sky(),            nd_seven_gl_fs_sky()            },
@@ -2739,7 +2740,7 @@ int main(void)
 				{ "post",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_post()           },
 				{ "terrain_shadow", nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow() }
 			};
-			for (int p = 0; p < 11; p++) {
+			for (int p = 0; p < 12; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
