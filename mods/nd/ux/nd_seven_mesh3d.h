@@ -801,12 +801,13 @@ nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
 	free(zbuf);
 }
 
-/* Ground-breaker relief mesh templates (206..211, layered after canonical ND_MESH3D_TOTAL = 206):
+/* Ground-breaker relief mesh templates (206..213, layered after canonical ND_MESH3D_TOTAL = 206):
  *   0..1: Mossy Earth & Root Hummock
  *   2..3: Embedded Scree & Fieldstone Outcrop
- *   4..5: Turf Berm & Exposed Root Mound */
+ *   4..5: Turf Berm & Exposed Root Mound
+ *   6..7: Fallen Mossy Log with broken stubs & humus saddle */
 #define ND_MESH3D_GEOBREAK_BASE  ND_MESH3D_TOTAL
-#define ND_MESH3D_GEOBREAK_COUNT 6u
+#define ND_MESH3D_GEOBREAK_COUNT 8u
 #define ND_SEVEN_MESH3D_TOTAL    (ND_MESH3D_GEOBREAK_BASE + ND_MESH3D_GEOBREAK_COUNT)
 
 static inline void
@@ -870,7 +871,7 @@ nd_m3d_build_geobreak_prop(nd_mesh3d_builder_t *b, uint32_t variant, nd_mesh3d_s
 		                           6, 3, 0.64f, 0,
 		                           0xFF36322Eu, 0xFF544E48u, 0xFF767068u, 0xFF98928Au,
 		                           1, 0xFF2C4D2Au, 0xFF4D7B3Fu, seed + 193u, ND_MAT3D_STONE_MATTE);
-	} else {
+	} else if (arch == 2u) {
 		/* Turf Berm & Exposed Root Mound */
 		mesh_w = sub ? 54.0f : 48.0f;
 		mesh_h = sub ? 11.5f : 9.8f;
@@ -886,6 +887,45 @@ nd_m3d_build_geobreak_prop(nd_mesh3d_builder_t *b, uint32_t variant, nd_mesh3d_s
 		                           0xFF343230u, 0xFF504C48u, 0xFF706C66u, 0xFF8E8A84u,
 		                           1, 0xFF26562Au, 0xFF488E42u,
 		                           seed + 257u, ND_MAT3D_STONE_MATTE);
+	} else {
+		/* Fallen Mossy Log: reclining bark-fissured trunk, broken stubs & embedded mossy earth saddle */
+		mesh_w = sub ? 50.0f : 42.0f;
+		mesh_h = sub ? 11.0f : 9.5f;
+		float half_l = mesh_w * 0.46f;
+		float r_base = sub ? 4.4f : 3.7f;
+		float bend_y = sub ? 3.2f : -2.6f;
+		float lpts[4][3] = {
+			{ -half_l,         -bend_y * 0.35f, r_base * 0.62f },
+			{ -half_l * 0.30f,  bend_y * 0.45f, r_base * 0.72f },
+			{  half_l * 0.35f,  bend_y * 0.30f, r_base * 0.60f },
+			{  half_l,         -bend_y * 0.20f, r_base * 0.38f }
+		};
+		float lrad[4] = { r_base, r_base * 0.88f, r_base * 0.72f, r_base * 0.52f };
+		nd_m3d_add_axis_spline_tube(b, lpts, lrad, 4, 7, 1,
+		                            0xFF202C3Au, 0xFF304254u, 0xFF445A6Eu,
+		                            ND_PLANT_BARK_FISSURED, mesh_h, seed);
+		/* Two weathered broken branch stubs rising slightly from the fallen trunk */
+		for (int s = 0; s < 2; s++) {
+			float sx = (s == 0) ? (-half_l * 0.22f) : (half_l * 0.28f);
+			float sy = (s == 0) ? (bend_y * 0.40f)  : (bend_y * 0.25f);
+			float sdir = (s == 0) ? 1.0f : -1.0f;
+			float spts[3][3] = {
+				{ sx,                    sy,                    r_base * 0.78f },
+				{ sx + sdir * 3.8f,      sy + sdir * 3.4f,      r_base * 1.48f },
+				{ sx + sdir * 6.8f,      sy + sdir * 6.0f,      r_base * 1.92f }
+			};
+			float srad[3] = { r_base * 0.38f, r_base * 0.26f, r_base * 0.14f };
+			nd_m3d_add_axis_spline_tube(b, spts, srad, 3, 5, 1,
+			                            0xFF202C3Au, 0xFF304254u, 0xFF445A6Eu,
+			                            ND_PLANT_BARK_FISSURED, mesh_h, seed + (uint32_t)(s * 53u + 17u));
+		}
+		/* Embedded mossy humus saddle hugging the trunk's base so the log sits naturally in soil */
+		nd_m3d_add_cleaved_boulder(b, -half_l * 0.12f, bend_y * 0.20f, -0.5f,
+		                           half_l * 0.56f, r_base * 1.35f, r_base * 0.76f,
+		                           7, 3, 0.22f, 0,
+		                           0xFF22303Au, 0xFF304450u, 0xFF425A66u, 0xFF526C78u,
+		                           1, 0xFF244E28u, 0xFF46843Eu,
+		                           seed + 311u, ND_MAT3D_STONE_MATTE);
 	}
 
 	/* Ground-breakers are static terrain relief: zero wind sway */

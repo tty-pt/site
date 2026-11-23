@@ -386,7 +386,7 @@ void nd_seven_mesh3d_init(void)
 		nd_m3d_build_shrub_prop(&b, sv, &s_mesh3d_slices[mid]);
 	}
 
-	/* Build all 6 instanced 3D ground-relief breakers: earth hummocks, scree & turf berms (206..211) */
+	/* Build all 8 instanced 3D ground-relief breakers: earth hummocks, scree, turf berms & fallen logs (206..213) */
 	for (unsigned gv = 0; gv < (unsigned)ND_MESH3D_GEOBREAK_COUNT; gv++) {
 		uint8_t mid = (uint8_t)(ND_MESH3D_GEOBREAK_BASE + gv);
 		nd_m3d_build_geobreak_prop(&b, gv, &s_mesh3d_slices[mid]);
@@ -411,8 +411,8 @@ uint8_t nd_seven_geobreak_mesh3d_id(unsigned biome, uint32_t hash)
 		/* Alpine / Tundra: stone scree & mossy earth hummocks */
 		arch = (r < 4u) ? 1u : ((r < 7u) ? 0u : 2u);
 	} else if (biome == 8u || biome == 9u || biome == 11u || biome == 12u || biome == 13u || biome == 16u || biome == 17u) {
-		/* Woodland / Forest floors: mossy earth/root hummocks & turf berms, with embedded scree */
-		arch = (r < 4u) ? 0u : ((r < 6u) ? 2u : 1u);
+		/* Woodland / Forest floors: mossy earth/root hummocks, fallen mossy logs, turf berms & scree */
+		arch = (r < 3u) ? 0u : ((r < 5u) ? 3u : ((r < 7u) ? 2u : 1u));
 	} else {
 		/* Meadow / Wetland / Savanna: turf berms, mossy hummocks & fieldstone scree */
 		arch = (r < 3u) ? 2u : ((r < 6u) ? 0u : 1u);

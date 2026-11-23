@@ -197,6 +197,10 @@ typedef struct {
 	GLint uCamAngles;
 	GLint uHiZTex;
 	GLint uHiZActive;
+	GLint uTreeShadowTex;
+	GLint uTreeShadowOrigin;
+	GLint uTreeShadowVP;
+	GLint uTreeShadowActive;
 	GLint aPos;
 	GLint aUV;
 	GLint aTint;
@@ -204,6 +208,27 @@ typedef struct {
 	GLint aQuadUV;
 	GLint aSpriteBounds;
 } gl_billboard_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLint uHeightTex;
+	GLint uChunkOrigin;
+	GLint uChunkSpan;
+	GLint uHeightScale;
+	GLint uTreeShadowWriteOrigin;
+	GLint uTreeShadowWriteVP;
+	GLint aGridUV;
+} gl_terrain_shadow_pipe_t;
+
+typedef struct {
+	GLuint height_tex;
+	float ox;
+	float oy;
+	float span_w;
+	float span_h;
+} gl_terr_shadow_chunk_t;
+
+#define MAX_TERR_SHADOW_QUEUE 64
 
 typedef struct {
 	GLuint prog;
@@ -478,7 +503,11 @@ typedef struct {
 	float  tree_shadow_read_vp[16];
 	float  tree_shadow_write_origin[3];
 	float  tree_shadow_write_vp[16];
+	float  tree_shadow_write_half_xy;
 	float  tree_shadow_active;
+	gl_terrain_shadow_pipe_t terrain_shadow_pipe;
+	gl_terr_shadow_chunk_t   terr_shadow_q[MAX_TERR_SHADOW_QUEUE];
+	uint32_t                 terr_shadow_q_count;
 	GLuint atlas_tex;
 	GLuint atlas_norm_tex;
 	uint32_t atlas_ver;
@@ -607,6 +636,8 @@ extern const char *s_fs_hiz_downsample;
 extern const char *s_fs_ssao;
 extern const char *s_fs_bloom;
 extern const char *s_fs_post;
+extern const char *s_vs_terrain_shadow;
+extern const char *s_fs_terrain_shadow;
 
 /* Shared internal functions across translation units */
 GLuint create_program_async(const char *vs_src, const char *fs_src);
@@ -623,6 +654,7 @@ void gl_resolve_scene(GLbitfield mask);
 bool gl_build_hiz_pyramid(void);
 void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
                                   const float E[3], const float S[3], const float N[3]);
+void gl_flush_terrain_shadows_to_fbo(void);
 GLuint gl_ensure_tree_shadow_dummy(void);
 void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActive);
 void gl_render_cloud_shadow_map(void);

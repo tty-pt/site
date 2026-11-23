@@ -417,6 +417,7 @@ static void init_pipelines(void)
 	s_gl.ssao_pipe.prog       = create_program_async(s_vs_csm, s_fs_ssao);
 	s_gl.bloom_pipe.prog      = create_program_async(s_vs_csm, s_fs_bloom);
 	s_gl.post_pipe.prog       = create_program_async(s_vs_csm, s_fs_post);
+	s_gl.terrain_shadow_pipe.prog = create_program_async(s_vs_terrain_shadow, s_fs_terrain_shadow);
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
@@ -450,6 +451,8 @@ static bool check_pipelines_ready(void)
 	if (s_gl.bloom_pipe.prog && !glGetProgramParameter(s_gl.bloom_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.post_pipe.prog && !glGetProgramParameter(s_gl.post_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.terrain_shadow_pipe.prog && !glGetProgramParameter(s_gl.terrain_shadow_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 
 	/* Sky dome pipeline */
@@ -594,12 +597,33 @@ static bool check_pipelines_ready(void)
 			s_gl.bb_pipe.uCamAngles     = glGetUniformLocation(p, "uCamAngles", 10);
 			s_gl.bb_pipe.uHiZTex        = glGetUniformLocation(p, "uHiZTex", 7);
 			s_gl.bb_pipe.uHiZActive     = glGetUniformLocation(p, "uHiZActive", 10);
+			s_gl.bb_pipe.uTreeShadowTex    = glGetUniformLocation(p, "uTreeShadowTex", 14);
+			s_gl.bb_pipe.uTreeShadowOrigin = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
+			s_gl.bb_pipe.uTreeShadowVP     = glGetUniformLocation(p, "uTreeShadowVP", 13);
+			s_gl.bb_pipe.uTreeShadowActive = glGetUniformLocation(p, "uTreeShadowActive", 17);
 			s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
 			s_gl.bb_pipe.aUV            = glGetAttribLocation(p, "a_uv", 4);
 			s_gl.bb_pipe.aTint          = glGetAttribLocation(p, "a_tint", 6);
 			s_gl.bb_pipe.aLocalPos      = glGetAttribLocation(p, "a_local_pos", 11);
 			s_gl.bb_pipe.aQuadUV        = glGetAttribLocation(p, "a_quad_uv", 9);
 			s_gl.bb_pipe.aSpriteBounds  = glGetAttribLocation(p, "a_sprite_bounds", 15);
+		}
+	}
+
+	/* Depth-only terrain shadow caster pipeline (into tree_shadow_fbo) */
+	if (s_gl.terrain_shadow_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.terrain_shadow_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.terrain_shadow_pipe.prog);
+			s_gl.terrain_shadow_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.terrain_shadow_pipe.prog;
+			s_gl.terrain_shadow_pipe.uHeightTex             = glGetUniformLocation(p, "uHeightTex", 10);
+			s_gl.terrain_shadow_pipe.uChunkOrigin           = glGetUniformLocation(p, "uChunkOrigin", 12);
+			s_gl.terrain_shadow_pipe.uChunkSpan             = glGetUniformLocation(p, "uChunkSpan", 10);
+			s_gl.terrain_shadow_pipe.uHeightScale           = glGetUniformLocation(p, "uHeightScale", 12);
+			s_gl.terrain_shadow_pipe.uTreeShadowWriteOrigin = glGetUniformLocation(p, "uTreeShadowWriteOrigin", 22);
+			s_gl.terrain_shadow_pipe.uTreeShadowWriteVP     = glGetUniformLocation(p, "uTreeShadowWriteVP", 18);
+			s_gl.terrain_shadow_pipe.aGridUV                = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
 
@@ -1263,6 +1287,25 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		cmd->base_instance = s_gl.indirect_cmd_count - 1u;
 	}
 
+	/* Enqueue primary-world near-field chunks (Level <= 1) for depth-only terrain shadow casting
+	 * into tree_shadow_fbo so riverbanks, cliffs, and hills cast directional shadows onto lowlands. */
+	if (world == s_gl.cur_pdef.world_id && level <= 1 &&
+	    s_gl.tree_shadow_ready && s_gl.terrain_shadow_pipe.prog &&
+	    s_gl.cur_dist < 2300.0f && s_gl.terr_shadow_q_count < MAX_TERR_SHADOW_QUEUE) {
+		float sh_pad = s_gl.tree_shadow_write_half_xy + (float)span_w;
+		float cx = (float)ox + (float)span_w * 0.5f;
+		float cy = (float)oy + (float)span_h * 0.5f;
+		if (fabsf(cx - s_gl.tree_shadow_write_origin[0]) <= sh_pad &&
+		    fabsf(cy - s_gl.tree_shadow_write_origin[1]) <= sh_pad) {
+			gl_terr_shadow_chunk_t *sq = &s_gl.terr_shadow_q[s_gl.terr_shadow_q_count++];
+			sq->height_tex = slot->height_tex;
+			sq->ox = (float)ox;
+			sq->oy = (float)oy;
+			sq->span_w = (float)span_w;
+			sq->span_h = (float)span_h;
+		}
+	}
+
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
 	if (s_gl.cloud_count < (uint32_t)nd_seven_gl_max_water_queue() &&
@@ -1429,3 +1472,37 @@ void nd_seven_gl_flush_water(void)
 	glActiveTexture(GL_TEXTURE0);
 	s_gl.water_count = 0;
 }
+
+void gl_flush_terrain_shadows_to_fbo(void)
+{
+	if (!s_gl.terrain_shadow_pipe.prog || s_gl.terr_shadow_q_count == 0)
+		return;
+	glUseProgram(s_gl.terrain_shadow_pipe.prog);
+	glUniform1f(s_gl.terrain_shadow_pipe.uHeightScale, 1.0f);
+	if (s_gl.terrain_shadow_pipe.uTreeShadowWriteOrigin >= 0)
+		glUniform3fv(s_gl.terrain_shadow_pipe.uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
+	if (s_gl.terrain_shadow_pipe.uTreeShadowWriteVP >= 0)
+		glUniformMatrix4fv(s_gl.terrain_shadow_pipe.uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
+
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_hi);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_hi);
+
+	glEnable(GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset(2.0f, 3.0f);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(s_gl.terrain_shadow_pipe.uHeightTex, 0);
+
+	for (uint32_t i = 0; i < s_gl.terr_shadow_q_count; i++) {
+		const gl_terr_shadow_chunk_t *sq = &s_gl.terr_shadow_q[i];
+		glBindTexture(GL_TEXTURE_2D, sq->height_tex);
+		glUniform2f(s_gl.terrain_shadow_pipe.uChunkOrigin, sq->ox, sq->oy);
+		glUniform2f(s_gl.terrain_shadow_pipe.uChunkSpan, sq->span_w, sq->span_h);
+		glDrawElements(GL_TRIANGLES, GL_TOTAL_INDICES_HI, GL_UNSIGNED_SHORT, 0);
+	}
+
+	glDisable(GL_POLYGON_OFFSET_FILL);
+	s_gl.terr_shadow_q_count = 0;
+}
+

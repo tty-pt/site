@@ -183,7 +183,7 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 		                        ? fmaxf(0.36f, b->height * (1.0f / 14.0f))
 		                        : 1.0f;
 	} else if (b->style == ND_BB_STYLE_LEAF_TINT || b->style == ND_BB_STYLE_FLORA) {
-		uint8_t pad_kind = b->pad0 & 0x7Fu;
+		uint8_t pad_kind = b->pad0 & 0x03u;
 		if (pad_kind == 1u && b->height > 0.0f) {
 			float h_norm = fminf(1.25f, fmaxf(0.55f, b->height * (1.0f / 26.0f)));
 			out->flora_sway_scale = 0.92f * h_norm;
@@ -385,7 +385,7 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
 
-		float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x7Fu) == 1u) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
+		float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u) ? (tip_mask * grass_rustle * 0.14f) : 0.0f;
 		out_verts[i].tint[0] = fminf(1.0f, tint[0] + sheen);
 		out_verts[i].tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
 		out_verts[i].tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
@@ -758,7 +758,7 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 	out->uv[2] = b->u1;
 	out->uv[3] = b->v1;
 
-	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x7Fu) == 1u) ? (grass_rustle * 0.14f) : 0.0f;
+	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u) ? (grass_rustle * 0.14f) : 0.0f;
 	out->tint[0] = fminf(1.0f, tint[0] + sheen);
 	out->tint[1] = fminf(1.0f, tint[1] + sheen * 1.1f);
 	out->tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
@@ -1009,6 +1009,31 @@ void nd_seven_gl_eval_mesh3d_anchor(const lam_billboard_gpu_t *b,
 	out_grid_pos[2] = b->z;
 }
 
+void nd_seven_gl_unpack_rgba_u32(uint32_t rgba, float out_rgba[4])
+{
+	out_rgba[0] = (float)((rgba >> 24) & 0xFFu) / 255.0f;
+	out_rgba[1] = (float)((rgba >> 16) & 0xFFu) / 255.0f;
+	out_rgba[2] = (float)((rgba >>  8) & 0xFFu) / 255.0f;
+	out_rgba[3] = (float)( rgba        & 0xFFu) / 255.0f;
+}
+
+uint8_t nd_seven_gl_pack_pad0(uint8_t kind_or_zone, unsigned biome, bool can_submerge)
+{
+	uint8_t bio_slot = (biome <= 18u) ? (uint8_t)(biome + 1u) : 0u;
+	return (uint8_t)((kind_or_zone & 3u) | ((bio_slot & 31u) << 2u) | (can_submerge ? 0x80u : 0u));
+}
+
+unsigned nd_seven_gl_unpack_pad0_biome(uint8_t pad0, bool *out_has_biome)
+{
+	uint8_t bio_slot = (pad0 >> 2u) & 31u;
+	if (bio_slot == 0u) {
+		if (out_has_biome) *out_has_biome = false;
+		return 0u;
+	}
+	if (out_has_biome) *out_has_biome = true;
+	return (unsigned)(bio_slot - 1u);
+}
+
 static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const billboard_basis_t *basis,
                                         const nd_mesh3d_slice_t *sl,
@@ -1062,21 +1087,27 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	out->axis_n[2] = N[2];
 	out->axis_n[3] = wind_sy;
 
-	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x7Fu) == 1u) ? (basis->grass_rustle * 0.14f) : 0.0f;
-	out->tint[0] = fminf(1.0f, (float)((b->tint_rgba >> 24) & 0xFFu) / 255.0f + sheen);
-	out->tint[1] = fminf(1.0f, (float)((b->tint_rgba >> 16) & 0xFFu) / 255.0f + sheen * 1.1f);
-	out->tint[2] = fminf(1.0f, (float)((b->tint_rgba >> 8)  & 0xFFu) / 255.0f + sheen * 0.5f);
-	out->tint[3] = (float)(b->tint_rgba & 0xFFu) / 255.0f;
+	float rgba[4];
+	nd_seven_gl_unpack_rgba_u32(b->tint_rgba, rgba);
+	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u) ? (basis->grass_rustle * 0.14f) : 0.0f;
+	out->tint[0] = fminf(1.0f, rgba[0] + sheen);
+	out->tint[1] = fminf(1.0f, rgba[1] + sheen * 1.1f);
+	out->tint[2] = fminf(1.0f, rgba[2] + sheen * 0.5f);
+	out->tint[3] = rgba[3];
 
-	uint8_t grass_bio = (b->style == ND_BB_STYLE_GRASS) ? ((b->pad0 >> 2u) & 31u) : 0u;
+	uint8_t bio_slot = (b->pad0 >> 2u) & 31u;
 	out->param[0] = bx;
 	out->param[1] = by;
 	out->param[2] = bz;
-	out->param[3] = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f) + (float)grass_bio * 32.0f;
+	out->param[3] = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f) + (float)bio_slot * 32.0f;
 
 	/* Local terrain plane (gx, gy, curv) and packed 3D shadow flags + yaw01 in a_iterr */
 	float gx = 0.0f, gy = 0.0f, curv = 0.0f;
-	bool need_terr_plane = want_lamb_shadow || (want_shadow && !s_gl.tree_shadow_ready);
+	float dx_c = bx - s_gl.cur_tx;
+	float dy_c = by - s_gl.cur_ty;
+	bool want_slope_norm = (b->style == ND_BB_STYLE_GRASS || b->style == ND_BB_STYLE_FLORA) &&
+	                       (dx_c * dx_c + dy_c * dy_c < 650.0f * 650.0f);
+	bool need_terr_plane = want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
 	if (need_terr_plane && nd_seven_get_chunk_sys()) {
 		const float step = 16.0f;
 		float dz_e = shadow_corner_terrain_dz(bx + step, by, bz, step, 0.0f);
@@ -1203,6 +1234,24 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		glEnable(GL_DEPTH_TEST);
 		glDepthFunc(GL_LEQUAL);
 		glDepthMask(GL_TRUE);
+		if (s_gl.terr_shadow_q_count > 0) {
+			gl_flush_terrain_shadows_to_fbo();
+			glUseProgram(s_gl.mesh3d_pipe.prog);
+			glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
+			for (GLuint a = 0; a < 3; a++) {
+				glEnableVertexAttribArray(a);
+				glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_mesh3d_vert_t), (size_t)(a * 16));
+				glVertexAttribDivisor(a, 0);
+			}
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
+			glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
+			for (GLuint a = 3; a < 10; a++) {
+				glEnableVertexAttribArray(a);
+				glVertexAttribDivisor(a, 1);
+			}
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
+		}
 		if (s_gl.mesh3d_pipe.uTreeShadowActive >= 0)
 			glUniform1f(s_gl.mesh3d_pipe.uTreeShadowActive, 0.0f);
 		if (s_gl.mesh3d_pipe.uTreeShadowWriteOrigin >= 0)
@@ -1422,6 +1471,10 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		glActiveTexture(GL_TEXTURE0);
 	}
 	gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap, s_gl.bb_pipe.uCsm);
+	gl_bind_tree_shadow_read(s_gl.bb_pipe.uTreeShadowTex,
+	                         s_gl.bb_pipe.uTreeShadowOrigin,
+	                         s_gl.bb_pipe.uTreeShadowVP,
+	                         s_gl.bb_pipe.uTreeShadowActive);
 
 	glUniformMatrix4fv(s_gl.bb_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	float bb_sea_level = (s_gl.focal_sea_level > -900.0f) ? s_gl.focal_sea_level : s_gl.cur_sea_level;
@@ -1509,17 +1562,15 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			if (!is_other && is_mesh3d_only && !is_mesh3d)
 				continue;
 			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
-				float gr = (float)(batch[i].tint_rgba & 0xFFu) / 255.0f;
-				float gg = (float)((batch[i].tint_rgba >> 8) & 0xFFu) / 255.0f;
-				float gb = (float)((batch[i].tint_rgba >> 16) & 0xFFu) / 255.0f;
-				float ga = (float)((batch[i].tint_rgba >> 24) & 0xFFu) / 255.0f;
-				if (ga > 0.05f) {
+				float grgba[4];
+				nd_seven_gl_unpack_rgba_u32(batch[i].tint_rgba, grgba);
+				if (grgba[3] > 0.05f) {
 					float dx_l = batch[i].x - s_gl.cur_lamb_light[0];
 					float dy_l = batch[i].y - s_gl.cur_lamb_light[1];
 					/* Skip duplicate of primary Lamb glow if within 4 world units */
 					if (s_gl.cur_lamb_light[3] <= 0.01f || (dx_l * dx_l + dy_l * dy_l) > 16.0f) {
 						(void)nd_seven_gl_add_point_light(batch[i].x, batch[i].y, batch[i].z + 360.0f,
-						                                  gr, gg, gb, ga * 1.25f, 1200.0f);
+						                                  grgba[0], grgba[1], grgba[2], grgba[3] * 1.25f, 1200.0f);
 					}
 				}
 			}
@@ -1662,6 +1713,25 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	for (GLuint a = 0; a < 7; a++) {
 		glVertexAttribDivisor(a, 0);
 		if (a > 0) glDisableVertexAttribArray(a);
+	}
+	if (s_gl.terr_shadow_q_count > 0 && s_gl.tree_shadow_ready && s_gl.cur_dist < 2300.0f) {
+		int write_idx = 1 - s_gl.tree_shadow_read_idx;
+		GLuint dummy = gl_ensure_tree_shadow_dummy();
+		glActiveTexture(GL_TEXTURE0 + 12);
+		glBindTexture(GL_TEXTURE_2D, dummy);
+		glActiveTexture(GL_TEXTURE0);
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
+		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glDisable(GL_BLEND);
+		glDisable(GL_STENCIL_TEST);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glDepthMask(GL_TRUE);
+		gl_flush_terrain_shadows_to_fbo();
+		s_gl.tree_shadow_write_draws = true;
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+		gl_bind_scene_target();
 	}
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);

@@ -176,6 +176,18 @@ bool nd_seven_gl_billboard_is_mesh3d_only(const lam_billboard_gpu_t *b);
 void nd_seven_gl_eval_mesh3d_anchor(const lam_billboard_gpu_t *b,
                                     float out_grid_pos[3]);
 
+/* Unpacks canonical 0xRRGGBBAA uint32 color into normalized [r, g, b, a] floats. */
+void nd_seven_gl_unpack_rgba_u32(uint32_t rgba, float out_rgba[4]);
+
+/* Packs unified lam_billboard_gpu_t.pad0 bitfield (zero ABI change):
+ *   bits 0..1: kind_or_zone (0..3)
+ *   bits 2..6: biome_slot (1..19 = biome + 1 for biome <= 18; 0 = unset)
+ *   bit  7:    can_submerge (0x80) */
+uint8_t nd_seven_gl_pack_pad0(uint8_t kind_or_zone, unsigned biome, bool can_submerge);
+
+/* Unpacks biome index (0..18) from unified pad0; sets *out_has_biome=false when slot==0. */
+unsigned nd_seven_gl_unpack_pad0_biome(uint8_t pad0, bool *out_has_biome);
+
 /* Pure-C reference mirror of the 3D volumetric billboard normal, directional sun
  * illumination, micro-relief, and ground-contact ambient occlusion in s_fs_billboard:
  * Evaluates the effective 3D lighting multiplier and writes the perturbed unit normal
@@ -479,6 +491,8 @@ bool     nd_seven_gl_is_gpu_hiz_active(void);
 int      nd_seven_gl_get_hiz_mip_levels(void);
 uint32_t nd_seven_gl_get_indirect_draw_count(void);
 const char *nd_seven_gl_vs_billboard(void);
+const char *nd_seven_gl_vs_terrain_shadow(void);
+const char *nd_seven_gl_fs_terrain_shadow(void);
 
 #ifdef __cplusplus
 }

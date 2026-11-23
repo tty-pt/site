@@ -2719,26 +2719,27 @@ int main(void)
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 10 WebGL2 shader programs (terrain, water, billboard, mesh3d, cloud, csm, sky, ssao, bloom, post) compile and link cleanly
+		/* 5. Verify all 11 WebGL2 shader programs (terrain, water, billboard, mesh3d, cloud, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[10] = {
-				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
-				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
-				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() },
-				{ "mesh3d",    nd_seven_gl_vs_mesh3d(),    nd_seven_gl_fs_mesh3d()    },
-				{ "cloud",     nd_seven_gl_vs_cloud(),     nd_seven_gl_fs_cloud()     },
-				{ "csm",       nd_seven_gl_vs_csm(),       nd_seven_gl_fs_csm()       },
-				{ "sky",       nd_seven_gl_vs_sky(),       nd_seven_gl_fs_sky()       },
-				{ "ssao",      nd_seven_gl_vs_csm(),       nd_seven_gl_fs_ssao()      },
-				{ "bloom",     nd_seven_gl_vs_csm(),       nd_seven_gl_fs_bloom()     },
-				{ "post",      nd_seven_gl_vs_csm(),       nd_seven_gl_fs_post()      }
+			} progs[11] = {
+				{ "terrain",        nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain()        },
+				{ "water",          nd_seven_gl_vs_water(),          nd_seven_gl_fs_water()          },
+				{ "billboard",      nd_seven_gl_vs_billboard(),      nd_seven_gl_fs_billboard()      },
+				{ "mesh3d",         nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d()         },
+				{ "cloud",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()          },
+				{ "csm",            nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()            },
+				{ "sky",            nd_seven_gl_vs_sky(),            nd_seven_gl_fs_sky()            },
+				{ "ssao",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_ssao()           },
+				{ "bloom",          nd_seven_gl_vs_csm(),            nd_seven_gl_fs_bloom()          },
+				{ "post",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_post()           },
+				{ "terrain_shadow", nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow() }
 			};
-			for (int p = 0; p < 10; p++) {
+			for (int p = 0; p < 11; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
@@ -4698,7 +4699,7 @@ int main(void)
 				assert(strstr(fs_m3d, "uBarkTex") != NULL);
 				assert(strstr(fs_m3d, "uBarkNorm") != NULL);
 				assert(strstr(fs_m3d, "nd_glsl_biome_rgb") != NULL);
-				assert(strstr(fs_m3d, "grassBio") != NULL);
+				assert(strstr(fs_m3d, "bioId") != NULL);
 				assert(strstr(fs_m3d, "style > 4.5 && style < 5.5") != NULL);
 				assert(strstr(fs_m3d, "isFolGrass") != NULL);
 				assert(strstr(fs_m3d, "barkSample") != NULL);
@@ -4771,8 +4772,8 @@ int main(void)
 			/* Realism Passes 1-3: Capsule Cutaway, Dual-Scale SSAO, 3-Tier Flora & 3D Ground-Breakers */
 			{
 				assert(ND_MESH3D_GEOBREAK_BASE == 206u);
-				assert(ND_MESH3D_GEOBREAK_COUNT == 6u);
-				assert(ND_SEVEN_MESH3D_TOTAL == 212u);
+				assert(ND_MESH3D_GEOBREAK_COUNT == 8u);
+				assert(ND_SEVEN_MESH3D_TOTAL == 214u);
 				assert(nd_seven_mesh3d_slice(ND_SEVEN_MESH3D_TOTAL) == NULL);
 
 				assert(nd_seven_geobreak_mesh3d_id(0u, 0u) == ND_MESH3D_NONE);
@@ -4870,7 +4871,7 @@ int main(void)
 				assert(strstr(fs_m3d,  "rootFeather") != NULL);
 				assert(strstr(fs_m3d,  "bankCol") != NULL);
 				assert(strstr(fs_m3d,  "nd_eval_grove_ecology_weight") != NULL);
-				assert(strstr(fs_m3d,  "0.22 + rootT * 0.62") != NULL);
+				assert(strstr(fs_m3d,  "0.30 + rootT * 0.60") != NULL);
 
 				/* Pass 3 */
 				assert(strstr(fs_terr, "0x48554D4Du") != NULL);
@@ -4929,12 +4930,71 @@ int main(void)
 					assert(fabsf(anchor[1] - (-40.0f)) < 1e-5f && "Grass mesh3d must not apply anchor_y north shift");
 					assert(fabsf(anchor[2] - 10.25f) < 1e-5f);
 
-					assert(strstr(fs_m3d, "microAO *= clamp(0.74 + 0.48 * grShade") != NULL);
-					assert(strstr(fs_m3d, "microAO = clamp(0.74 + 0.48 * grShade") == NULL);
+					assert(strstr(fs_m3d, "microAO *= clamp(0.74 + 0.46 * grShade") != NULL);
+					assert(strstr(fs_m3d, "microAO = clamp(0.74 + 0.46 * grShade") == NULL);
 					assert(strstr(fs_m3d, "clamp(cavityAO * contactAO * microAO, 0.38, 1.14)") != NULL);
 				}
 
-				printf("PASS: Realism Passes 1-3 (lowland rolling field, capsule cutaway, dual SSAO, 3-tier flora+saplings, 3D ground-breakers, mesh3d-only/anchor/AO fixes & Low preset) verified\n");
+				/* Realism Sequence Passes 0-4: RGBA unpack, pad0 biome packing, fallen logs,
+				 * terrain shadow caster, billboard shadow receiver, and unified substrate blending */
+				{
+					/* Pass 0: canonical 0xRRGGBBAA unpack & pad0 bitfield round-trip */
+					float rgba[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+					nd_seven_gl_unpack_rgba_u32(0x112233FFu, rgba);
+					assert(fabsf(rgba[0] - (float)0x11 / 255.0f) < 1e-5f);
+					assert(fabsf(rgba[1] - (float)0x22 / 255.0f) < 1e-5f);
+					assert(fabsf(rgba[2] - (float)0x33 / 255.0f) < 1e-5f);
+					assert(fabsf(rgba[3] - 1.0f) < 1e-5f);
+
+					static const unsigned test_bios[4] = { 0u, 1u, 16u, 18u };
+					for (int bi = 0; bi < 4; bi++) {
+						for (uint8_t kind = 0u; kind < 4u; kind++) {
+							for (int sub = 0; sub < 2; sub++) {
+								uint8_t p0 = nd_seven_gl_pack_pad0(kind, test_bios[bi], sub != 0);
+								assert((p0 & 0x03u) == kind);
+								assert(((p0 & 0x80u) != 0u) == (sub != 0));
+								bool has_bio = false;
+								unsigned out_bio = nd_seven_gl_unpack_pad0_biome(p0, &has_bio);
+								assert(has_bio);
+								assert(out_bio == test_bios[bi]);
+							}
+						}
+					}
+					bool has_bio_unset = true;
+					assert(nd_seven_gl_unpack_pad0_biome(1u, &has_bio_unset) == 0u && !has_bio_unset);
+
+					/* Pass 4: fallen mossy log slices & woodland biome gating */
+					uint32_t total_verts = 0u;
+					(void)nd_seven_mesh3d_verts(&total_verts);
+					assert(total_verts > 0u && total_verts < 393216u);
+					for (unsigned lv = 6u; lv < 8u; lv++) {
+						const nd_mesh3d_slice_t *lsl = nd_seven_mesh3d_slice((uint8_t)(ND_MESH3D_GEOBREAK_BASE + lv));
+						assert(lsl != NULL && lsl->vert_count >= 40u && lsl->idx_count >= 60u);
+					}
+					static const unsigned wood_bios[4] = { 11u, 12u, 16u, 17u };
+					for (int wi = 0; wi < 4; wi++) {
+						int log_hits = 0;
+						for (uint32_t h = 0u; h < 64u; h++) {
+							uint8_t gid = nd_seven_geobreak_mesh3d_id(wood_bios[wi], h);
+							if (gid >= ND_MESH3D_GEOBREAK_BASE + 6u) log_hits++;
+						}
+						assert(log_hits > 0 && "Woodland biomes must emit fallen mossy logs");
+					}
+					for (uint32_t h = 0u; h < 64u; h++) {
+						uint8_t gid_desert = nd_seven_geobreak_mesh3d_id(14u, h);
+						assert(gid_desert >= ND_MESH3D_GEOBREAK_BASE && gid_desert < ND_MESH3D_GEOBREAK_BASE + 6u);
+						assert(nd_seven_geobreak_mesh3d_id(1u, h) == ND_MESH3D_NONE);
+					}
+
+					/* Passes 1-3: shader pipeline guards */
+					assert(strstr(fs_bb,  "nd_eval_tree_shadow") != NULL);
+					assert(strstr(fs_m3d, "nd_eval_ground_substrate") != NULL);
+					assert(strstr(fs_m3d, "vTerrGrad") != NULL);
+					assert(strstr(vs_m3d, "vTerrGrad = a_iterr.xy") != NULL);
+					assert(strstr(nd_seven_gl_vs_terrain_shadow(), "uTreeShadowWriteVP") != NULL);
+				}
+
+				printf("PASS: Realism Passes 0-4 (RGBA/pad0 packing, unified substrate & slope-normal grounding, billboard+terrain shadows, fallen logs & GLSL validation) verified\n");
 			}
 		}
 	}

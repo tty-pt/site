@@ -147,16 +147,16 @@
 	"                        vec3 skyCol, float atmoIntensity) {\n" \
 	"    float groundMask = 1.0 - smoothstep(0.30, 0.80, clamp(atmoIntensity, 0.0, 1.0));\n" \
 	"    if (groundMask <= 0.001) return col;\n" \
-	"    float distEnv = smoothstep(130.0, 560.0, dist) * (1.0 - smoothstep(4500.0, 13000.0, dist));\n" \
+	"    float distEnv = smoothstep(260.0, 960.0, dist) * (1.0 - smoothstep(4800.0, 13000.0, dist));\n" \
 	"    if (distEnv <= 0.001) return col;\n" \
 	"    float refSea = (seaLevel > -900.0) ? seaLevel : 0.0;\n" \
 	"    float hAboveSea = worldZ - refSea;\n" \
 	"    float valleyBand = smoothstep(-28.0, -2.0, hAboveSea) * (1.0 - smoothstep(16.0, 160.0, hAboveSea));\n" \
 	"    float tFlow = mod(animTime * 0.04, 1024.0);\n" \
 	"    float wisp = chaff_grad_noise2d(worldXY * 0.0032 - vec2(0.741, -0.671) * tFlow, 0x56464F47u).x;\n" \
-	"    float valleyMist = (valleyBand > 0.001) ? (0.24 * distEnv * valleyBand * (0.62 + 0.52 * wisp)) : 0.0;\n" \
-	"    float ridgeHaze = smoothstep(260.0, 1450.0, dist) * (1.0 - smoothstep(5000.0, 13000.0, dist)) * 0.30;\n" \
-	"    float mist = clamp((valleyMist + ridgeHaze) * groundMask, 0.0, 0.56);\n" \
+	"    float valleyMist = (valleyBand > 0.001) ? (0.18 * distEnv * valleyBand * (0.62 + 0.52 * wisp)) : 0.0;\n" \
+	"    float ridgeHaze = smoothstep(480.0, 1900.0, dist) * (1.0 - smoothstep(5200.0, 13000.0, dist)) * 0.22;\n" \
+	"    float mist = clamp((valleyMist + ridgeHaze) * groundMask, 0.0, 0.48);\n" \
 	"    if (mist <= 0.001) return col;\n" \
 	"    vec3 fogTint = mix(nd_to_lin(vec3(0.16, 0.22, 0.34)), mix(skyCol * 0.88 + nd_to_lin(vec3(0.08, 0.11, 0.15)), nd_to_lin(vec3(0.76, 0.84, 0.92)), 0.42), dayFactor);\n" \
 	"    return mix(col, fogTint, mist);\n" \
@@ -214,6 +214,48 @@
 	"    if (b == 17) return vec3( 46.0, 114.0,  52.0) / 255.0;\n" \
 	"    if (b == 18) return vec3( 54.0,  48.0,  52.0) / 255.0;\n" \
 	"    return vec3(106.0, 148.0, 72.0) / 255.0;\n" \
+	"}\n"
+
+/* Shared Biome-Matched Ground Substrate Evaluator (linear RGB matched to s_fs_terrain).
+ * Used to root-blend 3D grass, medium/large flora bases, and geobreak earth/moss mounds.
+ * Requires nd_to_lin(), nd_glsl_biome_rgb(), and chaff_grad_noise2d(). */
+#define ND_GLSL_SUBSTRATE_FN \
+	"vec3 nd_eval_ground_substrate(vec2 worldXY, float bankT, float bioId, float groveM) {\n" \
+	"    int b = int(floor(bioId + 0.5));\n" \
+	"    float turfVar = chaff_grad_noise2d(worldXY * 0.28, 0x47524153u).x;\n" \
+	"    float macroV  = chaff_grad_noise2d(worldXY * 0.045, 0x474E4432u).x;\n" \
+	"    vec3 bioLin = nd_to_lin(nd_glsl_biome_rgb(bioId));\n" \
+	"    vec3 col = bioLin * vec3(0.84, 0.96, 0.76);\n" \
+	"    if (b == 1) {\n" \
+	"        col = nd_to_lin(vec3(0.86, 0.90, 0.96));\n" \
+	"    } else if (b == 2) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.38, 0.40, 0.34)), nd_to_lin(vec3(0.50, 0.52, 0.42)), macroV);\n" \
+	"    } else if (b == 4) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.54, 0.34, 0.22)), nd_to_lin(vec3(0.38, 0.44, 0.25)), macroV * 0.65);\n" \
+	"    } else if (b == 5) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.24, 0.31, 0.22)), nd_to_lin(vec3(0.30, 0.48, 0.30)), macroV);\n" \
+	"    } else if (b == 6 || b == 14) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.68, 0.58, 0.42)), nd_to_lin(vec3(0.78, 0.66, 0.47)), macroV);\n" \
+	"    } else if (b == 15) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.54, 0.36, 0.21)), nd_to_lin(vec3(0.64, 0.50, 0.28)), macroV);\n" \
+	"    } else if (b == 8 || b == 9) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.30, 0.26, 0.20)), nd_to_lin(vec3(0.32, 0.40, 0.24)), macroV);\n" \
+	"    } else if (b == 12) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.46, 0.35, 0.21)), nd_to_lin(vec3(0.36, 0.44, 0.24)), macroV);\n" \
+	"    } else if (b == 16) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.44, 0.38, 0.22)), nd_to_lin(vec3(0.32, 0.48, 0.24)), macroV);\n" \
+	"    } else if (b == 17) {\n" \
+	"        col = mix(nd_to_lin(vec3(0.34, 0.26, 0.18)), nd_to_lin(vec3(0.24, 0.44, 0.20)), macroV);\n" \
+	"    } else if (b == 18) {\n" \
+	"        col = nd_to_lin(vec3(0.21, 0.20, 0.23));\n" \
+	"    }\n" \
+	"    col *= (0.84 + 0.26 * turfVar);\n" \
+	"    float isWood = (b == 8 || b == 9 || b == 11 || b == 12 || b == 13 || b == 16 || b == 17) ? 1.0 : 0.0;\n" \
+	"    vec3 duffCol = nd_to_lin(vec3(0.31, 0.26, 0.19));\n" \
+	"    col = mix(col, duffCol, isWood * smoothstep(0.42, 0.78, groveM) * 0.42);\n" \
+	"    vec3 bankCol = nd_to_lin(vec3(0.45, 0.40, 0.31)) * (0.86 + 0.24 * turfVar);\n" \
+	"    col = mix(col, bankCol, clamp(bankT, 0.0, 1.0) * 0.45);\n" \
+	"    return col;\n" \
 	"}\n"
 
 /* Toroidal geometric self-eclipse raymarch:
@@ -1688,12 +1730,12 @@ const char *s_fs_terrain =
 	"                    float farCanopyBand = smoothstep(1400.0, 2800.0, vDistance) * (1.0 - smoothstep(12000.0, 28000.0, vDistance));\n"
 	"                    float farCanopyShade = groveMask * farCanopyBand * clamp(0.65 + 0.35 * (nStd - 0.5), 0.35, 1.0);\n"
 	"                    vegCol = mix(vegCol, vegCol * vec3(0.76, 0.85, 0.72), farCanopyShade * 0.38);\n"
-	"                    canopyApronAO = clamp(canopyApronAO + groveMask * (0.08 + 0.10 * farCanopyBand), 0.0, 0.22);\n"
+	"                    canopyApronAO = clamp(canopyApronAO + groveMask * (0.10 + 0.10 * farCanopyBand), 0.0, 0.24);\n"
 	"                    float meadowBed = nd_eval_meadow_bed_weight(vWorldPos, elevAboveWater, slopeMag, groveMacro) * (1.0 - smoothstep(0.18, 0.48, trailW));\n"
 	"                    if (meadowBed > 0.001) {\n"
 	"                        vec3 bedCarpet = mix(vegCol * vec3(0.76, 0.88, 0.66), mix(deepMoss, lushTurf, 0.50) * vec3(0.90, 0.96, 0.80), smoothstep(0.25, 0.78, nStd));\n"
 	"                        vegCol = mix(vegCol, bedCarpet, meadowBed * 0.54);\n"
-	"                        canopyApronAO = clamp(canopyApronAO + meadowBed * 0.10 * closeZoom, 0.0, 0.28);\n"
+	"                        canopyApronAO = clamp(canopyApronAO + meadowBed * 0.14 * closeZoom, 0.0, 0.34);\n"
 	"                    }\n"
 	"                }\n"
 	"                float bladeRelief = (nStd - 0.5) * 0.15 * distFade + (turfFiber * 0.65 + (nClose - 0.5) * 0.35) * 0.22 * closeZoom + (nUltra - 0.5) * 0.15 * ultraZoom;\n"
@@ -3012,6 +3054,7 @@ const char *s_fs_billboard =
 	ND_GLSL_SCENE_LIGHT
 	ND_GLSL_SRGB_FN
 	ND_GLSL_CSM_LOOKUP_FN
+	ND_GLSL_TREE_SHADOW_FN
 	CHAFF_GLSL_HASH_FN
 	CHAFF_GLSL_GRAD_NOISE_FN
 	CHAFF_GLSL_FLOW_FN
@@ -3397,13 +3440,19 @@ const char *s_fs_billboard =
 	"    float sunDiff = max(0.0, dot(N_bb, L_sun));\n"
 	"    float cavityAO = clamp(1.0 + microH * 0.10, 0.92, 1.06);\n"
 	"    float hAboveGround = max(0.0, vLocalPos.z - vQuadUV.z);\n"
-	"    float contactAO = isLambGlow ? 1.0 : mix(0.90, 1.0, smoothstep(0.0, 3.5, hAboveGround));\n"
+	"    float contactAO = isLambGlow ? 1.0 : mix(0.68, 1.0, smoothstep(0.0, 3.8, hAboveGround));\n"
+	"    float bbTreeSh = (uTreeShadowActive > 0.001 && vDist < 4200.0)\n"
+	"                   ? nd_eval_tree_shadow(vLocalPos, 3.0)\n"
+	"                   : 1.0;\n"
+	"    float bbSunSh = isLambGlow ? mix(0.38, 1.0, bbTreeSh) : mix(0.22, 1.0, bbTreeSh);\n"
+	"    float bbAmbSh = mix(0.80, 1.0, bbTreeSh);\n"
 	"    float hemiSky = 0.5 + 0.5 * N_bb.z;\n"
 	"    vec3 ambCol = mix(nd_to_lin(vec3(0.58, 0.62, 0.68)), nd_to_lin(vec3(0.76, 0.80, 0.86)), hemiSky);\n"
 	"    vec3 sunCol = nd_to_lin(vec3(1.05, 1.02, 0.96));\n"
 	"    float dirRelief = mix(0.22 + 0.78 * dayFactor, 1.0, directSun);\n"
-	"    vec3 lightTerm = (ambCol * (0.28 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor)) + sunCol * ((0.72 + 0.24 * hasNormMap) * sunDiff * nd_sun_trans(cloudSh) * dirRelief)) * (cavityAO * contactAO);\n"
-	"    vec3 lit = albedo * mix(vec3(1.0), lightTerm, mix(isLambGlow ? 0.28 : 0.42, 0.78, hasNormMap));\n"
+	"    vec3 bbShCool = mix(vec3(1.0), nd_to_lin(vec3(0.86, 0.92, 1.04)), (1.0 - bbTreeSh) * 0.28);\n"
+	"    vec3 lightTerm = (ambCol * (0.28 * nd_amb_trans(cloudSh) * (0.20 + 0.80 * dayFactor) * bbAmbSh) + sunCol * ((0.72 + 0.24 * hasNormMap) * sunDiff * nd_sun_trans(cloudSh) * dirRelief * bbSunSh)) * (cavityAO * contactAO) * bbShCool;\n"
+	"    vec3 lit = albedo * mix(vec3(1.0), lightTerm, mix(isLambGlow ? 0.34 : 0.48, 0.80, hasNormMap));\n"
 	"    if (uSeaLevel > -900.0 && canSubmerge && vQuadUV.z < waveSurfZ + 0.35 && !isSubmerged) {\n"
 	"        /* Capillary wet-rim darkening just above the waterline (including on the universe-owner lamb) */\n"
 	"        float heightAboveWater = effSpriteZ - waveSurfZ;\n"
@@ -3562,8 +3611,10 @@ const char *s_vs_mesh3d =
 	"out vec3 vSunLocal;\n"
 	"out vec3 vViewLocal;\n"
 	"out float vFlip;\n"
+	"out vec2 vTerrGrad;\n"
 	"void main() {\n"
 	"    vViewLocal = vec3(0.0, 0.0, 1.0);\n"
+	"    vTerrGrad = a_iterr.xy;\n"
 	"    float scXY = a_ibase.w;\n"
 	"    float scZ  = a_iE.w;\n"
     "    bool hasCardU = (a_vpos.w > 1.0);\n"
@@ -3743,6 +3794,7 @@ const char *s_fs_mesh3d =
 	"in vec3 vSunLocal;\n"
 	"in vec3 vViewLocal;\n"
 	"in float vFlip;\n"
+	"in vec2 vTerrGrad;\n"
 	"uniform float uSeaLevel;\n"
 	"uniform float uAnimTime;\n"
 	"uniform vec3 uCameraPos;\n"
@@ -3769,6 +3821,7 @@ const char *s_fs_mesh3d =
 	ND_GLSL_VALLEY_FOG_FN
 	ND_GLSL_BIOME_RGB_FN
 	ND_GLSL_GROVE_ECOLOGY_FN
+	ND_GLSL_SUBSTRATE_FN
 	"vec2 nd_branchlet_uv(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
 	"    vec2 tileOff = isCon ? vec2(0.0, 0.0)\n"
 	"                 : (isOv ? vec2(0.5, 0.0)\n"
@@ -3829,7 +3882,9 @@ const char *s_fs_mesh3d =
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
 	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    float baseStyle = mod(vParam.w, 32.0);\n"
-	"    float grassBio = floor(vParam.w / 32.0 + 0.01);\n"
+	"    float bioSlot = floor(vParam.w / 32.0 + 0.01);\n"
+	"    bool hasBio = (bioSlot >= 0.5);\n"
+	"    float bioId = hasBio ? (bioSlot - 1.0) : 10.0;\n"
 	"    bool inWaterTile = (baseStyle >= 15.5);\n"
 	"    float style = inWaterTile ? (baseStyle - 16.0) : baseStyle;\n"
 	"    bool canSubmerge = inWaterTile && (style < 0.5 || (style > 2.5 && style < 4.5));\n"
@@ -3956,24 +4011,39 @@ const char *s_fs_mesh3d =
 	"    float microAO = 1.0;\n"
 	"    float brTrans = 0.72;\n"
 	"    bool isGrassMesh = (style > 4.5 && style < 5.5);\n"
-	"    if (isGrassMesh) {\n"
-	"        float rootT = 1.0 - smoothstep(0.0, 4.8, vHeightAboveGround);\n"
-	"        float tipT  = smoothstep(2.5, 8.5, vHeightAboveGround);\n"
-	"        vec3 bioGround = nd_to_lin(nd_glsl_biome_rgb(grassBio));\n"
-	"        int gb = int(floor(grassBio + 0.5));\n"
+	"    bool isFloraMesh = (style > 0.5 && style < 1.5);\n"
+	"    bool isGeoMesh   = (style < 0.5);\n"
+	"    bool needSubGround = isGrassMesh || (hasBio && ((isFloraMesh && vHeightAboveGround < 7.0) || (isGeoMesh && (isRock || vHeightAboveGround < 6.0))));\n"
+	"    if (needSubGround) {\n"
+	"        int gb = int(floor(bioId + 0.5));\n"
 	"        float isWood = (gb == 8 || gb == 9 || gb == 11 || gb == 12 || gb == 13 || gb == 16 || gb == 17) ? 1.0 : 0.0;\n"
 	"        float isOpen = (gb == 4 || gb == 7 || gb == 10 || gb == 15) ? 1.0 : 0.0;\n"
 	"        float groveM = nd_eval_grove_ecology_weight(vLocalPos.xy, 0.0, isWood, isOpen);\n"
-	"        float turfVar = chaff_grad_noise2d(vLocalPos.xy * 0.28, 0x47524153u).x;\n"
-	"        vec3 turfCol = bioGround * vec3(0.84, 0.96, 0.76) * (0.82 + 0.28 * turfVar);\n"
-	"        vec3 duffCol = nd_to_lin(vec3(0.32, 0.28, 0.20));\n"
-	"        turfCol = mix(turfCol, duffCol, isWood * smoothstep(0.45, 0.78, groveM) * 0.38);\n"
 	"        float bankT = (uSeaLevel > -900.0) ? (1.0 - smoothstep(0.6, 6.5, vLocalPos.z - uSeaLevel)) : 0.0;\n"
-	"        vec3 bankCol = nd_to_lin(vec3(0.46, 0.41, 0.31)) * (0.86 + 0.24 * turfVar);\n"
-	"        turfCol = mix(turfCol, bankCol, bankT * 0.45);\n"
-	"        albedo = mix(albedo, turfCol, 0.22 + rootT * 0.62);\n"
-	"        albedo *= (1.0 + tipT * 0.12);\n"
-	"        microAO *= mix(1.0, 0.72, rootT);\n"
+	"        vec3 subCol = nd_eval_ground_substrate(vLocalPos.xy, bankT, bioId, groveM);\n"
+	"        if (isGrassMesh) {\n"
+	"            float rootT = 1.0 - smoothstep(0.0, 5.2, vHeightAboveGround);\n"
+	"            float tipT  = smoothstep(2.8, 9.0, vHeightAboveGround);\n"
+	"            albedo = mix(albedo, subCol, 0.30 + rootT * 0.60);\n"
+	"            albedo *= (1.0 + tipT * 0.05);\n"
+	"            microAO *= mix(1.0, 0.62, rootT);\n"
+	"        } else if (isFloraMesh) {\n"
+	"            float fRootT = 1.0 - smoothstep(0.0, 6.5, vHeightAboveGround);\n"
+	"            albedo = mix(albedo, subCol, fRootT * (isBark ? 0.36 : 0.44));\n"
+	"            microAO *= mix(1.0, 0.60, fRootT);\n"
+	"        } else if (isGeoMesh) {\n"
+	"            if (isRock) {\n"
+	"                float upFace = smoothstep(0.20, 0.82, N_local.z);\n"
+	"                float baseT = 1.0 - smoothstep(0.0, 4.8, vHeightAboveGround);\n"
+	"                float geoMix = clamp(upFace * 0.46 + baseT * 0.52, 0.0, 0.78);\n"
+	"                albedo = mix(albedo, subCol, geoMix);\n"
+	"                microAO *= mix(1.0, 0.66, baseT);\n"
+	"            } else {\n"
+	"                float baseT = 1.0 - smoothstep(0.0, 6.0, vHeightAboveGround);\n"
+	"                albedo = mix(albedo, subCol, baseT * 0.42);\n"
+	"                microAO *= mix(1.0, 0.64, baseT);\n"
+	"            }\n"
+	"        }\n"
 	"    }\n"
 	"    /* Botanical & mineralogical micro-relief */\n"
 	"    if (distFade > 0.02) {\n"
@@ -4009,7 +4079,7 @@ const char *s_fs_mesh3d =
 	"            float fComb  = furrow * 0.55 + fFine * 0.25 + (barkSample.r - 0.62) * 0.45;\n"
 	"            vec2 dBark   = gFurrow.yz * 0.48 + gFine.yz * 0.26 + bTexN * 0.46;\n"
 	"            N_local = normalize(N_local + vec3(-dBark.x * 0.74, -dBark.y * 0.62, fFine * 0.26 + (barkNMap.b - 0.5) * 0.22) * distFade);\n"
-	"            microAO = clamp((0.92 + fComb * 0.48 * distFade) * (0.76 + 0.34 * barkSample.b), 0.50, 1.22);\n"
+	"            microAO *= clamp((0.92 + fComb * 0.48 * distFade) * (0.76 + 0.34 * barkSample.b), 0.50, 1.22);\n"
 	"            albedo = clamp(albedo * (1.00 + fComb * 0.32 * distFade) * (0.86 + 0.26 * barkSample.r), 0.0, 1.0);\n"
 	"            /* Subtle Nordic forest-floor moss & lichen collar on lower trunk bases & crevices */\n"
 	"            float mossMask = (1.0 - smoothstep(1.2, 18.0, vHeightAboveGround)) * smoothstep(-0.18, 0.38, -furrow + 0.14 + (barkSample.g - 0.5) * 0.28) * distFade;\n"
@@ -4025,11 +4095,11 @@ const char *s_fs_mesh3d =
 	"                    float grDepth = grNorm.b;\n"
 	"                    brTrans       = grNorm.a;\n"
 	"                    vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.16, 0x47524154u);\n"
-	"                    vec3 strawCol = mix(albedo * vec3(1.18, 1.04, 0.66), nd_to_lin(vec3(0.68, 0.58, 0.34)), 0.45) * (0.84 + 0.30 * grShade);\n"
-	"                    vec3 bladeCol = clamp(albedo * (0.78 + 0.46 * grShade + (gMacro.x - 0.5) * 0.16), 0.0, 1.0);\n"
-	"                    albedo = mix(bladeCol, strawCol, grStraw * 0.35);\n"
-	"                    N_local = normalize(N_local + vec3(gTexNxy.x * 0.58 + rollN * 0.24, gTexNxy.y * 0.58 - rollN * 0.16, (grDepth - 0.42) * 0.42) * distFade);\n"
-	"                    microAO *= clamp(0.74 + 0.48 * grShade * (0.86 + 0.26 * grDepth), 0.64, 1.22);\n"
+	"                    vec3 strawCol = mix(albedo * vec3(1.08, 1.00, 0.72), nd_to_lin(vec3(0.56, 0.48, 0.28)), 0.30) * (0.84 + 0.26 * grShade);\n"
+	"                    vec3 bladeCol = clamp(albedo * (0.74 + 0.38 * grShade + (gMacro.x - 0.5) * 0.14), 0.0, 1.0);\n"
+	"                    albedo = mix(bladeCol, strawCol, grStraw * 0.16);\n"
+	"                    N_local = normalize(N_local + vec3(gTexNxy.x * 0.36 + rollN * 0.18, gTexNxy.y * 0.36 - rollN * 0.12, (grDepth - 0.42) * 0.34) * distFade);\n"
+	"                    microAO *= clamp(0.74 + 0.46 * grShade * (0.86 + 0.24 * grDepth), 0.62, 1.18);\n"
 	"                } else {\n"
 	"                    vec4 brNorm    = nd_sample_branchlet_norm(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
 	"                    float brShade  = brSample.r;\n"
@@ -4043,7 +4113,7 @@ const char *s_fs_mesh3d =
 	"                    vec3 leafCol = clamp(albedo * (0.82 + 0.44 * brShade + (gMacro.x - 0.5) * 0.14), 0.0, 1.0);\n"
 	"                    albedo = mix(leafCol, twigCol, twigMask * 0.85);\n"
 	"                    N_local = normalize(N_local + vec3(texNxy.x * 0.54 + rollN * 0.22, texNxy.y * 0.54 - rollN * 0.16, (brDepth - 0.45) * 0.36) * distFade);\n"
-	"                    microAO = clamp(0.80 + 0.42 * brShade * (0.88 + 0.24 * brDepth), 0.72, 1.20);\n"
+	"                    microAO *= clamp(0.80 + 0.42 * brShade * (0.88 + 0.24 * brDepth), 0.72, 1.20);\n"
 	"                }\n"
 	"            } else if (!isFolCore && vDist < 3400.0) {\n"
 	"                vec3 gMacro = chaff_grad_noise2d(vLocalPos.xy * 0.18 + vec2(vHeightAboveGround * 0.14, -vHeightAboveGround * 0.10), 0x4C454146u);\n"
@@ -4056,7 +4126,7 @@ const char *s_fs_mesh3d =
 	"                if (poreField < cutThresh * distFade) discard;\n"
 	"                vec2 dLeaf = gMacro.yz * 0.34 + gLeaf.yz * 0.44 + gMicro.yz * 0.22;\n"
 	"                N_local = normalize(N_local + vec3(dLeaf.x * 0.58, dLeaf.y * 0.58, (leafCluster - 0.45) * 0.48) * distFade);\n"
-	"                microAO = clamp(0.78 + 0.42 * leafCluster, 0.70, 1.16);\n"
+	"                microAO *= clamp(0.78 + 0.42 * leafCluster, 0.70, 1.16);\n"
 	"                albedo = clamp(albedo * (0.92 + 0.24 * leafCluster), 0.0, 1.0);\n"
 	"            }\n"
 	"        } else if (isRock) {\n"
@@ -4067,6 +4137,14 @@ const char *s_fs_mesh3d =
 	"            float stria = sin(vHeightAboveGround * 12.0) * 0.06 * (1.0 - abs(N_local.z));\n"
 	"            N_local = normalize(N_local + vec3(0.0, 0.0, stria * distFade));\n"
 	"        }\n"
+	"    }\n"
+	"    vec3 N_terr = normalize(vec3(-vTerrGrad.x, -vTerrGrad.y, 1.0));\n"
+	"    if (isGrassMesh) {\n"
+	"        float slopeAlign = mix(0.84, 0.44, smoothstep(0.0, 6.0, vHeightAboveGround));\n"
+	"        N_local = normalize(mix(N_local, N_terr, slopeAlign));\n"
+	"    } else if (isFloraMesh && isFoliage && vHeightAboveGround < 14.0) {\n"
+	"        float lowAlign = mix(0.40, 0.0, smoothstep(2.0, 14.0, vHeightAboveGround));\n"
+	"        N_local = normalize(mix(N_local, N_terr, lowAlign));\n"
 	"    }\n"
 	"    vec3 torusN = normalize(vTorusN);\n"
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
@@ -4152,6 +4230,50 @@ const char *s_fs_mesh3d =
 
 const char *nd_seven_gl_vs_mesh3d(void) { return s_vs_mesh3d; }
 const char *nd_seven_gl_fs_mesh3d(void) { return s_fs_mesh3d; }
+
+/* Depth-only terrain heightmap shadow caster (renders Level 0/1 hills, ridges, and riverbanks
+ * into tree_shadow_fbo alongside 3D trees for true macro terrain-onto-terrain and terrain-onto-sprite shadows). */
+const char *s_vs_terrain_shadow =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"precision highp int;\n"
+	"precision highp isampler2D;\n"
+	"layout (location = 0) in vec2 a_grid_uv;\n"
+	"uniform isampler2D uHeightTex;\n"
+	"uniform vec2 uChunkOrigin;\n"
+	"uniform vec2 uChunkSpan;\n"
+	"uniform float uHeightScale;\n"
+	"uniform vec3 uTreeShadowWriteOrigin;\n"
+	"uniform mat4 uTreeShadowWriteVP;\n"
+	"void main() {\n"
+	"    vec2 uv = clamp(a_grid_uv, 0.0, 1.0);\n"
+	"    vec2 texSize = vec2(textureSize(uHeightTex, 0));\n"
+	"    vec2 maxC = max(vec2(1.0), texSize - 1.0);\n"
+	"    ivec2 icMax = ivec2(maxC);\n"
+	"    vec2 p = uv * maxC;\n"
+	"    ivec2 i0 = clamp(ivec2(floor(p)), ivec2(0), icMax);\n"
+	"    ivec2 i1 = min(i0 + ivec2(1), icMax);\n"
+	"    vec2 f = clamp(p - vec2(i0), 0.0, 1.0);\n"
+	"    float h00 = float(texelFetch(uHeightTex, i0, 0).r);\n"
+	"    float h10 = float(texelFetch(uHeightTex, ivec2(i1.x, i0.y), 0).r);\n"
+	"    float h01 = float(texelFetch(uHeightTex, ivec2(i0.x, i1.y), 0).r);\n"
+	"    float h11 = float(texelFetch(uHeightTex, i1, 0).r);\n"
+	"    float rawH = mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);\n"
+	"    float effScale = ((uHeightScale != 0.0) ? uHeightScale : 1.0) * 0.0625;\n"
+	"    vec3 wGrid = vec3(uChunkOrigin + uv * uChunkSpan, rawH * effScale);\n"
+	"    gl_Position = uTreeShadowWriteVP * vec4(wGrid - uTreeShadowWriteOrigin, 1.0);\n"
+	"}\n";
+
+const char *s_fs_terrain_shadow =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"out vec4 FragColor;\n"
+	"void main() {\n"
+	"    FragColor = vec4(0.0);\n"
+	"}\n";
+
+const char *nd_seven_gl_vs_terrain_shadow(void) { return s_vs_terrain_shadow; }
+const char *nd_seven_gl_fs_terrain_shadow(void) { return s_fs_terrain_shadow; }
 
 /* Cloud-shadow map pass: one full-frame evaluation of the synoptic cloud density on the cloud slice (z = 920) over the
  * snapped window described by uCsm. Wind shear displacement is baked in; terrain, water and sprites index the map by

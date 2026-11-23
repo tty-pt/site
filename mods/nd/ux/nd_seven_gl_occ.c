@@ -563,6 +563,8 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	s_gl.tree_shadow_write_origin[0] = spr * rx + spu * ux + pl * lx;
 	s_gl.tree_shadow_write_origin[1] = spr * ry + spu * uy + pl * ly;
 	s_gl.tree_shadow_write_origin[2] = spr * rz + spu * uz + pl * lz;
+	s_gl.tree_shadow_write_half_xy = half_xy;
+	s_gl.terr_shadow_q_count = 0;
 
 	float inv_xy = 1.0f / half_xy;
 	float inv_z  = 1.0f / half_z;

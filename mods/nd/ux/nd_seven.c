@@ -2013,81 +2013,81 @@ static uint32_t meadow_biome_tint(unsigned biome, int zone, uint32_t h, uint8_t 
 	} else if (biome == 4u) {
 		/* Mediterranean garrigue: warm olive-sage & sun-cured thyme */
 		static const uint32_t med_tints[4] = {
-			0xDCBE8200u, 0xD2B47A00u, 0xE4C68A00u, 0xC8AC7200u
+			0xB89E6A00u, 0xAE966400u, 0xC2A67000u, 0xA48E5E00u
 		};
 		rgb = med_tints[idx];
 	} else if (biome == 5u) {
 		/* Wetland / fen: deep lush marsh sedge & olive-moss */
 		static const uint32_t wetland_tints[4] = {
-			0x6B986600u, 0x628E6000u, 0x74A26E00u, 0x5A845800u
+			0x628E5C00u, 0x5A845600u, 0x6A986400u, 0x527A4E00u
 		};
 		rgb = wetland_tints[idx];
 	} else if (biome == 6u || biome == 14u) {
 		/* Cold desert (6) & Desert (14): parched straw, weathered sage & dry bunchgrass */
 		static const uint32_t desert_tints[4] = {
-			0xDEC08200u, 0xD2B67C00u, 0xE6C88A00u, 0xC8AE7400u
+			0xC8AC7400u, 0xBEA46E00u, 0xD0B47C00u, 0xB49C6800u
 		};
 		rgb = desert_tints[idx];
 	} else if (biome == 7u) {
 		/* Cool shrubland: dusty sagebrush-grey, cool olive-ochre & dry steppe bunchgrass */
 		static const uint32_t shrub_tints[4] = {
-			0xC4BC9400u, 0xCEBE9000u, 0xBAB48C00u, 0xC8B68800u
+			0xA6A07A00u, 0xB0A27600u, 0x9C987400u, 0xAA9A7000u
 		};
 		rgb = shrub_tints[idx];
 	} else if (biome == 15u) {
 		/* Savannah: sun-cured golden-ochre & warm straw */
 		static const uint32_t savanna_tints[4] = {
-			0xF2BA6800u, 0xE8B06000u, 0xFAC27000u, 0xDEA65800u
+			0xD4A25800u, 0xCA985200u, 0xDCAA6000u, 0xC08E4A00u
 		};
 		rgb = savanna_tints[idx];
 	} else if (biome == 8u || biome == 9u) {
 		/* Coniferous & Boreal forest: deep spruce moss & warm olive-pine */
 		static const uint32_t boreal_tints[4] = {
-			0x6C8A5800u, 0x64825200u, 0x76946000u, 0x5C784C00u
+			0x607E4E00u, 0x58764800u, 0x6A885600u, 0x526E4400u
 		};
 		rgb = boreal_tints[idx];
 	} else if (biome == 11u) {
-		/* Open Woodland: fresh sunlit clover & warm olive-emerald */
+		/* Open Woodland: rich sunlit clover & grounded olive-emerald */
 		static const uint32_t woodland_tints[4] = {
-			0x9BB66A00u, 0xA6BA6600u, 0x92AE6400u, 0xAEBC6400u
+			0x7E9C5400u, 0x86A05200u, 0x76944E00u, 0x8EA25000u
 		};
 		rgb = woodland_tints[idx];
 	} else if (biome == 12u) {
-		/* Temperate seasonal forest: warm olive-gold & autumn leaf-litter accents */
+		/* Temperate seasonal forest: warm olive-moss & russet leaf-litter accents */
 		static const uint32_t temp_seasonal_tints[4] = {
-			0xC8C48600u, 0xD4BA7C00u, 0xBEBE8000u, 0xDCB27400u
+			0x989A5C00u, 0xA4905600u, 0x8E945800u, 0xAA885000u
 		};
 		rgb = temp_seasonal_tints[idx];
 	} else if (biome == 13u) {
 		/* Temperate rainforest: deep misty Pacific-Northwest fern & moss-olive */
 		static const uint32_t temp_rf_tints[4] = {
-			0x6F9E5E00u, 0x66945600u, 0x78A86600u, 0x5E8A4E00u
+			0x64925400u, 0x5C884C00u, 0x6E9C5C00u, 0x547E4600u
 		};
 		rgb = temp_rf_tints[idx];
 	} else if (biome == 16u) {
-		/* Tropical seasonal / monsoon forest: warm chartreuse, sun-lit olive & dry-season gold */
+		/* Tropical seasonal / monsoon forest: grounded olive-emerald & warm dry-season ochre */
 		static const uint32_t monsoon_tints[4] = {
-			0xC6C47800u, 0xD2BC7000u, 0xB8C07400u, 0xDAB46800u
+			0x86944C00u, 0x948E4800u, 0x7A904A00u, 0x9C864400u
 		};
 		rgb = monsoon_tints[idx];
 	} else if (biome == 17u) {
 		/* Tropical rainforest: deep saturated equatorial jungle chlorophyll */
 		static const uint32_t jungle_tints[4] = {
-			0x6EA65200u, 0x669C4C00u, 0x78B05A00u, 0x5E924600u
+			0x60984800u, 0x588E4200u, 0x6AA25000u, 0x52843E00u
 		};
 		rgb = jungle_tints[idx];
 	} else {
-		/* Temperate grassland (10) & default: warm sunlit meadow olive-green */
+		/* Temperate grassland (10) & default: grounded sunlit meadow olive-green */
 		static const uint32_t meadow_tints[4] = {
-			0xA8C06C00u, 0x9EB66400u, 0xB2C87400u, 0x94AC5C00u
+			0x88A45600u, 0x7E9A5000u, 0x92AC5E00u, 0x76904800u
 		};
 		rgb = meadow_tints[idx];
 	}
 
 	if (zone == ND_MEADOW_UNDERSTORY) {
-		uint32_t r = (((rgb >> 24) & 0xFFu) * 228u) >> 8u;
-		uint32_t g = (((rgb >> 16) & 0xFFu) * 236u) >> 8u;
-		uint32_t b = (((rgb >>  8) & 0xFFu) * 224u) >> 8u;
+		uint32_t r = (((rgb >> 24) & 0xFFu) * 218u) >> 8u;
+		uint32_t g = (((rgb >> 16) & 0xFFu) * 228u) >> 8u;
+		uint32_t b = (((rgb >>  8) & 0xFFu) * 214u) >> 8u;
 		rgb = (r << 24) | (g << 16) | (b << 8);
 	}
 	return rgb | (uint32_t)alpha;
@@ -2804,6 +2804,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					int16_t c_mpos[4];
 					if (nd_seven_tile_at(st, c_ti, c_tj, &c_mt, c_mpos))
 						c_bio = c_mt.biome;
+					if (dst_bb->style == ND_BB_STYLE_FLORA)
+						dst_bb->pad0 = nd_seven_gl_pack_pad0(dst_bb->pad0 & 3u, c_bio, (dst_bb->pad0 & 0x80u) != 0);
 					int barren_bio = (c_bio == 0u || c_bio == 1u || c_bio == 6u || c_bio == 14u || c_bio == 18u);
 					if (!barren_bio) {
 						uint16_t c_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
@@ -2848,7 +2850,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 										bbb->style = ND_BB_STYLE_STANDARD;
 										bbb->shadow_rx = (uint8_t)(bbw * 0.32f > 4.0f ? bbw * 0.32f : 4.0f);
 										bbb->shadow_ry = (uint8_t)(bbb->shadow_rx * 0.48f > 2.0f ? bbb->shadow_rx * 0.48f : 2.0f);
-										bbb->pad0 = 0u;
+										bbb->pad0 = nd_seven_gl_pack_pad0(0u, c_bio, false);
 										bbb->mesh_id = b_mid;
 									}
 								}
@@ -2911,7 +2913,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 								cbb->style = ND_BB_STYLE_FLORA;
 								cbb->shadow_rx = (uint8_t)(cbw * 0.30f > 4.0f ? cbw * 0.30f : 4.0f);
 								cbb->shadow_ry = (uint8_t)(cbb->shadow_rx * 0.45f > 2.0f ? cbb->shadow_rx * 0.45f : 2.0f);
-								cbb->pad0 = 1u;
+								cbb->pad0 = nd_seven_gl_pack_pad0(1u, c_bio, false);
 								cbb->mesh_id = c_mid;
 							}
 						}
@@ -3098,7 +3100,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						bb->shadow_rx = (uint8_t)grx;
 						bb->shadow_ry = (uint8_t)gry;
 					}
-					bb->pad0 = (uint8_t)(((unsigned)zone & 3u) | ((bio & 31u) << 2));
+					bb->pad0 = nd_seven_gl_pack_pad0((uint8_t)zone, bio, false);
 					bb->mesh_id = m_id;
 				}
 			}
@@ -3237,7 +3239,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bb->style = ND_BB_STYLE_FLORA;
 				bb->shadow_rx = (uint8_t)(bw_u * 0.32f > 4.0f ? bw_u * 0.32f : 4.0f);
 				bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
-				bb->pad0 = 1u;
+				bb->pad0 = nd_seven_gl_pack_pad0(1u, bio, false);
 				bb->mesh_id = u_mesh_id;
 			}
 		}
@@ -3365,7 +3367,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				unsigned fam = (sh >> 16u) % 10u;
 				uint8_t s_mesh_id = ND_MESH3D_NONE;
 				uint8_t s_style = ND_BB_STYLE_FLORA;
-				uint8_t s_pad0 = 1u;
+				uint8_t s_pad0 = nd_seven_gl_pack_pad0(1u, bio, false);
 				int s_grass_zone = ND_MEADOW_TALL_GRASS;
 				int is_grass_clump = 0;
 
@@ -3391,7 +3393,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 					             ? ND_MEADOW_UNDERSTORY : ND_MEADOW_TALL_GRASS;
 					s_mesh_id = nd_seven_meadow_mesh3d_id(s_grass_zone, bio, sh >> 18u);
 					s_style = ND_BB_STYLE_GRASS;
-					s_pad0 = (uint8_t)(((unsigned)s_grass_zone & 3u) | ((bio & 31u) << 2));
+					s_pad0 = nd_seven_gl_pack_pad0((uint8_t)s_grass_zone, bio, false);
 					is_grass_clump = 1;
 				} else {
 					/* Wild tall flowering herbs (flax, wild carrot umbels, leafy berry bushes) */
@@ -3626,7 +3628,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bb->style = ND_BB_STYLE_FLORA;
 				bb->shadow_rx = (uint8_t)(bw_l * 0.32f > 5.0f ? bw_l * 0.32f : 5.0f);
 				bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
-				bb->pad0 = 2u;
+				bb->pad0 = nd_seven_gl_pack_pad0(2u, bio, false);
 				bb->mesh_id = l_mesh_id;
 			}
 		}
@@ -3660,7 +3662,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				continue;
 			for (int32_t gx = gcx0; gx <= glwx + geobreak_rad && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; gx += geobreak_step) {
 				uint32_t gh = meadow_hash32(gx, gy, 0x47454F42u);
-				if ((gh % 4u) != 0u)
+				if ((gh % 3u) != 0u)
 					continue;
 				int32_t wx = gx + (int32_t)((gh >> 4u) % 41u) - 20;
 				int32_t wy = gy + (int32_t)((gh >> 10u) % 41u) - 20;
@@ -3669,7 +3671,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				float ddy = (float)(wy - glwy);
 				if (ddx * ddx + ddy * ddy > (float)(geobreak_rad * geobreak_rad))
 					continue;
-				if (ddx * ddx + ddy * ddy < 36.0f * 36.0f)
+				if (ddx * ddx + ddy * ddy < 26.0f * 26.0f)
 					continue;
 				if (s_frame_frustum_valid &&
 				    !seven_test_frustum_xy((float)wx - 36.0f, (float)wy - 36.0f,
@@ -3779,7 +3781,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				bb->style = ND_BB_STYLE_STANDARD;
 				bb->shadow_rx = (uint8_t)(bw_g * 0.32f > 4.0f ? bw_g * 0.32f : 4.0f);
 				bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.48f > 2.0f ? bb->shadow_rx * 0.48f : 2.0f);
-				bb->pad0 = 0u;
+				bb->pad0 = nd_seven_gl_pack_pad0(0u, bio, false);
 				bb->mesh_id = g_mesh_id;
 			}
 		}
