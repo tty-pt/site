@@ -35,6 +35,23 @@ float nd_seven_get_zoom(void);
 void nd_seven_zoom_in(void);
 void nd_seven_zoom_out(void);
 
+#ifndef ND_SEVEN_CAM_PITCH_MIN
+#define ND_SEVEN_CAM_PITCH_MIN      10.0f
+#endif
+#ifndef ND_SEVEN_CAM_PITCH_MAX
+#define ND_SEVEN_CAM_PITCH_MAX      85.0f
+#endif
+
+/* Free 3D orbit camera controls (yaw in [-180..180), pitch in [10..85] deg) */
+void  nd_seven_set_cam_angles(float yaw_deg, float pitch_deg);
+void  nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg);
+void  nd_seven_reset_cam(void);
+float nd_seven_get_yaw_deg(void);
+float nd_seven_get_pitch_deg(void);
+void  nd_seven_step_cam(float dt);
+float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
+                               float dist, float yaw_deg, float pitch_deg);
+
 /* User-adjustable billboard detail / draw distance scale (0.20f .. 2.50f, default 1.0f) */
 void nd_seven_set_detail_scale(float scale);
 float nd_seven_get_detail_scale(void);

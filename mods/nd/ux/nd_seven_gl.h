@@ -91,7 +91,16 @@ void nd_seven_gl_torus_frame(float wx, float wy, float wz,
                              float out_N[3]);
 
 /* Pure-C 3D Torus Camera MVP Matrix:
- * Matches the left-handed East-right diorama camera on the curved torus. */
+ * Matches the left-handed camera on the curved torus at arbitrary (yaw_deg, pitch_deg). */
+void nd_seven_gl_compute_mvp_ex(uint32_t vp_w, uint32_t vp_h,
+                                float tx, float ty, float tz,
+                                float dist, float yaw_deg, float pitch_deg, float fov_deg,
+                                const nd_planet_def_t *pdef,
+                                float out_mvp[16],
+                                float out_eye[3],
+                                float out_target[3],
+                                float out_up[3]);
+
 void nd_seven_gl_compute_mvp(uint32_t vp_w, uint32_t vp_h,
                              float tx, float ty, float tz,
                              float dist, float pitch_deg, float fov_deg,
@@ -102,16 +111,29 @@ void nd_seven_gl_compute_mvp(uint32_t vp_w, uint32_t vp_h,
                              float out_up[3]);
 
 /* Pure-C Flat Tangent-Space Camera MVP Matrix for libareole quadtree culling:
- * Uses identical left-handed East-right convention (ar_mat4_lookat_lh) and
+ * Uses identical left-handed convention (ar_mat4_lookat_lh) and
  * dynamic near/far depth planes. */
+void nd_seven_gl_compute_flat_mvp_ex(uint32_t vp_w, uint32_t vp_h,
+                                     float tx, float ty, float tz,
+                                     float dist, float yaw_deg, float pitch_deg, float fov_deg,
+                                     float out_mvp[16]);
+
 void nd_seven_gl_compute_flat_mvp(uint32_t vp_w, uint32_t vp_h,
                                   float tx, float ty, float tz,
                                   float dist, float pitch_deg, float fov_deg,
                                   float out_mvp[16]);
 
-/* Pitch-Rotated Billboard Basis & 6-Vertex Quad Construction:
- * Rotates the billboard quad around the horizontal camera axis (out_E) by
- * pitch_deg so the quad faces the pitched camera with 1:1 projected aspect ratio. */
+/* Camera-Facing Billboard Basis & 6-Vertex Quad Construction:
+ * Rotates the billboard quad around Zenith by yaw_deg and tilts by pitch_deg
+ * so the quad faces the orbiting camera with 1:1 projected aspect ratio. */
+void nd_seven_gl_billboard_basis_ex(float wx, float wy, float wz,
+                                    float yaw_deg, float pitch_deg,
+                                    const nd_planet_def_t *pdef,
+                                    float out_base_pos[3],
+                                    float out_right[3],
+                                    float out_up[3],
+                                    float out_view_dir[3]);
+
 void nd_seven_gl_billboard_basis(float wx, float wy, float wz,
                                  float pitch_deg,
                                  const nd_planet_def_t *pdef,
@@ -119,6 +141,11 @@ void nd_seven_gl_billboard_basis(float wx, float wy, float wz,
                                  float out_right[3],
                                  float out_up[3],
                                  float out_view_dir[3]);
+
+void nd_seven_gl_eval_billboard_quad_ex(const lam_billboard_gpu_t *b,
+                                        float yaw_deg, float pitch_deg,
+                                        const nd_planet_def_t *pdef,
+                                        nd_seven_gl_bb_vert_t out_verts[6]);
 
 void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
                                      float pitch_deg,
@@ -189,6 +216,11 @@ void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,
 uint32_t nd_seven_gl_get_frame_count(void);
 
 void nd_seven_gl_set_focal_water(float water_level);
+void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
+                                float tx, float ty, float tz,
+                                float dist, float yaw_deg, float pitch_deg, float fov_deg,
+                                float anim_time,
+                                const nd_planet_def_t *pdef);
 void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
                              float tx, float ty, float tz,
                              float dist, float pitch_deg, float fov_deg,
@@ -215,6 +247,8 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   const uint32_t *atlas_rgba);
 
 /* Shader source accessors for verification */
+const char *nd_seven_gl_vs_sky(void);
+const char *nd_seven_gl_fs_sky(void);
 const char *nd_seven_gl_vs_terrain(void);
 const char *nd_seven_gl_fs_terrain(void);
 const char *nd_seven_gl_vs_water(void);
@@ -227,6 +261,9 @@ const char *nd_seven_gl_vs_csm(void);
 const char *nd_seven_gl_fs_csm(void);
 const char *nd_seven_gl_vs_cloud(void);
 const char *nd_seven_gl_fs_cloud(void);
+const char *nd_seven_gl_fs_ssao(void);
+const char *nd_seven_gl_fs_bloom(void);
+const char *nd_seven_gl_fs_post(void);
 
 /* Query active GPU mesh quad resolution for a given LOD level and camera distance:
  * Level 0 at mid-near zoom (340 < cam_dist < 5000) returns 48 (48x48 quads = 4,608 triangles);

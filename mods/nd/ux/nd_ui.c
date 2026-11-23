@@ -16,6 +16,7 @@ int g_stage_w = ND_CANVAS_W, g_stage_h = ND_CANVAS_H;
 int g_ui_initialized = 0;
 
 static void seven_stage_redraw(void);
+static int nd_ui_seven_active(const nd_client_state_t *st);
 
 char g_active_modal[32] = {0};
 
@@ -108,6 +109,9 @@ static int s_drag_start_x = 0;
 static int s_drag_start_y = 0;
 static int s_drag_start_w = 0;
 static int s_drag_start_h = 0;
+static int s_orbit_dragging = 0;
+static int s_orbit_last_mx = 0;
+static int s_orbit_last_my = 0;
 
 static const char *const s_win_persist_keys[ND_WIN_COUNT] = {
 	"nd-win-chat",
@@ -476,9 +480,72 @@ static int on_win_drag_down(bud_event *ev)
 	return start_win_drag(ev, win_id, mode);
 }
 
+static int on_stage_orbit_down(bud_event *ev)
+{
+	if (!nd_ui_seven_active(&client_state))
+		return 0;
+	int cx = 0, cy = 0, vw = 0, vh = 0;
+	parse_mouse_coords(ev, &cx, &cy, &vw, &vh, NULL, NULL, NULL, NULL);
+	s_orbit_dragging = 1;
+	s_orbit_last_mx = cx;
+	s_orbit_last_my = cy;
+	return 0;
+}
+
+static int on_stage_orbit_wheel(bud_event *ev)
+{
+	if (!nd_ui_seven_active(&client_state))
+		return 0;
+	const char *s = ev ? (const char *)ev->user : NULL;
+	if (!s || !*s)
+		return 0;
+	int dx = 0, dy = 0, mode = 0;
+	if (sscanf(s, "%d,%d,%d", &dx, &dy, &mode) < 2)
+		return 0;
+	(void)dx;
+	float scale = (mode == 1) ? 33.0f : ((mode == 2) ? 300.0f : 1.0f);
+	float delta_px = (float)dy * scale;
+	if (delta_px > 600.0f) delta_px = 600.0f;
+	if (delta_px < -600.0f) delta_px = -600.0f;
+	float cur_zoom = nd_seven_get_zoom();
+	float next_zoom = cur_zoom * expf(-delta_px * 0.0012f);
+	nd_seven_set_zoom(next_zoom);
+	return 1;
+}
+
+static int on_stage_orbit_dblclick(bud_event *ev)
+{
+	(void)ev;
+	if (!nd_ui_seven_active(&client_state))
+		return 0;
+	nd_seven_reset_cam();
+	return 1;
+}
+
 static int on_win_drag_move(bud_event *ev)
 {
-	if (s_drag_win < 0 || s_drag_win >= ND_WIN_COUNT || !s_drag_mode) return 0;
+	if (s_drag_win < 0 || s_drag_win >= ND_WIN_COUNT || !s_drag_mode) {
+		if (!s_orbit_dragging)
+			return 0;
+		int cx = 0, cy = 0, vw = 0, vh = 0, rx = -1, ry = -1, rw = 0, rh = 0, btn = 0, btns = 1;
+		const char *s = ev ? (const char *)ev->user : NULL;
+		if (s && *s) {
+			sscanf(s, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+			       &cx, &cy, &vw, &vh, &rx, &ry, &rw, &rh, &btn, &btns);
+			(void)rx; (void)ry; (void)rw; (void)rh; (void)btn;
+		}
+		if (btns == 0) {
+			s_orbit_dragging = 0;
+			return 0;
+		}
+		int mdx = cx - s_orbit_last_mx;
+		int mdy = cy - s_orbit_last_my;
+		s_orbit_last_mx = cx;
+		s_orbit_last_my = cy;
+		if (mdx != 0 || mdy != 0)
+			nd_seven_orbit_cam((float)(-mdx) * 0.32f, (float)(-mdy) * 0.25f);
+		return 0;
+	}
 	int cx = 0, cy = 0, vw = 0, vh = 0;
 	parse_mouse_coords(ev, &cx, &cy, &vw, &vh, NULL, NULL, NULL, NULL);
 	if (cx == 0 && cy == 0 && vw == 0 && vh == 0) return 0;
@@ -559,6 +626,8 @@ static int on_win_drag_move(bud_event *ev)
 static int on_win_drag_up(bud_event *ev)
 {
 	(void)ev;
+	if (s_orbit_dragging)
+		s_orbit_dragging = 0;
 	if (s_drag_win < 0 && !s_drag_mode) return 0;
 	s_drag_win = -1;
 	s_drag_mode = 0;
@@ -841,19 +910,24 @@ static bud_node *mount_seven_stage(void)
 	 * The stage fills its holder: the canvas is resized by the lamina bridge
 	 * to whatever frame size the stage draws (data-bud-canvas-fit), 1:1 with
 	 * the screen, so the sprite scale never changes. */
+	bud_node *canvas = lx_n("canvas",
+		lx_attr("id", "seven-stage-canvas"),
+		lx_attr("data-bud-key", "seven-stage-canvas"),
+		lx_attr("data-bud-canvas", "1"),
+		lx_attr("data-bud-canvas-fit", "1"),
+		lx_attr("data-bud-webgl", "1"),
+		lx_attr("width", "640"),
+		lx_attr("height", "480"),
+		lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"));
+	bud_bind(canvas, "mousedown", 0, on_stage_orbit_down);
+	bud_bind(canvas, "wheel", 0, on_stage_orbit_wheel);
+	bud_bind(canvas, "dblclick", 0, on_stage_orbit_dblclick);
+
 	bud_node *stage = lx_n("nd-stage",
 		lx_attr("id", "game-stage"),
 		lx_attr("data-bud-key", "game-stage"),
 		lx_attr("class", "absolute inset-0 min-w-0 min-h-0 overflow-hidden bg-neutral-950"),
-		lx_node(lx_n("canvas",
-			lx_attr("id", "seven-stage-canvas"),
-			lx_attr("data-bud-key", "seven-stage-canvas"),
-			lx_attr("data-bud-canvas", "1"),
-			lx_attr("data-bud-canvas-fit", "1"),
-			lx_attr("data-bud-webgl", "1"),
-			lx_attr("width", "640"),
-			lx_attr("height", "480"),
-			lx_attr("class", "absolute inset-0 w-full h-full block select-none bg-neutral-950"))),
+		lx_node(canvas),
 		lx_node(lx_n("div",
 			lx_attr("id", "seven-shader-status"),
 			lx_attr("data-bud-key", "seven-shader-status"),
@@ -1937,6 +2011,17 @@ static int on_key_down(bud_event *e)
 			seven_stage_redraw();
 			bud_app_set_state();
 			return 1;
+		} else if (strcmp(key, "q") == 0 || strcmp(key, "Q") == 0) {
+			nd_seven_orbit_cam(12.0f, 0.0f);
+			return 1;
+		} else if (strcmp(key, "e") == 0 || strcmp(key, "E") == 0) {
+			nd_seven_orbit_cam(-12.0f, 0.0f);
+			return 1;
+		} else if (strcmp(key, "r") == 0 || strcmp(key, "R") == 0 || strcmp(key, "Home") == 0) {
+			nd_seven_reset_cam();
+			nd_seven_set_zoom(1.0f);
+			bud_app_set_state();
+			return 1;
 		}
 		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
 			char act[64];
@@ -2312,7 +2397,12 @@ static void seven_stage_redraw(void)
 	float zoom = nd_seven_get_zoom();
 	float eff_cam_dist = ND_SEVEN_CAM_DIST / zoom;
 
-	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, ND_SEVEN_DIORAMA_PITCH, ND_SEVEN_CAM_YAW, ND_SEVEN_CAM_FOV);
+	uint16_t world = (uint16_t)client_state.map_data.pos[3];
+	float yaw_deg = nd_seven_get_yaw_deg();
+	float pitch_deg = nd_seven_clamp_cam_pitch(world, (float)wx, (float)wy, wz,
+	                                           eff_cam_dist, yaw_deg, nd_seven_get_pitch_deg());
+
+	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, pitch_deg, yaw_deg, ND_SEVEN_CAM_FOV);
 	nd_seven_render((uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
 	lam_cam_set_2d();
 
@@ -2346,6 +2436,7 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 	if (now_seven != s_prev_seven_active) {
 		/* Driver handshake: entering or exiting Seven stage */
 		nd_seven_reset_input();
+		s_orbit_dragging = 0;
 		if (now_seven)
 			nd_seven_sync_origin(&client_state);
 		s_prev_seven_active = now_seven;

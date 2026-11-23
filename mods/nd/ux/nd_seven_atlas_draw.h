@@ -60,5 +60,8 @@ uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id);
 uint8_t nd_seven_stone_mesh3d_id(const ndw_obj_t *o);
 uint8_t nd_seven_obj_mesh3d_id(const ndw_obj_t *o);
 uint8_t nd_seven_entity_mesh3d_id(int spr_id);
+uint8_t nd_seven_meadow_mesh3d_id(int zone, unsigned biome, uint32_t hash);
+uint8_t nd_seven_understory_mesh3d_id(unsigned biome, uint32_t hash);
+uint8_t nd_seven_shrub_mesh3d_id(unsigned biome, uint32_t hash);
 
 #endif /* ND_SEVEN_ATLAS_DRAW_H */

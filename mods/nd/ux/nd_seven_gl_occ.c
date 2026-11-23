@@ -38,6 +38,8 @@ static void gl_free_scene_targets(void)
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0 + 6);
 	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0 + 8);
+	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0 + 11);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0);
@@ -45,12 +47,18 @@ static void gl_free_scene_targets(void)
 	if (s_gl.scene_fbo) glDeleteFramebuffer(s_gl.scene_fbo);
 	if (s_gl.res_fbo) glDeleteFramebuffer(s_gl.res_fbo);
 	if (s_gl.cloud_fbo) glDeleteFramebuffer(s_gl.cloud_fbo);
+	if (s_gl.ssao_fbo) glDeleteFramebuffer(s_gl.ssao_fbo);
+	if (s_gl.bloom_fbo[0]) glDeleteFramebuffer(s_gl.bloom_fbo[0]);
+	if (s_gl.bloom_fbo[1]) glDeleteFramebuffer(s_gl.bloom_fbo[1]);
 	if (s_gl.scene_rb_color) glDeleteRenderbuffer(s_gl.scene_rb_color);
 	if (s_gl.scene_rb_depth) glDeleteRenderbuffer(s_gl.scene_rb_depth);
 	if (s_gl.cloud_depth_rb) glDeleteRenderbuffer(s_gl.cloud_depth_rb);
 	if (s_gl.res_color_tex) glDeleteTexture(s_gl.res_color_tex);
 	if (s_gl.res_depth_tex) glDeleteTexture(s_gl.res_depth_tex);
 	if (s_gl.cloud_tex) glDeleteTexture(s_gl.cloud_tex);
+	if (s_gl.ssao_tex) glDeleteTexture(s_gl.ssao_tex);
+	if (s_gl.bloom_tex[0]) glDeleteTexture(s_gl.bloom_tex[0]);
+	if (s_gl.bloom_tex[1]) glDeleteTexture(s_gl.bloom_tex[1]);
 	for (int i = 0; i < ND_HIZ_MAX_LEVELS; i++) {
 		if (s_gl.hiz_mip_fbo[i]) { glDeleteFramebuffer(s_gl.hiz_mip_fbo[i]); s_gl.hiz_mip_fbo[i] = 0; }
 		if (s_gl.hiz_mip_tex[i] && s_gl.hiz_mip_tex[i] != s_gl.res_depth_tex) {
@@ -59,20 +67,29 @@ static void gl_free_scene_targets(void)
 		s_gl.hiz_mip_tex[i] = 0;
 	}
 	s_gl.scene_fbo = s_gl.res_fbo = s_gl.cloud_fbo = 0;
+	s_gl.ssao_fbo = s_gl.bloom_fbo[0] = s_gl.bloom_fbo[1] = 0;
 	s_gl.scene_rb_color = s_gl.scene_rb_depth = s_gl.cloud_depth_rb = 0;
 	s_gl.res_color_tex = s_gl.res_depth_tex = s_gl.cloud_tex = 0;
+	s_gl.ssao_tex = s_gl.bloom_tex[0] = s_gl.bloom_tex[1] = 0;
 	s_gl.cloud_w = s_gl.cloud_h = 0;
+	s_gl.post_half_w = s_gl.post_half_h = 0;
+	s_gl.scene_hdr = false;
+	s_gl.post_targets_ok = false;
 	s_gl.scene_ok = false;
 	s_gl.gpu_hiz_built = false;
 }
 
-static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
+static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples, bool try_hdr)
 {
+	GLenum color_ifmt = try_hdr ? GL_RGBA16F : GL_RGBA8;
+	GLenum color_type = try_hdr ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
+	s_gl.scene_hdr = try_hdr;
+
 	glActiveTexture(GL_TEXTURE0);
-	/* Multisampled colour + depth renderbuffers (antialiased scene) */
+	/* Multisampled colour + depth renderbuffers (antialiased linear HDR or fallback SDR scene) */
 	s_gl.scene_rb_color = glCreateRenderbuffer();
 	glBindRenderbuffer(GL_RENDERBUFFER, s_gl.scene_rb_color);
-	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, (GLsizei)w, (GLsizei)h);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, color_ifmt, (GLsizei)w, (GLsizei)h);
 	s_gl.scene_rb_depth = glCreateRenderbuffer();
 	glBindRenderbuffer(GL_RENDERBUFFER, s_gl.scene_rb_depth);
 	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH32F_STENCIL8, (GLsizei)w, (GLsizei)h);
@@ -82,14 +99,14 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s_gl.scene_rb_depth);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
 
-	/* Resolved, sampleable colour + depth */
+	/* Resolved, sampleable colour + depth (strictly matches scene_rb_color format for glBlitFramebuffer) */
 	s_gl.res_color_tex = glCreateTexture();
 	glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, color_ifmt, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, color_type, NULL);
 	s_gl.res_depth_tex = glCreateTexture();
 	glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -179,6 +196,60 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	s_gl.hiz_failed = !s_gl.hiz_valid;
 	s_gl.gpu_hiz_built = false;
 
+	/* Half-resolution SSAO + Ping-Pong Bloom targets (soft fallback if unsupported on target GPU) */
+	uint32_t pw = (w > 1u) ? (w >> 1) : 1u;
+	uint32_t ph = (h > 1u) ? (h >> 1) : 1u;
+	s_gl.post_half_w = pw;
+	s_gl.post_half_h = ph;
+	s_gl.post_targets_ok = false;
+
+	s_gl.ssao_tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, s_gl.ssao_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)pw, (GLsizei)ph, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+	s_gl.ssao_fbo = glCreateFramebuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.ssao_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.ssao_tex, 0);
+	bool post_ok = (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+
+	for (int b = 0; b < 2; b++) {
+		s_gl.bloom_tex[b] = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, s_gl.bloom_tex[b]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, color_ifmt, (GLsizei)pw, (GLsizei)ph, 0, GL_RGBA, color_type, NULL);
+		s_gl.bloom_fbo[b] = glCreateFramebuffer();
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.bloom_fbo[b]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.bloom_tex[b], 0);
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+			post_ok = false;
+	}
+	if (post_ok) {
+		glViewport(0, 0, (GLsizei)pw, (GLsizei)ph);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.ssao_fbo);
+		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		for (int b = 0; b < 2; b++) {
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.bloom_fbo[b]);
+			glClear(GL_COLOR_BUFFER_BIT);
+		}
+		s_gl.post_targets_ok = true;
+	} else {
+		if (s_gl.ssao_fbo) { glDeleteFramebuffer(s_gl.ssao_fbo); s_gl.ssao_fbo = 0; }
+		if (s_gl.ssao_tex) { glDeleteTexture(s_gl.ssao_tex); s_gl.ssao_tex = 0; }
+		for (int b = 0; b < 2; b++) {
+			if (s_gl.bloom_fbo[b]) { glDeleteFramebuffer(s_gl.bloom_fbo[b]); s_gl.bloom_fbo[b] = 0; }
+			if (s_gl.bloom_tex[b]) { glDeleteTexture(s_gl.bloom_tex[b]); s_gl.bloom_tex[b] = 0; }
+		}
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -189,7 +260,7 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples)
 	return true;
 }
 
-/* (Re)create the scene targets for the stage size; falls back to single-sampled, then to the canvas itself. */
+/* (Re)create the scene targets for the stage size; tries HDR GL_RGBA16F then falls back cleanly to SDR GL_RGBA8 / 0-MSAA. */
 void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 {
 	if (s_gl.scene_failed || w == 0 || h == 0) return;
@@ -203,14 +274,22 @@ void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 	    s_gl.cloud_w == want_cw && s_gl.cloud_h == want_ch)
 		return;
 	if (s_gl.scene_fbo || s_gl.res_fbo) gl_free_scene_targets();
-	int try_samples[2] = { want_samples, 0 };
-	int num_tries = (want_samples > 0) ? 2 : 1;
+	int try_samples[4];
+	bool try_hdr[4];
+	int num_tries = 0;
+	if (want_samples > 0) {
+		try_samples[num_tries] = want_samples; try_hdr[num_tries++] = true;
+		try_samples[num_tries] = want_samples; try_hdr[num_tries++] = false;
+	}
+	try_samples[num_tries] = 0; try_hdr[num_tries++] = true;
+	try_samples[num_tries] = 0; try_hdr[num_tries++] = false;
 	for (int i = 0; i < num_tries; i++) {
-		if (gl_alloc_scene_targets(w, h, try_samples[i])) {
+		if (gl_alloc_scene_targets(w, h, try_samples[i], try_hdr[i])) {
 			s_gl.scene_ok = true;
 			s_gl.scene_w = w;
 			s_gl.scene_h = h;
 			s_gl.scene_samples = try_samples[i];
+			s_gl.scene_hdr = try_hdr[i];
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			return;
 		}
@@ -807,29 +886,124 @@ void nd_seven_gl_end_frame(void)
 		}
 	}
 	if (!s_gl.scene_ok) return;
-	gl_resolve_scene(GL_COLOR_BUFFER_BIT);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
-	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	
+	bool run_post = (s_gl.pipelines_ready && s_gl.post_pipe.prog && s_gl.post_targets_ok);
+	gl_resolve_scene(run_post ? (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) : GL_COLOR_BUFFER_BIT);
+	if (run_post) {
+		glDisableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		glDisable(GL_STENCIL_TEST);
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_BLEND);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+		float ssao_fade = (s_gl.ssao_pipe.prog && s_gl.ssao_fbo && s_gl.ssao_tex && s_gl.cur_dist <= 2600.0f)
+			? fminf(1.0f, fmaxf(0.0f, (2600.0f - s_gl.cur_dist) / 1200.0f))
+			: 0.0f;
+		if (ssao_fade > 0.001f) {
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.ssao_fbo);
+			glViewport(0, 0, (GLsizei)s_gl.post_half_w, (GLsizei)s_gl.post_half_h);
+			glUseProgram(s_gl.ssao_pipe.prog);
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
+			glUniform1i(s_gl.ssao_pipe.uDepthTex, 5);
+			glUniform2f(s_gl.ssao_pipe.uNearFar, s_gl.cur_near, s_gl.cur_far);
+			glUniform2f(s_gl.ssao_pipe.uProjScale, s_gl.cur_tan_half * s_gl.cur_aspect, s_gl.cur_tan_half);
+			glUniform2f(s_gl.ssao_pipe.uViewport, (float)s_gl.post_half_w, (float)s_gl.post_half_h);
+			glUniform1f(s_gl.ssao_pipe.uAnimTime, s_gl.cur_anim_time);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+		}
+
+		bool do_bloom = (s_gl.bloom_pipe.prog && s_gl.bloom_fbo[0] && s_gl.bloom_fbo[1] &&
+		                 s_gl.bloom_tex[0] && s_gl.bloom_tex[1]);
+		if (do_bloom) {
+			glViewport(0, 0, (GLsizei)s_gl.post_half_w, (GLsizei)s_gl.post_half_h);
+			glUseProgram(s_gl.bloom_pipe.prog);
+
+			/* Pass 0: 2x2 downsample + soft-knee highlight extraction */
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.bloom_fbo[0]);
+			glActiveTexture(GL_TEXTURE0 + 4);
+			glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex);
+			glUniform1i(s_gl.bloom_pipe.uSrcTex, 4);
+			glUniform2f(s_gl.bloom_pipe.uTexelSize, 1.0f / (float)s_gl.scene_w, 1.0f / (float)s_gl.scene_h);
+			glUniform2f(s_gl.bloom_pipe.uPassDir, 0.0f, 0.0f);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+
+			/* Pass 1: horizontal separable Gaussian blur */
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.bloom_fbo[1]);
+			glBindTexture(GL_TEXTURE_2D, s_gl.bloom_tex[0]);
+			glUniform1i(s_gl.bloom_pipe.uSrcTex, 4);
+			glUniform2f(s_gl.bloom_pipe.uTexelSize, 1.0f / (float)s_gl.post_half_w, 1.0f / (float)s_gl.post_half_h);
+			glUniform2f(s_gl.bloom_pipe.uPassDir, 1.0f, 0.0f);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+
+			/* Pass 2: vertical separable Gaussian blur */
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.bloom_fbo[0]);
+			glBindTexture(GL_TEXTURE_2D, s_gl.bloom_tex[1]);
+			glUniform1i(s_gl.bloom_pipe.uSrcTex, 4);
+			glUniform2f(s_gl.bloom_pipe.uTexelSize, 1.0f / (float)s_gl.post_half_w, 1.0f / (float)s_gl.post_half_h);
+			glUniform2f(s_gl.bloom_pipe.uPassDir, 0.0f, 1.0f);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+		}
+
+		/* Final HDR ACES tone-mapping + SSAO + bloom composite to default framebuffer 0 */
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
+		glUseProgram(s_gl.post_pipe.prog);
+		glActiveTexture(GL_TEXTURE0 + 4);
+		glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex);
+		glUniform1i(s_gl.post_pipe.uSceneTex, 4);
+		glActiveTexture(GL_TEXTURE0 + 6);
+		glBindTexture(GL_TEXTURE_2D, s_gl.bloom_tex[0]);
+		glUniform1i(s_gl.post_pipe.uBloomTex, 6);
+		glActiveTexture(GL_TEXTURE0 + 8);
+		glBindTexture(GL_TEXTURE_2D, s_gl.ssao_tex);
+		glUniform1i(s_gl.post_pipe.uSsaoTex, 8);
+		glUniform1f(s_gl.post_pipe.uSsaoActive, ssao_fade);
+		glUniform1f(s_gl.post_pipe.uBloomActive, do_bloom ? 1.0f : 0.0f);
+		glUniform1f(s_gl.post_pipe.uExposure, 1.06f);
+		glUniform1f(s_gl.post_pipe.uCamDist, s_gl.cur_dist);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+
+		glActiveTexture(GL_TEXTURE0 + 8);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0 + 6);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0 + 5);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0 + 4);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0);
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_TRUE);
+	} else {
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
+		                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
 	/* Read back Hi-Z pyramid for CPU occlusion culling next frame */
 	if (s_gl.hiz_valid) {
 		gl_readback_hiz();
 	}
-	
+
 	/* Build 2D hierarchical occlusion map from Hi-Z readback when readback is active */
 	if (s_gl.hiz_valid && s_occ2d_valid) {
 		gl_build_occ2d_map();
 	}
-	
+
 	/* The sprite marker lives in the scene alpha: the canvas must end up fully opaque */
-	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	if (!run_post) {
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	}
 }
 
 void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,

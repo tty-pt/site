@@ -368,9 +368,97 @@ void nd_seven_mesh3d_init(void)
 		nd_m3d_build_stone_spec(&b, gen_sp, sw, sh, &s_mesh3d_slices[mid]);
 	}
 
+	/* Build all 12 instanced 3D Living Meadow clump templates (180..191) */
+	for (unsigned mv = 0; mv < (unsigned)ND_MESH3D_MEADOW_COUNT; mv++) {
+		uint8_t mid = (uint8_t)(ND_MESH3D_MEADOW_BASE + mv);
+		nd_m3d_build_meadow_clump(&b, mv, &s_mesh3d_slices[mid]);
+	}
+
+	/* Build all 4 instanced 3D forest-floor understory props (192..195) */
+	for (unsigned uv = 0; uv < (unsigned)ND_MESH3D_UNDERSTORY_COUNT; uv++) {
+		uint8_t mid = (uint8_t)(ND_MESH3D_UNDERSTORY_BASE + uv);
+		nd_m3d_build_understory_prop(&b, uv, &s_mesh3d_slices[mid]);
+	}
+
+	/* Build all 10 instanced 3D mid-story shrubs, ferns & deadwood snags (196..205) */
+	for (unsigned sv = 0; sv < (unsigned)ND_MESH3D_SHRUB_COUNT; sv++) {
+		uint8_t mid = (uint8_t)(ND_MESH3D_SHRUB_BASE + sv);
+		nd_m3d_build_shrub_prop(&b, sv, &s_mesh3d_slices[mid]);
+	}
+
 	s_mesh3d_vert_count = b.vert_count;
 	s_mesh3d_idx_count  = b.idx_count;
 	s_mesh3d_ready      = 1;
+}
+
+uint8_t nd_seven_understory_mesh3d_id(unsigned biome, uint32_t hash)
+{
+	/* Woodland / forested biomes only (taiga, boreal, temperate, seasonal, tropical forests) */
+	bool forest_biome = (biome == 8u || biome == 9u || biome == 11u ||
+	                     biome == 12u || biome == 13u || biome == 16u || biome == 17u);
+	if (!forest_biome)
+		return ND_MESH3D_NONE;
+	/* Silver birch twin log (variant 3) prefers cooler/boreal/temperate woodlands */
+	unsigned pick = hash & 3u;
+	if (pick == 3u && (biome == 11u || biome == 12u || biome == 16u))
+		pick = (hash >> 2u) % 3u;
+	return (uint8_t)(ND_MESH3D_UNDERSTORY_BASE + pick);
+}
+
+uint8_t nd_seven_shrub_mesh3d_id(unsigned biome, uint32_t hash)
+{
+	if (biome == 0u || biome == 1u || biome == 6u || biome == 14u || biome == 18u)
+		return ND_MESH3D_NONE;
+	unsigned sub = hash & 1u;
+	unsigned r = (hash >> 2u) % 16u;
+	unsigned arch = 0u;
+	if (biome == 2u || biome == 3u) {
+		/* Tundra / Alpine: creeping juniper & alpine heather, rare wind-blasted snag */
+		arch = (r < 8u) ? 0u : ((r < 14u) ? 2u : 4u);
+	} else if (biome == 4u || biome == 7u || biome == 15u) {
+		/* Mediterranean / Scrub / Savanna: dry sagebrush/heather, creeping juniper, scrub thicket, rare snag */
+		arch = (r < 7u) ? 2u : ((r < 13u) ? 0u : ((r < 15u) ? 1u : 4u));
+	} else if (biome == 5u) {
+		/* Wetland / Fen: giant bracken fern & alder/hazel coppice thicket */
+		arch = (r < 9u) ? 3u : 1u;
+	} else if (biome == 8u || biome == 9u || biome == 11u || biome == 12u || biome == 13u) {
+		/* Boreal / Conifer / Woodland / Temperate Forest & Rainforest:
+		 * giant fern, hazel/berry thicket, creeping juniper, heather glade & deadwood snags */
+		arch = (r < 5u) ? 3u : ((r < 10u) ? 1u : ((r < 13u) ? 0u : ((r < 14u) ? 2u : 4u)));
+	} else if (biome == 16u || biome == 17u) {
+		/* Tropical Monsoon & Rainforest: giant fern, dense broadleaf thicket & standing snag */
+		arch = (r < 8u) ? 3u : ((r < 14u) ? 1u : 4u);
+	} else {
+		/* Grassland / Hedgerow (10): heather cushion, berry thicket, creeping juniper & rare snag */
+		arch = (r < 6u) ? 2u : ((r < 12u) ? 1u : ((r < 14u) ? 0u : 4u));
+	}
+	return (uint8_t)(ND_MESH3D_SHRUB_BASE + arch * 2u + sub);
+}
+
+uint8_t nd_seven_meadow_mesh3d_id(int zone, unsigned biome, uint32_t hash)
+{
+	unsigned sub = hash & 1u;
+	if (zone <= 0)
+		return ND_MESH3D_NONE;
+	if (zone == 1) /* ND_MEADOW_REED */
+		return (uint8_t)(ND_MESH3D_MEADOW_BASE + 6u + sub);
+	if (zone == 2) /* ND_MEADOW_WILDFLOWER */
+		return (uint8_t)(ND_MESH3D_MEADOW_BASE + 4u + sub);
+	if (zone == 5) /* ND_MEADOW_TALL_GRASS */
+		return (uint8_t)(ND_MESH3D_MEADOW_BASE + 2u + sub);
+	if (zone == 4) /* ND_MEADOW_UNDERSTORY */
+		return (uint8_t)(ND_MESH3D_MEADOW_BASE + 8u + sub);
+
+	/* ND_MEADOW_GRASS: distribute biome-specific fern rosettes, hardy tussocks, and lush turf */
+	bool forest_biome = (biome == 8u || biome == 9u || biome == 11u ||
+	                     biome == 12u || biome == 13u || biome == 17u);
+	bool tussock_biome = (biome == 2u || biome == 3u || biome == 6u ||
+	                      biome == 7u || biome == 14u || biome == 15u);
+	if (forest_biome && ((hash >> 2u) & 3u) == 0u)
+		return (uint8_t)(ND_MESH3D_MEADOW_BASE + 8u + sub); /* Forest fern */
+	if (tussock_biome && (biome == 2u || biome == 6u || biome == 14u || ((hash >> 2u) & 1u) == 0u))
+		return (uint8_t)(ND_MESH3D_MEADOW_BASE + 10u + sub); /* Tundra/arid/savanna tussock */
+	return (uint8_t)(ND_MESH3D_MEADOW_BASE + sub); /* Lush meadow grass */
 }
 
 const nd_mesh3d_vert_t *nd_seven_mesh3d_verts(uint32_t *out_count)

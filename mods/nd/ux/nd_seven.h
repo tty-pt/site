@@ -71,6 +71,16 @@ float nd_seven_get_zoom(void);
 void nd_seven_zoom_in(void);
 void nd_seven_zoom_out(void);
 
+/* Free 3D orbit camera controls (yaw in [-180..180), pitch in [10..85] deg) */
+void  nd_seven_set_cam_angles(float yaw_deg, float pitch_deg);
+void  nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg);
+void  nd_seven_reset_cam(void);
+float nd_seven_get_yaw_deg(void);
+float nd_seven_get_pitch_deg(void);
+void  nd_seven_step_cam(float dt);
+float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
+                               float dist, float yaw_deg, float pitch_deg);
+
 /* User-adjustable billboard detail / draw distance scale (0.20f .. 2.50f, default 1.0f) */
 void nd_seven_set_detail_scale(float scale);
 float nd_seven_get_detail_scale(void);
@@ -227,6 +237,17 @@ int nd_seven_eval_meadow_tuft(int32_t wx, int32_t wy,
 int nd_seven_eval_meadow_lamb_occlusion(float wx_f, float wy_f,
                                         float lwx_f, float lwy_f,
                                         float *io_sort_y, float *io_scale);
+
+/* Compute metric world-unit dimensions for an object with continuous woody-tree stature */
+void nd_seven_calc_obj_dims(const ndw_obj_t *o, float sr_w, float sr_h,
+                            float *out_w, float *out_h, float *out_ay);
+
+/* Macro grove/glade ecology & alpine/slope krummholz dwarfing:
+ * Returns grove density [0..1] (0 = sunlit open glade, 1 = shaded woodland grove) and
+ * outputs krummholz stature multiplier [0.35..1.0] (dwarfed on high ridges & steep slopes). */
+float nd_seven_eval_grove_ecology(int32_t wx, int32_t wy,
+                                  float elev_z, float water_level, float slope_mag,
+                                  unsigned biome, float *out_krummholz_scale);
 
 /* Viewport LOD & Macro Chunk Thresholds (zero magic numbers) */
 #define ND_SEVEN_STRATOSPHERE_ZOOM_THRESHOLD 0.25f  /* Camera zoom threshold below which macro quadtree LOD activates */

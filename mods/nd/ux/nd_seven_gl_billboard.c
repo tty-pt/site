@@ -4,6 +4,47 @@
 
 #include "nd_seven_gl_internal.h"
 
+void nd_seven_gl_billboard_basis_ex(float wx, float wy, float wz,
+                                    float yaw_deg, float pitch_deg,
+                                    const nd_planet_def_t *pdef,
+                                    float out_base_pos[3],
+                                    float out_right[3],
+                                    float out_up[3],
+                                    float out_view_dir[3])
+{
+	float E[3], S[3], N[3];
+	nd_seven_gl_torus_frame(wx, wy, wz, pdef, out_base_pos, E, S, N);
+
+	float yaw_rad = yaw_deg * (PI_F / 180.0f);
+	float cos_y = cosf(yaw_rad);
+	float sin_y = sinf(yaw_rad);
+	float pitch_rad = pitch_deg * (PI_F / 180.0f);
+	float cos_p = cosf(pitch_rad);
+	float sin_p = sinf(pitch_rad);
+
+	float horiz[3] = {
+		sin_y * E[0] + cos_y * S[0],
+		sin_y * E[1] + cos_y * S[1],
+		sin_y * E[2] + cos_y * S[2]
+	};
+
+	if (out_right) {
+		out_right[0] = cos_y * E[0] - sin_y * S[0];
+		out_right[1] = cos_y * E[1] - sin_y * S[1];
+		out_right[2] = cos_y * E[2] - sin_y * S[2];
+	}
+	if (out_up) {
+		out_up[0] = cos_p * N[0] - sin_p * horiz[0];
+		out_up[1] = cos_p * N[1] - sin_p * horiz[1];
+		out_up[2] = cos_p * N[2] - sin_p * horiz[2];
+	}
+	if (out_view_dir) {
+		out_view_dir[0] = sin_p * N[0] + cos_p * horiz[0];
+		out_view_dir[1] = sin_p * N[1] + cos_p * horiz[1];
+		out_view_dir[2] = sin_p * N[2] + cos_p * horiz[2];
+	}
+}
+
 void nd_seven_gl_billboard_basis(float wx, float wy, float wz,
                                  float pitch_deg,
                                  const nd_planet_def_t *pdef,
@@ -12,28 +53,8 @@ void nd_seven_gl_billboard_basis(float wx, float wy, float wz,
                                  float out_up[3],
                                  float out_view_dir[3])
 {
-	float E[3], S[3], N[3];
-	nd_seven_gl_torus_frame(wx, wy, wz, pdef, out_base_pos, E, S, N);
-
-	float pitch_rad = pitch_deg * (PI_F / 180.0f);
-	float cos_p = cosf(pitch_rad);
-	float sin_p = sinf(pitch_rad);
-
-	if (out_right) {
-		out_right[0] = E[0];
-		out_right[1] = E[1];
-		out_right[2] = E[2];
-	}
-	if (out_up) {
-		out_up[0] = cos_p * N[0] - sin_p * S[0];
-		out_up[1] = cos_p * N[1] - sin_p * S[1];
-		out_up[2] = cos_p * N[2] - sin_p * S[2];
-	}
-	if (out_view_dir) {
-		out_view_dir[0] = sin_p * N[0] + cos_p * S[0];
-		out_view_dir[1] = sin_p * N[1] + cos_p * S[1];
-		out_view_dir[2] = sin_p * N[2] + cos_p * S[2];
-	}
+	nd_seven_gl_billboard_basis_ex(wx, wy, wz, 0.0f, pitch_deg, pdef,
+	                               out_base_pos, out_right, out_up, out_view_dir);
 }
 
 
@@ -283,6 +304,7 @@ static void eval_billboard_basis(const lam_billboard_gpu_t *b,
 
 static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
                                            const billboard_basis_t *basis,
+                                           float cos_y, float sin_y,
                                            float cos_p, float sin_p,
                                            nd_seven_gl_bb_vert_t out_verts[6])
 {
@@ -291,11 +313,20 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 	const float *N = basis->N;
 	const float *base_pos = basis->base_pos;
 
-	float right[3] = { E[0], E[1], E[2] };
+	float horiz[3] = {
+		sin_y * E[0] + cos_y * S[0],
+		sin_y * E[1] + cos_y * S[1],
+		sin_y * E[2] + cos_y * S[2]
+	};
+	float right[3] = {
+		cos_y * E[0] - sin_y * S[0],
+		cos_y * E[1] - sin_y * S[1],
+		cos_y * E[2] - sin_y * S[2]
+	};
 	float up[3] = {
-		cos_p * N[0] - sin_p * S[0],
-		cos_p * N[1] - sin_p * S[1],
-		cos_p * N[2] - sin_p * S[2]
+		cos_p * N[0] - sin_p * horiz[0],
+		cos_p * N[1] - sin_p * horiz[1],
+		cos_p * N[2] - sin_p * horiz[2]
 	};
 
 	float half_w = b->width * 0.5f;
@@ -326,19 +357,19 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 	float grass_dz = basis->grass_dz;
 	float grass_rustle = basis->grass_rustle;
 
-	/* Prevent vertical screen-height collapse (-sy * sin_p - dz * cos_p) on short scaled meadow tufts
+	/* Prevent vertical screen-height collapse (-horiz_sway * sin_p - dz * cos_p) on short scaled meadow tufts
 	 * so trampled or wind-bent tufts always retain at least 60% of their vertical screen height */
 	if (basis->flora_sway_scale > 0.0f && h > 0.0f) {
 		float max_vert_loss = 0.40f * h;
-		float vert_loss = grass_sy * sin_p + grass_dz * cos_p;
+		float horiz_sway = grass_sx * sin_y + grass_sy * cos_y;
+		float vert_loss = horiz_sway * sin_p + grass_dz * cos_p;
 		if (vert_loss > max_vert_loss && vert_loss > 1e-4f) {
 			float keep = max_vert_loss / vert_loss;
+			grass_sx *= keep;
 			grass_sy *= keep;
 			grass_dz *= keep;
 		}
 	}
-
-	float inv_sin_p = 1.0f / (sin_p > 0.1f ? sin_p : 0.819152f);
 
 	for (int i = 0; i < 6; i++) {
 		int k = idx[i];
@@ -347,9 +378,9 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 		float sy = grass_sy * tip_mask;
 		float dz = grass_dz * tip_mask;
 
-		out_verts[i].world_pos[0] = base_pos[0] + (c[k].dx + sx) * right[0] + c[k].dy * up[0] + sy * S[0] - dz * N[0];
-		out_verts[i].world_pos[1] = base_pos[1] + (c[k].dx + sx) * right[1] + c[k].dy * up[1] + sy * S[1] - dz * N[1];
-		out_verts[i].world_pos[2] = base_pos[2] + (c[k].dx + sx) * right[2] + c[k].dy * up[2] + sy * S[2] - dz * N[2];
+		out_verts[i].world_pos[0] = base_pos[0] + c[k].dx * right[0] + c[k].dy * up[0] + sx * E[0] + sy * S[0] - dz * N[0];
+		out_verts[i].world_pos[1] = base_pos[1] + c[k].dx * right[1] + c[k].dy * up[1] + sx * E[1] + sy * S[1] - dz * N[1];
+		out_verts[i].world_pos[2] = base_pos[2] + c[k].dx * right[2] + c[k].dy * up[2] + sx * E[2] + sy * S[2] - dz * N[2];
 
 		out_verts[i].uv[0] = c[k].u;
 		out_verts[i].uv[1] = c[k].v;
@@ -360,8 +391,8 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 		out_verts[i].tint[2] = fminf(1.0f, tint[2] + sheen * 0.5f);
 		out_verts[i].tint[3] = tint[3];
 
-		out_verts[i].local_pos[0] = b->x + c[k].dx + sx;
-		out_verts[i].local_pos[1] = b->y - c[k].dy * inv_sin_p + sy;
+		out_verts[i].local_pos[0] = b->x + c[k].dx * cos_y - c[k].dy * sin_p * sin_y + sx;
+		out_verts[i].local_pos[1] = b->y - c[k].dx * sin_y - c[k].dy * sin_p * cos_y + sy;
 		out_verts[i].local_pos[2] = c[k].loc_z - dz;
 
 		out_verts[i].quad_uv[0] = c[k].qx;
@@ -377,7 +408,7 @@ static void eval_billboard_quad_from_basis(const lam_billboard_gpu_t *b,
 }
 
 static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
-                                            float pitch_deg,
+                                            float yaw_deg, float pitch_deg,
                                             const nd_planet_def_t *pdef,
                                             const double ref_origin[3],
                                             nd_seven_gl_bb_vert_t out_verts[6])
@@ -385,8 +416,17 @@ static void eval_billboard_quad_with_origin(const lam_billboard_gpu_t *b,
 	if (!b || !out_verts) return;
 	billboard_basis_t basis;
 	eval_billboard_basis(b, pdef, ref_origin, &basis);
+	float yaw_rad = yaw_deg * (PI_F / 180.0f);
 	float pitch_rad = pitch_deg * (PI_F / 180.0f);
-	eval_billboard_quad_from_basis(b, &basis, cosf(pitch_rad), sinf(pitch_rad), out_verts);
+	eval_billboard_quad_from_basis(b, &basis, cosf(yaw_rad), sinf(yaw_rad), cosf(pitch_rad), sinf(pitch_rad), out_verts);
+}
+
+void nd_seven_gl_eval_billboard_quad_ex(const lam_billboard_gpu_t *b,
+                                        float yaw_deg, float pitch_deg,
+                                        const nd_planet_def_t *pdef,
+                                        nd_seven_gl_bb_vert_t out_verts[6])
+{
+	eval_billboard_quad_with_origin(b, yaw_deg, pitch_deg, pdef, NULL, out_verts);
 }
 
 void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
@@ -394,7 +434,7 @@ void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
                                      const nd_planet_def_t *pdef,
                                      nd_seven_gl_bb_vert_t out_verts[6])
 {
-	eval_billboard_quad_with_origin(b, pitch_deg, pdef, NULL, out_verts);
+	eval_billboard_quad_with_origin(b, 0.0f, pitch_deg, pdef, NULL, out_verts);
 }
 
 float s_shadow_sun_dir[3] = { 0.0f, 0.0f, 0.0f };
@@ -635,6 +675,7 @@ static nd_seven_gl_bb_inst_t s_bb_other_instances[MAX_BB_INSTANCES];
 
 static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
                                          const billboard_basis_t *basis,
+                                         float cos_y, float sin_y,
                                          float cos_p, float sin_p,
                                          nd_seven_gl_bb_inst_t *out)
 {
@@ -643,11 +684,20 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 	const float *N = basis->N;
 	const float *base_pos = basis->base_pos;
 
-	float right[3] = { E[0], E[1], E[2] };
+	float horiz[3] = {
+		sin_y * E[0] + cos_y * S[0],
+		sin_y * E[1] + cos_y * S[1],
+		sin_y * E[2] + cos_y * S[2]
+	};
+	float right[3] = {
+		cos_y * E[0] - sin_y * S[0],
+		cos_y * E[1] - sin_y * S[1],
+		cos_y * E[2] - sin_y * S[2]
+	};
 	float up[3] = {
-		cos_p * N[0] - sin_p * S[0],
-		cos_p * N[1] - sin_p * S[1],
-		cos_p * N[2] - sin_p * S[2]
+		cos_p * N[0] - sin_p * horiz[0],
+		cos_p * N[1] - sin_p * horiz[1],
+		cos_p * N[2] - sin_p * horiz[2]
 	};
 
 	float half_w = b->width * 0.5f;
@@ -668,9 +718,11 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 
 	if (basis->flora_sway_scale > 0.0f && h > 0.0f) {
 		float max_vert_loss = 0.40f * h;
-		float vert_loss = grass_sy * sin_p + grass_dz * cos_p;
+		float horiz_sway = grass_sx * sin_y + grass_sy * cos_y;
+		float vert_loss = horiz_sway * sin_p + grass_dz * cos_p;
 		if (vert_loss > max_vert_loss && vert_loss > 1e-4f) {
 			float keep = max_vert_loss / vert_loss;
+			grass_sx *= keep;
 			grass_sy *= keep;
 			grass_dz *= keep;
 		}
@@ -679,6 +731,7 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 	float sx = (basis->flora_sway_scale > 0.0f) ? grass_sx : 0.0f;
 	float sy = (basis->flora_sway_scale > 0.0f) ? grass_sy : 0.0f;
 	float dz = (basis->flora_sway_scale > 0.0f) ? grass_dz : 0.0f;
+	float sway_right = sx * cos_y - sy * sin_y;
 
 	out->pos0[0] = base_pos[0] - half_w * right[0] - ay * up[0];
 	out->pos0[1] = base_pos[1] - half_w * right[1] - ay * up[1];
@@ -690,15 +743,15 @@ static inline void pack_bb_quad_instance(const lam_billboard_gpu_t *b,
 	out->pos1[2] = base_pos[2] + half_w * right[2] - ay * up[2];
 	out->pos1[3] = half_w;
 
-	out->pos2[0] = base_pos[0] + (-half_w + sx) * right[0] + (h - ay) * up[0] + sy * S[0] - dz * N[0];
-	out->pos2[1] = base_pos[1] + (-half_w + sx) * right[1] + (h - ay) * up[1] + sy * S[1] - dz * N[1];
-	out->pos2[2] = base_pos[2] + (-half_w + sx) * right[2] + (h - ay) * up[2] + sy * S[2] - dz * N[2];
-	out->pos2[3] = -half_w + sx;
+	out->pos2[0] = base_pos[0] - half_w * right[0] + (h - ay) * up[0] + sx * E[0] + sy * S[0] - dz * N[0];
+	out->pos2[1] = base_pos[1] - half_w * right[1] + (h - ay) * up[1] + sx * E[1] + sy * S[1] - dz * N[1];
+	out->pos2[2] = base_pos[2] - half_w * right[2] + (h - ay) * up[2] + sx * E[2] + sy * S[2] - dz * N[2];
+	out->pos2[3] = -half_w + sway_right;
 
-	out->pos3[0] = base_pos[0] + (half_w + sx) * right[0] + (h - ay) * up[0] + sy * S[0] - dz * N[0];
-	out->pos3[1] = base_pos[1] + (half_w + sx) * right[1] + (h - ay) * up[1] + sy * S[1] - dz * N[1];
-	out->pos3[2] = base_pos[2] + (half_w + sx) * right[2] + (h - ay) * up[2] + sy * S[2] - dz * N[2];
-	out->pos3[3] = half_w + sx;
+	out->pos3[0] = base_pos[0] + half_w * right[0] + (h - ay) * up[0] + sx * E[0] + sy * S[0] - dz * N[0];
+	out->pos3[1] = base_pos[1] + half_w * right[1] + (h - ay) * up[1] + sx * E[1] + sy * S[1] - dz * N[1];
+	out->pos3[2] = base_pos[2] + half_w * right[2] + (h - ay) * up[2] + sx * E[2] + sy * S[2] - dz * N[2];
+	out->pos3[3] = half_w + sway_right;
 
 	out->uv[0] = b->u0;
 	out->uv[1] = b->v0;
@@ -957,12 +1010,13 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	float wind_sx = (basis->flora_sway_scale > 0.0f) ? basis->grass_sx : 0.0f;
 	float wind_sy = (basis->flora_sway_scale > 0.0f) ? basis->grass_sy : 0.0f;
 
-	/* Center the 3D trunk/rock base at (o->x, o->y - o->hh * 0.5f) along North (-S)
-	 * so the physical 3D mesh base aligns with the center of ndw_obj_rect and the shadow quad. */
-	float north_shift = (b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	/* Center 3D trunks/rocks at (b->x, b->y - anchor_y * 0.5f) along North (-S);
+	 * ground-rooted 3D meadow grass clumps stay centered cleanly at (b->x, b->y, b->z). */
+	bool is_grass = (b->style == ND_BB_STYLE_GRASS);
+	float north_shift = (!is_grass && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
 	float bx = b->x;
 	float by = b->y - north_shift;
-	float bz = b->z - b->water_z_off;
+	float bz = is_grass ? b->z : (b->z - b->water_z_off);
 	out->base_scale[0] = basis->base_pos[0] - S[0] * north_shift;
 	out->base_scale[1] = basis->base_pos[1] - S[1] * north_shift;
 	out->base_scale[2] = basis->base_pos[2] - S[2] * north_shift;
@@ -1287,11 +1341,21 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	bool emit_shadows = (s_gl.cur_dist < 5000.0f * det_scale);
 	bool emit_grass_shadows = (s_gl.cur_dist < 1800.0f * det_scale);
 	bool emit_lamb_shadows = (s_lamb_shadow_light[3] > 0.01f && s_gl.cur_dist < 3800.0f * det_scale);
-	float pitch_rad = s_gl.cur_pitch_deg * (PI_F / 180.0f);
-	float cos_p = cosf(pitch_rad);
-	float sin_p = sinf(pitch_rad);
+	float cos_y = s_gl.cur_cos_y;
+	float sin_y = s_gl.cur_sin_y;
+	float cos_p = s_gl.cur_cos_p;
+	float sin_p = s_gl.cur_sin_p;
+	if (cos_y * cos_y + sin_y * sin_y < 0.01f) {
+		float pitch_rad = ((s_gl.cur_pitch_deg > 1.0f) ? s_gl.cur_pitch_deg : 55.0f) * (PI_F / 180.0f);
+		float yaw_rad = s_gl.cur_yaw_deg * (PI_F / 180.0f);
+		cos_y = cosf(yaw_rad);
+		sin_y = sinf(yaw_rad);
+		cos_p = cosf(pitch_rad);
+		sin_p = sinf(pitch_rad);
+	}
 
 	glUseProgram(s_gl.bb_pipe.prog);
+	glUniform4f(s_gl.bb_pipe.uCamAngles, cos_y, sin_y, cos_p, sin_p);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
@@ -1349,7 +1413,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	bool mesh3d_any_sun_sh = false, mesh3d_any_lamb_sh = false;
 	for (uint32_t i = 0; i <= count; i++) {
 		bool last = (i == count);
-		bool is_other = false, is_mesh3d = false, want_shadow = false, want_lamb_shadow = false;
+		bool is_other = false, is_mesh3d = false, is_understory = false, emit_impostor_crossfade = false;
+		bool want_shadow = false, want_lamb_shadow = false;
+		float lod_mesh_keep = 1.0f;
 		uint32_t need_core = 0, need_other = 0, need_mesh3d = 0;
 		const nd_mesh3d_slice_t *m3d_slice = NULL;
 		if (!last) {
@@ -1362,18 +1428,39 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				}
 			}
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
+			is_understory = (batch[i].mesh_id >= ND_MESH3D_UNDERSTORY_BASE &&
+			                 batch[i].mesh_id < ND_MESH3D_TOTAL);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
+			bool is_tall_tree = (!is_grass && !is_other &&
+			                     (batch[i].height >= 90.0f ||
+			                      (is_understory && batch[i].height >= 64.0f)) &&
+			                     batch[i].mesh_id >= ND_MESH3D_PLANT_BASE &&
+			                     batch[i].mesh_id < ND_MESH3D_TOTAL);
 			if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
 				float dx_m = batch[i].x - s_gl.cur_tx;
 				float dy_m = batch[i].y - s_gl.cur_ty;
 				float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
-				float max_m3d_dist = fmaxf(750.0f, 1150.0f * det_scale);
+				float max_m3d_dist = is_grass ? fmaxf(520.0f, 820.0f * det_scale)
+				                              : (is_tall_tree ? fmaxf(950.0f, 1500.0f * det_scale)
+				                                              : fmaxf(750.0f, 1150.0f * det_scale));
+				float cross_band = max_m3d_dist * 0.16f;
+				float cross_start = max_m3d_dist - cross_band;
 				if (d2_m <= max_m3d_dist * max_m3d_dist) {
 					m3d_slice = nd_seven_mesh3d_slice(batch[i].mesh_id);
-					if (m3d_slice && m3d_slice->idx_count > 0)
+					if (m3d_slice && m3d_slice->idx_count > 0) {
 						is_mesh3d = true;
+						float d_m = sqrtf(d2_m);
+						if (d_m > cross_start) {
+							float lod_t = (d_m - cross_start) / fmaxf(1.0f, cross_band);
+							lod_mesh_keep = fmaxf(0.02f, fminf(0.98f, 1.0f - lod_t));
+							if (!is_understory && batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1)
+								emit_impostor_crossfade = true;
+						}
+					}
 				}
 			}
+			if (!is_other && is_understory && !is_mesh3d)
+				continue;
 			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
 				float gr = (float)(batch[i].tint_rgba & 0xFFu) / 255.0f;
 				float gg = (float)((batch[i].tint_rgba >> 8) & 0xFFu) / 255.0f;
@@ -1402,7 +1489,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				float d2_l = dx_l * dx_l + dy_l * dy_l;
 				want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 290.0f * 290.0f);
 			}
-			need_core   = (is_other || is_mesh3d) ? 0u : 1u;
+			need_core   = (is_other || (is_mesh3d && !emit_impostor_crossfade)) ? 0u : 1u;
 			need_mesh3d = is_mesh3d ? 1u : 0u;
 			need_other  = (is_other ? 1u : 0u) +
 			              ((!is_mesh3d && want_shadow) ? 1u : 0u) +
@@ -1480,19 +1567,30 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			}
 		}
 		if (is_other) {
-			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_other_instances[other_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_other_instances[other_n++]);
 		} else if (is_mesh3d) {
 			if (want_shadow) mesh3d_any_sun_sh = true;
 			if (want_lamb_shadow) mesh3d_any_lamb_sh = true;
 			s_mesh3d_staging_ids[mesh3d_n] = batch[i].mesh_id;
 			pack_mesh3d_instance(&batch[i], &basis, m3d_slice, want_shadow, want_lamb_shadow,
-			                     &s_mesh3d_staging[mesh3d_n++]);
+			                     &s_mesh3d_staging[mesh3d_n]);
+			if (lod_mesh_keep < 0.995f)
+				s_mesh3d_staging[mesh3d_n].tint[3] *= lod_mesh_keep;
+			mesh3d_n++;
+			if (emit_impostor_crossfade) {
+				pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[core_n]);
+				int k31 = (int)roundf(lod_mesh_keep * 31.0f);
+				if (k31 < 1) k31 = 1;
+				if (k31 > 30) k31 = 30;
+				s_bb_instances[core_n].param[3] += (float)k31 * 32.0f;
+				core_n++;
+			}
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
 			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
 				s_gl.sprites_in_water = true;
 		} else {
-			pack_bb_quad_instance(&batch[i], &basis, cos_p, sin_p, &s_bb_instances[core_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[core_n++]);
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
 			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)

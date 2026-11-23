@@ -3,6 +3,7 @@
 #include "nd_seven_motion.h"
 #include <ttypt/areole.h>
 #include <nd/field.h>
+#include <math.h>
 #include <string.h>
 
 __attribute__((weak)) ar_system_t *nd_seven_get_chunk_sys(void) { return NULL; }
@@ -195,6 +196,127 @@ void nd_seven_zoom_in(void)
 void nd_seven_zoom_out(void)
 {
 	nd_seven_set_zoom(s_camera_zoom / 1.15f);
+}
+
+static float s_cam_yaw_target = 0.0f;
+static float s_cam_yaw_cur = 0.0f;
+static float s_cam_pitch_target = 55.0f;
+static float s_cam_pitch_cur = 55.0f;
+
+static float wrap_deg_180(float deg)
+{
+	deg = fmodf(deg + 180.0f, 360.0f);
+	if (deg < 0.0f)
+		deg += 360.0f;
+	return deg - 180.0f;
+}
+
+static float clamp_pitch_range(float pitch_deg)
+{
+	if (pitch_deg < ND_SEVEN_CAM_PITCH_MIN) return ND_SEVEN_CAM_PITCH_MIN;
+	if (pitch_deg > ND_SEVEN_CAM_PITCH_MAX) return ND_SEVEN_CAM_PITCH_MAX;
+	return pitch_deg;
+}
+
+void nd_seven_set_cam_angles(float yaw_deg, float pitch_deg)
+{
+	yaw_deg = wrap_deg_180(yaw_deg);
+	pitch_deg = clamp_pitch_range(pitch_deg);
+	s_cam_yaw_target = yaw_deg;
+	s_cam_yaw_cur = yaw_deg;
+	s_cam_pitch_target = pitch_deg;
+	s_cam_pitch_cur = pitch_deg;
+}
+
+void nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg)
+{
+	s_cam_yaw_target = wrap_deg_180(s_cam_yaw_target + dyaw_deg);
+	s_cam_pitch_target = clamp_pitch_range(s_cam_pitch_target + dpitch_deg);
+}
+
+void nd_seven_reset_cam(void)
+{
+	s_cam_yaw_target = 0.0f;
+	s_cam_pitch_target = 55.0f;
+}
+
+float nd_seven_get_yaw_deg(void)
+{
+	return s_cam_yaw_cur;
+}
+
+float nd_seven_get_pitch_deg(void)
+{
+	return s_cam_pitch_cur;
+}
+
+void nd_seven_step_cam(float dt)
+{
+	if (dt <= 0.0f)
+		return;
+	float alpha = 1.0f - expf(-16.0f * dt);
+	if (alpha < 0.0f) alpha = 0.0f;
+	if (alpha > 1.0f) alpha = 1.0f;
+
+	float dyaw = wrap_deg_180(s_cam_yaw_target - s_cam_yaw_cur);
+	if (fabsf(dyaw) < 0.02f)
+		s_cam_yaw_cur = s_cam_yaw_target;
+	else
+		s_cam_yaw_cur = wrap_deg_180(s_cam_yaw_cur + dyaw * alpha);
+
+	float dpitch = s_cam_pitch_target - s_cam_pitch_cur;
+	if (fabsf(dpitch) < 0.02f)
+		s_cam_pitch_cur = s_cam_pitch_target;
+	else
+		s_cam_pitch_cur = clamp_pitch_range(s_cam_pitch_cur + dpitch * alpha);
+}
+
+float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
+                               float dist, float yaw_deg, float pitch_deg)
+{
+	float p = clamp_pitch_range(pitch_deg);
+	if (dist <= 1.0f || dist >= 8000.0f)
+		return p;
+
+	const float deg2rad = 3.14159265358979323846f / 180.0f;
+	float yaw_rad = yaw_deg * deg2rad;
+	float sin_y = sinf(yaw_rad);
+	float cos_y = cosf(yaw_rad);
+	float base_wl = (float)nd_field_water_level(world);
+
+	/* Iterate up to 3 times so raising pitch pulls the horizontal sample inward accurately */
+	for (int iter = 0; iter < 3; iter++) {
+		float p_rad = p * deg2rad;
+		float cos_p = cosf(p_rad);
+		float sin_p = sinf(p_rad);
+		float cam_z = tz + dist * sin_p;
+		float req_sin_p = sin_p;
+		float samples[3] = { 0.50f, 0.78f, 1.00f };
+		for (int s = 0; s < 3; s++) {
+			float f = samples[s];
+			float sx = tx + dist * cos_p * f * sin_y;
+			float sy = ty + dist * cos_p * f * cos_y;
+			float gz = nd_seven_ground_elevation_f((int32_t)lroundf(sx), (int32_t)lroundf(sy));
+			float floor_z = (gz > base_wl) ? gz : base_wl;
+			float min_z = floor_z + ((s == 2) ? 14.0f : 8.0f);
+			if (cam_z < min_z) {
+				float need = (min_z - tz) / (dist * ((s == 2) ? 1.0f : fmaxf(0.35f, f)));
+				if (need > req_sin_p)
+					req_sin_p = need;
+			}
+		}
+		if (req_sin_p <= sin_p + 1e-4f)
+			break;
+		if (req_sin_p > 0.99619f) req_sin_p = 0.99619f; /* sin(85 deg) */
+		float new_p = asinf(req_sin_p) / deg2rad;
+		new_p = clamp_pitch_range(new_p);
+		if (new_p <= p + 0.05f) {
+			p = new_p;
+			break;
+		}
+		p = new_p;
+	}
+	return p;
 }
 
 static float s_detail_scale = 0.75f;
@@ -451,10 +573,10 @@ int32_t nd_seven_meadow_lattice_step(float cam_dist, float max_meadow_cull)
 {
 	if (cam_dist >= max_meadow_cull || max_meadow_cull <= 1.0f)
 		return 0;
-	if (cam_dist >= max_meadow_cull * 0.68f)
-		return 78; /* 3x sub-lattice (26 * 3) */
-	if (cam_dist >= max_meadow_cull * 0.42f)
-		return 52; /* 2x sub-lattice (26 * 2) */
-	return 26;
+	if (cam_dist >= max_meadow_cull * 0.65f)
+		return 64; /* 4x sub-lattice (16 * 4) */
+	if (cam_dist >= max_meadow_cull * 0.32f)
+		return 32; /* 2x sub-lattice (16 * 2) */
+	return 16;
 }
 

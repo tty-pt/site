@@ -189,6 +189,7 @@ typedef struct {
 	GLint uCloudShadowMap;
 	GLint uCsm;
 	GLint uPass;
+	GLint uCamAngles;
 	GLint uHiZTex;
 	GLint uHiZActive;
 	GLint aPos;
@@ -198,6 +199,22 @@ typedef struct {
 	GLint aQuadUV;
 	GLint aSpriteBounds;
 } gl_billboard_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLint uCamFwd;
+	GLint uCamRight;
+	GLint uCamUp;
+	GLint uTanHalfAspect;
+	GLint uEast;
+	GLint uSouth;
+	GLint uZenith;
+	GLint uSunDir;
+	GLint uMoonDir;
+	GLint uSkyColor;
+	GLint uCamDist;
+	GLint uAnimTime;
+} gl_sky_pipe_t;
 
 typedef struct {
 	GLuint prog;
@@ -282,6 +299,33 @@ typedef struct {
 } gl_cloud_comp_pipe_t;
 
 typedef struct {
+	GLuint prog;
+	GLint uDepthTex;
+	GLint uNearFar;
+	GLint uProjScale;
+	GLint uViewport;
+	GLint uAnimTime;
+} gl_ssao_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLint uSrcTex;
+	GLint uTexelSize;
+	GLint uPassDir;
+} gl_bloom_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLint uSceneTex;
+	GLint uBloomTex;
+	GLint uSsaoTex;
+	GLint uSsaoActive;
+	GLint uBloomActive;
+	GLint uExposure;
+	GLint uCamDist;
+} gl_post_pipe_t;
+
+typedef struct {
 	uint16_t world;
 	uint8_t level;
 	uint8_t active;
@@ -314,9 +358,13 @@ typedef struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_mesh3d_pipe_t mesh3d_pipe;
+	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipe;
 	gl_cloud_comp_pipe_t cloud_comp_pipe;
 	gl_csm_pipe_t csm_pipe;
+	gl_ssao_pipe_t ssao_pipe;
+	gl_bloom_pipe_t bloom_pipe;
+	gl_post_pipe_t post_pipe;
 	GLuint csm_tex;
 	GLuint csm_fbo;
 	bool csm_failed;
@@ -372,6 +420,14 @@ typedef struct {
 	GLuint cloud_fbo;
 	GLuint cloud_tex;
 	GLuint cloud_depth_rb;
+	GLuint ssao_fbo;
+	GLuint ssao_tex;
+	GLuint bloom_fbo[2];
+	GLuint bloom_tex[2];
+	uint32_t post_half_w;
+	uint32_t post_half_h;
+	bool scene_hdr;
+	bool post_targets_ok;
 	uint32_t cloud_w;
 	uint32_t cloud_h;
 	uint32_t scene_w;
@@ -440,7 +496,18 @@ typedef struct {
 	float cur_far;
 	float cur_tan_half;
 	float cur_aspect;
+	float cur_yaw_deg;
 	float cur_pitch_deg;
+	float cur_cos_y;
+	float cur_sin_y;
+	float cur_cos_p;
+	float cur_sin_p;
+	float cur_E[3];
+	float cur_S[3];
+	float cur_N[3];
+	float cur_cam_right[3];
+	float cur_cam_up[3];
+	float cur_cam_fwd[3];
 	float cur_anim_time;
 	float cur_sea_level;
 	float cur_base_sea_level;
@@ -509,6 +576,8 @@ extern float s_ridge_cam_flat_y;
 extern int s_ridge_use_occlusion;
 
 /* Shader string declarations (defined in nd_seven_gl_shaders.c) */
+extern const char *s_vs_sky;
+extern const char *s_fs_sky;
 extern const char *s_vs_terrain;
 extern const char *s_fs_terrain;
 extern const char *s_vs_water;
@@ -525,6 +594,9 @@ extern const char *s_vs_cloud;
 extern const char *s_fs_cloud;
 extern const char *s_fs_cloud_comp;
 extern const char *s_fs_hiz_downsample;
+extern const char *s_fs_ssao;
+extern const char *s_fs_bloom;
+extern const char *s_fs_post;
 
 /* Shared internal functions across translation units */
 GLuint create_program_async(const char *vs_src, const char *fs_src);

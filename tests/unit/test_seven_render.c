@@ -13,6 +13,7 @@
 #include "nd_seven_ground.h"
 #include "nd_seven_gl.h"
 #include "nd_lamina.h"
+#include <ttypt/webgl.h>
 #include <math.h>
 
 #define MAXW 1920
@@ -2718,22 +2719,26 @@ int main(void)
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 6 WebGL2 shader programs (terrain, water, billboard, mesh3d, cloud, csm) compile and link cleanly
+		/* 5. Verify all 10 WebGL2 shader programs (terrain, water, billboard, mesh3d, cloud, csm, sky, ssao, bloom, post) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[6] = {
+			} progs[10] = {
 				{ "terrain",   nd_seven_gl_vs_terrain(),   nd_seven_gl_fs_terrain()   },
 				{ "water",     nd_seven_gl_vs_water(),     nd_seven_gl_fs_water()     },
 				{ "billboard", nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard() },
 				{ "mesh3d",    nd_seven_gl_vs_mesh3d(),    nd_seven_gl_fs_mesh3d()    },
 				{ "cloud",     nd_seven_gl_vs_cloud(),     nd_seven_gl_fs_cloud()     },
-				{ "csm",       nd_seven_gl_vs_csm(),       nd_seven_gl_fs_csm()       }
+				{ "csm",       nd_seven_gl_vs_csm(),       nd_seven_gl_fs_csm()       },
+				{ "sky",       nd_seven_gl_vs_sky(),       nd_seven_gl_fs_sky()       },
+				{ "ssao",      nd_seven_gl_vs_csm(),       nd_seven_gl_fs_ssao()      },
+				{ "bloom",     nd_seven_gl_vs_csm(),       nd_seven_gl_fs_bloom()     },
+				{ "post",      nd_seven_gl_vs_csm(),       nd_seven_gl_fs_post()      }
 			};
-			for (int p = 0; p < 6; p++) {
+			for (int p = 0; p < 10; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
@@ -4001,9 +4006,9 @@ int main(void)
 				assert(fmaxf(test_bbs[3].width, test_bbs[3].height) == 16.0f);
 
 				/* Verify nd_seven_meadow_lattice_step scales lattice stride with camera distance */
-				assert(nd_seven_meadow_lattice_step(400.0f, 3800.0f) == 26);
-				assert(nd_seven_meadow_lattice_step(1600.0f, 3800.0f) == 52);
-				assert(nd_seven_meadow_lattice_step(2800.0f, 3800.0f) == 78);
+				assert(nd_seven_meadow_lattice_step(400.0f, 3800.0f) == 16);
+				assert(nd_seven_meadow_lattice_step(1600.0f, 3800.0f) == 32);
+				assert(nd_seven_meadow_lattice_step(2800.0f, 3800.0f) == 64);
 				assert(nd_seven_meadow_lattice_step(4000.0f, 3800.0f) == 0);
 
 				/* Verify libcorolla analytical ray-cloud-shell intersection (nd_seven_gl_cloud_shell_ray_hit) */
@@ -4233,6 +4238,37 @@ int main(void)
 				nd_m3d_plant_metric_dims(1u, 1u, &pw_b, &ph_b, &pay_b);
 				assert(ph_b > 34.0f * lamb_wu && ph_b < 38.0f * lamb_wu);
 
+				/* Continuous tree stature: small (0.25..0.62 * big_h) & big (0.52..1.18 * big_h) overlap smoothly */
+				{
+					float min_small_h = 1e9f, max_small_h = 0.0f;
+					float min_big_h   = 1e9f, max_big_h   = 0.0f;
+					for (uint32_t s = 0; s < 64u; s++) {
+						ndw_obj_t o_sm, o_bg;
+						memset(&o_sm, 0, sizeof(o_sm));
+						memset(&o_bg, 0, sizeof(o_bg));
+						o_sm.x = (uint8_t)((s * 7u) & 63u);
+						o_sm.y = (uint8_t)((s * 13u) & 63u);
+						o_sm.kind = NDW_K_DECID;
+						o_sm.variant = (uint8_t)(s * 29u);
+						o_sm.plant_id = ND_PLANT_PACK_ID(10u, 0u, s & 3u);
+						o_bg = o_sm;
+						o_bg.big = 1;
+						o_bg.plant_id = ND_PLANT_PACK_ID(10u, 1u, s & 3u);
+						float ws = 0.0f, hs = 0.0f, ays = 0.0f;
+						float wb = 0.0f, hb = 0.0f, ayb = 0.0f;
+						nd_seven_calc_obj_dims(&o_sm, 32.0f, 32.0f, &ws, &hs, &ays);
+						nd_seven_calc_obj_dims(&o_bg, 32.0f, 32.0f, &wb, &hb, &ayb);
+						if (hs < min_small_h) min_small_h = hs;
+						if (hs > max_small_h) max_small_h = hs;
+						if (hb < min_big_h)   min_big_h   = hb;
+						if (hb > max_big_h)   max_big_h   = hb;
+					}
+					assert(min_small_h >= ph_b * 0.0f); /* sanity check below uses oak 432 wu */
+					assert(min_small_h < 432.0f * 0.35f && max_small_h > 432.0f * 0.54f);
+					assert(min_big_h   < 432.0f * 0.62f && max_big_h   > 432.0f * 1.05f);
+					assert(max_small_h > min_big_h && "Small saplings/pole trees and mature veterans must overlap in stature");
+				}
+
 				/* Geological metric tiers: STONE (< 0.75 * Lamb) < ROCK (1.1..1.5 * Lamb) < BOULDER (2.2..2.8 * Lamb) */
 				float sw_st = 0.0f, sh_st = 0.0f, say_st = 0.0f;
 				float sw_rk = 0.0f, sh_rk = 0.0f, say_rk = 0.0f;
@@ -4421,6 +4457,225 @@ int main(void)
 				assert(strstr(nd_seven_gl_fs_terrain(), "STAGE 9: Atmospheric Perspective") != NULL);
 
 				printf("PASS: Unified Terrain LOD Architecture Invariants (field LOD invariance, lamb-Z/zoom independence, 1:1 48x48 mesh, shader invariants) verified\n");
+			}
+
+			/* Phase 1: Free 3D Orbit Camera, Yaw-Aware Billboards, Terrain Pitch Clamp & Sky Dome Shaders */
+			{
+				const nd_planet_def_t *pdef = nd_seven_get_planet(1);
+				const float yaw_cases[] = { 0.0f, 45.0f, 90.0f, -120.0f, 180.0f };
+				const float pitch_cases[] = { 15.0f, 35.0f, 55.0f, 75.0f };
+				for (size_t yi = 0; yi < sizeof(yaw_cases) / sizeof(yaw_cases[0]); yi++) {
+					for (size_t pi = 0; pi < sizeof(pitch_cases) / sizeof(pitch_cases[0]); pi++) {
+						float yaw = yaw_cases[yi];
+						float pitch = pitch_cases[pi];
+						float mvp[16], eye[3], target[3], cup[3];
+						nd_seven_gl_compute_mvp_ex(1280, 720, 1600.0f, 1280.0f, 10.0f,
+						                           ND_SEVEN_CAM_DIST, yaw, pitch, ND_SEVEN_CAM_FOV,
+						                           pdef, mvp, eye, target, cup);
+						float fwd[3] = {
+							(target[0] - eye[0]) / ND_SEVEN_CAM_DIST,
+							(target[1] - eye[1]) / ND_SEVEN_CAM_DIST,
+							(target[2] - eye[2]) / ND_SEVEN_CAM_DIST
+						};
+						float dot_fu = fwd[0] * cup[0] + fwd[1] * cup[1] + fwd[2] * cup[2];
+						assert(fabsf(dot_fu) < 2e-3f);
+
+						float bpos[3], bright[3], bup[3], bview[3];
+						nd_seven_gl_billboard_basis_ex(1600.0f, 1280.0f, 10.0f, yaw, pitch, pdef,
+						                               bpos, bright, bup, bview);
+						float dot_ru = bright[0] * bup[0] + bright[1] * bup[1] + bright[2] * bup[2];
+						float dot_rv = bright[0] * bview[0] + bright[1] * bview[1] + bright[2] * bview[2];
+						float dot_uv = bup[0] * bview[0] + bup[1] * bview[1] + bup[2] * bview[2];
+						assert(fabsf(dot_ru) < 1e-4f);
+						assert(fabsf(dot_rv) < 1e-4f);
+						assert(fabsf(dot_uv) < 1e-4f);
+
+						lam_billboard_gpu_t bb = {
+							.x = 1600.0f, .y = 1280.0f, .z = 10.0f,
+							.width = 32.0f, .height = 32.0f,
+							.u0 = 0.0f, .v0 = 0.0f, .u1 = 1.0f, .v1 = 1.0f,
+							.tint_rgba = 0xFFFFFFFFu
+						};
+						nd_seven_gl_bb_vert_t qv[6];
+						nd_seven_gl_eval_billboard_quad_ex(&bb, yaw, pitch, pdef, qv);
+						float ndc_x[3], ndc_y[3];
+						for (int k = 0; k < 3; k++) {
+							float x = qv[k].world_pos[0], y = qv[k].world_pos[1], z = qv[k].world_pos[2];
+							float cx = mvp[0] * x + mvp[4] * y + mvp[8]  * z + mvp[12];
+							float cy = mvp[1] * x + mvp[5] * y + mvp[9]  * z + mvp[13];
+							float cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+							assert(cw > 1.0f);
+							ndc_x[k] = cx / cw;
+							ndc_y[k] = cy / cw;
+						}
+						float proj_w = fabsf(ndc_x[1] - ndc_x[0]) * (1280.0f / 720.0f);
+						float proj_h = fabsf(ndc_y[2] - ndc_y[0]);
+						assert(proj_w > 0.01f && proj_h > 0.01f);
+						assert(fabsf((proj_h / proj_w) - 1.0f) < 0.08f);
+					}
+				}
+
+				/* Orbit state, damping, reset & terrain clearance pitch clamping */
+				nd_seven_reset_cam();
+				nd_seven_step_cam(1.0f);
+				assert(fabsf(nd_seven_get_yaw_deg()) < 1e-3f);
+				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_DIORAMA_PITCH) < 1e-2f);
+				nd_seven_set_cam_angles(90.0f, 35.0f);
+				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
+				assert(fabsf(nd_seven_get_yaw_deg() - 90.0f) < 1.0f);
+				assert(fabsf(nd_seven_get_pitch_deg() - 35.0f) < 1.0f);
+				nd_seven_reset_cam();
+				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
+				assert(fabsf(nd_seven_get_yaw_deg()) < 1.0f);
+
+				float low_p = nd_seven_clamp_cam_pitch(0, 1600.0f, 1280.0f, 10.0f, 400.0f, 0.0f, 1.0f);
+				float hi_p  = nd_seven_clamp_cam_pitch(0, 1600.0f, 1280.0f, 10.0f, 400.0f, 0.0f, 89.5f);
+				assert(low_p >= ND_SEVEN_CAM_PITCH_MIN && low_p <= ND_SEVEN_CAM_PITCH_MAX);
+				assert(hi_p <= ND_SEVEN_CAM_PITCH_MAX + 1e-4f);
+
+				/* Sky dome shaders & absence of hardcoded 55-deg vector literals in fragment shaders */
+				assert(nd_seven_gl_vs_sky() && strstr(nd_seven_gl_vs_sky(), "gl_VertexID") != NULL);
+				assert(nd_seven_gl_fs_sky() && strstr(nd_seven_gl_fs_sky(), "uSunDir") != NULL);
+				assert(nd_seven_gl_fs_sky() && strstr(nd_seven_gl_fs_sky(), "sky_hash21") != NULL);
+				assert(strstr(nd_seven_gl_fs_billboard(), "0.573576") == NULL);
+				assert(strstr(nd_seven_gl_fs_billboard(), "0.819152") == NULL);
+				assert(strstr(nd_seven_gl_fs_billboard(), "0.7002075") == NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "0.573576") == NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "0.7002075") == NULL);
+
+				printf("PASS: Phase 1 orbit camera, yaw-aware MVPs & billboards, pitch clamp & procedural sky dome verified\n");
+			}
+
+			/* Phase 2: 3D Instanced Living Meadow Clumps, Biome Distribution & Lamb Trample Physics */
+			{
+				uint32_t vcnt = 0u, icnt = 0u;
+				(void)nd_seven_mesh3d_verts(&vcnt);
+				(void)nd_seven_mesh3d_indices(&icnt);
+				assert(vcnt > 0u && vcnt < ND_MESH3D_MAX_VERTS);
+				assert(icnt > 0u && icnt < ND_MESH3D_MAX_INDICES);
+
+				assert(nd_seven_meadow_mesh3d_id(0, 8u, 0x1234u) == ND_MESH3D_NONE);
+				uint8_t reed_id = nd_seven_meadow_mesh3d_id(1, 5u, 0u);
+				uint8_t flw_id  = nd_seven_meadow_mesh3d_id(2, 8u, 1u);
+				uint8_t tall_id = nd_seven_meadow_mesh3d_id(5, 7u, 0u);
+				uint8_t fern_id = nd_seven_meadow_mesh3d_id(4, 12u, 1u);
+				uint8_t tuss_id = nd_seven_meadow_mesh3d_id(3, 2u, 0u);
+				uint8_t turf_id = nd_seven_meadow_mesh3d_id(3, 8u, 4u);
+				assert(reed_id >= ND_MESH3D_MEADOW_BASE + 6u && reed_id <= ND_MESH3D_MEADOW_BASE + 7u);
+				assert(flw_id  >= ND_MESH3D_MEADOW_BASE + 4u && flw_id  <= ND_MESH3D_MEADOW_BASE + 5u);
+				assert(tall_id >= ND_MESH3D_MEADOW_BASE + 2u && tall_id <= ND_MESH3D_MEADOW_BASE + 3u);
+				assert(fern_id >= ND_MESH3D_MEADOW_BASE + 8u && fern_id <= ND_MESH3D_MEADOW_BASE + 9u);
+				assert(tuss_id >= ND_MESH3D_MEADOW_BASE + 10u && tuss_id <= ND_MESH3D_MEADOW_BASE + 11u);
+				assert(turf_id >= ND_MESH3D_MEADOW_BASE && turf_id <= ND_MESH3D_MEADOW_BASE + 1u);
+
+				for (unsigned mv = 0; mv < ND_MESH3D_MEADOW_COUNT; mv++) {
+					const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)(ND_MESH3D_MEADOW_BASE + mv));
+					assert(sl != NULL && sl->vert_count >= 64u && sl->idx_count >= 96u);
+					assert(sl->mesh_w_wu >= 18.0f && sl->mesh_h_wu >= 5.0f);
+				}
+
+				assert(nd_seven_meadow_lattice_step(280.0f, 2160.0f) == 16);
+				assert(nd_seven_meadow_lattice_step(800.0f, 2160.0f) == 32);
+				assert(nd_seven_meadow_lattice_step(1500.0f, 2160.0f) == 64);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "isGrassMesh") != NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "rootT") != NULL);
+
+				const char *vs_m3d = nd_seven_gl_vs_mesh3d();
+				assert(vs_m3d && strstr(vs_m3d, "isGrassMesh") != NULL);
+				assert(strstr(vs_m3d, "trample_e") != NULL);
+				assert(strstr(vs_m3d, "trample_squash") != NULL);
+
+				printf("PASS: Phase 2 3D Living Meadow clumps, biome selection & Lamb trample physics verified (%u/%u verts)\n",
+				       vcnt, (unsigned)ND_MESH3D_MAX_VERTS);
+			}
+
+			/* Phase 3: Linear HDR, ACES Tone Mapping, Half-Res Bloom, SSAO, Soft PCF & Valley Fog */
+			{
+				assert(GL_RGBA16F == 0x881Au);
+				assert(GL_HALF_FLOAT == 0x140Bu);
+				assert(strstr(nd_seven_gl_fs_terrain(), "nd_eval_valley_fog") != NULL);
+				assert(strstr(nd_seven_gl_fs_billboard(), "nd_eval_valley_fog") != NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "nd_eval_valley_fog") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "2.15 / 1024.0") != NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "2.15 / 1024.0") != NULL);
+				assert(nd_seven_gl_fs_ssao() && strstr(nd_seven_gl_fs_ssao(), "uDepthTex") != NULL);
+				assert(nd_seven_gl_fs_bloom() && strstr(nd_seven_gl_fs_bloom(), "uSrcTex") != NULL);
+				assert(nd_seven_gl_fs_post() && strstr(nd_seven_gl_fs_post(), "uBloomTex") != NULL);
+				assert(strstr(nd_seven_gl_fs_post(), "uSsaoTex") != NULL);
+				assert(strstr(nd_seven_gl_fs_post(), "2.51 * x + 0.03") != NULL);
+				printf("PASS: Phase 3 HDR ACES, half-res bloom, SSAO, soft PCF & valley fog verified\n");
+			}
+
+			/* Phase 4: Forest-Floor Fallen Logs/Stumps, Bark Furrows, Bayer Crossfade & Torus Sun L_sun */
+			{
+				const unsigned forest_biomes[] = { 8u, 9u, 11u, 12u, 13u, 16u, 17u };
+				for (size_t fi = 0; fi < sizeof(forest_biomes) / sizeof(forest_biomes[0]); fi++) {
+					uint8_t uid = nd_seven_understory_mesh3d_id(forest_biomes[fi], (uint32_t)fi);
+					assert(uid >= ND_MESH3D_UNDERSTORY_BASE && uid < ND_MESH3D_TOTAL);
+				}
+				assert(nd_seven_understory_mesh3d_id(4u, 0u) == ND_MESH3D_NONE);
+				assert(nd_seven_understory_mesh3d_id(10u, 1u) == ND_MESH3D_NONE);
+				assert(nd_seven_understory_mesh3d_id(14u, 2u) == ND_MESH3D_NONE);
+
+				for (unsigned uv = 0; uv < ND_MESH3D_UNDERSTORY_COUNT; uv++) {
+					const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)(ND_MESH3D_UNDERSTORY_BASE + uv));
+					assert(sl != NULL && sl->vert_count >= 28u && sl->idx_count >= 36u);
+					assert(sl->mesh_w_wu >= 30.0f && sl->mesh_h_wu >= 12.0f);
+				}
+
+				assert(strstr(nd_seven_gl_fs_billboard(), "lodQ") != NULL);
+				assert(strstr(nd_seven_gl_fs_billboard(), "sunLocBB") != NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "lodKeep") != NULL);
+
+				printf("PASS: Phase 4 understory props, bark relief, Bayer LOD crossfade & torus L_sun verified\n");
+			}
+
+			/* Botanical Phase 3: Mid-Story Shrubs, Ferns, Snags & Anchor Collars */
+			{
+				assert(ND_MESH3D_TOTAL == 206u);
+				const unsigned barren[] = { 0u, 1u, 6u, 14u, 18u };
+				for (size_t bi = 0; bi < sizeof(barren) / sizeof(barren[0]); bi++)
+					assert(nd_seven_shrub_mesh3d_id(barren[bi], 0x1234u) == ND_MESH3D_NONE);
+				const unsigned veg[] = { 2u, 3u, 4u, 5u, 7u, 8u, 9u, 10u, 11u, 12u, 13u, 15u, 16u, 17u };
+				for (size_t vi = 0; vi < sizeof(veg) / sizeof(veg[0]); vi++) {
+					for (uint32_t h = 0; h < 32u; h++) {
+						uint8_t sid = nd_seven_shrub_mesh3d_id(veg[vi], h);
+						assert(sid >= ND_MESH3D_SHRUB_BASE && sid < ND_MESH3D_TOTAL);
+					}
+				}
+				for (unsigned sv = 0; sv < ND_MESH3D_SHRUB_COUNT; sv++) {
+					const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)(ND_MESH3D_SHRUB_BASE + sv));
+					assert(sl != NULL && sl->vert_count >= 24u && sl->idx_count >= 36u);
+				}
+				printf("PASS: Botanical Phase 3 mid-story shrubs, ferns, snags & anchor collars verified\n");
+			}
+
+			/* Botanical Phase 4: Macro Grove/Glade Ecology, Krummholz Dwarfing, Forest Duff & Ridge Silhouettes */
+			{
+				float kr_low = 0.0f, kr_high = 0.0f, kr_steep = 0.0f;
+				float g_forest_sum = 0.0f, g_alpine_sum = 0.0f;
+				for (int32_t i = 0; i < 64; i++) {
+					int32_t wx = i * 97 - 2400;
+					int32_t wy = i * 61 - 1800;
+					float kr = 0.0f;
+					float gf = nd_seven_eval_grove_ecology(wx, wy, 20.0f, 0.0f, 0.05f, 9u, &kr);
+					float ga = nd_seven_eval_grove_ecology(wx, wy, 20.0f, 0.0f, 0.05f, 3u, &kr);
+					assert(gf >= 0.0f && gf <= 1.0f && ga >= 0.0f && ga <= 1.0f);
+					assert(fabsf(kr - 1.0f) < 1e-5f);
+					g_forest_sum += gf;
+					g_alpine_sum += ga;
+				}
+				assert(g_forest_sum > g_alpine_sum && "Forest biome must exhibit higher grove score than open alpine");
+				nd_seven_eval_grove_ecology(120, 240, 20.0f,  0.0f, 0.05f, 9u, &kr_low);
+				nd_seven_eval_grove_ecology(120, 240, 260.0f, 0.0f, 0.10f, 9u, &kr_high);
+				nd_seven_eval_grove_ecology(120, 240, 20.0f,  0.0f, 0.72f, 9u, &kr_steep);
+				assert(fabsf(kr_low - 1.0f) < 1e-5f);
+				assert(kr_high >= 0.35f && kr_high < 0.65f);
+				assert(kr_steep >= 0.35f && kr_steep < 0.70f);
+				assert(strstr(nd_seven_gl_fs_terrain(), "groveMacro") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "needleDuffCol") != NULL);
+				printf("PASS: Botanical Phase 4 grove/glade ecology, krummholz (low=%.2f, alt=%.2f, steep=%.2f) & duff shader verified\n",
+				       kr_low, kr_high, kr_steep);
 			}
 		}
 	}

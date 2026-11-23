@@ -1078,6 +1078,7 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 	 * so frame-rate changes from 15fps chunk baking to 60/120fps steady state never speed up wind/water) */
 	float anim_dt = (dt > 0.033f) ? 0.033f : ((dt > 0.0f) ? dt : (1.0f / 60.0f));
 	s_anim_sec += anim_dt * 1.4f;
+	nd_seven_step_cam(dt > 0.0f ? dt : 0.016f);
 
 	if (s_teleport_pending_t > 0.0f) {
 		s_teleport_pending_t -= dt;

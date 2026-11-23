@@ -241,19 +241,15 @@ main(void)
 					if (is_tree) {
 						float h_wu = slice.mesh_h_wu;
 						float min_fol_z = h_wu;
-						float min_fol_proj = h_wu;
 						uint32_t fol_cnt = 0u;
 						uint32_t mid_bark_cnt = 0u;
 						for (uint32_t vi = 0; vi < slice.vert_count; vi++) {
 							const nd_mesh3d_vert_t *v = &b.verts[slice.first_vert + vi];
 							float mat = v->col[3];
 							float vz = v->pos[2];
-							float vy = v->pos[1];
-							float h_proj = vz - 0.7002075f * vy;
 							if (mat >= 0.19f && mat <= 0.36f) {
 								fol_cnt++;
 								if (vz < min_fol_z) min_fol_z = vz;
-								if (h_proj < min_fol_proj) min_fol_proj = h_proj;
 							} else if (mat < 0.08f) {
 								if (vz >= h_wu * 0.32f && vz <= h_wu * 0.72f)
 									mid_bark_cnt++;
@@ -262,8 +258,6 @@ main(void)
 						assert(fol_cnt > 0u && "Every tree must emit foliage vertices");
 						assert(min_fol_z >= h_wu * 0.17f &&
 						       "Tree foliage 3D Z must never descend to the ground below clear bole");
-						assert(min_fol_proj >= h_wu * 0.16f &&
-						       "Tree foliage 55-deg projected height must never descend to the ground");
 						if (sp == 7u) { /* Acacia senegal */
 							assert(min_fol_z >= h_wu * 0.55f &&
 							       "Acacia senegal foliage must be perched in the upper savannah umbrella stratum");
@@ -274,12 +268,106 @@ main(void)
 				}
 			}
 		}
+		/* Phase 1 Skyrim vegetation: verify juvenile non-tabular trees carry foliage lower than mature trees */
+		{
+			const nd_plant_spec_t *fir_spec = &s_nd_plant_specs[1u];
+			nd_mesh3d_slice_t sl_j, sl_m;
+			memset(&sl_j, 0, sizeof(sl_j));
+			memset(&sl_m, 0, sizeof(sl_m));
+			nd_m3d_build_plant_from_genes(&b, fir_spec, 0, 0, 0xB07A0u + 97u, &sl_j);
+			nd_m3d_build_plant_from_genes(&b, fir_spec, 1, 0, 0xB07A0u + 97u, &sl_m);
+			float min_fol_j = 1.0f, min_fol_m = 1.0f;
+			for (uint32_t vi = 0; vi < sl_j.vert_count; vi++) {
+				const nd_mesh3d_vert_t *v = &b.verts[sl_j.first_vert + vi];
+				if (v->col[3] >= 0.19f && v->col[3] <= 0.36f) {
+					float f = v->pos[2] / sl_j.mesh_h_wu;
+					if (f < min_fol_j) min_fol_j = f;
+				}
+			}
+			for (uint32_t vi = 0; vi < sl_m.vert_count; vi++) {
+				const nd_mesh3d_vert_t *v = &b.verts[sl_m.first_vert + vi];
+				if (v->col[3] >= 0.19f && v->col[3] <= 0.36f) {
+					float f = v->pos[2] / sl_m.mesh_h_wu;
+					if (f < min_fol_m) min_fol_m = f;
+				}
+			}
+			assert(min_fol_j < min_fol_m && "Juvenile non-tabular fir saplings must carry live lower foliage further down the trunk");
+		}
 		assert(b.vert_count < ND_MESH3D_MAX_VERTS - 16384u &&
 		       "All 128 plant templates must fit comfortably within VBO vertex budget");
 		assert(b.idx_count < ND_MESH3D_MAX_INDICES - 32768u &&
 		       "All 128 plant templates must fit comfortably within VBO index budget");
 		printf("Stage 4 Geometry Budget: 128 plant templates used %u / %u verts, %u / %u indices\n",
 		       b.vert_count, ND_MESH3D_MAX_VERTS, b.idx_count, ND_MESH3D_MAX_INDICES);
+
+		/* Phase 2: Verify all 12 3D Living Meadow clump archetypes */
+		for (uint32_t mv = 0; mv < ND_MESH3D_MEADOW_COUNT; mv++) {
+			nd_mesh3d_slice_t mslice;
+			memset(&mslice, 0, sizeof(mslice));
+			nd_m3d_build_meadow_clump(&b, mv, &mslice);
+			assert(mslice.vert_count >= 64u && (mslice.idx_count % 3u) == 0u && mslice.idx_count >= 96u);
+			assert(mslice.mesh_w_wu >= 18.0f && mslice.mesh_h_wu >= 5.0f);
+			float min_z = 100.0f, max_z = -100.0f, max_w = 0.0f;
+			uint32_t root_pin_cnt = 0u, flower_cnt = 0u, fol_cnt = 0u;
+			for (uint32_t vi = 0; vi < mslice.vert_count; vi++) {
+				const nd_mesh3d_vert_t *v = &b.verts[mslice.first_vert + vi];
+				if (v->pos[2] < min_z) min_z = v->pos[2];
+				if (v->pos[2] > max_z) max_z = v->pos[2];
+				if (v->pos[3] > max_w) max_w = v->pos[3];
+				if (v->pos[2] < -0.10f && v->pos[3] == 0.0f) root_pin_cnt++;
+				if (v->col[3] > 0.355f && v->col[3] <= 0.55f) flower_cnt++;
+				if (v->col[3] >= 0.18f && v->col[3] <= 0.355f) fol_cnt++;
+			}
+			assert(min_z >= -0.30f && "Meadow clump roots must remain cleanly anchored without deep sink");
+			assert(root_pin_cnt >= 16u && "Compound meadow mats must anchor multiple subtuft roots with zero wind weight");
+			assert(max_w > 0.30f && "Meadow clump tips must expose non-zero wind weight");
+			assert(fol_cnt > 48u && "Compound meadow mats must emit multi-subtuft foliage blades");
+			if (mv == 4u || mv == 5u) {
+				assert(flower_cnt >= 10u && "Wildflower meadow clump must emit 3D corolla blossoms");
+			}
+		}
+
+		/* Phase 4: Verify enhanced tree root collars & all 4 forest-floor understory log/stump archetypes */
+		assert(ND_MESH3D_UNDERSTORY_BASE == 192u && ND_MESH3D_UNDERSTORY_COUNT == 4u);
+		assert(ND_MESH3D_SHRUB_BASE == 196u && ND_MESH3D_SHRUB_COUNT == 10u);
+		assert(ND_MESH3D_TOTAL == 206u && ND_MESH3D_MAX_VERTS >= 393216u);
+		{
+			const nd_plant_spec_t *oak_spec = &s_nd_plant_specs[10u];
+			nd_mesh3d_slice_t oak_sl;
+			memset(&oak_sl, 0, sizeof(oak_sl));
+			nd_m3d_build_plant_from_genes(&b, oak_spec, 1, 0, 0xB07A0u + 10u * 97u, &oak_sl);
+			float min_bark_z = 100.0f;
+			for (uint32_t vi = 0; vi < oak_sl.vert_count; vi++) {
+				const nd_mesh3d_vert_t *v = &b.verts[oak_sl.first_vert + vi];
+				if (v->col[3] < 0.08f && v->pos[2] < min_bark_z)
+					min_bark_z = v->pos[2];
+			}
+			assert(min_bark_z < 0.0f && "Tree root collars/spurs must sink cleanly into slopes");
+		}
+		for (uint32_t uv = 0; uv < ND_MESH3D_UNDERSTORY_COUNT; uv++) {
+			nd_mesh3d_slice_t uslice;
+			memset(&uslice, 0, sizeof(uslice));
+			nd_m3d_build_understory_prop(&b, uv, &uslice);
+			assert(uslice.vert_count >= 28u && uslice.idx_count >= 36u && (uslice.idx_count % 3u) == 0u);
+			assert(uslice.mesh_w_wu >= 30.0f && uslice.mesh_h_wu >= 12.0f);
+			uint32_t bark_cnt = 0u, fern_cnt = 0u;
+			float min_wood_z = 100.0f, max_fern_wind = 0.0f;
+			for (uint32_t vi = 0; vi < uslice.vert_count; vi++) {
+				const nd_mesh3d_vert_t *v = &b.verts[uslice.first_vert + vi];
+				if (v->col[3] < 0.18f) {
+					bark_cnt++;
+					assert(v->pos[3] == 0.0f && "Understory log/stump timber must stay rigid (zero wind sway)");
+					if (v->pos[2] < min_wood_z) min_wood_z = v->pos[2];
+				} else {
+					fern_cnt++;
+					if (v->pos[3] > max_fern_wind) max_fern_wind = v->pos[3];
+				}
+			}
+			assert(bark_cnt >= 24u && fern_cnt >= 8u);
+			assert(min_wood_z <= 0.0f && "Understory log/stump bases must anchor flush into ground");
+			assert(max_fern_wind > 0.05f && "Understory nurse-log ferns must keep positive wind sway");
+		}
+		assert(b.vert_count < ND_MESH3D_MAX_VERTS && b.idx_count < ND_MESH3D_MAX_INDICES);
 	}
 
 	/* 5b. Verify 3D Beer-Lambert Intra-Crown Light Competition & 1024x1024 Foliage Atlas */
@@ -403,6 +491,53 @@ main(void)
 		             child.architecture.internode_length_m.mean) < 1e-6f);
 		assert(plant_genome_migrate_v1_to_v2(&deserialized, &migrated_v2) == PLANT_OK);
 		assert(migrated_v2.schema_version == 2u);
+	}
+
+	/* 7. Verify Phase 3 Mid-Story Shrub, Fern & Deadwood Snag Mesh Builders */
+	{
+		nd_mesh3d_vert_t *sb_verts = (nd_mesh3d_vert_t *)calloc(32768u, sizeof(nd_mesh3d_vert_t));
+		uint32_t *sb_idx = (uint32_t *)calloc(65536u, sizeof(uint32_t));
+		assert(sb_verts && sb_idx);
+		nd_mesh3d_builder_t sb = {
+			.verts = sb_verts,
+			.vert_count = 0u,
+			.vert_cap = 32768u,
+			.indices = sb_idx,
+			.idx_count = 0u,
+			.idx_cap = 65536u
+		};
+		for (uint32_t sv = 0; sv < ND_MESH3D_SHRUB_COUNT; sv++) {
+			nd_mesh3d_slice_t sl;
+			memset(&sl, 0, sizeof(sl));
+			nd_m3d_build_shrub_prop(&sb, sv, &sl);
+			assert(sl.vert_count >= 24u && sl.idx_count >= 36u);
+			assert(sl.mesh_w_wu >= 24.0f && sl.mesh_h_wu >= 18.0f);
+			if ((sv >> 1u) == 4u) {
+				/* Deadwood snag: tall, rigid (zero wind sway) */
+				assert(sl.mesh_h_wu >= 75.0f);
+				for (uint32_t vi = 0; vi < sl.vert_count; vi++) {
+					assert(sb.verts[sl.first_vert + vi].pos[3] == 0.0f);
+				}
+			} else if ((sv >> 1u) == 3u) {
+				/* Bracken fern: positive blade wind weights */
+				uint32_t wind_v = 0u;
+				for (uint32_t vi = 0; vi < sl.vert_count; vi++) {
+					if (sb.verts[sl.first_vert + vi].pos[3] > 0.01f)
+						wind_v++;
+				}
+				assert(wind_v >= 20u);
+			} else {
+				/* Woody juniper / thicket / heather: UV branchlet cards (pos[3] > 1.0f) */
+				uint32_t card_v = 0u;
+				for (uint32_t vi = 0; vi < sl.vert_count; vi++) {
+					if (sb.verts[sl.first_vert + vi].pos[3] > 1.0f)
+						card_v++;
+				}
+				assert(card_v >= 18u);
+			}
+		}
+		free(sb_verts);
+		free(sb_idx);
 	}
 
 	printf("PASS: test_nd_plant_model (16 species validation, Cholesky PSD, MTG validation, Da Vinci pipe-model, dt-invariance, ephemeral delta decay, serialization, 3D geometry)\n");

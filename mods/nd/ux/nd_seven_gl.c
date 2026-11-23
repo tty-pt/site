@@ -211,6 +211,7 @@ static void init_grid_buffers(void)
 
 static void init_pipelines(void)
 {
+	s_gl.sky_pipe.prog        = create_program_async(s_vs_sky, s_fs_sky);
 	s_gl.terrain_pipe.prog    = create_program_async(s_vs_terrain, s_fs_terrain);
 	s_gl.water_pipe.prog      = create_program_async(s_vs_water, s_fs_water);
 	s_gl.bb_pipe.prog         = create_program_async(s_vs_billboard, s_fs_billboard);
@@ -218,6 +219,9 @@ static void init_pipelines(void)
 	s_gl.cloud_pipe.prog      = create_program_async(s_vs_cloud, s_fs_cloud);
 	s_gl.cloud_comp_pipe.prog = create_program_async(s_vs_csm, s_fs_cloud_comp);
 	s_gl.csm_pipe.prog        = create_program_async(s_vs_csm, s_fs_csm);
+	s_gl.ssao_pipe.prog       = create_program_async(s_vs_csm, s_fs_ssao);
+	s_gl.bloom_pipe.prog      = create_program_async(s_vs_csm, s_fs_bloom);
+	s_gl.post_pipe.prog       = create_program_async(s_vs_csm, s_fs_post);
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
@@ -230,6 +234,8 @@ static bool check_pipelines_ready(void)
 	if (!s_gl.initialized)
 		return false;
 
+	if (s_gl.sky_pipe.prog && !glGetProgramParameter(s_gl.sky_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
 	if (s_gl.terrain_pipe.prog && !glGetProgramParameter(s_gl.terrain_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.water_pipe.prog && !glGetProgramParameter(s_gl.water_pipe.prog, GL_COMPLETION_STATUS_KHR))
@@ -244,6 +250,34 @@ static bool check_pipelines_ready(void)
 		return false;
 	if (s_gl.csm_pipe.prog && !glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
+	if (s_gl.ssao_pipe.prog && !glGetProgramParameter(s_gl.ssao_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.bloom_pipe.prog && !glGetProgramParameter(s_gl.bloom_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+	if (s_gl.post_pipe.prog && !glGetProgramParameter(s_gl.post_pipe.prog, GL_COMPLETION_STATUS_KHR))
+		return false;
+
+	/* Sky dome pipeline */
+	if (s_gl.sky_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.sky_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.sky_pipe.prog);
+			s_gl.sky_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.sky_pipe.prog;
+			s_gl.sky_pipe.uCamFwd        = glGetUniformLocation(p, "uCamFwd", 7);
+			s_gl.sky_pipe.uCamRight      = glGetUniformLocation(p, "uCamRight", 9);
+			s_gl.sky_pipe.uCamUp         = glGetUniformLocation(p, "uCamUp", 6);
+			s_gl.sky_pipe.uTanHalfAspect = glGetUniformLocation(p, "uTanHalfAspect", 14);
+			s_gl.sky_pipe.uEast          = glGetUniformLocation(p, "uEast", 5);
+			s_gl.sky_pipe.uSouth         = glGetUniformLocation(p, "uSouth", 6);
+			s_gl.sky_pipe.uZenith        = glGetUniformLocation(p, "uZenith", 7);
+			s_gl.sky_pipe.uSunDir        = glGetUniformLocation(p, "uSunDir", 7);
+			s_gl.sky_pipe.uMoonDir       = glGetUniformLocation(p, "uMoonDir", 8);
+			s_gl.sky_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
+			s_gl.sky_pipe.uCamDist       = glGetUniformLocation(p, "uCamDist", 8);
+			s_gl.sky_pipe.uAnimTime      = glGetUniformLocation(p, "uAnimTime", 9);
+		}
+	}
 
 	/* Terrain pipeline */
 	if (s_gl.terrain_pipe.prog) {
@@ -360,6 +394,7 @@ static bool check_pipelines_ready(void)
 			s_gl.bb_pipe.uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
 			s_gl.bb_pipe.uCsm           = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.bb_pipe.uPass          = glGetUniformLocation(p, "uPass", 5);
+			s_gl.bb_pipe.uCamAngles     = glGetUniformLocation(p, "uCamAngles", 10);
 			s_gl.bb_pipe.uHiZTex        = glGetUniformLocation(p, "uHiZTex", 7);
 			s_gl.bb_pipe.uHiZActive     = glGetUniformLocation(p, "uHiZActive", 10);
 			s_gl.bb_pipe.aPos           = glGetAttribLocation(p, "a_pos", 5);
@@ -472,6 +507,51 @@ static bool check_pipelines_ready(void)
 		}
 	}
 
+	/* SSAO half-res pipeline */
+	if (s_gl.ssao_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.ssao_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.ssao_pipe.prog);
+			s_gl.ssao_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.ssao_pipe.prog;
+			s_gl.ssao_pipe.uDepthTex  = glGetUniformLocation(p, "uDepthTex", 9);
+			s_gl.ssao_pipe.uNearFar   = glGetUniformLocation(p, "uNearFar", 8);
+			s_gl.ssao_pipe.uProjScale = glGetUniformLocation(p, "uProjScale", 10);
+			s_gl.ssao_pipe.uViewport  = glGetUniformLocation(p, "uViewport", 9);
+			s_gl.ssao_pipe.uAnimTime  = glGetUniformLocation(p, "uAnimTime", 9);
+		}
+	}
+
+	/* Separable bloom half-res pipeline */
+	if (s_gl.bloom_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.bloom_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.bloom_pipe.prog);
+			s_gl.bloom_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.bloom_pipe.prog;
+			s_gl.bloom_pipe.uSrcTex    = glGetUniformLocation(p, "uSrcTex", 7);
+			s_gl.bloom_pipe.uTexelSize = glGetUniformLocation(p, "uTexelSize", 10);
+			s_gl.bloom_pipe.uPassDir   = glGetUniformLocation(p, "uPassDir", 8);
+		}
+	}
+
+	/* HDR ACES tone-mapping + SSAO + bloom composite pipeline */
+	if (s_gl.post_pipe.prog) {
+		if (!glGetProgramParameter(s_gl.post_pipe.prog, GL_LINK_STATUS)) {
+			glDeleteProgram(s_gl.post_pipe.prog);
+			s_gl.post_pipe.prog = 0;
+		} else {
+			GLuint p = s_gl.post_pipe.prog;
+			s_gl.post_pipe.uSceneTex    = glGetUniformLocation(p, "uSceneTex", 9);
+			s_gl.post_pipe.uBloomTex    = glGetUniformLocation(p, "uBloomTex", 9);
+			s_gl.post_pipe.uSsaoTex     = glGetUniformLocation(p, "uSsaoTex", 8);
+			s_gl.post_pipe.uSsaoActive  = glGetUniformLocation(p, "uSsaoActive", 11);
+			s_gl.post_pipe.uBloomActive = glGetUniformLocation(p, "uBloomActive", 12);
+			s_gl.post_pipe.uExposure    = glGetUniformLocation(p, "uExposure", 9);
+			s_gl.post_pipe.uCamDist     = glGetUniformLocation(p, "uCamDist", 8);
+		}
+	}
+
 	s_gl.pipelines_ready = true;
 	return true;
 }
@@ -530,11 +610,41 @@ float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
 }
 
 
-void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
-                             float tx, float ty, float tz,
-                             float dist, float pitch_deg, float fov_deg,
-                             float anim_time,
-                             const nd_planet_def_t *pdef)
+static void gl_render_sky(float space_t)
+{
+	if (!s_gl.pipelines_ready || !s_gl.sky_pipe.prog)
+		return;
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_BLEND);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glUseProgram(s_gl.sky_pipe.prog);
+	glUniform3fv(s_gl.sky_pipe.uCamFwd, 1, s_gl.cur_cam_fwd);
+	glUniform3fv(s_gl.sky_pipe.uCamRight, 1, s_gl.cur_cam_right);
+	glUniform3fv(s_gl.sky_pipe.uCamUp, 1, s_gl.cur_cam_up);
+	glUniform2f(s_gl.sky_pipe.uTanHalfAspect, s_gl.cur_tan_half, s_gl.cur_aspect);
+	glUniform3fv(s_gl.sky_pipe.uEast, 1, s_gl.cur_E);
+	glUniform3fv(s_gl.sky_pipe.uSouth, 1, s_gl.cur_S);
+	glUniform3fv(s_gl.sky_pipe.uZenith, 1, s_gl.cur_N);
+	glUniform3fv(s_gl.sky_pipe.uSunDir, 1, s_gl.cur_sun_dir);
+	glUniform3fv(s_gl.sky_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
+	glUniform3f(s_gl.sky_pipe.uSkyColor,
+	            0.55f * (1.0f - space_t) + 0.012f * space_t,
+	            0.70f * (1.0f - space_t) + 0.016f * space_t,
+	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	glUniform1f(s_gl.sky_pipe.uCamDist, s_gl.cur_dist);
+	glUniform1f(s_gl.sky_pipe.uAnimTime, s_gl.cur_anim_time);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_TRUE);
+}
+
+void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
+                                float tx, float ty, float tz,
+                                float dist, float yaw_deg, float pitch_deg, float fov_deg,
+                                float anim_time,
+                                const nd_planet_def_t *pdef)
 {
 	s_gl.frame_count++;
 	s_gl.water_count = 0;
@@ -555,6 +665,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_shadow_sun_dir[1] = s_gl.cur_sun_dir[1];
 	s_shadow_sun_dir[2] = s_gl.cur_sun_dir[2];
 	s_gl.cur_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
+	s_gl.cur_yaw_deg = yaw_deg;
 	s_gl.cur_pitch_deg = pitch_deg;
 	s_gl.cur_anim_time = anim_time;
 	s_gl.cur_tx = tx;
@@ -568,6 +679,11 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	/* Evaluate double-precision reference origin at (tx, ty, 0) to eliminate 32-bit float cancellation */
 	float E[3], S[3], N[3];
 	torus_frame_double((double)tx, (double)ty, 0.0, pdef, s_gl.cur_origin, E, S, N);
+	for (int k = 0; k < 3; k++) {
+		s_gl.cur_E[k] = E[k];
+		s_gl.cur_S[k] = S[k];
+		s_gl.cur_N[k] = N[k];
+	}
 
 	double u0 = 6.28318530717958647692 * ((double)tx / (double)ND_SEVEN_WORLD_DIM_W);
 	double v0 = 6.28318530717958647692 * ((double)ty / (double)ND_SEVEN_WORLD_DIM_H);
@@ -585,22 +701,53 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	s_bb_ref_trig[2] = s_gl.cur_ref_trig[2];
 	s_bb_ref_trig[3] = s_gl.cur_ref_trig[3];
 
+	float yaw_rad = yaw_deg * (PI_F / 180.0f);
+	float cos_y = cosf(yaw_rad);
+	float sin_y = sinf(yaw_rad);
 	float pitch_rad = pitch_deg * (PI_F / 180.0f);
 	float cos_p = cosf(pitch_rad);
 	float sin_p = sinf(pitch_rad);
 	float d = s_gl.cur_dist;
 
+	s_gl.cur_cos_y = cos_y;
+	s_gl.cur_sin_y = sin_y;
+	s_gl.cur_cos_p = cos_p;
+	s_gl.cur_sin_p = sin_p;
+
+	float horiz[3] = {
+		sin_y * E[0] + cos_y * S[0],
+		sin_y * E[1] + cos_y * S[1],
+		sin_y * E[2] + cos_y * S[2]
+	};
+	float right[3] = {
+		cos_y * E[0] - sin_y * S[0],
+		cos_y * E[1] - sin_y * S[1],
+		cos_y * E[2] - sin_y * S[2]
+	};
+
 	s_gl.cur_target[0] = tz * N[0];
 	s_gl.cur_target[1] = tz * N[1];
 	s_gl.cur_target[2] = tz * N[2];
 
-	s_gl.cur_eye[0] = s_gl.cur_target[0] + d * (cos_p * S[0] + sin_p * N[0]);
-	s_gl.cur_eye[1] = s_gl.cur_target[1] + d * (cos_p * S[1] + sin_p * N[1]);
-	s_gl.cur_eye[2] = s_gl.cur_target[2] + d * (cos_p * S[2] + sin_p * N[2]);
+	float view_to_eye[3] = {
+		cos_p * horiz[0] + sin_p * N[0],
+		cos_p * horiz[1] + sin_p * N[1],
+		cos_p * horiz[2] + sin_p * N[2]
+	};
 
-	s_gl.cur_up[0] = -sin_p * S[0] + cos_p * N[0];
-	s_gl.cur_up[1] = -sin_p * S[1] + cos_p * N[1];
-	s_gl.cur_up[2] = -sin_p * S[2] + cos_p * N[2];
+	s_gl.cur_eye[0] = s_gl.cur_target[0] + d * view_to_eye[0];
+	s_gl.cur_eye[1] = s_gl.cur_target[1] + d * view_to_eye[1];
+	s_gl.cur_eye[2] = s_gl.cur_target[2] + d * view_to_eye[2];
+
+	s_gl.cur_up[0] = -sin_p * horiz[0] + cos_p * N[0];
+	s_gl.cur_up[1] = -sin_p * horiz[1] + cos_p * N[1];
+	s_gl.cur_up[2] = -sin_p * horiz[2] + cos_p * N[2];
+
+	for (int k = 0; k < 3; k++) {
+		s_gl.cur_cam_right[k] = right[k];
+		s_gl.cur_cam_up[k]    = s_gl.cur_up[k];
+		s_gl.cur_cam_fwd[k]   = -view_to_eye[k];
+	}
 
 	float modelview[16], proj[16];
 	ar_mat4_lookat_lh(modelview, s_gl.cur_eye, s_gl.cur_target, s_gl.cur_up);
@@ -649,6 +796,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
 	if (s_gl.pipelines_ready) {
+		gl_render_sky(space_t);
 		gl_render_cloud_shadow_map();
 		gl_prepare_tree_shadow_frame(tx, ty, tz, E, S, N);
 	} else {
@@ -656,6 +804,17 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 		s_gl.csm_clear_sky = false;
 		s_gl.tree_shadow_active = 0.0f;
 	}
+}
+
+void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
+                             float tx, float ty, float tz,
+                             float dist, float pitch_deg, float fov_deg,
+                             float anim_time,
+                             const nd_planet_def_t *pdef)
+{
+	nd_seven_gl_begin_frame_ex(stage_w, stage_h, tx, ty, tz,
+	                           dist, 0.0f, pitch_deg, fov_deg,
+	                           anim_time, pdef);
 }
 
 static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
