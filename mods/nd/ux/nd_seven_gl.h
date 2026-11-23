@@ -166,6 +166,16 @@ bool nd_seven_gl_eval_billboard_lamb_shadow_quad(const lam_billboard_gpu_t *b,
                                                  const nd_planet_def_t *pdef,
                                                  nd_seven_gl_bb_vert_t out_verts[6]);
 
+/* Returns true when a billboard carries a 3D mesh without a valid 2D atlas tile
+ * (e.g. procedural understory, geobreaks, or v0==v1 / full-atlas-sentinel 3D flora)
+ * and therefore must never fall back to a 2D atlas quad or impostor crossfade. */
+bool nd_seven_gl_billboard_is_mesh3d_only(const lam_billboard_gpu_t *b);
+
+/* Evaluates the canonical world-grid anchor (bx, by, bz) packed into a_iparam.xyz
+ * for a 3D mesh instance, preserving ground z = b->z (never subtracting water_z_off). */
+void nd_seven_gl_eval_mesh3d_anchor(const lam_billboard_gpu_t *b,
+                                    float out_grid_pos[3]);
+
 /* Pure-C reference mirror of the 3D volumetric billboard normal, directional sun
  * illumination, micro-relief, and ground-contact ambient occlusion in s_fs_billboard:
  * Evaluates the effective 3D lighting multiplier and writes the perturbed unit normal

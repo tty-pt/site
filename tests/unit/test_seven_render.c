@@ -4610,8 +4610,8 @@ int main(void)
 				assert(strstr(nd_seven_gl_fs_terrain(), "nd_eval_valley_fog") != NULL);
 				assert(strstr(nd_seven_gl_fs_billboard(), "nd_eval_valley_fog") != NULL);
 				assert(strstr(nd_seven_gl_fs_mesh3d(), "nd_eval_valley_fog") != NULL);
-				assert(strstr(nd_seven_gl_fs_terrain(), "1.35 / 1024.0") != NULL);
-				assert(strstr(nd_seven_gl_fs_mesh3d(), "1.35 / 1024.0") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "1.25 / 1024.0") != NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "1.25 / 1024.0") != NULL);
 				assert(nd_seven_gl_fs_ssao() && strstr(nd_seven_gl_fs_ssao(), "uDepthTex") != NULL);
 				assert(nd_seven_gl_fs_bloom() && strstr(nd_seven_gl_fs_bloom(), "uSrcTex") != NULL);
 				assert(nd_seven_gl_fs_post() && strstr(nd_seven_gl_fs_post(), "uBloomTex") != NULL);
@@ -4799,6 +4799,51 @@ int main(void)
 				}
 				assert(med_shrubs > 0 && large_shrubs > 0);
 
+				/* Juvenile saplings, wild herbs (3, 8, 9) & riparian cattails (15) across vegetated biomes */
+				assert(nd_seven_sapling_mesh3d_id(0u, 0u) == ND_MESH3D_NONE);
+				assert(nd_seven_sapling_mesh3d_id(1u, 1u) == ND_MESH3D_NONE);
+				assert(nd_seven_sapling_mesh3d_id(18u, 2u) == ND_MESH3D_NONE);
+				for (unsigned bio = 2u; bio <= 17u; bio++) {
+					for (uint32_t h = 0u; h < 16u; h++) {
+						uint8_t sid = nd_seven_sapling_mesh3d_id(bio, h);
+						assert(sid >= ND_MESH3D_PLANT_BASE && sid < ND_MESH3D_STONE_BASE);
+						const nd_mesh3d_slice_t *ssl = nd_seven_mesh3d_slice(sid);
+						assert(ssl != NULL && ssl->idx_count > 0 && ssl->mesh_h_wu > 0.1f);
+					}
+				}
+				{
+					static const uint8_t strata_sp[4] = { 3u, 8u, 9u, 15u };
+					for (int si = 0; si < 4; si++) {
+						uint8_t pid = nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(strata_sp[si], 1u, 0u));
+						const nd_mesh3d_slice_t *psl = nd_seven_mesh3d_slice(pid);
+						assert(psl != NULL && psl->idx_count > 0 && psl->mesh_h_wu > 0.1f);
+					}
+				}
+
+				/* Canonical lowland rolling micro-topography (field.h): real undulation when rug_q8 == 0,
+				 * while preserving LOD 0 (fine == 0) and coarse invariance */
+				{
+					int32_t min_f = 0x7FFFFFFF, max_f = -0x7FFFFFFF;
+					int lowland_hits = 0;
+					for (int32_t wy = -2048; wy <= 2048; wy += 128) {
+						for (int32_t wx = -2048; wx <= 2048; wx += 128) {
+							if (nd_field_ruggedness_q8(0u, wx, wy) == 0u) {
+								int32_t c1 = 0, f1 = 0, c2 = 0, f2 = 0, c0 = 0, f0 = 0;
+								(void)nd_field_elevation_step_q12_4(0u, 1 << 16, wx, wy, &c1, &f1);
+								(void)nd_field_elevation_step_q12_4(0u, 64 << 16, wx, wy, &c2, &f2);
+								(void)nd_field_elevation_step_q12_4(0u, 2048 << 16, wx, wy, &c0, &f0);
+								assert(c1 == c2 && "Coarse elevation must remain step-invariant");
+								assert(f0 == 0 && "LOD 0 fine elevation must stay zero");
+								if (f1 < min_f) min_f = f1;
+								if (f1 > max_f) max_f = f1;
+								lowland_hits++;
+							}
+						}
+					}
+					assert(lowland_hits > 16 && (max_f - min_f) >= 64 &&
+					       "Flat lowlands (rug_q8 == 0) must exhibit >= 4 wu canonical rolling undulation");
+				}
+
 				const char *fs_terr = nd_seven_gl_fs_terrain();
 				const char *fs_bb   = nd_seven_gl_fs_billboard();
 				const char *vs_m3d  = nd_seven_gl_vs_mesh3d();
@@ -4811,15 +4856,21 @@ int main(void)
 				assert(strstr(fs_m3d, "perpDist < 28.0") != NULL);
 				assert(strstr(fs_m3d, "vDist < 145.0") != NULL);
 				assert(strstr(fs_m3d, "selfShadowVis") != NULL);
+				assert(strstr(fs_m3d, "mix(0.55, 1.0, smoothstep(0.0, 3.6, vHeightAboveGround))") != NULL);
+				assert(strstr(fs_terr, "rTexel = 1.25 / 1024.0") != NULL);
+				assert(strstr(fs_terr, "directShadowVis = mix(0.14, 1.0, treeShadowVis)") != NULL);
 				assert(strstr(fs_bb,  "smoothstep(0.95, 0.12, r2)") != NULL);
 				assert(strstr(fs_ssao, "rContact") != NULL && strstr(fs_ssao, "rCrevice") != NULL);
 				assert(strstr(fs_pst, "0.58 * clamp(uSsaoActive") != NULL);
 
 				/* Pass 2 */
 				assert(strstr(fs_terr, "nd_eval_meadow_bed_weight") != NULL);
-				assert(strstr(vs_m3d,  "isGrassMesh ? -1.45 : -1.5") != NULL);
+				assert(strstr(fs_terr, "bankGrassKeep") != NULL);
+				assert(strstr(vs_m3d,  "isGrassMesh ? -1.8 : -1.5") != NULL);
+				assert(strstr(fs_m3d,  "rootFeather") != NULL);
+				assert(strstr(fs_m3d,  "bankCol") != NULL);
 				assert(strstr(fs_m3d,  "nd_eval_grove_ecology_weight") != NULL);
-				assert(strstr(fs_m3d,  "0.18 + rootT * 0.56") != NULL);
+				assert(strstr(fs_m3d,  "0.22 + rootT * 0.62") != NULL);
 
 				/* Pass 3 */
 				assert(strstr(fs_terr, "0x48554D4Du") != NULL);
@@ -4828,7 +4879,62 @@ int main(void)
 				assert(nd_seven_get_res_scale() >= 0.66f && nd_seven_get_detail_scale() >= 0.71f);
 				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 
-				printf("PASS: Realism Passes 1-3 (capsule cutaway, dual SSAO, 3-tier flora, 3D ground-breakers & Low preset) verified\n");
+				/* Bug-hunt regression guards:
+				 * 1) 3D-only procedural flora (including mesh_id 1..128 & 160..191) must never fall back to full-atlas 2D quads
+				 * 2) 3D mesh world-grid anchor Z must preserve b->z (never subtract water_z_off) for shadow/cutaway alignment
+				 * 3) Grass mesh3d shader must multiply (not overwrite) rootT microAO and permit AO down to 0.38 */
+				{
+					lam_billboard_gpu_t b;
+					memset(&b, 0, sizeof(b));
+					b.mesh_id = nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(3u, 1u, 0u)); /* wild herb (1..128) */
+					b.u0 = 0.0f; b.u1 = 1.0f; b.v0 = 0.0f; b.v1 = 0.0f;
+					assert(nd_seven_gl_billboard_is_mesh3d_only(&b));
+					b.u0 = 1.0f; b.u1 = 0.0f; /* flipped */
+					assert(nd_seven_gl_billboard_is_mesh3d_only(&b));
+					b.mesh_id = nd_seven_sapling_mesh3d_id(9u, 0x1234u); /* juvenile sapling */
+					b.v0 = 0.0f; b.v1 = 1.0f; /* legacy full-atlas sentinel */
+					assert(nd_seven_gl_billboard_is_mesh3d_only(&b));
+					b.mesh_id = ND_MESH3D_MEADOW_BASE; /* tall grass/meadow clump (180..191) */
+					b.u0 = 0.0f; b.u1 = 1.0f; b.v0 = 0.0f; b.v1 = 0.0f;
+					assert(nd_seven_gl_billboard_is_mesh3d_only(&b));
+					b.mesh_id = ND_MESH3D_GEOBREAK_BASE;
+					b.u0 = 0.1f; b.u1 = 0.2f; b.v0 = 0.1f; b.v1 = 0.2f;
+					assert(nd_seven_gl_billboard_is_mesh3d_only(&b));
+					b.mesh_id = 42u; /* atlas-backed 3D tree allowed to crossfade */
+					b.u0 = 0.125f; b.u1 = 0.25f; b.v0 = 0.25f; b.v1 = 0.375f;
+					assert(!nd_seven_gl_billboard_is_mesh3d_only(&b));
+					b.mesh_id = 0u; /* plain 2D billboard */
+					b.u0 = 0.0f; b.u1 = 1.0f; b.v0 = 0.0f; b.v1 = 1.0f;
+					assert(!nd_seven_gl_billboard_is_mesh3d_only(&b));
+
+					float anchor[3] = { 0.0f, 0.0f, 0.0f };
+					memset(&b, 0, sizeof(b));
+					b.x = 120.0f; b.y = -40.0f; b.z = 24.0f;
+					b.water_z_off = 12.0f; b.anchor_y = 10.0f;
+					b.style = ND_BB_STYLE_STANDARD;
+					nd_seven_gl_eval_mesh3d_anchor(&b, anchor);
+					assert(fabsf(anchor[0] - 120.0f) < 1e-5f);
+					assert(fabsf(anchor[1] - (-45.0f)) < 1e-5f);
+					assert(fabsf(anchor[2] - 24.0f) < 1e-5f && "3D mesh anchor Z must equal b->z, never b->z - water_z_off");
+
+					b.z = 18.5f; b.water_z_off = 0.0f; b.anchor_y = 0.0f;
+					b.style = ND_BB_STYLE_FLORA;
+					nd_seven_gl_eval_mesh3d_anchor(&b, anchor);
+					assert(fabsf(anchor[1] - (-40.0f)) < 1e-5f && "Procedural flora with anchor_y=0 must not drift north");
+					assert(fabsf(anchor[2] - 18.5f) < 1e-5f);
+
+					b.z = 10.25f; b.water_z_off = 4.0f; b.anchor_y = 6.0f;
+					b.style = ND_BB_STYLE_GRASS;
+					nd_seven_gl_eval_mesh3d_anchor(&b, anchor);
+					assert(fabsf(anchor[1] - (-40.0f)) < 1e-5f && "Grass mesh3d must not apply anchor_y north shift");
+					assert(fabsf(anchor[2] - 10.25f) < 1e-5f);
+
+					assert(strstr(fs_m3d, "microAO *= clamp(0.74 + 0.48 * grShade") != NULL);
+					assert(strstr(fs_m3d, "microAO = clamp(0.74 + 0.48 * grShade") == NULL);
+					assert(strstr(fs_m3d, "clamp(cavityAO * contactAO * microAO, 0.38, 1.14)") != NULL);
+				}
+
+				printf("PASS: Realism Passes 1-3 (lowland rolling field, capsule cutaway, dual SSAO, 3-tier flora+saplings, 3D ground-breakers, mesh3d-only/anchor/AO fixes & Low preset) verified\n");
 			}
 		}
 	}

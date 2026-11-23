@@ -63,6 +63,7 @@ uint8_t nd_seven_entity_mesh3d_id(int spr_id);
 uint8_t nd_seven_meadow_mesh3d_id(int zone, unsigned biome, uint32_t hash);
 uint8_t nd_seven_understory_mesh3d_id(unsigned biome, uint32_t hash);
 uint8_t nd_seven_shrub_mesh3d_id(unsigned biome, uint32_t hash);
+uint8_t nd_seven_sapling_mesh3d_id(unsigned biome, uint32_t hash);
 uint8_t nd_seven_geobreak_mesh3d_id(unsigned biome, uint32_t hash);
 
 #endif /* ND_SEVEN_ATLAS_DRAW_H */

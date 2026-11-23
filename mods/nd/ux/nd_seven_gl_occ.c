@@ -549,7 +549,7 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	float uz = lx * ry - ly * rx;
 
 	/* Quantized orthographic half-extent + light-space texel snapping eliminates shadow shimmering on camera pan */
-	float raw_half = fminf(1024.0f, fmaxf(160.0f, s_gl.cur_dist * 0.52f));
+	float raw_half = fminf(1024.0f, fmaxf(160.0f, s_gl.cur_dist * 0.45f));
 	float half_xy = floorf(raw_half / 32.0f + 0.5f) * 32.0f;
 	const float half_z = 2048.0f;
 	float texel = (2.0f * half_xy) / (float)ND_TREE_SHADOW_RES;

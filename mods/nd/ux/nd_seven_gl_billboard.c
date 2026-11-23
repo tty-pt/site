@@ -983,6 +983,32 @@ static uint32_t s_mesh3d_counts[ND_SEVEN_MESH3D_TOTAL];
 static uint32_t s_mesh3d_offsets[ND_SEVEN_MESH3D_TOTAL];
 static uint32_t s_mesh3d_cursors[ND_SEVEN_MESH3D_TOTAL];
 
+bool nd_seven_gl_billboard_is_mesh3d_only(const lam_billboard_gpu_t *b)
+{
+	if (!b || b->mesh_id == 0)
+		return false;
+	if (b->mesh_id >= ND_MESH3D_UNDERSTORY_BASE && b->mesh_id < ND_SEVEN_MESH3D_TOTAL)
+		return true;
+	if (b->v0 == b->v1)
+		return true;
+	if (b->v0 <= 0.0001f && b->v1 >= 0.9999f && fabsf(b->u1 - b->u0) >= 0.999f)
+		return true;
+	return false;
+}
+
+void nd_seven_gl_eval_mesh3d_anchor(const lam_billboard_gpu_t *b,
+                                    float out_grid_pos[3])
+{
+	/* Center 3D trunks/rocks at (b->x, b->y - anchor_y * 0.5f) along North (-S);
+	 * 3D mesh vertices are rooted at local z = 0 on basis->base_pos (at b->z), so
+	 * param[2] must stay at b->z to keep the 3D shadow map, cutaway, and water line aligned. */
+	bool is_grass = (b->style == ND_BB_STYLE_GRASS);
+	float north_shift = (!is_grass && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	out_grid_pos[0] = b->x;
+	out_grid_pos[1] = b->y - north_shift;
+	out_grid_pos[2] = b->z;
+}
+
 static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const billboard_basis_t *basis,
                                         const nd_mesh3d_slice_t *sl,
@@ -1010,13 +1036,12 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	float wind_sx = (basis->flora_sway_scale > 0.0f) ? basis->grass_sx : 0.0f;
 	float wind_sy = (basis->flora_sway_scale > 0.0f) ? basis->grass_sy : 0.0f;
 
-	/* Center 3D trunks/rocks at (b->x, b->y - anchor_y * 0.5f) along North (-S);
-	 * ground-rooted 3D meadow grass clumps stay centered cleanly at (b->x, b->y, b->z). */
-	bool is_grass = (b->style == ND_BB_STYLE_GRASS);
-	float north_shift = (!is_grass && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
-	float bx = b->x;
-	float by = b->y - north_shift;
-	float bz = is_grass ? b->z : (b->z - b->water_z_off);
+	float anchor[3];
+	nd_seven_gl_eval_mesh3d_anchor(b, anchor);
+	float bx = anchor[0];
+	float by = anchor[1];
+	float bz = anchor[2];
+	float north_shift = b->y - by;
 	out->base_scale[0] = basis->base_pos[0] - S[0] * north_shift;
 	out->base_scale[1] = basis->base_pos[1] - S[1] * north_shift;
 	out->base_scale[2] = basis->base_pos[2] - S[2] * north_shift;
@@ -1444,8 +1469,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_understory = (batch[i].mesh_id >= ND_MESH3D_UNDERSTORY_BASE &&
 			                 batch[i].mesh_id < ND_MESH3D_TOTAL);
-			bool is_geobreak = (batch[i].mesh_id >= ND_MESH3D_GEOBREAK_BASE &&
-			                    batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL);
+			bool is_mesh3d_only = nd_seven_gl_billboard_is_mesh3d_only(&batch[i]);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
 			bool is_tall_tree = (!is_grass && !is_other &&
 			                     (batch[i].height >= 90.0f ||
@@ -1469,20 +1493,20 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 						if (d_m > cross_start) {
 							float lod_t = (d_m - cross_start) / fmaxf(1.0f, cross_band);
 							lod_mesh_keep = fmaxf(0.02f, fminf(0.98f, 1.0f - lod_t));
-							if (!is_understory && !is_geobreak &&
+							if (!is_mesh3d_only &&
 							    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1)
 								emit_impostor_crossfade = true;
 						}
 					}
 				}
-				if (!is_mesh3d && is_tall_tree && !is_understory &&
+				if (!is_mesh3d && is_tall_tree && !is_mesh3d_only &&
 				    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1) {
 					float max_cross_d = max_m3d_dist * 2.2f;
 					if (d2_m <= max_cross_d * max_cross_d)
 						is_crossed_tree = true;
 				}
 			}
-			if (!is_other && (is_understory || is_geobreak) && !is_mesh3d)
+			if (!is_other && is_mesh3d_only && !is_mesh3d)
 				continue;
 			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
 				float gr = (float)(batch[i].tint_rgba & 0xFFu) / 255.0f;
@@ -1610,7 +1634,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			}
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
-			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
+			if (can_sub && bb_sea_level > -900.0f && batch[i].z < bb_sea_level + 0.15f)
 				s_gl.sprites_in_water = true;
 		} else if (is_crossed_tree) {
 			/* Crossed +/-28 deg impostor cards give far trees volumetric depth across oblique views */

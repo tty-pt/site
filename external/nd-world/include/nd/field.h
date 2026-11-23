@@ -1168,6 +1168,20 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 			CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
 
 		uint16_t rug_q8 = nd_field_ruggedness_q8(world, wx, wy);
+		int32_t lowland_roll_q12_4 = 0;
+		if (rug_q8 < 256u && chaff_octave_weight_q16(6, step_q16) > 0u) {
+			/* Gentle canonical lowland rolling micro-topography (32..64 wu swales & rises, smooth quintic C2,
+			 * zero ridge folding) tapered out smoothly as ruggedness rises so plains never look tabletop-flat
+			 * while preserving gentle clear-plain relief (<= 8 wu avg room span) and >= 3.5x rugged contrast. */
+			int32_t roll_raw_q12_4 = chaff_fbm_rotated_2d_step_q12_4(
+				wx, wy, step_q16,
+				5, 6,
+				255, 5, 1,
+				seed ^ 0x524F4C4Cu, 0xB10Du,
+				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+			int32_t low_w_q8 = 256 - (int32_t)rug_q8;
+			lowland_roll_q12_4 = (int32_t)(((int64_t)roll_raw_q12_4 * low_w_q8) >> 8);
+		}
 		if (rug_q8 > 0) {
 			int32_t meso_ridge_q12_4 = chaff_fbm_rotated_2d_step_q12_4(
 				wx, wy, step_q16,
@@ -1175,11 +1189,12 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 				6, 5, 10,
 				seed ^ 0x7F4A7C15u, 0xCAFEu,
 				CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
-			int32_t base_scale_q8 = 128 + ((int32_t)rug_q8 * 3 >> 1);
+			int32_t base_scale_q8 = 128 + (((int32_t)rug_q8 * 11) >> 3);
 			int32_t scaled_base = (int32_t)(((int64_t)base_fine_q12_4 * base_scale_q8) >> 8);
-			fine_q12_4 = scaled_base + (int32_t)(((int64_t)meso_ridge_q12_4 * (int32_t)rug_q8) >> 8);
+			fine_q12_4 = scaled_base + lowland_roll_q12_4 +
+			             (int32_t)(((int64_t)meso_ridge_q12_4 * (int32_t)rug_q8) >> 8);
 		} else {
-			fine_q12_4 = base_fine_q12_4 >> 1;
+			fine_q12_4 = (base_fine_q12_4 >> 1) + lowland_roll_q12_4;
 		}
 	}
 

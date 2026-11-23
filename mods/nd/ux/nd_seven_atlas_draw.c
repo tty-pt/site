@@ -464,6 +464,48 @@ uint8_t nd_seven_shrub_mesh3d_id(unsigned biome, uint32_t hash)
 	return (uint8_t)(ND_MESH3D_SHRUB_BASE + arch * 2u + sub);
 }
 
+uint8_t nd_seven_sapling_mesh3d_id(unsigned biome, uint32_t hash)
+{
+	if (biome == 0u || biome == 1u || biome == 18u)
+		return ND_MESH3D_NONE;
+	unsigned var = hash & 3u;
+	unsigned r = (hash >> 2u) % 8u;
+	unsigned sp = 10u; /* Default: Quercus robur */
+	switch (biome) {
+	case 2u: case 3u: /* Tundra / Alpine meadow */
+		sp = (r < 5u) ? 4u : 0u; /* Betula pubescens, Pinus sylvestris */
+		break;
+	case 4u: /* Mediterranean */
+		sp = (r < 5u) ? 13u : 10u; /* Olea europaea, Quercus robur */
+		break;
+	case 5u: /* Wetland */
+		sp = (r < 5u) ? 11u : 4u; /* Salix babylonica, Betula pubescens */
+		break;
+	case 6u: case 14u: /* Cold / Hot Desert */
+		sp = 6u; /* Arthrocereus rondonianus */
+		break;
+	case 7u: case 15u: /* Shrubland / Savannah */
+		sp = (r < 5u) ? 7u : 13u; /* Acacia senegal, Olea europaea */
+		break;
+	case 8u: case 9u: /* Coniferous / Boreal forest */
+		sp = (r < 3u) ? 0u : ((r < 5u) ? 1u : ((r < 7u) ? 5u : 2u));
+		break;
+	case 10u: /* Temperate grassland */
+		sp = (r < 4u) ? 10u : ((r < 6u) ? 2u : 12u);
+		break;
+	case 11u: case 12u: case 13u: /* Woodland / Temperate seasonal / Rainforest */
+		sp = (r < 3u) ? 10u : ((r < 5u) ? 12u : ((r < 6u) ? 2u : ((r < 7u) ? 1u : 11u)));
+		break;
+	case 16u: case 17u: /* Tropical seasonal / Rainforest */
+		sp = (r < 3u) ? 11u : ((r < 5u) ? 7u : ((r < 7u) ? 12u : 10u));
+		break;
+	default:
+		sp = 10u;
+		break;
+	}
+	return nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(sp, 0u, var));
+}
+
 uint8_t nd_seven_meadow_mesh3d_id(int zone, unsigned biome, uint32_t hash)
 {
 	unsigned sub = hash & 1u;
