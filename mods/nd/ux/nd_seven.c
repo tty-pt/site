@@ -2787,7 +2787,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				/* Deterministic Trunk & Boulder Anchor Collars + 3D Tree Root Buttress Mounds:
 				 * Ground tree trunks into flared mossy root mounds and tuck root-collar ferns,
 				 * creeping juniper, alpine heather, hazel thickets, or mossy stumps around bases. */
-				if (dr[a].what == D_OBJ && eff_cam_dist < 1400.0f && all_gpu_count + 4 < ALL_GPU_MAX_DRAW &&
+				if (dr[a].what == D_OBJ && eff_cam_dist < 2100.0f && all_gpu_count + 4 < ALL_GPU_MAX_DRAW &&
 				    (dr[a].obj.kind == NDW_K_DECID || dr[a].obj.kind == NDW_K_TALL ||
 				     dr[a].obj.kind == NDW_K_FIR || dr[a].obj.kind == NDW_K_ROCK ||
 				     dr[a].obj.kind == NDW_K_BOULDER)) {
@@ -3247,7 +3247,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	/* Emit deterministic 3D Medium botanical stratum (16-32 wu):
 	 * Macro-patch clustered ferns, heather cushions, creeping juniper, tall meadow grass clumps,
 	 * and wild flowering herbs (flax, wild carrot umbels, leafy berry bushes). */
-	if (eff_cam_dist < 1800.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
+	if (eff_cam_dist < 2200.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
 		uint16_t s_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t s_base_wl = nd_field_water_level(s_world);
 		int64_t slwx64 = 0, slwy64 = 0;
@@ -3258,7 +3258,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float slwy_f = (float)slwy;
 
 		const int32_t med_step = 52;
-		const int32_t med_rad  = 1144;
+		const int32_t med_rad  = 1456;
 		int32_t scx0 = ndw_fdiv(slwx - med_rad, med_step) * med_step;
 		int32_t scy0 = ndw_fdiv(slwy - med_rad, med_step) * med_step;
 		const ar_node_t *s_node = NULL;
@@ -3448,7 +3448,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	/* Emit deterministic 3D Large undergrowth stratum (36-75 wu):
 	 * Biome-matched juvenile saplings, hazel/berry coppice thickets, tall riparian cattail/bulrush stands,
 	 * and occasional deadwood snags bridging mid-story shrubs into the mature tree canopy. */
-	if (eff_cam_dist < 2100.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
+	if (eff_cam_dist < 2600.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
 		uint16_t l_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t l_base_wl = nd_field_water_level(l_world);
 		int64_t llwx64 = 0, llwy64 = 0;
@@ -3459,7 +3459,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float llwy_f = (float)llwy;
 
 		const int32_t large_step = 92;
-		const int32_t large_rad  = 1196;
+		const int32_t large_rad  = 1564;
 		int32_t lcx0 = ndw_fdiv(llwx - large_rad, large_step) * large_step;
 		int32_t lcy0 = ndw_fdiv(llwy - large_rad, large_step) * large_step;
 		const ar_node_t *l_node = NULL;
@@ -3635,7 +3635,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 	/* Emit deterministic 3D ground-breaker relief props (mossy hummocks, scree outcrops, turf berms)
 	 * across flat lowlands, riverbanks, grove margins, and footpath shoulders */
-	if (eff_cam_dist < 1750.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
+	if (eff_cam_dist < 2200.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
 		uint16_t g_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 		int16_t g_base_wl = nd_field_water_level(g_world);
 		int64_t glwx64 = 0, glwy64 = 0;
@@ -3646,7 +3646,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		float glwy_f = (float)glwy;
 
 		const int32_t geobreak_step = 52;
-		const int32_t geobreak_rad  = 1140;
+		const int32_t geobreak_rad  = 1456;
 		int32_t gcx0 = ndw_fdiv(glwx - geobreak_rad, geobreak_step) * geobreak_step;
 		int32_t gcy0 = ndw_fdiv(glwy - geobreak_rad, geobreak_step) * geobreak_step;
 		const ar_node_t *g_node = NULL;

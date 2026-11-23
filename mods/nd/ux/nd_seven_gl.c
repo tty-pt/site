@@ -1483,8 +1483,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	/* Enqueue primary-world near-field chunks (Level <= 1) for GPU-instanced 3D grass & clover carpet */
 	if (world == s_gl.cur_pdef.world_id && level <= 1 &&
 	    s_gl.grass_pipe.prog && s_gl.grass_idx_count > 0 &&
-	    s_gl.cur_dist < 1800.0f && s_gl.grass_q_count < MAX_GRASS_CHUNKS) {
-		float g_pad = 720.0f + (float)span_w * 0.5f;
+	    s_gl.cur_dist < 2600.0f && s_gl.grass_q_count < MAX_GRASS_CHUNKS) {
+		float g_pad = 1180.0f + (float)span_w * 0.5f;
 		float cx = (float)ox + (float)span_w * 0.5f;
 		float cy = (float)oy + (float)span_h * 0.5f;
 		if (fabsf(cx - s_gl.cur_tx) <= g_pad && fabsf(cy - s_gl.cur_ty) <= g_pad) {
@@ -1555,14 +1555,14 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 void nd_seven_gl_flush_grass(void)
 {
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.grass_pipe.prog ||
-	    s_gl.grass_q_count == 0 || s_gl.grass_idx_count <= 0 || s_gl.cur_dist >= 1800.0f) {
+	    s_gl.grass_q_count == 0 || s_gl.grass_idx_count <= 0 || s_gl.cur_dist >= 2600.0f) {
 		s_gl.grass_q_count = 0;
 		return;
 	}
 
 	float det_scale = nd_seven_get_detail_scale();
-	int l0_n = (det_scale < 0.75f) ? 36 : ((det_scale < 0.90f) ? 52 : 64);
-	int l1_n = (det_scale < 0.75f) ? 24 : ((det_scale < 0.90f) ? 36 : 44);
+	int l0_n = (det_scale < 0.75f) ? 40 : ((det_scale < 0.90f) ? 54 : 68);
+	int l1_n = (det_scale < 0.75f) ? 28 : ((det_scale < 0.90f) ? 38 : 48);
 
 	glUseProgram(s_gl.grass_pipe.prog);
 	glEnable(GL_DEPTH_TEST);
