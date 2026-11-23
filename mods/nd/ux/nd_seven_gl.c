@@ -1267,41 +1267,28 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
 	if (s_gl.cloud_count < (uint32_t)nd_seven_gl_max_water_queue() &&
 	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
-		
-		/* Hi-Z occlusion test for cloud chunk (when CPU readback is populated) */
-		if (s_gl.hiz_valid && s_occ2d_valid &&
-		    nd_seven_hiz_test_cloud_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, 920.0f)) {
-			s_gl.cloud_culled_hiz++;
-		} else {
-			gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
-			cq->ox = ox;
-			cq->oy = oy;
-			cq->span_w = span_w;
-			cq->span_h = span_h;
-			cq->level = level;
-			cq->sea_level = terrain_sea_lvl;
-			cq->height_tex = slot->height_tex;
-			cq->substrate_tex = slot->substrate_tex;
-			cq->rel_center[0] = rel_center[0];
-			cq->rel_center[1] = rel_center[1];
-			cq->rel_center[2] = rel_center[2];
-			for (int k = 0; k < 16; k++) cq->rot_mat4[k] = rot_mat4[k];
-			cq->major_r = eff_pdef->major_r;
-			cq->minor_r = eff_pdef->minor_r;
-		}
+		gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
+		cq->ox = ox;
+		cq->oy = oy;
+		cq->span_w = span_w;
+		cq->span_h = span_h;
+		cq->level = level;
+		cq->sea_level = terrain_sea_lvl;
+		cq->height_tex = slot->height_tex;
+		cq->substrate_tex = slot->substrate_tex;
+		cq->rel_center[0] = rel_center[0];
+		cq->rel_center[1] = rel_center[1];
+		cq->rel_center[2] = rel_center[2];
+		for (int k = 0; k < 16; k++) cq->rot_mat4[k] = rot_mat4[k];
+		cq->major_r = eff_pdef->major_r;
+		cq->minor_r = eff_pdef->minor_r;
 	}
 
 	/* Queue the water surface of this chunk for the submerged-object pass */
 	if (terrain_sea_lvl > -900.0f && s_gl.water_count < (uint32_t)nd_seven_gl_max_water_queue()) {
-		/* Skip water chunks that are occluded (2D hierarchical occlusion map or 1D ridge test) */
-		if (s_occ2d_valid && s_gl.hiz_valid) {
-			if (nd_seven_occ2d_test_water_chunk(ox, oy, span_w, span_h, s_gl.cur_mvp, terrain_sea_lvl)) {
-				s_gl.water_culled_occ2d++;
-				return; /* Don't queue this water chunk */
-			}
-		} else if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
-		                                            s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-		                                            s_gl.cur_pdef.minor_r)) {
+		if (nd_seven_is_water_ridge_occluded(ox, oy, span_w, span_h,
+		                                     s_gl.cur_mvp, s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+		                                     s_gl.cur_pdef.minor_r)) {
 			return; /* Don't queue this water chunk */
 		}
 		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];

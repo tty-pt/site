@@ -801,4 +801,111 @@ nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
 	free(zbuf);
 }
 
+/* Ground-breaker relief mesh templates (206..211, layered after canonical ND_MESH3D_TOTAL = 206):
+ *   0..1: Mossy Earth & Root Hummock
+ *   2..3: Embedded Scree & Fieldstone Outcrop
+ *   4..5: Turf Berm & Exposed Root Mound */
+#define ND_MESH3D_GEOBREAK_BASE  ND_MESH3D_TOTAL
+#define ND_MESH3D_GEOBREAK_COUNT 6u
+#define ND_SEVEN_MESH3D_TOTAL    (ND_MESH3D_GEOBREAK_BASE + ND_MESH3D_GEOBREAK_COUNT)
+
+static inline void
+nd_m3d_build_geobreak_prop(nd_mesh3d_builder_t *b, uint32_t variant, nd_mesh3d_slice_t *out_slice)
+{
+	uint32_t first_vert = b->vert_count;
+	uint32_t first_idx  = b->idx_count;
+	uint32_t vtype = variant % ND_MESH3D_GEOBREAK_COUNT;
+	uint32_t arch  = vtype >> 1u;
+	uint32_t sub   = vtype & 1u;
+	uint32_t seed  = 0x47454F42u ^ (vtype * 0x9E3779B1u);
+
+	float mesh_w = 44.0f;
+	float mesh_h = 12.0f;
+
+	if (arch == 0u) {
+		/* Mossy Earth & Root Hummock */
+		mesh_w = sub ? 48.0f : 42.0f;
+		mesh_h = sub ? 13.0f : 11.0f;
+		nd_m3d_add_cleaved_boulder(b, 0.0f, 0.0f, -0.4f,
+		                           mesh_w * 0.38f, mesh_w * 0.30f, mesh_h * 0.88f,
+		                           8, 4, 0.24f, 0,
+		                           0xFF22303Eu, 0xFF304456u, 0xFF40586Eu, 0xFF4F6B84u,
+		                           1, 0xFF224C28u, 0xFF448640u,
+		                           seed, ND_MAT3D_STONE_MATTE);
+		nd_m3d_add_cleaved_boulder(b, sub ? -10.5f : 10.5f, 3.8f, -0.4f,
+		                           mesh_w * 0.22f, mesh_w * 0.19f, mesh_h * 0.56f,
+		                           7, 3, 0.28f, 0,
+		                           0xFF22303Eu, 0xFF304456u, 0xFF40586Eu, 0xFF4F6B84u,
+		                           1, 0xFF224C28u, 0xFF448640u,
+		                           seed + 131u, ND_MAT3D_STONE_MATTE);
+		for (int r = 0; r < 2; r++) {
+			float dir = (r == 0) ? 1.0f : -1.0f;
+			float rpts[3][3] = {
+				{ dir * 3.5f, -1.5f + (float)r * 3.0f, mesh_h * 0.42f },
+				{ dir * 11.0f, -3.2f + (float)r * 5.2f, mesh_h * 0.24f },
+				{ dir * 18.5f, -4.5f + (float)r * 7.0f, -0.6f }
+			};
+			static const float rrad[3] = { 1.65f, 1.10f, 0.45f };
+			nd_m3d_add_axis_spline_tube(b, rpts, rrad, 3, 5, 0,
+			                            0xFF243444u, 0xFF344A5Eu, 0xFF48647Cu,
+			                            ND_PLANT_BARK_FISSURED, mesh_h, seed + (uint32_t)(r * 37u + 9u));
+		}
+	} else if (arch == 1u) {
+		/* Embedded Scree & Fieldstone Outcrop */
+		mesh_w = sub ? 42.0f : 36.0f;
+		mesh_h = sub ? 15.0f : 12.5f;
+		nd_m3d_add_cleaved_boulder(b, -3.0f, 0.0f, -0.5f,
+		                           mesh_w * 0.34f, mesh_w * 0.27f, mesh_h * 0.85f,
+		                           7, 3, 0.68f, 1,
+		                           0xFF36322Eu, 0xFF544E48u, 0xFF767068u, 0xFF98928Au,
+		                           1, 0xFF2C4D2Au, 0xFF4D7B3Fu,
+		                           seed, ND_MAT3D_STONE_MATTE);
+		nd_m3d_add_cleaved_boulder(b, 8.8f, 3.6f, -0.4f,
+		                           mesh_w * 0.21f, mesh_w * 0.17f, mesh_h * 0.58f,
+		                           6, 3, 0.72f, 1,
+		                           0xFF36322Eu, 0xFF544E48u, 0xFF767068u, 0xFF98928Au,
+		                           0, 0, 0, seed + 71u, ND_MAT3D_STONE_MATTE);
+		nd_m3d_add_cleaved_boulder(b, -11.5f, -3.2f, -0.4f,
+		                           mesh_w * 0.16f, mesh_w * 0.14f, mesh_h * 0.42f,
+		                           6, 3, 0.64f, 0,
+		                           0xFF36322Eu, 0xFF544E48u, 0xFF767068u, 0xFF98928Au,
+		                           1, 0xFF2C4D2Au, 0xFF4D7B3Fu, seed + 193u, ND_MAT3D_STONE_MATTE);
+	} else {
+		/* Turf Berm & Exposed Root Mound */
+		mesh_w = sub ? 54.0f : 48.0f;
+		mesh_h = sub ? 11.5f : 9.8f;
+		nd_m3d_add_cleaved_boulder(b, 0.0f, 0.0f, -0.4f,
+		                           mesh_w * 0.42f, mesh_w * 0.22f, mesh_h * 0.86f,
+		                           8, 4, 0.20f, 0,
+		                           0xFF243440u, 0xFF344A58u, 0xFF45606Eu, 0xFF567684u,
+		                           1, 0xFF26562Au, 0xFF488E42u,
+		                           seed, ND_MAT3D_STONE_MATTE);
+		nd_m3d_add_cleaved_boulder(b, sub ? 12.0f : -12.0f, -2.5f, -0.4f,
+		                           mesh_w * 0.20f, mesh_w * 0.15f, mesh_h * 0.54f,
+		                           7, 3, 0.46f, 1,
+		                           0xFF343230u, 0xFF504C48u, 0xFF706C66u, 0xFF8E8A84u,
+		                           1, 0xFF26562Au, 0xFF488E42u,
+		                           seed + 257u, ND_MAT3D_STONE_MATTE);
+	}
+
+	/* Ground-breakers are static terrain relief: zero wind sway */
+	for (uint32_t vi = first_vert; vi < b->vert_count; vi++)
+		b->verts[vi].pos[3] = 0.0f;
+
+	if (out_slice) {
+		out_slice->first_vert = first_vert;
+		out_slice->vert_count = b->vert_count - first_vert;
+		out_slice->first_idx  = first_idx;
+		out_slice->idx_count  = b->idx_count - first_idx;
+		out_slice->mesh_w_wu  = mesh_w;
+		out_slice->mesh_h_wu  = mesh_h;
+		out_slice->sprite_w   = (uint16_t)(mesh_w + 0.5f);
+		out_slice->sprite_h   = (uint16_t)(mesh_h + 0.5f);
+		out_slice->anchor_y   = 2u;
+		out_slice->shadow_rx  = (uint8_t)(mesh_w * 0.36f);
+		out_slice->shadow_ry  = (uint8_t)(mesh_w * 0.18f);
+		out_slice->pad0       = 0;
+	}
+}
+
 #endif /* ND_SEVEN_MESH3D_H */

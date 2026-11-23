@@ -979,9 +979,9 @@ static inline bool pack_bb_lamb_shadow_quad_instance(const lam_billboard_gpu_t *
 static nd_seven_gl_mesh3d_inst_t s_mesh3d_staging[MAX_BB_INSTANCES];
 static uint8_t s_mesh3d_staging_ids[MAX_BB_INSTANCES];
 static nd_seven_gl_mesh3d_inst_t s_mesh3d_sorted[MAX_BB_INSTANCES];
-static uint32_t s_mesh3d_counts[ND_MESH3D_TOTAL];
-static uint32_t s_mesh3d_offsets[ND_MESH3D_TOTAL];
-static uint32_t s_mesh3d_cursors[ND_MESH3D_TOTAL];
+static uint32_t s_mesh3d_counts[ND_SEVEN_MESH3D_TOTAL];
+static uint32_t s_mesh3d_offsets[ND_SEVEN_MESH3D_TOTAL];
+static uint32_t s_mesh3d_cursors[ND_SEVEN_MESH3D_TOTAL];
 
 static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const billboard_basis_t *basis,
@@ -1079,11 +1079,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	memset(s_mesh3d_counts, 0, sizeof(s_mesh3d_counts));
 	for (uint32_t i = 0; i < mesh3d_n; i++) {
 		uint8_t mid = s_mesh3d_staging_ids[i];
-		if (mid > 0 && mid < ND_MESH3D_TOTAL)
+		if (mid > 0 && mid < ND_SEVEN_MESH3D_TOTAL)
 			s_mesh3d_counts[mid]++;
 	}
 	uint32_t running = 0;
-	for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
+	for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
 		s_mesh3d_offsets[m] = running;
 		s_mesh3d_cursors[m] = running;
 		running += s_mesh3d_counts[m];
@@ -1092,7 +1092,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	for (uint32_t i = 0; i < mesh3d_n; i++) {
 		uint8_t mid = s_mesh3d_staging_ids[i];
-		if (mid > 0 && mid < ND_MESH3D_TOTAL)
+		if (mid > 0 && mid < ND_SEVEN_MESH3D_TOTAL)
 			s_mesh3d_sorted[s_mesh3d_cursors[mid]++] = s_mesh3d_staging[i];
 	}
 
@@ -1185,7 +1185,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		if (s_gl.mesh3d_pipe.uTreeShadowWriteVP >= 0)
 			glUniformMatrix4fv(s_gl.mesh3d_pipe.uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
 		glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 3);
-		for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
+		for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
 			uint32_t icnt = s_mesh3d_counts[m];
 			if (icnt == 0) continue;
 			const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
@@ -1228,7 +1228,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			glStencilMask(sbit);
 			glStencilFunc(GL_EQUAL, 0, sbit);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
-			for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
+			for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
 				uint32_t icnt = s_mesh3d_counts[m];
 				if (icnt == 0) continue;
 				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
@@ -1253,7 +1253,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	glStencilFunc(GL_ALWAYS, 1, 0x01);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
-	for (uint32_t m = 1; m < ND_MESH3D_TOTAL; m++) {
+	for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
 		uint32_t icnt = s_mesh3d_counts[m];
 		if (icnt == 0) continue;
 		const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
@@ -1441,24 +1441,18 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		uint32_t need_core = 0, need_other = 0, need_mesh3d = 0;
 		const nd_mesh3d_slice_t *m3d_slice = NULL;
 		if (!last) {
-			/* Hi-Z occlusion culling for billboards when CPU readback map is active */
-			if (s_gl.hiz_valid && s_occ2d_valid) {
-				float radius = fmaxf(batch[i].width, batch[i].height) * 0.5f;
-				if (nd_seven_hiz_test_sphere(batch[i].x, batch[i].y, batch[i].z, radius)) {
-					s_gl.billboard_culled_hiz++;
-					continue;  // Skip this billboard
-				}
-			}
 			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
 			is_understory = (batch[i].mesh_id >= ND_MESH3D_UNDERSTORY_BASE &&
 			                 batch[i].mesh_id < ND_MESH3D_TOTAL);
+			bool is_geobreak = (batch[i].mesh_id >= ND_MESH3D_GEOBREAK_BASE &&
+			                    batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL);
 			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
 			bool is_tall_tree = (!is_grass && !is_other &&
 			                     (batch[i].height >= 90.0f ||
 			                      (is_understory && batch[i].height >= 64.0f)) &&
 			                     batch[i].mesh_id >= ND_MESH3D_PLANT_BASE &&
 			                     batch[i].mesh_id < ND_MESH3D_TOTAL);
-			if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
+			if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
 				float dx_m = batch[i].x - s_gl.cur_tx;
 				float dy_m = batch[i].y - s_gl.cur_ty;
 				float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
@@ -1475,7 +1469,8 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 						if (d_m > cross_start) {
 							float lod_t = (d_m - cross_start) / fmaxf(1.0f, cross_band);
 							lod_mesh_keep = fmaxf(0.02f, fminf(0.98f, 1.0f - lod_t));
-							if (!is_understory && batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1)
+							if (!is_understory && !is_geobreak &&
+							    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1)
 								emit_impostor_crossfade = true;
 						}
 					}
@@ -1487,7 +1482,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 						is_crossed_tree = true;
 				}
 			}
-			if (!is_other && is_understory && !is_mesh3d)
+			if (!is_other && (is_understory || is_geobreak) && !is_mesh3d)
 				continue;
 			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
 				float gr = (float)(batch[i].tint_rgba & 0xFFu) / 255.0f;

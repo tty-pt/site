@@ -382,8 +382,8 @@ int main(void)
 		preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
 		bud_runtime_dispatch(rt, preset_btn, "click", "");
 		assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
-		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 50);
-		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 50);
+		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 67);
+		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 72);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_LOW);
 		assert(nd_seven_get_msaa() == 0);
 		assert(nd_seven_get_fps_cap() == 30);
@@ -392,7 +392,7 @@ int main(void)
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
 		assert(strstr(html, "🔋 Low (Fastest)") != NULL);
-		assert(strstr(html, "--nd-res:50;--nd-det:50;--nd-cloud:1;--nd-msaa:0;--nd-fps:30;--nd-zoom:100;") != NULL);
+		assert(strstr(html, "--nd-res:67;--nd-det:72;--nd-cloud:1;--nd-msaa:0;--nd-fps:30;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
 		rt = bud_runtime_new(root);

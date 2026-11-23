@@ -551,7 +551,6 @@ typedef struct {
 	bool hiz_valid;
 	bool hiz_failed;
 	bool gpu_hiz_built;
-	float hiz_readback[ND_HIZ_MAX_LEVELS][16][16];
 	GLuint hiz_downsample_prog;
 
 	/* GPU Indirect Draw Command Buffer & Stats */
@@ -583,10 +582,6 @@ extern float s_lamb_shadow_light[4];
 
 extern float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
 extern int s_ridge_occlusion_valid;
-extern float s_occ2d_pyramid[ND_OCC2D_MAX_LEVELS][64][64];
-extern int s_occ2d_valid;
-extern int s_occ2d_levels;
-extern uint32_t s_occ2d_w, s_occ2d_h;
 extern float s_ridge_cam_flat_y;
 extern int s_ridge_use_occlusion;
 

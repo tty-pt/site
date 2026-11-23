@@ -4043,26 +4043,26 @@ int main(void)
 				uint32_t bbs_detail_100 = nd_seven_last_mid_billboard_count();
 				assert(bbs_detail_100 > 10);
 
-				/* 2) Low Preset (50% res, 50% detail, Low 1/4 clouds, No CSM, 1x Off MSAA, 30 FPS) */
+				/* 2) Low Preset (67% res, 72% detail, Low 1/4 clouds, No CSM, 1x Off MSAA, 30 FPS) */
 				nd_seven_apply_quality_preset(ND_QUALITY_LOW);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
-				assert(fabsf(nd_seven_get_res_scale() - 0.50f) < 1e-4f);
-				assert(fabsf(nd_seven_get_detail_scale() - 0.50f) < 1e-4f);
+				assert(fabsf(nd_seven_get_res_scale() - 0.67f) < 1e-4f);
+				assert(fabsf(nd_seven_get_detail_scale() - 0.72f) < 1e-4f);
 				assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_LOW);
 				assert(nd_seven_get_msaa() == 0);
 				assert(nd_seven_get_fps_cap() == 30);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
-				assert(rw == 960 && rh == 540);
+				assert(rw == 1286 && rh == 724);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
-				assert(st_w == 960 && st_h == 540);
-				assert(sc_w == 960 && sc_h == 540);
+				assert(st_w == 1286 && st_h == 724);
+				assert(sc_w == 1286 && sc_h == 724);
 				assert(sc_samples == 0);
-				assert(cl_w == 240 && cl_h == 135);
+				assert(cl_w == 321 && cl_h == 181);
 				assert(csm_act == false);
-				uint32_t bbs_detail_50 = nd_seven_last_mid_billboard_count();
-				assert(bbs_detail_50 > 0 && bbs_detail_50 < bbs_detail_100);
+				uint32_t bbs_detail_low = nd_seven_last_mid_billboard_count();
+				assert(bbs_detail_low > 0 && bbs_detail_low < bbs_detail_100);
 
 				/* 3) Medium Preset (75% res, 75% detail, Medium 1/3 clouds + CSM, 1x Off MSAA, 60 FPS) */
 				nd_seven_apply_quality_preset(ND_QUALITY_MEDIUM);
@@ -4083,7 +4083,7 @@ int main(void)
 				assert(cl_w == 480 && cl_h == 270);
 				assert(csm_act == true);
 				uint32_t bbs_detail_75 = nd_seven_last_mid_billboard_count();
-				assert(bbs_detail_75 > bbs_detail_50 && bbs_detail_75 < bbs_detail_100);
+				assert(bbs_detail_75 > bbs_detail_low && bbs_detail_75 < bbs_detail_100);
 
 				/* 4) Custom Settings: 25% resolution scale, 200% scenery detail, Clouds Off, MSAA On */
 				nd_seven_set_res_scale(0.25f);
@@ -4610,8 +4610,8 @@ int main(void)
 				assert(strstr(nd_seven_gl_fs_terrain(), "nd_eval_valley_fog") != NULL);
 				assert(strstr(nd_seven_gl_fs_billboard(), "nd_eval_valley_fog") != NULL);
 				assert(strstr(nd_seven_gl_fs_mesh3d(), "nd_eval_valley_fog") != NULL);
-				assert(strstr(nd_seven_gl_fs_terrain(), "2.15 / 1024.0") != NULL);
-				assert(strstr(nd_seven_gl_fs_mesh3d(), "2.15 / 1024.0") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "1.35 / 1024.0") != NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "1.35 / 1024.0") != NULL);
 				assert(nd_seven_gl_fs_ssao() && strstr(nd_seven_gl_fs_ssao(), "uDepthTex") != NULL);
 				assert(nd_seven_gl_fs_bloom() && strstr(nd_seven_gl_fs_bloom(), "uSrcTex") != NULL);
 				assert(nd_seven_gl_fs_post() && strstr(nd_seven_gl_fs_post(), "uBloomTex") != NULL);
@@ -4766,6 +4766,69 @@ int main(void)
 
 				printf("PASS: Low-veg grass/trail sync (hits=%d, max_tw=%.2f), micro-detail/normal atlases & linear HDR/sRGB pipeline verified\n",
 				       high_trail_hits, max_tw);
+			}
+
+			/* Realism Passes 1-3: Capsule Cutaway, Dual-Scale SSAO, 3-Tier Flora & 3D Ground-Breakers */
+			{
+				assert(ND_MESH3D_GEOBREAK_BASE == 206u);
+				assert(ND_MESH3D_GEOBREAK_COUNT == 6u);
+				assert(ND_SEVEN_MESH3D_TOTAL == 212u);
+				assert(nd_seven_mesh3d_slice(ND_SEVEN_MESH3D_TOTAL) == NULL);
+
+				assert(nd_seven_geobreak_mesh3d_id(0u, 0u) == ND_MESH3D_NONE);
+				assert(nd_seven_geobreak_mesh3d_id(1u, 1u) == ND_MESH3D_NONE);
+				assert(nd_seven_geobreak_mesh3d_id(18u, 2u) == ND_MESH3D_NONE);
+				for (unsigned bio = 2u; bio <= 17u; bio++) {
+					for (uint32_t h = 0u; h < 16u; h++) {
+						uint8_t gid = nd_seven_geobreak_mesh3d_id(bio, h);
+						assert(gid >= ND_MESH3D_GEOBREAK_BASE && gid < ND_SEVEN_MESH3D_TOTAL);
+					}
+				}
+				for (unsigned gv = 0u; gv < ND_MESH3D_GEOBREAK_COUNT; gv++) {
+					const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)(ND_MESH3D_GEOBREAK_BASE + gv));
+					assert(sl != NULL && sl->vert_count >= 40u && sl->idx_count >= 60u);
+					assert(sl->mesh_w_wu >= 30.0f && sl->mesh_h_wu >= 8.0f);
+				}
+
+				int med_shrubs = 0, large_shrubs = 0;
+				for (unsigned sv = 0u; sv < ND_MESH3D_SHRUB_COUNT; sv++) {
+					const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)(ND_MESH3D_SHRUB_BASE + sv));
+					assert(sl != NULL);
+					if (sl->mesh_h_wu > 35.0f) large_shrubs++;
+					else med_shrubs++;
+				}
+				assert(med_shrubs > 0 && large_shrubs > 0);
+
+				const char *fs_terr = nd_seven_gl_fs_terrain();
+				const char *fs_bb   = nd_seven_gl_fs_billboard();
+				const char *vs_m3d  = nd_seven_gl_vs_mesh3d();
+				const char *fs_m3d  = nd_seven_gl_fs_mesh3d();
+				const char *fs_ssao = nd_seven_gl_fs_ssao();
+				const char *fs_pst  = nd_seven_gl_fs_post();
+
+				/* Pass 1 */
+				assert(strstr(fs_m3d, "proj > 12.0 && proj < clLen - 12.0") != NULL);
+				assert(strstr(fs_m3d, "perpDist < 28.0") != NULL);
+				assert(strstr(fs_m3d, "vDist < 145.0") != NULL);
+				assert(strstr(fs_m3d, "selfShadowVis") != NULL);
+				assert(strstr(fs_bb,  "smoothstep(0.95, 0.12, r2)") != NULL);
+				assert(strstr(fs_ssao, "rContact") != NULL && strstr(fs_ssao, "rCrevice") != NULL);
+				assert(strstr(fs_pst, "0.58 * clamp(uSsaoActive") != NULL);
+
+				/* Pass 2 */
+				assert(strstr(fs_terr, "nd_eval_meadow_bed_weight") != NULL);
+				assert(strstr(vs_m3d,  "isGrassMesh ? -1.45 : -1.5") != NULL);
+				assert(strstr(fs_m3d,  "nd_eval_grove_ecology_weight") != NULL);
+				assert(strstr(fs_m3d,  "0.18 + rootT * 0.56") != NULL);
+
+				/* Pass 3 */
+				assert(strstr(fs_terr, "0x48554D4Du") != NULL);
+				assert(strstr(fs_terr, "0.32 + 0.28 * distFade + 0.22 * closeZoom") != NULL);
+				nd_seven_apply_quality_preset(ND_QUALITY_LOW);
+				assert(nd_seven_get_res_scale() >= 0.66f && nd_seven_get_detail_scale() >= 0.71f);
+				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
+
+				printf("PASS: Realism Passes 1-3 (capsule cutaway, dual SSAO, 3-tier flora, 3D ground-breakers & Low preset) verified\n");
 			}
 		}
 	}

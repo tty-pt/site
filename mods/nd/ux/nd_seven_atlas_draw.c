@@ -263,7 +263,7 @@ static uint32_t s_norm_scratch[384 * 384];
 
 static nd_mesh3d_vert_t  s_mesh3d_verts[ND_MESH3D_MAX_VERTS];
 static uint32_t          s_mesh3d_indices[ND_MESH3D_MAX_INDICES];
-static nd_mesh3d_slice_t s_mesh3d_slices[ND_MESH3D_TOTAL];
+static nd_mesh3d_slice_t s_mesh3d_slices[ND_SEVEN_MESH3D_TOTAL];
 static uint32_t          s_mesh3d_vert_count = 0;
 static uint32_t          s_mesh3d_idx_count  = 0;
 static uint8_t           s_mesh3d_ready      = 0;
@@ -386,9 +386,38 @@ void nd_seven_mesh3d_init(void)
 		nd_m3d_build_shrub_prop(&b, sv, &s_mesh3d_slices[mid]);
 	}
 
+	/* Build all 6 instanced 3D ground-relief breakers: earth hummocks, scree & turf berms (206..211) */
+	for (unsigned gv = 0; gv < (unsigned)ND_MESH3D_GEOBREAK_COUNT; gv++) {
+		uint8_t mid = (uint8_t)(ND_MESH3D_GEOBREAK_BASE + gv);
+		nd_m3d_build_geobreak_prop(&b, gv, &s_mesh3d_slices[mid]);
+	}
+
 	s_mesh3d_vert_count = b.vert_count;
 	s_mesh3d_idx_count  = b.idx_count;
 	s_mesh3d_ready      = 1;
+}
+
+uint8_t nd_seven_geobreak_mesh3d_id(unsigned biome, uint32_t hash)
+{
+	if (biome == 0u || biome == 1u || biome == 18u)
+		return ND_MESH3D_NONE;
+	unsigned sub = hash & 1u;
+	unsigned r = (hash >> 1u) % 8u;
+	unsigned arch = 0u;
+	if (biome == 6u || biome == 14u || biome == 4u || biome == 7u) {
+		/* Arid/rocky/Mediterranean: favor embedded scree outcrops & low turf/earth berms */
+		arch = (r < 5u) ? 1u : 2u;
+	} else if (biome == 2u || biome == 3u) {
+		/* Alpine / Tundra: stone scree & mossy earth hummocks */
+		arch = (r < 4u) ? 1u : ((r < 7u) ? 0u : 2u);
+	} else if (biome == 8u || biome == 9u || biome == 11u || biome == 12u || biome == 13u || biome == 16u || biome == 17u) {
+		/* Woodland / Forest floors: mossy earth/root hummocks & turf berms, with embedded scree */
+		arch = (r < 4u) ? 0u : ((r < 6u) ? 2u : 1u);
+	} else {
+		/* Meadow / Wetland / Savanna: turf berms, mossy hummocks & fieldstone scree */
+		arch = (r < 3u) ? 2u : ((r < 6u) ? 0u : 1u);
+	}
+	return (uint8_t)(ND_MESH3D_GEOBREAK_BASE + arch * 2u + sub);
 }
 
 uint8_t nd_seven_understory_mesh3d_id(unsigned biome, uint32_t hash)
@@ -478,7 +507,7 @@ const uint32_t *nd_seven_mesh3d_indices(uint32_t *out_count)
 const nd_mesh3d_slice_t *nd_seven_mesh3d_slice(uint8_t mesh_id)
 {
 	nd_seven_mesh3d_init();
-	if (mesh_id == 0 || mesh_id >= ND_MESH3D_TOTAL)
+	if (mesh_id == 0 || mesh_id >= ND_SEVEN_MESH3D_TOTAL)
 		return NULL;
 	return &s_mesh3d_slices[mesh_id];
 }
@@ -497,7 +526,7 @@ uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id)
 static int
 bake_mesh3d_into_slot(flora_dyn_slot_t *slot, uint8_t mesh_id)
 {
-	if (!slot || mesh_id == 0 || mesh_id >= ND_MESH3D_TOTAL)
+	if (!slot || mesh_id == 0 || mesh_id >= ND_SEVEN_MESH3D_TOTAL)
 		return 0;
 	if (slot->loaded)
 		return 1;

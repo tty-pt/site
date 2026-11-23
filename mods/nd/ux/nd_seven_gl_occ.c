@@ -6,10 +6,6 @@
 
 float s_ridge_horizon_ndc_y[SEVEN_HORIZON_BINS];
 int s_ridge_occlusion_valid = 0;
-float s_occ2d_pyramid[ND_OCC2D_MAX_LEVELS][64][64];
-int s_occ2d_valid = 0;
-int s_occ2d_levels = 0;
-uint32_t s_occ2d_w = 0, s_occ2d_h = 0;
 float s_ridge_cam_flat_y = 0.0f;
 int s_ridge_use_occlusion = 0;
 
@@ -349,135 +345,11 @@ bool gl_build_hiz_pyramid(void)
 	return true;
 }
 
-/* Read back Hi-Z pyramid to CPU when CPU occlusion readback is active.
- * GPU-driven Hi-Z culling samples uHiZTex directly in the vertex shader. */
-static void gl_readback_hiz(void)
-{
-    (void)s_gl;
-}
-
-/* Build 2D hierarchical occlusion map from Hi-Z pyramid.
- * Creates a min-depth pyramid at tile granularity for fast rectangle queries. */
-static void gl_build_occ2d_map(void)
-{
-    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0) {
-        s_occ2d_valid = 0;
-        return;
-    }
-    
-    // Use Hi-Z level 2 as base (4x downsampled from full res)
-    int base_level = s_gl.hiz_levels > 2 ? 2 : s_gl.hiz_levels - 1;
-    uint32_t base_w = (s_gl.hiz_w > (1u << base_level)) ? (s_gl.hiz_w >> base_level) : 1u;
-    uint32_t base_h = (s_gl.hiz_h > (1u << base_level)) ? (s_gl.hiz_h >> base_level) : 1u;
-    
-    // Number of tiles in each dimension
-    int tiles_x = (base_w + ND_OCC2D_TILE_SIZE - 1) / ND_OCC2D_TILE_SIZE;
-    int tiles_y = (base_h + ND_OCC2D_TILE_SIZE - 1) / ND_OCC2D_TILE_SIZE;
-    tiles_x = tiles_x > 64 ? 64 : tiles_x;
-    tiles_y = tiles_y > 64 ? 64 : tiles_y;
-    
-    s_occ2d_w = base_w;
-    s_occ2d_h = base_h;
-    
-    // Level 0: compute min depth per tile from Hi-Z readback
-    for (int ty = 0; ty < tiles_y; ty++) {
-        for (int tx = 0; tx < tiles_x; tx++) {
-            int px0 = tx * ND_OCC2D_TILE_SIZE;
-            int py0 = ty * ND_OCC2D_TILE_SIZE;
-            int px1 = (px0 + ND_OCC2D_TILE_SIZE < (int)base_w) ? (px0 + ND_OCC2D_TILE_SIZE) : (int)base_w;
-            int py1 = (py0 + ND_OCC2D_TILE_SIZE < (int)base_h) ? (py0 + ND_OCC2D_TILE_SIZE) : (int)base_h;
-            
-            float min_depth = 1.0f;  // Far plane = 1.0 in NDC
-            for (int y = py0; y < py1; y++) {
-                for (int x = px0; x < px1; x++) {
-                    float d = s_gl.hiz_readback[base_level][y][x];
-                    if (d < min_depth) min_depth = d;
-                }
-            }
-            s_occ2d_pyramid[0][ty][tx] = min_depth;
-        }
-    }
-    
-    // Build higher levels (2x2 min filter)
-    int level_w = tiles_x;
-    int level_h = tiles_y;
-    for (int level = 1; level < ND_OCC2D_MAX_LEVELS; level++) {
-        int next_w = (level_w + 1) / 2;
-        int next_h = (level_h + 1) / 2;
-        if (next_w == 0 || next_h == 0) break;
-        
-        for (int ty = 0; ty < next_h; ty++) {
-            for (int tx = 0; tx < next_w; tx++) {
-                float d00 = s_occ2d_pyramid[level-1][ty*2][tx*2];
-                float d01 = (tx*2+1 < level_w) ? s_occ2d_pyramid[level-1][ty*2][tx*2+1] : d00;
-                float d10 = (ty*2+1 < level_h) ? s_occ2d_pyramid[level-1][ty*2+1][tx*2] : d00;
-                float d11 = (tx*2+1 < level_w && ty*2+1 < level_h) ? s_occ2d_pyramid[level-1][ty*2+1][tx*2+1] : d00;
-                
-                float min_d = d00;
-                if (d01 < min_d) min_d = d01;
-                if (d10 < min_d) min_d = d10;
-                if (d11 < min_d) min_d = d11;
-                
-                s_occ2d_pyramid[level][ty][tx] = min_d;
-            }
-        }
-        level_w = next_w;
-        level_h = next_h;
-        s_occ2d_levels = level + 1;
-    }
-    
-    s_occ2d_valid = 1;
-}
-
-/* Test if a world-space bounding sphere is occluded by Hi-Z buffer.
- * Returns true (1) if fully occluded (sphere behind depth at all samples). */
+/* GPU-driven Hi-Z culling samples uHiZTex directly in the vertex shader; CPU readback queries return 0. */
 int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius)
 {
-    if (!s_gl.hiz_valid || s_gl.hiz_levels == 0 || !s_occ2d_valid) return 0;
-    
-    // Project sphere center to clip space using current MVP
-    const float *clip = s_gl.cur_mvp;
-    
-    float px = clip[0]*cx + clip[4]*cy + clip[8]*cz + clip[12];
-    float py = clip[1]*cx + clip[5]*cy + clip[9]*cz + clip[13];
-    float pz = clip[2]*cx + clip[6]*cy + clip[10]*cz + clip[14];
-    float pw = clip[3]*cx + clip[7]*cy + clip[11]*cz + clip[15];
-    
-    if (pw <= 0.0f) return 0;  // Behind camera
-    
-    float ndc_x = px / pw;
-    float ndc_y = py / pw;
-    float ndc_z = pz / pw;
-    
-    // Sphere radius in NDC (approximate)
-    float r_ndc = radius * 2.0f / fmaxf(1.0f, fabsf(pw));
-    
-    // Test at Hi-Z level 2 (4x downsampled) for efficiency
-    int level = s_gl.hiz_levels > 2 ? 2 : s_gl.hiz_levels - 1;
-    int read_w = 16, read_h = 16;
-    
-    // UV in [0,1] for texture lookup
-    float uv_x = ndc_x * 0.5f + 0.5f;
-    float uv_y = -ndc_y * 0.5f + 0.5f;  // Flip Y for texture coords
-    
-    if (uv_x < 0.0f || uv_x > 1.0f || uv_y < 0.0f || uv_y > 1.0f) return 0;
-    
-    // Sample 3x3 neighborhood in Hi-Z
-    float texel = 1.0f / (float)read_w;
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            int sx = (int)((uv_x + dx * texel) * read_w);
-            int sy = (int)((uv_y + dy * texel) * read_h);
-            sx = sx < 0 ? 0 : (sx >= read_w ? read_w - 1 : sx);
-            sy = sy < 0 ? 0 : (sy >= read_h ? read_h - 1 : sy);
-            
-            float hiz_depth = s_gl.hiz_readback[level][sy][sx];
-            if (ndc_z + r_ndc > hiz_depth) {
-                return 0;  // Not occluded at this sample
-            }
-        }
-    }
-    return 1;  // Fully occluded
+    (void)cx; (void)cy; (void)cz; (void)radius;
+    return 0;
 }
 
 /* Ridge occlusion query for water queue gating: returns 1 if the water chunk at
@@ -490,15 +362,15 @@ int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int
     (void)r_planet;
     if (!s_ridge_occlusion_valid || !s_ridge_use_occlusion)
         return 0;
-    
-    // Only check if the water chunk is behind the camera (farther than lamb)
+
+    /* Only check if the water chunk is behind the camera (farther than lamb) */
     float cam_flat_y = s_ridge_cam_flat_y;
     if (oy + span_h >= cam_flat_y - 64.0f)
         return 0;
-    
+
     float x0 = (float)ox, x1 = (float)(ox + span_w);
     float y0 = (float)oy, y1 = (float)(oy + span_h);
-    float z_top = 96.0f; // water surface margin for occlusion test
+    float z_top = 96.0f; /* water surface margin for occlusion test */
     float corners[4][2] = { { x0, y0 }, { x1, y0 }, { x0, y1 }, { x1, y1 } };
     float min_nx = 2.0f, max_nx = -2.0f, max_ny = -2.0f;
     bool all_front = true;
@@ -518,176 +390,47 @@ int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int
     }
     if (!all_front || max_nx < -1.0f || min_nx > 1.0f || max_ny >= 1.0f)
         return 0;
-    
+
     int b0 = (int)floorf((fmaxf(-1.0f, min_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
     int b1 = (int)ceilf((fminf(1.0f, max_nx) + 1.0f) * (0.5f * SEVEN_HORIZON_BINS));
     if (b0 < 0) b0 = 0;
     if (b1 >= SEVEN_HORIZON_BINS) b1 = SEVEN_HORIZON_BINS - 1;
     if (b0 > b1)
         return 0;
-    
+
     for (int b = b0; b <= b1; b++) {
         if (max_ny + 0.015f >= s_ridge_horizon_ndc_y[b]) {
-            return 0; // Not occluded - ridge buffer is higher than water chunk
+            return 0;
         }
     }
-    return 1; // Fully occluded by ridge
+    return 1;
 }
 
-/* Cloud chunk occlusion test using Hi-Z */
 int nd_seven_hiz_test_cloud_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                    const float mvp[16], float cloud_z)
 {
-    (void)mvp;
-    // Compute bounding sphere of cloud chunk
-    float cx = (float)ox + span_w * 0.5f;
-    float cy = (float)oy + span_h * 0.5f;
-    float cz = cloud_z;
-    float radius = fmaxf(span_w, span_h) * 0.7071f;
-    
-    return nd_seven_hiz_test_sphere(cx, cy, cz, radius);
+    (void)ox; (void)oy; (void)span_w; (void)span_h; (void)mvp; (void)cloud_z;
+    return 0;
 }
 
-/* Grass/billboard batch occlusion test using Hi-Z */
 int nd_seven_hiz_test_billboard_batch(const lam_billboard_gpu_t *batch, uint32_t count,
                                        const float mvp[16], float max_radius)
 {
-    (void)mvp;
-    if (!s_gl.hiz_valid || count == 0) return 0;
-    
-    int occluded = 0;
-    for (uint32_t i = 0; i < count; i++) {
-        const lam_billboard_gpu_t *b = &batch[i];
-        float radius = fmaxf(b->width, b->height) * 0.5f;
-        radius = fmaxf(radius, max_radius);
-        
-        if (nd_seven_hiz_test_sphere(b->x, b->y, b->z, radius)) {
-            occluded++;
-        }
-    }
-    return occluded;
+    (void)batch; (void)count; (void)mvp; (void)max_radius;
+    return 0;
 }
 
-/* Query 2D occlusion map for a screen-space rectangle.
- * Returns true if the rectangle is fully occluded (min depth <= near_z). */
 int nd_seven_occ2d_test_rect(float ndc_x0, float ndc_y0, float ndc_x1, float ndc_y1, float near_z)
 {
-    if (!s_occ2d_valid || s_occ2d_levels == 0) return 0;
-    
-    // Convert NDC [-1,1] to texture coordinates [0,1]
-    float u0 = ndc_x0 * 0.5f + 0.5f;
-    float v0 = -ndc_y0 * 0.5f + 0.5f;
-    float u1 = ndc_x1 * 0.5f + 0.5f;
-    float v1 = -ndc_y1 * 0.5f + 0.5f;
-    
-    if (u0 > u1) { float t = u0; u0 = u1; u1 = t; }
-    if (v0 > v1) { float t = v0; v0 = v1; v1 = t; }
-    
-    // Clamp to [0,1]
-    if (u0 < 0.0f) u0 = 0.0f;
-    if (v0 < 0.0f) v0 = 0.0f;
-    if (u1 > 1.0f) u1 = 1.0f;
-    if (v1 > 1.0f) v1 = 1.0f;
-    if (u0 >= u1 || v0 >= v1) return 0;
-    
-    // Choose appropriate pyramid level based on rectangle size
-    float rect_w = u1 - u0;
-    float rect_h = v1 - v0;
-    float tile_w = (float)ND_OCC2D_TILE_SIZE / (float)s_occ2d_w;
-    float tile_h = (float)ND_OCC2D_TILE_SIZE / (float)s_occ2d_h;
-    
-    int level = 0;
-    while (level + 1 < s_occ2d_levels && rect_w > tile_w * 4.0f && rect_h > tile_h * 4.0f) {
-        level++;
-        tile_w *= 2.0f;
-        tile_h *= 2.0f;
-    }
-    
-    // Compute tile range
-    int tx0 = (int)(u0 / tile_w);
-    int ty0 = (int)(v0 / tile_h);
-    int tx1 = (int)(u1 / tile_w);
-    int ty1 = (int)(v1 / tile_h);
-    
-    int level_w = (s_occ2d_w + (ND_OCC2D_TILE_SIZE << level) - 1) / (ND_OCC2D_TILE_SIZE << level);
-    int level_h = (s_occ2d_h + (ND_OCC2D_TILE_SIZE << level) - 1) / (ND_OCC2D_TILE_SIZE << level);
-    
-    if (tx0 < 0) tx0 = 0;
-    if (ty0 < 0) ty0 = 0;
-    if (tx1 >= level_w) tx1 = level_w - 1;
-    if (ty1 >= level_h) ty1 = level_h - 1;
-    
-    // Test min depth in rectangle
-    float min_depth = 1.0f;
-    for (int ty = ty0; ty <= ty1; ty++) {
-        for (int tx = tx0; tx <= tx1; tx++) {
-            float d = s_occ2d_pyramid[level][ty][tx];
-            if (d < min_depth) min_depth = d;
-        }
-    }
-    
-    // Occluded if min depth in rectangle is in front of our near_z
-    return (min_depth <= near_z) ? 1 : 0;
+    (void)ndc_x0; (void)ndc_y0; (void)ndc_x1; (void)ndc_y1; (void)near_z;
+    return 0;
 }
 
-/* Water chunk 2D occ map test - projects water chunk to NDC and tests against occ map. */
 int nd_seven_occ2d_test_water_chunk(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                      const float mvp[16], float water_z)
 {
-    if (!s_occ2d_valid || s_occ2d_levels == 0) return 0;
-    
-    // Project 4 corners of water chunk to clip space
-    float x0 = (float)ox, x1 = (float)(ox + span_w);
-    float y0 = (float)oy, y1 = (float)(oy + span_h);
-    
-    float in_corners[4][4] = {
-        { x0, y0, water_z, 1.0f },
-        { x1, y0, water_z, 1.0f },
-        { x0, y1, water_z, 1.0f },
-        { x1, y1, water_z, 1.0f }
-    };
-    
-    float min_nx = 2.0f, max_nx = -2.0f;
-    float min_ny = 2.0f, max_ny = -2.0f;
-    bool all_front = true;
-    
-    for (int c = 0; c < 4; c++) {
-        float cx = in_corners[c][0];
-        float cy = in_corners[c][1];
-        float cz = in_corners[c][2];
-        float cw = in_corners[c][3];
-        
-        float px = mvp[0]*cx + mvp[4]*cy + mvp[8]*cz + mvp[12]*cw;
-        float py = mvp[1]*cx + mvp[5]*cy + mvp[9]*cz + mvp[13]*cw;
-        float pw = mvp[3]*cx + mvp[7]*cy + mvp[11]*cz + mvp[15]*cw;
-        
-        if (pw <= 0.0f) {
-            all_front = false;
-            break;
-        }
-        
-        float nx = px / pw;
-        float ny = py / pw;
-        
-        if (nx < min_nx) min_nx = nx;
-        if (nx > max_nx) max_nx = nx;
-        if (ny < min_ny) min_ny = ny;
-        if (ny > max_ny) max_ny = ny;
-    }
-    
-    if (!all_front || max_nx < -1.0f || min_nx > 1.0f || max_ny < -1.0f || min_ny > 1.0f)
-        return 0;  // Off screen or behind camera
-    
-    // Clamp to NDC bounds
-    if (min_nx < -1.0f) min_nx = -1.0f;
-    if (max_nx > 1.0f) max_nx = 1.0f;
-    if (min_ny < -1.0f) min_ny = -1.0f;
-    if (max_ny > 1.0f) max_ny = 1.0f;
-    
-    // Near Z for water (slightly in front to be conservative)
-    float near_z = 0.0f;
-    
-    return nd_seven_occ2d_test_rect(min_nx, min_ny, max_nx, max_ny, near_z);
+    (void)ox; (void)oy; (void)span_w; (void)span_h; (void)mvp; (void)water_z;
+    return 0;
 }
 
 /* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and the stage viewport. */
@@ -806,8 +549,8 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	float uz = lx * ry - ly * rx;
 
 	/* Quantized orthographic half-extent + light-space texel snapping eliminates shadow shimmering on camera pan */
-	float raw_half = fminf(1152.0f, fmaxf(192.0f, s_gl.cur_dist * 0.60f));
-	float half_xy = floorf(raw_half / 64.0f + 0.5f) * 64.0f;
+	float raw_half = fminf(1024.0f, fmaxf(160.0f, s_gl.cur_dist * 0.52f));
+	float half_xy = floorf(raw_half / 32.0f + 0.5f) * 32.0f;
 	const float half_z = 2048.0f;
 	float texel = (2.0f * half_xy) / (float)ND_TREE_SHADOW_RES;
 
@@ -985,16 +728,6 @@ void nd_seven_gl_end_frame(void)
 		glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
 		                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	}
-
-	/* Read back Hi-Z pyramid for CPU occlusion culling next frame */
-	if (s_gl.hiz_valid) {
-		gl_readback_hiz();
-	}
-
-	/* Build 2D hierarchical occlusion map from Hi-Z readback when readback is active */
-	if (s_gl.hiz_valid && s_occ2d_valid) {
-		gl_build_occ2d_map();
 	}
 
 	/* The sprite marker lives in the scene alpha: the canvas must end up fully opaque */

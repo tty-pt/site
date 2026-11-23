@@ -473,8 +473,8 @@ void nd_seven_apply_quality_preset(int preset)
 {
 	switch (preset) {
 	case ND_QUALITY_LOW:
-		nd_seven_set_res_scale(0.50f);
-		nd_seven_set_detail_scale(0.50f);
+		nd_seven_set_res_scale(0.67f);
+		nd_seven_set_detail_scale(0.72f);
 		nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_LOW);
 		nd_seven_set_msaa(0);
 		nd_seven_set_fps_cap(30);
@@ -509,7 +509,7 @@ int nd_seven_get_quality_preset(void)
 	    s_cloud_quality == ND_CLOUD_QUALITY_MEDIUM &&
 	    s_msaa_enabled == 0 && s_fps_cap == 60)
 		return ND_QUALITY_MEDIUM;
-	if (res_pct == 50 && det_pct == 50 &&
+	if (res_pct == 67 && det_pct == 72 &&
 	    s_cloud_quality == ND_CLOUD_QUALITY_LOW &&
 	    s_msaa_enabled == 0 && s_fps_cap == 30)
 		return ND_QUALITY_LOW;
