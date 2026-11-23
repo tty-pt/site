@@ -308,20 +308,22 @@ main(void)
 			assert(mslice.vert_count >= 64u && (mslice.idx_count % 3u) == 0u && mslice.idx_count >= 96u);
 			assert(mslice.mesh_w_wu >= 18.0f && mslice.mesh_h_wu >= 5.0f);
 			float min_z = 100.0f, max_z = -100.0f, max_w = 0.0f;
-			uint32_t root_pin_cnt = 0u, flower_cnt = 0u, fol_cnt = 0u;
+			uint32_t root_pin_cnt = 0u, flower_cnt = 0u, fol_cnt = 0u, grass_card_cnt = 0u;
 			for (uint32_t vi = 0; vi < mslice.vert_count; vi++) {
 				const nd_mesh3d_vert_t *v = &b.verts[mslice.first_vert + vi];
 				if (v->pos[2] < min_z) min_z = v->pos[2];
 				if (v->pos[2] > max_z) max_z = v->pos[2];
 				if (v->pos[3] > max_w) max_w = v->pos[3];
-				if (v->pos[2] < -0.10f && v->pos[3] == 0.0f) root_pin_cnt++;
-				if (v->col[3] > 0.355f && v->col[3] <= 0.55f) flower_cnt++;
-				if (v->col[3] >= 0.18f && v->col[3] <= 0.355f) fol_cnt++;
+				if (v->pos[2] < -0.10f && (v->pos[3] == 0.0f || (v->pos[3] > 1.0f && floorf(v->pos[3]) < 1.5f))) root_pin_cnt++;
+				if (v->col[3] > 0.425f && v->col[3] <= 0.55f) flower_cnt++;
+				if (v->col[3] >= 0.18f && v->col[3] <= 0.425f) fol_cnt++;
+				if (v->col[3] >= 0.319f && v->col[3] <= 0.425f && v->pos[3] > 1.0f) grass_card_cnt++;
 			}
 			assert(min_z >= -0.30f && "Meadow clump roots must remain cleanly anchored without deep sink");
 			assert(root_pin_cnt >= 16u && "Compound meadow mats must anchor multiple subtuft roots with zero wind weight");
 			assert(max_w > 0.30f && "Meadow clump tips must expose non-zero wind weight");
 			assert(fol_cnt > 48u && "Compound meadow mats must emit multi-subtuft foliage blades");
+			assert(grass_card_cnt >= 24u && "Skyrim meadow & fern mats must emit 3D alpha-tested botanical cards");
 			if (mv == 4u || mv == 5u) {
 				assert(flower_cnt >= 10u && "Wildflower meadow clump must emit 3D corolla blossoms");
 			}
@@ -343,6 +345,18 @@ main(void)
 					min_bark_z = v->pos[2];
 			}
 			assert(min_bark_z < 0.0f && "Tree root collars/spurs must sink cleanly into slopes");
+		}
+		for (uint32_t sv = 6u; sv <= 7u; sv++) {
+			nd_mesh3d_slice_t fslice;
+			memset(&fslice, 0, sizeof(fslice));
+			nd_m3d_build_shrub_prop(&b, sv, &fslice);
+			uint32_t fern_card_verts = 0u;
+			for (uint32_t vi = 0; vi < fslice.vert_count; vi++) {
+				const nd_mesh3d_vert_t *v = &b.verts[fslice.first_vert + vi];
+				if (v->col[3] >= ND_MAT3D_FOL_BLADE && v->col[3] <= 0.355f && v->pos[3] > 1.0f)
+					fern_card_verts++;
+			}
+			assert(fern_card_verts >= 72u && "Giant woodland bracken fern shrub must emit feathery bipinnate frond cards");
 		}
 		for (uint32_t uv = 0; uv < ND_MESH3D_UNDERSTORY_COUNT; uv++) {
 			nd_mesh3d_slice_t uslice;
@@ -436,6 +450,106 @@ main(void)
 		free(fol_alb);
 		free(fol_norm);
 		free(fol_mip1);
+
+		/* 5c. Verify 1024x512 Grass Tuft Atlas, Terrain Micro-Detail Atlas & Seamless 256x256 Bark Atlas */
+		assert(ND_GRASS_ATLAS_W == 1024 && ND_GRASS_ATLAS_H == 512 && ND_GRASS_MIP_LEVELS == 9);
+		assert(ND_BARK_ATLAS_SIZE == 256 && ND_BARK_MIP_LEVELS == 8);
+		assert(ND_TERR_ATLAS_SIZE == 256 && ND_TERR_MIP_LEVELS == 8);
+		size_t grass_bytes = (size_t)ND_GRASS_ATLAS_W * (size_t)ND_GRASS_ATLAS_H * 4u;
+		uint8_t *grass_alb  = (uint8_t *)malloc(grass_bytes);
+		uint8_t *grass_norm = (uint8_t *)malloc(grass_bytes);
+		uint8_t *grass_mip1 = (uint8_t *)malloc(grass_bytes / 4u);
+		assert(grass_alb && grass_norm && grass_mip1);
+		nd_grass_atlas_bake_level0(grass_alb);
+		nd_grass_atlas_bake_normals_level0(grass_alb, grass_norm);
+		nd_grass_atlas_downsample(grass_alb, ND_GRASS_ATLAS_W, ND_GRASS_ATLAS_H, grass_mip1);
+
+		uint32_t g_tile0_cov = 0u, g_tile1_cov = 0u, g_mip_cov = 0u;
+		for (int y = 0; y < ND_GRASS_ATLAS_H; y++) {
+			for (int x = 0; x < ND_GRASS_ATLAS_W; x++) {
+				const uint8_t *ga = grass_alb + ((size_t)y * (size_t)ND_GRASS_ATLAS_W + (size_t)x) * 4u;
+				const uint8_t *gn = grass_norm + ((size_t)y * (size_t)ND_GRASS_ATLAS_W + (size_t)x) * 4u;
+				if (ga[3] > 180u) {
+					if (x < ND_GRASS_TILE_SIZE) g_tile0_cov++;
+					else g_tile1_cov++;
+					assert(gn[3] >= 10u && "Opaque grass blade must store subsurface translucency");
+				} else if (ga[3] <= 1u) {
+					assert(gn[0] == 128u && gn[1] == 128u && gn[2] == 0u && gn[3] == 0u);
+				}
+			}
+		}
+		for (size_t i = 0; i < (size_t)(ND_GRASS_ATLAS_W / 2) * (size_t)(ND_GRASS_ATLAS_H / 2); i++) {
+			const uint8_t *mp = grass_mip1 + i * 4u;
+			if (mp[3] > 128u) g_mip_cov++;
+			if (mp[3] == 0u) {
+				assert(mp[0] == 46u && mp[1] == 68u && mp[2] == 32u &&
+				       "Empty mip texels must fill with dark botanical green instead of yellow");
+			}
+		}
+		assert(g_tile0_cov > 38000u && g_tile1_cov > 38000u && "Both grass tiles must bake rich dense tufts");
+		assert(g_tile0_cov < 104857u && g_tile1_cov < 104857u && "Each grass tile must keep >60% open negative space");
+		assert(g_mip_cov > 20000u && "Grass atlas mip-1 downsample must preserve blade coverage");
+		free(grass_alb);
+		free(grass_norm);
+		free(grass_mip1);
+
+		size_t terr_bytes = (size_t)ND_TERR_ATLAS_SIZE * (size_t)ND_TERR_ATLAS_SIZE * 4u;
+		uint8_t *terr_alb  = (uint8_t *)malloc(terr_bytes);
+		uint8_t *terr_norm = (uint8_t *)malloc(terr_bytes);
+		assert(terr_alb && terr_norm);
+		nd_terr_atlas_bake_level0(terr_alb);
+		nd_terr_atlas_bake_normals_level0(terr_alb, terr_norm);
+		int t_max_seam = 0, t_max_int = 0;
+		for (int i = 0; i < ND_TERR_ATLAS_SIZE; i++) {
+			int sx = abs((int)terr_alb[(i * ND_TERR_ATLAS_SIZE + 0) * 4] -
+			             (int)terr_alb[(i * ND_TERR_ATLAS_SIZE + (ND_TERR_ATLAS_SIZE - 1)) * 4]);
+			int sy = abs((int)terr_alb[(0 * ND_TERR_ATLAS_SIZE + i) * 4] -
+			             (int)terr_alb[((ND_TERR_ATLAS_SIZE - 1) * ND_TERR_ATLAS_SIZE + i) * 4]);
+			if (sx > t_max_seam) t_max_seam = sx;
+			if (sy > t_max_seam) t_max_seam = sy;
+			for (int j = 0; j < ND_TERR_ATLAS_SIZE - 1; j++) {
+				int ix = abs((int)terr_alb[(i * ND_TERR_ATLAS_SIZE + j + 1) * 4] -
+				             (int)terr_alb[(i * ND_TERR_ATLAS_SIZE + j) * 4]);
+				int iy = abs((int)terr_alb[((j + 1) * ND_TERR_ATLAS_SIZE + i) * 4] -
+				             (int)terr_alb[(j * ND_TERR_ATLAS_SIZE + i) * 4]);
+				if (ix > t_max_int) t_max_int = ix;
+				if (iy > t_max_int) t_max_int = iy;
+			}
+		}
+		assert(t_max_seam <= t_max_int + 2 && "Terrain micro-detail atlas must wrap seamlessly without seams");
+		free(terr_alb);
+		free(terr_norm);
+
+		size_t bark_bytes = (size_t)ND_BARK_ATLAS_SIZE * (size_t)ND_BARK_ATLAS_SIZE * 4u;
+		uint8_t *bark_alb  = (uint8_t *)malloc(bark_bytes);
+		uint8_t *bark_norm = (uint8_t *)malloc(bark_bytes);
+		uint8_t *bark_mip1 = (uint8_t *)malloc(bark_bytes / 4u);
+		assert(bark_alb && bark_norm && bark_mip1);
+		nd_bark_atlas_bake_level0(bark_alb);
+		nd_bark_atlas_bake_normals_level0(bark_alb, bark_norm);
+		nd_bark_atlas_downsample(bark_alb, ND_BARK_ATLAS_SIZE, ND_BARK_ATLAS_SIZE, bark_mip1);
+
+		int max_seam_diff = 0, max_int_diff = 0;
+		for (int i = 0; i < ND_BARK_ATLAS_SIZE; i++) {
+			int sx = abs((int)bark_alb[(i * ND_BARK_ATLAS_SIZE + 0) * 4] -
+			             (int)bark_alb[(i * ND_BARK_ATLAS_SIZE + (ND_BARK_ATLAS_SIZE - 1)) * 4]);
+			int sy = abs((int)bark_alb[(0 * ND_BARK_ATLAS_SIZE + i) * 4] -
+			             (int)bark_alb[((ND_BARK_ATLAS_SIZE - 1) * ND_BARK_ATLAS_SIZE + i) * 4]);
+			if (sx > max_seam_diff) max_seam_diff = sx;
+			if (sy > max_seam_diff) max_seam_diff = sy;
+			for (int j = 0; j < ND_BARK_ATLAS_SIZE - 1; j++) {
+				int ix = abs((int)bark_alb[(i * ND_BARK_ATLAS_SIZE + j + 1) * 4] -
+				             (int)bark_alb[(i * ND_BARK_ATLAS_SIZE + j) * 4]);
+				int iy = abs((int)bark_alb[((j + 1) * ND_BARK_ATLAS_SIZE + i) * 4] -
+				             (int)bark_alb[(j * ND_BARK_ATLAS_SIZE + i) * 4]);
+				if (ix > max_int_diff) max_int_diff = ix;
+				if (iy > max_int_diff) max_int_diff = iy;
+			}
+		}
+		assert(max_seam_diff <= max_int_diff + 2 && "Periodic bark atlas must wrap seamlessly without border discontinuity");
+		free(bark_alb);
+		free(bark_norm);
+		free(bark_mip1);
 	}
 
 	/* 6. Verify v1.0 IDEA.md Cholesky Correlation Validation, MTG Graph Validation,

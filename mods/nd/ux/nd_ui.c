@@ -2399,8 +2399,9 @@ static void seven_stage_redraw(void)
 
 	uint16_t world = (uint16_t)client_state.map_data.pos[3];
 	float yaw_deg = nd_seven_get_yaw_deg();
+	float eff_pitch = nd_seven_eval_effective_pitch(nd_seven_get_pitch_deg(), eff_cam_dist);
 	float pitch_deg = nd_seven_clamp_cam_pitch(world, (float)wx, (float)wy, wz,
-	                                           eff_cam_dist, yaw_deg, nd_seven_get_pitch_deg());
+	                                           eff_cam_dist, yaw_deg, eff_pitch);
 
 	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, pitch_deg, yaw_deg, ND_SEVEN_CAM_FOV);
 	nd_seven_render((uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);

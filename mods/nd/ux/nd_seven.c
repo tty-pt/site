@@ -2112,6 +2112,35 @@ int nd_seven_eval_meadow_lamb_occlusion(float wx_f, float wy_f,
 	return 1;
 }
 
+static inline float seven_smoothstep(float e0, float e1, float x)
+{
+	float t = (x - e0) / (e1 - e0);
+	if (t < 0.0f) t = 0.0f;
+	if (t > 1.0f) t = 1.0f;
+	return t * t * (3.0f - 2.0f * t);
+}
+
+float nd_seven_eval_trail_weight(float wx, float wy, float slope_mag)
+{
+	if (slope_mag >= 0.40f)
+		return 0.0f;
+	float u1 = wx * 0.0042f + wy * 0.0029f
+	         + 0.85f * sinf(wy * 0.0061f - wx * 0.0033f)
+	         + 0.40f * cosf(wx * 0.0117f + wy * 0.0089f);
+	float u2 = wx * -0.0031f + wy * 0.0046f
+	         + 0.80f * sinf(wx * 0.0057f + wy * 0.0037f)
+	         + 0.38f * cosf(wy * 0.0109f - wx * 0.0083f);
+	float d1 = fabsf(sinf(u1));
+	float d2 = fabsf(sinf(u2));
+	float g1 = seven_smoothstep(0.15f, 0.55f, sinf(wx * 0.0011f - wy * 0.0014f + 0.6f));
+	float g2 = seven_smoothstep(0.20f, 0.60f, cosf(wx * 0.0013f + wy * 0.0009f - 0.4f));
+	float t1 = (1.0f - seven_smoothstep(0.038f, 0.095f, d1)) * g1;
+	float t2 = (1.0f - seven_smoothstep(0.035f, 0.088f, d2)) * g2;
+	float t = (t1 > t2) ? t1 : t2;
+	if (t > 1.0f) t = 1.0f;
+	return t * (1.0f - seven_smoothstep(0.20f, 0.40f, slope_mag));
+}
+
 int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
                               float elev_z, float water_level, float slope_mag,
                               unsigned biome, float near_tree_dist_sq,
@@ -2171,6 +2200,12 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 			return 0;
 	}
 
+	/* Synchronized winding footpath/trail breakup: clear beaten dirt track core, lush edge shoulders */
+	float trail_w = (elev_above_water > 1.2f) ? nd_seven_eval_trail_weight(wx_f, wy_f, slope_mag) : 0.0f;
+	if (trail_w > 0.42f)
+		return 0;
+	int on_trail_shoulder = (trail_w > 0.08f);
+
 	/* 5. Tree canopy drip-line understory (81 <= d^2 < 576, i.e. 9..24 units from trunk) */
 	float grove_val = nd_seven_eval_grove_ecology(wx, wy, elev_z, water_level, slope_mag, biome, NULL);
 	if (near_tree_dist_sq >= 81.0f && near_tree_dist_sq < 576.0f) {
@@ -2195,7 +2230,8 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 	float n_macro = meadow_noise_2d(wx_f + warp_x, wy_f + warp_y, 176.0f, 0x464C4F52u);
 	float n_meso  = meadow_noise_2d(wx_f - warp_y * 0.5f, wy_f + warp_x * 0.5f, 64.0f, 0x4D454132u);
 	float n_fine  = meadow_noise_2d(wx_f, wy_f, 24.0f, 0x4D454133u);
-	float noise_env = 0.54f * n_macro + 0.33f * n_meso + 0.13f * n_fine;
+	float n_clump = meadow_noise_2d(wx_f, wy_f, 42.0f, 0x434C4D50u);
+	float noise_env = 0.50f * n_macro + 0.30f * n_meso + 0.12f * n_fine + 0.08f * n_clump;
 
 	/* Fertile moist lowland basins & gentle plains boost meadow formation */
 	float moist_t = 1.0f - ((elev_above_water - 1.85f) * (1.0f / 14.15f));
@@ -2274,25 +2310,43 @@ int nd_seven_eval_meadow_area(int32_t wx, int32_t wy,
 		span_sc  = 0.22f;
 	}
 
-	float fertility = bio_mult * (noise_env + moisture_bonus - ridge_pen - slope_pen);
+	int is_woodland = (biome == 8u || biome == 9u || biome == 11u || biome == 12u ||
+	                   biome == 13u || biome == 16u || biome == 17u);
+	float duff_glade = (is_woodland && !is_arid && grove_val > 0.68f)
+	                 ? (grove_val - 0.68f) * 0.48f
+	                 : 0.0f;
 
-	/* Lowered bare-ground cutoff (0.28) builds a lush interlocking groundcover carpet in fertile biomes */
+	float fertility = bio_mult * (noise_env + moisture_bonus - ridge_pen - slope_pen - duff_glade);
+	if (on_trail_shoulder && !is_arid && g.kind != NDW_G_TUNDRA)
+		fertility += 0.04f;
+
+	/* Lowered bare-ground cutoff (0.18) builds a lush interlocking groundcover carpet in fertile biomes */
 	if (is_arid) {
 		/* Arid clumping: suppress grass tufts on open desert sand dunes; allow only near oasis water */
 		if (elev_above_water > 1.35f || fertility <= 0.40f || ((h >> 12u) & 7u) > 0u)
 			return 0;
-	} else if (fertility <= 0.28f) {
+	} else if (fertility <= 0.18f) {
 		return 0;
 	}
 
-	float thresh = is_arid ? 0.40f : 0.28f;
-	float core_t = (fertility - thresh) * (1.0f / 0.48f);
+	float thresh = is_arid ? 0.40f : 0.18f;
+	float core_t = (fertility - thresh) * (1.0f / 0.52f);
 	if (core_t < 0.0f)
 		core_t = 0.0f;
 	if (core_t > 1.0f)
 		core_t = 1.0f;
 
+	/* Natural outer meadow margin breakups so patches fray organically while keeping dense cores full */
+	if (!is_arid && core_t < 0.14f && ((h >> 14u) & 3u) == 0u)
+		return 0;
+
 	float sc = base_sc + span_sc * core_t + ((float)(int32_t)(h & 7u) - 3.5f) * 0.008f;
+	if (on_trail_shoulder && !is_arid && g.kind != NDW_G_TUNDRA) {
+		float shoulder_t = (trail_w - 0.08f) * (1.0f / 0.34f);
+		if (shoulder_t > 1.0f) shoulder_t = 1.0f;
+		sc += 0.035f * shoulder_t;
+		if (sc > 0.695f) sc = 0.695f;
+	}
 	if (out_scale)
 		*out_scale = sc;
 
@@ -2862,8 +2916,9 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 				continue;
 			for (int32_t gx = cx0; gx <= lwx + rad && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; gx += step) {
 				uint32_t jh = meadow_hash32(gx, gy, 0x4A495454u);
-				int32_t wx = gx + (int32_t)(jh % 13u) - 6;
-				int32_t wy = gy + (int32_t)((jh >> 5u) % 13u) - 6;
+				int32_t j_span = (step > 4) ? (step - 2) : step;
+				int32_t wx = gx + (int32_t)(jh % (uint32_t)j_span) - (j_span >> 1);
+				int32_t wy = gy + (int32_t)((jh >> 6u) % (uint32_t)j_span) - (j_span >> 1);
 
 				float ddx = (float)(wx - lwx);
 				float ddy = (float)(wy - lwy);
@@ -2951,8 +3006,10 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 				uint8_t m_id = nd_seven_meadow_mesh3d_id(zone, bio, jh >> 16u);
 				const nd_mesh3d_slice_t *m_sl = (m_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(m_id) : NULL;
-				float bw_m = m_sl ? (m_sl->mesh_w_wu * sc1 * 1.95f) : ((float)sr.w * sc1 * 1.75f);
-				float bh_m = (float)sr.h * sc1;
+				float h_var = 0.58f + 0.92f * ((float)((jh >> 20u) & 255u) * (1.0f / 255.0f));
+				float w_var = 0.94f + 0.44f * ((float)((jh >> 12u) & 255u) * (1.0f / 255.0f));
+				float bw_m = m_sl ? (m_sl->mesh_w_wu * sc1 * w_var) : ((float)sr.w * sc1 * 1.15f * w_var);
+				float bh_m = m_sl ? (m_sl->mesh_h_wu * sc1 * h_var) : ((float)sr.h * sc1 * h_var);
 				float cull_w = (float)sr.w * sc1;
 				float eff_alpha = seven_eval_billboard_alpha((float)wx, (float)wy, z_f, cull_w, bh_m);
 				uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
@@ -2989,7 +3046,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 						bb->shadow_rx = (uint8_t)grx;
 						bb->shadow_ry = (uint8_t)gry;
 					}
-					bb->pad0 = (uint8_t)zone;
+					bb->pad0 = (uint8_t)(((unsigned)zone & 3u) | ((bio & 31u) << 2));
 					bb->mesh_id = m_id;
 				}
 			}

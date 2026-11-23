@@ -202,6 +202,7 @@ static float s_cam_yaw_target = 0.0f;
 static float s_cam_yaw_cur = 0.0f;
 static float s_cam_pitch_target = 55.0f;
 static float s_cam_pitch_cur = 55.0f;
+static int   s_cam_pitch_user_override = 0;
 
 static float wrap_deg_180(float deg)
 {
@@ -226,18 +227,22 @@ void nd_seven_set_cam_angles(float yaw_deg, float pitch_deg)
 	s_cam_yaw_cur = yaw_deg;
 	s_cam_pitch_target = pitch_deg;
 	s_cam_pitch_cur = pitch_deg;
+	s_cam_pitch_user_override = 1;
 }
 
 void nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg)
 {
 	s_cam_yaw_target = wrap_deg_180(s_cam_yaw_target + dyaw_deg);
 	s_cam_pitch_target = clamp_pitch_range(s_cam_pitch_target + dpitch_deg);
+	if (fabsf(dpitch_deg) > 0.01f)
+		s_cam_pitch_user_override = 1;
 }
 
 void nd_seven_reset_cam(void)
 {
 	s_cam_yaw_target = 0.0f;
 	s_cam_pitch_target = 55.0f;
+	s_cam_pitch_user_override = 0;
 }
 
 float nd_seven_get_yaw_deg(void)
@@ -248,6 +253,26 @@ float nd_seven_get_yaw_deg(void)
 float nd_seven_get_pitch_deg(void)
 {
 	return s_cam_pitch_cur;
+}
+
+int nd_seven_has_pitch_override(void)
+{
+	return s_cam_pitch_user_override;
+}
+
+float nd_seven_eval_effective_pitch(float base_pitch_deg, float eff_cam_dist)
+{
+	float p = clamp_pitch_range(base_pitch_deg);
+	if (s_cam_pitch_user_override || eff_cam_dist >= 280.0f)
+		return p;
+	/* Close-zoom horizon tilt: zoom > 1.0 (eff_cam_dist < 280) glides smoothly
+	 * from 55 deg diorama toward 36 deg low-horizon view unless user overrode pitch. */
+	float u = (280.0f - eff_cam_dist) / (280.0f - 95.0f);
+	if (u < 0.0f) u = 0.0f;
+	if (u > 1.0f) u = 1.0f;
+	float t = u * u * (3.0f - 2.0f * u);
+	float target = (p > 36.0f) ? 36.0f : p;
+	return clamp_pitch_range(p + (target - p) * t);
 }
 
 void nd_seven_step_cam(float dt)
@@ -319,7 +344,7 @@ float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
 	return p;
 }
 
-static float s_detail_scale = 0.75f;
+static float s_detail_scale = 1.00f;
 
 void nd_seven_set_detail_scale(float scale)
 {
@@ -343,10 +368,10 @@ void nd_seven_detail_out(void)
 	nd_seven_set_detail_scale(s_detail_scale / ND_SEVEN_DETAIL_STEP);
 }
 
-static float s_res_scale = 0.75f;
-static int s_cloud_quality = ND_CLOUD_QUALITY_MEDIUM;
-static int s_msaa_enabled = 0;
-static int s_fps_cap = 60;
+static float s_res_scale = 1.00f;
+static int s_cloud_quality = ND_CLOUD_QUALITY_HIGH;
+static int s_msaa_enabled = 1;
+static int s_fps_cap = 0;
 
 void nd_seven_set_res_scale(float scale)
 {

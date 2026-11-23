@@ -249,6 +249,10 @@ float nd_seven_eval_grove_ecology(int32_t wx, int32_t wy,
                                   float elev_z, float water_level, float slope_mag,
                                   unsigned biome, float *out_krummholz_scale);
 
+/* Winding footpath / game-trail weight [0..1] synchronized with GPU ND_GLSL_TRAIL_FN.
+ * Returns 1.0 in compacted trail core, tapering cleanly across trail shoulders to 0.0. */
+float nd_seven_eval_trail_weight(float wx, float wy, float slope_mag);
+
 /* Viewport LOD & Macro Chunk Thresholds (zero magic numbers) */
 #define ND_SEVEN_STRATOSPHERE_ZOOM_THRESHOLD 0.25f  /* Camera zoom threshold below which macro quadtree LOD activates */
 #define ND_SEVEN_FOCAL_WINDOW_RADIUS_ROOMS   3      /* 7x7 focal room grid radius around the player (-3..+3) */

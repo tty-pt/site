@@ -207,6 +207,201 @@ static void init_grid_buffers(void)
 		free(buf_n);
 		free(buf_b);
 	}
+
+	/* Bake and upload 1024x512 RGBA8 grass tuft & sedge atlas + companion normal/translucency atlas with CPU mip levels */
+	if (!s_gl.fol_grass_tex || !s_gl.fol_grass_norm_tex) {
+		size_t gbytes = (size_t)ND_GRASS_ATLAS_W * (size_t)ND_GRASS_ATLAS_H * 4u;
+		uint8_t *buf_a = (uint8_t *)malloc(gbytes);
+		uint8_t *buf_n = (uint8_t *)malloc(gbytes);
+		uint8_t *buf_b = (uint8_t *)malloc(gbytes >> 2);
+		if (buf_a && buf_n && buf_b) {
+			nd_grass_atlas_bake_level0(buf_a);
+			nd_grass_atlas_bake_normals_level0(buf_a, buf_n);
+
+			if (!s_gl.fol_grass_tex)
+				s_gl.fol_grass_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_GRASS_MIP_LEVELS - 1);
+			int cur_w = ND_GRASS_ATLAS_W, cur_h = ND_GRASS_ATLAS_H;
+			const uint8_t *src = buf_a;
+			uint8_t *dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_GRASS_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1, next_h = cur_h >> 1;
+				nd_grass_atlas_downsample(src, cur_w, cur_h, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+				cur_h = next_h;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+
+			if (!s_gl.fol_grass_norm_tex)
+				s_gl.fol_grass_norm_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 6);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_norm_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_GRASS_MIP_LEVELS - 1);
+			cur_w = ND_GRASS_ATLAS_W;
+			cur_h = ND_GRASS_ATLAS_H;
+			src = buf_n;
+			dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_GRASS_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1, next_h = cur_h >> 1;
+				nd_foliage_atlas_downsample_normals(src, cur_w, cur_h, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+				cur_h = next_h;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glActiveTexture(GL_TEXTURE0);
+		}
+		free(buf_a);
+		free(buf_n);
+		free(buf_b);
+	}
+
+	/* Bake and upload 256x256 seamless periodic bark detail + tangent normal atlases with GL_REPEAT */
+	if (!s_gl.fol_bark_tex || !s_gl.fol_bark_norm_tex) {
+		size_t bbytes = (size_t)ND_BARK_ATLAS_SIZE * (size_t)ND_BARK_ATLAS_SIZE * 4u;
+		uint8_t *buf_a = (uint8_t *)malloc(bbytes);
+		uint8_t *buf_n = (uint8_t *)malloc(bbytes);
+		uint8_t *buf_b = (uint8_t *)malloc(bbytes >> 2);
+		if (buf_a && buf_n && buf_b) {
+			nd_bark_atlas_bake_level0(buf_a);
+			nd_bark_atlas_bake_normals_level0(buf_a, buf_n);
+
+			if (!s_gl.fol_bark_tex)
+				s_gl.fol_bark_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 8);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_BARK_MIP_LEVELS - 1);
+			int cur_w = ND_BARK_ATLAS_SIZE;
+			const uint8_t *src = buf_a;
+			uint8_t *dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_BARK_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1;
+				nd_bark_atlas_downsample(src, cur_w, cur_w, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+
+			if (!s_gl.fol_bark_norm_tex)
+				s_gl.fol_bark_norm_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 9);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_norm_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_BARK_MIP_LEVELS - 1);
+			cur_w = ND_BARK_ATLAS_SIZE;
+			src = buf_n;
+			dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_BARK_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1;
+				nd_bark_atlas_downsample_normals(src, cur_w, cur_w, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glActiveTexture(GL_TEXTURE0);
+		}
+		free(buf_a);
+		free(buf_n);
+		free(buf_b);
+	}
+
+	/* Bake and upload 256x256 seamless periodic terrain micro-detail + tangent normal atlases with GL_REPEAT */
+	if (!s_gl.terr_detail_tex || !s_gl.terr_norm_tex) {
+		size_t tbytes = (size_t)ND_TERR_ATLAS_SIZE * (size_t)ND_TERR_ATLAS_SIZE * 4u;
+		uint8_t *buf_a = (uint8_t *)malloc(tbytes);
+		uint8_t *buf_n = (uint8_t *)malloc(tbytes);
+		uint8_t *buf_b = (uint8_t *)malloc(tbytes >> 2);
+		if (buf_a && buf_n && buf_b) {
+			nd_terr_atlas_bake_level0(buf_a);
+			nd_terr_atlas_bake_normals_level0(buf_a, buf_n);
+
+			if (!s_gl.terr_detail_tex)
+				s_gl.terr_detail_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 10);
+			glBindTexture(GL_TEXTURE_2D, s_gl.terr_detail_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_TERR_MIP_LEVELS - 1);
+			int cur_w = ND_TERR_ATLAS_SIZE;
+			const uint8_t *src = buf_a;
+			uint8_t *dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_TERR_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1;
+				nd_bark_atlas_downsample(src, cur_w, cur_w, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+
+			if (!s_gl.terr_norm_tex)
+				s_gl.terr_norm_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 11);
+			glBindTexture(GL_TEXTURE_2D, s_gl.terr_norm_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, ND_TERR_MIP_LEVELS - 1);
+			cur_w = ND_TERR_ATLAS_SIZE;
+			src = buf_n;
+			dst = buf_b;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cur_w, cur_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int mip = 1; mip < ND_TERR_MIP_LEVELS; mip++) {
+				int next_w = cur_w >> 1;
+				nd_bark_atlas_downsample_normals(src, cur_w, cur_w, dst);
+				glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, next_w, next_w, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *prev_src = (uint8_t *)src;
+				src = dst;
+				dst = prev_src;
+				cur_w = next_w;
+			}
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glActiveTexture(GL_TEXTURE0);
+		}
+		free(buf_a);
+		free(buf_n);
+		free(buf_b);
+	}
 }
 
 static void init_pipelines(void)
@@ -322,6 +517,8 @@ static bool check_pipelines_ready(void)
 			s_gl.terrain_pipe.uTreeShadowOrigin = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
 			s_gl.terrain_pipe.uTreeShadowVP     = glGetUniformLocation(p, "uTreeShadowVP", 13);
 			s_gl.terrain_pipe.uTreeShadowActive = glGetUniformLocation(p, "uTreeShadowActive", 17);
+			s_gl.terrain_pipe.uTerrDetailTex    = glGetUniformLocation(p, "uTerrDetailTex", 14);
+			s_gl.terrain_pipe.uTerrNormTex      = glGetUniformLocation(p, "uTerrNormTex", 12);
 			s_gl.terrain_pipe.aGridUV           = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
@@ -427,7 +624,11 @@ static bool check_pipelines_ready(void)
 			s_gl.mesh3d_pipe.uCsm                   = glGetUniformLocation(p, "uCsm", 4);
 			s_gl.mesh3d_pipe.uShadowPass            = glGetUniformLocation(p, "uShadowPass", 11);
 			s_gl.mesh3d_pipe.uBranchletTex          = glGetUniformLocation(p, "uBranchletTex", 13);
-		s_gl.mesh3d_pipe.uBranchletNorm          = glGetUniformLocation(p, "uBranchletNorm", 14);
+			s_gl.mesh3d_pipe.uBranchletNorm         = glGetUniformLocation(p, "uBranchletNorm", 14);
+			s_gl.mesh3d_pipe.uGrassTex              = glGetUniformLocation(p, "uGrassTex", 9);
+			s_gl.mesh3d_pipe.uGrassNorm             = glGetUniformLocation(p, "uGrassNorm", 10);
+			s_gl.mesh3d_pipe.uBarkTex               = glGetUniformLocation(p, "uBarkTex", 8);
+			s_gl.mesh3d_pipe.uBarkNorm              = glGetUniformLocation(p, "uBarkNorm", 9);
 			s_gl.mesh3d_pipe.uTreeShadowTex         = glGetUniformLocation(p, "uTreeShadowTex", 14);
 			s_gl.mesh3d_pipe.uTreeShadowOrigin      = glGetUniformLocation(p, "uTreeShadowOrigin", 17);
 			s_gl.mesh3d_pipe.uTreeShadowVP          = glGetUniformLocation(p, "uTreeShadowVP", 13);
@@ -962,6 +1163,18 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
 	glUniform1i(s_gl.terrain_pipe.uSubstrateTex, 1);
+
+	if (s_gl.terr_detail_tex && s_gl.terrain_pipe.uTerrDetailTex >= 0) {
+		glActiveTexture(GL_TEXTURE0 + 10);
+		glBindTexture(GL_TEXTURE_2D, s_gl.terr_detail_tex);
+		glUniform1i(s_gl.terrain_pipe.uTerrDetailTex, 10);
+	}
+	if (s_gl.terr_norm_tex && s_gl.terrain_pipe.uTerrNormTex >= 0) {
+		glActiveTexture(GL_TEXTURE0 + 11);
+		glBindTexture(GL_TEXTURE_2D, s_gl.terr_norm_tex);
+		glUniform1i(s_gl.terrain_pipe.uTerrNormTex, 11);
+	}
+	glActiveTexture(GL_TEXTURE0);
 	gl_bind_csm(s_gl.terrain_pipe.uCloudShadowMap, s_gl.terrain_pipe.uCsm);
 	gl_bind_tree_shadow_read(s_gl.terrain_pipe.uTreeShadowTex,
 	                         s_gl.terrain_pipe.uTreeShadowOrigin,

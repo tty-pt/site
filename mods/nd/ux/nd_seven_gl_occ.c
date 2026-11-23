@@ -806,7 +806,7 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	float uz = lx * ry - ly * rx;
 
 	/* Quantized orthographic half-extent + light-space texel snapping eliminates shadow shimmering on camera pan */
-	float raw_half = fminf(1152.0f, fmaxf(352.0f, s_gl.cur_dist * 0.92f));
+	float raw_half = fminf(1152.0f, fmaxf(192.0f, s_gl.cur_dist * 0.60f));
 	float half_xy = floorf(raw_half / 64.0f + 0.5f) * 64.0f;
 	const float half_z = 2048.0f;
 	float texel = (2.0f * half_xy) / (float)ND_TREE_SHADOW_RES;
@@ -963,7 +963,7 @@ void nd_seven_gl_end_frame(void)
 		glUniform1i(s_gl.post_pipe.uSsaoTex, 8);
 		glUniform1f(s_gl.post_pipe.uSsaoActive, ssao_fade);
 		glUniform1f(s_gl.post_pipe.uBloomActive, do_bloom ? 1.0f : 0.0f);
-		glUniform1f(s_gl.post_pipe.uExposure, 1.06f);
+		glUniform1f(s_gl.post_pipe.uExposure, 1.12f);
 		glUniform1f(s_gl.post_pipe.uCamDist, s_gl.cur_dist);
 		glDrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -983,7 +983,7 @@ void nd_seven_gl_end_frame(void)
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
-		                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 

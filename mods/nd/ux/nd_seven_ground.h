@@ -51,6 +51,8 @@ float nd_seven_get_pitch_deg(void);
 void  nd_seven_step_cam(float dt);
 float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
                                float dist, float yaw_deg, float pitch_deg);
+float nd_seven_eval_effective_pitch(float base_pitch_deg, float eff_cam_dist);
+int   nd_seven_has_pitch_override(void);
 
 /* User-adjustable billboard detail / draw distance scale (0.20f .. 2.50f, default 1.0f) */
 void nd_seven_set_detail_scale(float scale);

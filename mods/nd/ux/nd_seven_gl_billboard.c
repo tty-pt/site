@@ -1043,10 +1043,11 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	out->tint[2] = fminf(1.0f, (float)((b->tint_rgba >> 8)  & 0xFFu) / 255.0f + sheen * 0.5f);
 	out->tint[3] = (float)(b->tint_rgba & 0xFFu) / 255.0f;
 
+	uint8_t grass_bio = (b->style == ND_BB_STYLE_GRASS) ? ((b->pad0 >> 2u) & 31u) : 0u;
 	out->param[0] = bx;
 	out->param[1] = by;
 	out->param[2] = bz;
-	out->param[3] = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f);
+	out->param[3] = (float)b->style + ((b->pad0 & 0x80u) ? 16.0f : 0.0f) + (float)grass_bio * 32.0f;
 
 	/* Local terrain plane (gx, gy, curv) and packed 3D shadow flags + yaw01 in a_iterr */
 	float gx = 0.0f, gy = 0.0f, curv = 0.0f;
@@ -1106,8 +1107,28 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_norm_tex);
 			glUniform1i(s_gl.mesh3d_pipe.uBranchletNorm, 4);
 		}
-		glActiveTexture(GL_TEXTURE0);
 	}
+	if (s_gl.fol_grass_tex && s_gl.mesh3d_pipe.uGrassTex >= 0) {
+		glActiveTexture(GL_TEXTURE0 + 5);
+		glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_tex);
+		glUniform1i(s_gl.mesh3d_pipe.uGrassTex, 5);
+		if (s_gl.fol_grass_norm_tex && s_gl.mesh3d_pipe.uGrassNorm >= 0) {
+			glActiveTexture(GL_TEXTURE0 + 6);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_norm_tex);
+			glUniform1i(s_gl.mesh3d_pipe.uGrassNorm, 6);
+		}
+	}
+	if (s_gl.fol_bark_tex && s_gl.mesh3d_pipe.uBarkTex >= 0) {
+		glActiveTexture(GL_TEXTURE0 + 8);
+		glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_tex);
+		glUniform1i(s_gl.mesh3d_pipe.uBarkTex, 8);
+		if (s_gl.fol_bark_norm_tex && s_gl.mesh3d_pipe.uBarkNorm >= 0) {
+			glActiveTexture(GL_TEXTURE0 + 9);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_norm_tex);
+			glUniform1i(s_gl.mesh3d_pipe.uBarkNorm, 9);
+		}
+	}
+	glActiveTexture(GL_TEXTURE0);
 	glUniformMatrix4fv(s_gl.mesh3d_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform1f(s_gl.mesh3d_pipe.uSeaLevel, bb_sea_level);
 	glUniform1f(s_gl.mesh3d_pipe.uAnimTime, s_gl.cur_anim_time);
@@ -1414,6 +1435,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	for (uint32_t i = 0; i <= count; i++) {
 		bool last = (i == count);
 		bool is_other = false, is_mesh3d = false, is_understory = false, emit_impostor_crossfade = false;
+		bool is_crossed_tree = false;
 		bool want_shadow = false, want_lamb_shadow = false;
 		float lod_mesh_keep = 1.0f;
 		uint32_t need_core = 0, need_other = 0, need_mesh3d = 0;
@@ -1440,10 +1462,10 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				float dx_m = batch[i].x - s_gl.cur_tx;
 				float dy_m = batch[i].y - s_gl.cur_ty;
 				float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
-				float max_m3d_dist = is_grass ? fmaxf(520.0f, 820.0f * det_scale)
-				                              : (is_tall_tree ? fmaxf(950.0f, 1500.0f * det_scale)
-				                                              : fmaxf(750.0f, 1150.0f * det_scale));
-				float cross_band = max_m3d_dist * 0.16f;
+				float max_m3d_dist = is_grass ? fmaxf(720.0f, 1150.0f * det_scale)
+				                              : (is_tall_tree ? fmaxf(1550.0f, 2500.0f * det_scale)
+				                                              : fmaxf(1050.0f, 1650.0f * det_scale));
+				float cross_band = max_m3d_dist * 0.08f;
 				float cross_start = max_m3d_dist - cross_band;
 				if (d2_m <= max_m3d_dist * max_m3d_dist) {
 					m3d_slice = nd_seven_mesh3d_slice(batch[i].mesh_id);
@@ -1457,6 +1479,12 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 								emit_impostor_crossfade = true;
 						}
 					}
+				}
+				if (!is_mesh3d && is_tall_tree && !is_understory &&
+				    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1) {
+					float max_cross_d = max_m3d_dist * 2.2f;
+					if (d2_m <= max_cross_d * max_cross_d)
+						is_crossed_tree = true;
 				}
 			}
 			if (!is_other && is_understory && !is_mesh3d)
@@ -1489,7 +1517,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				float d2_l = dx_l * dx_l + dy_l * dy_l;
 				want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 290.0f * 290.0f);
 			}
-			need_core   = (is_other || (is_mesh3d && !emit_impostor_crossfade)) ? 0u : 1u;
+			need_core   = (is_other || (is_mesh3d && !emit_impostor_crossfade)) ? 0u : (is_crossed_tree ? 2u : 1u);
 			need_mesh3d = is_mesh3d ? 1u : 0u;
 			need_other  = (is_other ? 1u : 0u) +
 			              ((!is_mesh3d && want_shadow) ? 1u : 0u) +
@@ -1585,6 +1613,20 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				s_bb_instances[core_n].param[3] += (float)k31 * 32.0f;
 				core_n++;
 			}
+			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
+			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
+			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
+				s_gl.sprites_in_water = true;
+		} else if (is_crossed_tree) {
+			/* Crossed +/-28 deg impostor cards give far trees volumetric depth across oblique views */
+			const float c28 = 0.8829476f;
+			const float s28 = 0.4694716f;
+			float cos_p28 = cos_y * c28 - sin_y * s28;
+			float sin_p28 = sin_y * c28 + cos_y * s28;
+			float cos_m28 = cos_y * c28 + sin_y * s28;
+			float sin_m28 = sin_y * c28 - cos_y * s28;
+			pack_bb_quad_instance(&batch[i], &basis, cos_p28, sin_p28, cos_p, sin_p, &s_bb_instances[core_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_m28, sin_m28, cos_p, sin_p, &s_bb_instances[core_n++]);
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
 			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)

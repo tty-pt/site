@@ -24,6 +24,9 @@
 #ifndef GL_LINEAR_MIPMAP_LINEAR
 #define GL_LINEAR_MIPMAP_LINEAR 0x2703
 #endif
+#ifndef GL_REPEAT
+#define GL_REPEAT 0x2901
+#endif
 #ifndef GL_TEXTURE_MAX_LEVEL
 #define GL_TEXTURE_MAX_LEVEL 0x813D
 #endif
@@ -129,6 +132,8 @@ typedef struct {
 	GLint uTreeShadowOrigin;
 	GLint uTreeShadowVP;
 	GLint uTreeShadowActive;
+	GLint uTerrDetailTex;
+	GLint uTerrNormTex;
 	GLint aGridUV;
 } gl_terrain_pipe_t;
 
@@ -233,6 +238,10 @@ typedef struct {
 	GLint uShadowPass;
 	GLint uBranchletTex;
 	GLint uBranchletNorm;
+	GLint uGrassTex;
+	GLint uGrassNorm;
+	GLint uBarkTex;
+	GLint uBarkNorm;
 	GLint uTreeShadowTex;
 	GLint uTreeShadowOrigin;
 	GLint uTreeShadowVP;
@@ -451,6 +460,12 @@ typedef struct {
 	GLuint mesh3d_inst_vbo;
 	GLuint fol_atlas_tex;
 	GLuint fol_atlas_norm_tex;
+	GLuint fol_grass_tex;
+	GLuint fol_grass_norm_tex;
+	GLuint fol_bark_tex;
+	GLuint fol_bark_norm_tex;
+	GLuint terr_detail_tex;
+	GLuint terr_norm_tex;
 	GLuint tree_shadow_fbo[2];
 	GLuint tree_shadow_tex[2];
 	GLuint tree_shadow_dummy_tex;

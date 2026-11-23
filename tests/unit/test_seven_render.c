@@ -3745,11 +3745,11 @@ int main(void)
 
 		/* 12. User-Adjustable Detail Scale (nd_seven_set_detail_scale / nd_seven_detail_in / nd_seven_detail_out) */
 		{
-			assert(fabsf(nd_seven_get_detail_scale() - 0.75f) < 1e-5f);
+			assert(fabsf(nd_seven_get_detail_scale() - 1.00f) < 1e-5f);
 			nd_seven_detail_out();
-			assert(nd_seven_get_detail_scale() < 0.75f && nd_seven_get_detail_scale() >= ND_SEVEN_DETAIL_MIN);
+			assert(nd_seven_get_detail_scale() < 1.00f && nd_seven_get_detail_scale() >= ND_SEVEN_DETAIL_MIN);
 			nd_seven_detail_in();
-			assert(fabsf(nd_seven_get_detail_scale() - 0.75f) < 1e-4f);
+			assert(fabsf(nd_seven_get_detail_scale() - 1.00f) < 1e-4f);
 
 			/* Lowering detail scale culls distant billboards earlier at zoom = 0.08f (cam_dist = 3,500 wu) */
 			set_map(10, 10, 12, 0x1B, 0, 'X', 'o', 'T');
@@ -3772,7 +3772,7 @@ int main(void)
 			uint32_t cnt_full_detail = nd_seven_last_mid_billboard_count();
 			assert(cnt_full_detail > cnt_mid_detail);
 
-			nd_seven_set_detail_scale(0.75f);
+			nd_seven_set_detail_scale(1.00f);
 			nd_seven_set_zoom(1.0f);
 			printf("PASS: User-adjustable detail scale verified (1.25x=%u, 0.85x=%u, 0.35x=0 billboards at 0.08x zoom)\n",
 			       cnt_full_detail, cnt_mid_detail);
@@ -4527,6 +4527,19 @@ int main(void)
 				nd_seven_reset_cam();
 				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
 				assert(fabsf(nd_seven_get_yaw_deg()) < 1.0f);
+				assert(nd_seven_has_pitch_override() == 0);
+				assert(fabsf(nd_seven_eval_effective_pitch(55.0f, 280.0f) - 55.0f) < 1e-4f);
+				assert(fabsf(nd_seven_eval_effective_pitch(55.0f, 95.0f) - 36.0f) < 1e-4f);
+				float mid_tilt = nd_seven_eval_effective_pitch(55.0f, 187.5f);
+				assert(mid_tilt > 42.0f && mid_tilt < 49.0f);
+				nd_seven_orbit_cam(0.0f, -10.0f);
+				assert(nd_seven_has_pitch_override() == 1);
+				assert(fabsf(nd_seven_eval_effective_pitch(55.0f, 95.0f) - 55.0f) < 1e-4f);
+				nd_seven_reset_cam();
+				assert(nd_seven_has_pitch_override() == 0);
+				assert(fabsf(nd_seven_get_pitch_deg() - 55.0f) < 5.0f);
+				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
+				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_DIORAMA_PITCH) < 1e-2f);
 
 				float low_p = nd_seven_clamp_cam_pitch(0, 1600.0f, 1280.0f, 10.0f, 400.0f, 0.0f, 1.0f);
 				float hi_p  = nd_seven_clamp_cam_pitch(0, 1600.0f, 1280.0f, 10.0f, 400.0f, 0.0f, 89.5f);
@@ -4541,6 +4554,7 @@ int main(void)
 				assert(strstr(nd_seven_gl_fs_billboard(), "0.819152") == NULL);
 				assert(strstr(nd_seven_gl_fs_billboard(), "0.7002075") == NULL);
 				assert(strstr(nd_seven_gl_fs_mesh3d(), "0.573576") == NULL);
+				assert(strstr(nd_seven_gl_fs_mesh3d(), "0.819152") == NULL);
 				assert(strstr(nd_seven_gl_fs_mesh3d(), "0.7002075") == NULL);
 
 				printf("PASS: Phase 1 orbit camera, yaw-aware MVPs & billboards, pitch clamp & procedural sky dome verified\n");
@@ -4674,8 +4688,84 @@ int main(void)
 				assert(kr_steep >= 0.35f && kr_steep < 0.70f);
 				assert(strstr(nd_seven_gl_fs_terrain(), "groveMacro") != NULL);
 				assert(strstr(nd_seven_gl_fs_terrain(), "needleDuffCol") != NULL);
-				printf("PASS: Botanical Phase 4 grove/glade ecology, krummholz (low=%.2f, alt=%.2f, steep=%.2f) & duff shader verified\n",
+				assert(strstr(nd_seven_gl_fs_terrain(), "nd_eval_grove_ecology_weight") != NULL);
+				assert(strstr(nd_seven_gl_fs_terrain(), "farCanopyBand") != NULL);
+				assert(strstr(nd_seven_gl_vs_mesh3d(), "mod(a_iparam.w, 32.0)") != NULL);
+				assert(strstr(nd_seven_gl_vs_mesh3d(), "cardU < 0.05") != NULL);
+				const char *fs_m3d = nd_seven_gl_fs_mesh3d();
+				assert(strstr(fs_m3d, "uGrassTex") != NULL);
+				assert(strstr(fs_m3d, "uGrassNorm") != NULL);
+				assert(strstr(fs_m3d, "uBarkTex") != NULL);
+				assert(strstr(fs_m3d, "uBarkNorm") != NULL);
+				assert(strstr(fs_m3d, "nd_glsl_biome_rgb") != NULL);
+				assert(strstr(fs_m3d, "grassBio") != NULL);
+				assert(strstr(fs_m3d, "style > 4.5 && style < 5.5") != NULL);
+				assert(strstr(fs_m3d, "isFolGrass") != NULL);
+				assert(strstr(fs_m3d, "barkSample") != NULL);
+				printf("PASS: Botanical Phase 4 grove/glade ecology, krummholz (low=%.2f, alt=%.2f, steep=%.2f), grass/bark atlases & duff shader verified\n",
 				       kr_low, kr_high, kr_steep);
+			}
+
+			/* Low-Vegetation Regression & Skyrim-Grade Linear HDR Realism Verification */
+			{
+				int high_trail_hits = 0;
+				float max_tw = 0.0f;
+				float trail_wx = 0.0f, trail_wy = 0.0f;
+				for (int iy = -200; iy <= 200; iy += 8) {
+					for (int ix = -200; ix <= 200; ix += 8) {
+						float wx = (float)ix * 11.0f;
+						float wy = (float)iy * 11.0f;
+						float tw = nd_seven_eval_trail_weight(wx, wy, 0.05f);
+						assert(tw >= 0.0f && tw <= 1.0f);
+						float tw_steep = nd_seven_eval_trail_weight(wx, wy, 0.45f);
+						assert(tw_steep == 0.0f && "Steep slopes >= 0.40 must suppress trails");
+						if (tw > max_tw) {
+							max_tw = tw;
+							trail_wx = wx;
+							trail_wy = wy;
+						}
+						if (tw > 0.55f)
+							high_trail_hits++;
+					}
+				}
+				assert(high_trail_hits > 0 && max_tw > 0.70f && "Flat terrain must exhibit winding footpath trail bands");
+
+				/* Dense compacted trail core must suppress meadow clumps */
+				int zone = 0, flip = 0;
+				float scale = 0.0f;
+				int suppressed = nd_seven_eval_meadow_area((int32_t)trail_wx, (int32_t)trail_wy,
+				                                           12.0f, -50.0f, 0.05f, 9u, 9999.0f,
+				                                           &zone, &scale, &flip);
+				assert(suppressed == 0 && "High-weight trail core (>0.50) must suppress meadow grass");
+
+				const char *fs_terr = nd_seven_gl_fs_terrain();
+				const char *fs_wat  = nd_seven_gl_fs_water();
+				const char *fs_bb   = nd_seven_gl_fs_billboard();
+				const char *fs_m3d  = nd_seven_gl_fs_mesh3d();
+				const char *fs_sky  = nd_seven_gl_fs_sky();
+				const char *fs_cld  = nd_seven_gl_fs_cloud();
+				const char *fs_blm  = nd_seven_gl_fs_bloom();
+				const char *fs_pst  = nd_seven_gl_fs_post();
+
+				assert(strstr(fs_terr, "uTerrDetailTex") != NULL);
+				assert(strstr(fs_terr, "uTerrNormTex") != NULL);
+				assert(strstr(fs_terr, "nd_eval_trail_weight") != NULL);
+				assert(strstr(fs_terr, "terrCreviceAO") != NULL);
+				assert(strstr(fs_terr, "nd_to_lin") != NULL);
+
+				assert(strstr(fs_sky, "nd_to_lin") != NULL);
+				assert(strstr(fs_wat, "nd_to_lin") != NULL);
+				assert(strstr(fs_wat, "nd_to_lin(uSceneColor") == NULL && "Water background scene copy is already linear HDR");
+				assert(strstr(fs_bb,  "nd_to_lin") != NULL);
+				assert(strstr(fs_m3d, "nd_to_lin") != NULL);
+				assert(strstr(fs_m3d, "isFolGrass ? 0.40 : 0.38") != NULL);
+				assert(strstr(fs_m3d, "isFolGrass ? mix(0.42, 0.30") != NULL);
+				assert(strstr(fs_cld, "nd_to_lin") != NULL);
+				assert(strstr(fs_blm, "const float thresh = 0.78;") != NULL);
+				assert(strstr(fs_pst, "pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / 2.2))") != NULL);
+
+				printf("PASS: Low-veg grass/trail sync (hits=%d, max_tw=%.2f), micro-detail/normal atlases & linear HDR/sRGB pipeline verified\n",
+				       high_trail_hits, max_tw);
 			}
 		}
 	}
