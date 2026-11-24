@@ -1985,6 +1985,23 @@ static int on_key_down(bud_event *e)
 	if (!key || !*key)
 		return 0;
 
+	if (strcmp(key, "Escape") == 0) {
+		int changed = 0;
+		const char *active = nd_ui_get_active_modal();
+		if (active && active[0]) {
+			nd_ui_set_active_modal("");
+			changed = 1;
+		}
+		if (client_state.selected_item_ref) {
+			client_state.selected_item_ref = 0;
+			changed = 1;
+		}
+		if (changed) {
+			bud_app_set_state();
+			return 1;
+		}
+	}
+
 	if (nd_ui_seven_active(&client_state)) {
 		if (strcmp(key, "+") == 0 || strcmp(key, "=") == 0 || strcmp(key, "]") == 0 || strcmp(key, "PageUp") == 0) {
 			nd_seven_zoom_in();

@@ -41,3 +41,4 @@ tests/unit/mpfd_contract_test
 .lease.json
 *.lease.json
 /.mm
+/apps/nd-native
