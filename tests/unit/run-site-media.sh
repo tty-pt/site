@@ -1,19 +1,15 @@
 #!/bin/sh
 set -eu
+. "$(dirname "$0")/common.sh"
 
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
-bin=$tmpdir/site_media_test
+unit_tmpdir
+unit_cx_transpile mods/common/ux/site_media.cx
+bin="$UNIT_TMPDIR/site_media_test"
 
-${CC:-clang} -Wall -Wextra -Werror \
-	-I"$repo/external/libbud/include" \
-	-I"$repo/external/libhyle/include" \
-	-I"$repo/external/libhyle-bud/include" \
-	-I"$repo/mods/common" \
-	-I"$repo/mods/common/ux" \
-	-o "$bin" \
-	"$repo/tests/unit/site_media_test.c" \
-	-lbud \
+# shellcheck disable=SC2086
+"$UNIT_CC" -Wall -Wextra -Werror \
+	$UNIT_EXT_INCLUDES -I"$REPO_ROOT/mods/common" -I"$REPO_ROOT/mods/common/ux" \
+	-o "$bin" "$REPO_ROOT/tests/unit/site_media_test.c" \
+	$UNIT_EXT_LDFLAGS -lbud
 
-"$bin"
+LD_LIBRARY_PATH="$UNIT_LD_LIBRARY_PATH" "$bin"

@@ -1,29 +1,15 @@
 #!/bin/sh
-set -e
+set -eu
+. "$(dirname "$0")/common.sh"
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-mkdir -p "$ROOT/build/test"
+unit_tmpdir
+bin="$UNIT_TMPDIR/auth_group_permissions_test"
 
-clang -Wall -Wextra \
-      -I"$ROOT/external/axil-auth/include" \
-      -I"$ROOT/external/axil/include" \
-      -I"$ROOT/external/libstele/include" \
-      -I"$ROOT/external/libcorm/include" \
-      -I"$ROOT/external/libxylem/include" \
-      -I"$ROOT/external/libbud/include" \
-      -I"$ROOT/external/libhyle/include" \
-      -I"$ROOT/external/libhyle-source/include" \
-      -I"$ROOT/external/libhyle-bud/include" \
-      -I"$ROOT/external/liblemma/include" \
-      -L"$ROOT/external/axil/lib" \
-      -L"$ROOT/external/axil-auth/lib" \
-      -L"$ROOT/external/libcorm/lib" \
-      -L"$ROOT/external/libxylem/lib" \
-      -L"$ROOT/external/libstele/lib" \
-      -L"$ROOT/external/liblemma/lib" \
-      -I"$ROOT/mods" \
-      -laxil -lcorm -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -llemma -ljson-c -lstele \
-      "$ROOT/tests/unit/auth_group_permissions_test.c" \
-      -o "$ROOT/build/test/auth_group_permissions_test"
+# shellcheck disable=SC2086
+"$UNIT_CC" -Wall -Wextra \
+	$UNIT_EXT_INCLUDES -I"$REPO_ROOT/mods" \
+	-o "$bin" "$REPO_ROOT/tests/unit/auth_group_permissions_test.c" \
+	$UNIT_EXT_LDFLAGS \
+	-laxil -lcorm -lxylem -lbud -lhyle -lhyle-source -lhyle-bud -llemma -ljson-c -lstele
 
-LD_LIBRARY_PATH="$ROOT/external/axil/lib:$ROOT/external/axil-auth/lib:$ROOT/external/libstele/lib:$ROOT/external/libcorm/lib:$ROOT/external/libxylem/lib:$ROOT/external/liblemma/lib:${LD_LIBRARY_PATH:-/usr/lib}" "$ROOT/build/test/auth_group_permissions_test"
+LD_LIBRARY_PATH="$UNIT_LD_LIBRARY_PATH" "$bin"

@@ -1,30 +1,15 @@
 #!/bin/sh
 set -eu
+. "$(dirname "$0")/common.sh"
 
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
-bin=$tmpdir/site_ui_helpers_test
+unit_tmpdir
+bin="$UNIT_TMPDIR/site_ui_helpers_test"
 
-${CC:-clang} -Wall -Wextra -Werror \
-	-I"$repo/external/libhyle/include" \
-	-I"$repo/external/libhyle-source/include" \
-	-I"$repo/external/libhyle-bud/include" \
-	-I"$repo/external/libbud/include" \
-	-I"$repo/external/axil/include" \
-	-I"$repo/external/libcorm/include" \
-	-I"$repo" \
-	-o "$bin" \
-	"$repo/tests/unit/site_ui_helpers_test.c" \
-	-L"$repo/mods/common" -Wl,-rpath,"$repo/mods/common" -l:common.so \
-	-L"$repo/external/axil/lib" -Wl,-rpath,"$repo/external/axil/lib" \
-	-L"$repo/external/libstele/lib" -Wl,-rpath,"$repo/external/libstele/lib" \
-	-L"$repo/external/libcorm/lib" -Wl,-rpath,"$repo/external/libcorm/lib" \
-	-L"$repo/external/libxylem/lib" -Wl,-rpath,"$repo/external/libxylem/lib" \
-	-L"$repo/external/libbud/lib" -Wl,-rpath,"$repo/external/libbud/lib" \
-	-L"$repo/external/liblemma/lib" -Wl,-rpath,"$repo/external/liblemma/lib" \
-	-lhyle-bud \
-	-lbud \
-	-lxylem \
+# shellcheck disable=SC2086
+"$UNIT_CC" -Wall -Wextra -Werror \
+	$UNIT_EXT_INCLUDES -I"$REPO_ROOT" \
+	-o "$bin" "$REPO_ROOT/tests/unit/site_ui_helpers_test.c" \
+	-L"$REPO_ROOT/mods/common" -Wl,-rpath,"$REPO_ROOT/mods/common" -l:common.so \
+	$UNIT_EXT_LDFLAGS -lhyle-bud -lbud -lxylem
 
-LD_LIBRARY_PATH="$repo/external/axil/lib:$repo/external/libstele/lib:$repo/external/libcorm/lib:$repo/external/libxylem/lib:$repo/external/liblemma/lib:${LD_LIBRARY_PATH:-}" "$bin"
+LD_LIBRARY_PATH="$UNIT_LD_LIBRARY_PATH" "$bin"

@@ -8,7 +8,7 @@
 const char *site_ui_get_locale(void) { return "en"; }
 void site_ui_set_locale(const char *lang) { (void)lang; }
 
-#include "../../mods/common/ux/site_media.c"
+#include "../../mods/common/ux/site_media.cx.c"
 
 #define CHECK(label, condition)                                                \
 	do {                                                                   \

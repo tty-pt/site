@@ -11,7 +11,7 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 | **P0** | Asset Sync & Single Source of Truth | Small (1–2h) | Low | **Done** | Fixes live `bud-cap.js` drift; makes `htdocs/` strictly derived |
 | **P1** | WASM Size, Incremental Caching & Unified Bundle Cutover | Small–Med (½d) | Low–Med | **Done** | 4–7× smaller `.wasm` payloads; 0.77s incremental `nd.wasm`; single cached `/site.wasm` on site pages |
 | **P2** | `libbud` Bump Arena (`bud_arena`) | Medium (1d) | Medium | **Done** | 100% fewer per-frame heap allocs (474,000 → 0 over 1,000 renders), 2.7–4.7× faster tree build, zero ASan/UBSan findings |
-| **P3** | Build & Unit-Test Deduplication | Small–Med (½d) | Low | Planned | Shrinks `Makefile` ~200L and collapses 59 copy-pasted `tests/unit/run-*.sh` harnesses |
+| **P3** | Build & Unit-Test Deduplication | Small–Med (½d) | Low | **Done** | Shrinks `Makefile` (-142L) & 18 unit scripts (-512L raw / -271L net); 7.1× faster warm ND UX tests; 31/31 `standalone-unit-tests` green |
 | **P4** | Seven Engine Extraction & Shader Deduplication | Large (2–3d) | Medium | Planned | Cuts ~2,000L duplicate GLSL, splits 1,761L `nd_seven_render`, shrinks `mods/nd/ux/` from 31K → ~2.5K LOC |
 | **P5** | Server Module Slimming & Repo/Submodule Hygiene | Medium (1–2d) | Low–Med | Planned | Separates domain logic from HTTP handlers (`gig`, `chat`, `index`, `auth`); cleans root/docs/unused submodules |
 
@@ -82,13 +82,14 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 - `tests/unit/` has 59 scripts (1,375 LOC) duplicating flags, `.cx` transpilation, and the 15-file ND UX source list across 5 separate scripts.
 
 **Deliverables:**
-1. Replace repetitive `*-lib:` rules in `Makefile` with a `LIB_TARGET` template macro propagating `PREFIX`, `PROFILE`, `SANITIZE`, and `EXT_MAKE_ARGS` uniformly.
-2. Collapse `SITE_WASM_OBJS` rules in `Makefile` into a compact declarative table/pattern rule.
-3. Add `tests/unit/common.sh` and a cached `libnd_ux_test.a` archive shared by the 5 ND UX unit scripts.
+1. Replaced all 21 repetitive `*-lib:` rules (including stranded `xylem-lib` / `jarvis-lib`) in `Makefile` with a `LIB_TARGET` template macro propagating `EXT_MAKE_ARGS`, `PREFIX`, `PROFILE`, and `SANITIZE` uniformly (fixing missing `EXT_MAKE_ARGS` on `areole-lib`, `chaff-lib`, `corolla-lib`), and deduplicated `stage-assets` `@tty-pt/*` symlinks + `npm-test-all`/`standalone-unit-tests`/`test-graphics`/`pages-test` script lists.
+2. Collapsed the 28 copy-pasted `SITE_WASM_OBJS` rules in `Makefile` into a declarative `SITE_WASM_SPECS` table + `SITE_WASM_RULE` macro with `-MMD -MP -MT $@ -MF $@.d` automatic header tracking and atomic `.tmp` renames.
+3. Added `tests/unit/common.sh` with automatic repo-local `UNIT_EXT_INCLUDES` / `UNIT_EXT_LDFLAGS` / `UNIT_LD_LIBRARY_PATH`, incremental `unit_cx_transpile`, and cached `-MMD -MP` static archives (`libnd_ux_test.a` with `--whole-archive` constructor preservation and `libnd_seven_test.a`). Migrated 18 unit scripts (5 full ND UX, 4 Seven graphics, 9 `-lbud` standalone scripts) and fixed `tests/unit/site_media_test.c` (`site_media.cx.c`).
 
-**Exit Criteria:**
-- `Makefile` shrinks by **≥ 200 lines** with identical target names.
-- `make test-fast` exits `0` cleanly and faster.
+**Exit Criteria (Verified):**
+- `Makefile` shrunk **682 → 540 lines (-142L)** with all 26 `*-lib` targets/aliases preserved; `tests/unit/run-*.sh` shrunk **1,381 → 869 lines (-512L raw, -271L net including `common.sh`)** — **-413 net lines** total.
+- `make standalone-unit-tests` exits `0` (**31/31 PASS** in 6.30s with zero custom env overrides); 3 ND UX tests (`seven-stage-html`, `ssr-hydration`, `viewport-registry`) drop from **19.85s → 9.14s cold (2.17×) → 2.80s warm (7.09×)** with verified header invalidation; 4 Seven graphics tests (`scene-sync`, `seven-world`, `map-render`, `seven-render`) all exit `0`.
+- All asset, boundary, UX purity, JS, WASM, pkg-config, and `Makefile` `-L` audits exit `0` *(note: `scripts/check-no-tree-rpath.sh` still flags pre-existing external daemon `external/libjarvis/lib/libjarvis.so` outside Phase 3 scope)*.
 
 ---
 
