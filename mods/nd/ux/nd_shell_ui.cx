@@ -1,0 +1,313 @@
+#include "nd_ui_internal.h"
+#include "site_ui.h"
+
+bud_node *mount_tty(void)
+{
+	return (
+		<div id="term"
+		     data-bud-key="term"
+		     data-bud-terminal="1"
+		     data-bud-foreign="1"
+		     data-line-mode="true"
+		     style="border: thin solid #9589c5 !important;"
+		     class="flex-1 h-full min-h-[400px] font-mono text-neutral-200 overflow-hidden relative" />
+	);
+}
+
+bud_node *mount_seven_stage(void)
+{
+	/* A different tag than the terminal's <div>: swapping stages must replace
+	 * the element (patch-replace). Patching the terminal's div in place would
+	 * keep its data-bud-terminal attribute, and with it the live xterm, which
+	 * then swallows every key press.
+	 *
+	 * The stage fills its holder: the canvas is resized by the lamina bridge
+	 * to whatever frame size the stage draws (data-bud-canvas-fit), 1:1 with
+	 * the screen, so the sprite scale never changes. */
+	return (
+		<nd-stage id="game-stage"
+		          data-bud-key="game-stage"
+		          class="absolute inset-0 min-w-0 min-h-0 overflow-hidden bg-neutral-950">
+			<canvas id="seven-stage-canvas"
+			        data-bud-key="seven-stage-canvas"
+			        data-bud-canvas="1"
+			        data-bud-canvas-fit="1"
+			        data-bud-webgl="1"
+			        width="640"
+			        height="480"
+			        class="absolute inset-0 w-full h-full block select-none bg-neutral-950"
+			        onMouseDownSelf={on_stage_orbit_down}
+			        onWheelSelf={on_stage_orbit_wheel}
+			        onDblClickSelf={on_stage_orbit_dblclick} />
+			<div id="seven-shader-status"
+			     data-bud-key="seven-shader-status"
+			     class={g_seven_shaders_ready_ui
+			            ? "hidden"
+			            : "absolute inset-0 flex items-center justify-center pointer-events-none select-none font-mono text-sm text-neutral-300 z-10"}>
+				Compiling shaders...
+			</div>
+		</nd-stage>
+	);
+}
+
+static bud_node *render_viewport_slot(const nd_client_state_t *st)
+{
+	const char *req_drv = (st && st->preferred_driver[0]) ? st->preferred_driver : "tty";
+	bud_node *vport = NULL;
+
+	for (size_t i = 0; i < g_driver_count; i++) {
+		if (strcmp(g_viewport_drivers[i].id, req_drv) == 0 && g_viewport_drivers[i].mount) {
+			vport = g_viewport_drivers[i].mount();
+			break;
+		}
+	}
+	if (!vport)
+		vport = mount_tty();
+
+	bud_node *overlay = nd_ui_glue_render_slot(ND_UI_SLOT_HUD_OVERLAYS, st);
+
+	return (
+		<div id="viewport-container"
+		     class="relative flex-1 flex flex-col min-w-0 min-h-0"
+		     data-bud-key="viewport-container">
+			{vport}
+			{overlay}
+		</div>
+	);
+}
+
+static bud_node *render_modals_slot(const nd_client_state_t *st)
+{
+	bud_node *slot = <div id="modals-slot" />;
+	nd_ui_glue_contribute(ND_UI_SLOT_MODALS, slot, st);
+	bud_append(slot, render_settings_modal(st));
+	return slot;
+}
+
+static bud_node *render_hud_window(int win_id, const char *id, const char *key,
+                                   const char *id_prefix, const char *title_txt,
+                                   const char *base_cls, const char *extra_cls,
+                                   bud_node *body, bud_node *after_body)
+{
+	char cls[224];
+	snprintf(cls, sizeof(cls), "%s%s%s%s",
+		base_cls,
+		(extra_cls && extra_cls[0]) ? extra_cls : "",
+		nd_ui_get_win_minimized(win_id) ? " hud-win-minimized" : "",
+		nd_win_is_dragging(win_id) ? " hud-win-dragging" : "");
+
+	bud_node *win = <div id={id} data-bud-key={key} class={cls} />;
+	append_win_chrome(win, win_id, id_prefix, title_txt, 0);
+	if (body)
+		bud_append(win, body);
+	if (after_body)
+		bud_append(win, after_body);
+	return win;
+}
+
+static bud_node *wrap_bud_root(bud_node *main_box, const nd_client_state_t *st, int with_drag)
+{
+	const char *user = (st && st->user[0]) ? st->user : client_state.user;
+	bud_node *layout = site_ui_layout("NeverDark", "/nd", "🕹️", user, NULL, main_box);
+
+	bud_node *root = (
+		<div id="bud-root"
+		     data-slot="1"
+		     data-capabilities="axil axil-tty lamina bud xylem"
+		     class={"w-full h-[calc(100vh-64px)] box-border font-[\"Lucida_Console\",Monaco,monospace]"}
+		     onCmd={on_cmd_action}
+		     on:cycle-viewport={on_cycle_viewport}
+		     on:restore-persist={on_restore_persist}
+		     onWindowKeyDown={on_key_down}
+		     onWindowKeyUp={on_key_up}>
+			{layout}
+		</div>
+	);
+	if (with_drag) {
+		bud_bind(root, "mousemove@window", 1, on_win_drag_move);
+		bud_bind(root, "mouseup@window", 1, on_win_drag_up);
+	}
+	return root;
+}
+
+bud_node *nd_ui_render(const nd_client_state_t *st)
+{
+	nd_ui_init_defaults();
+	if (st && st->preferred_driver[0]) {
+		for (size_t i = 0; i < g_driver_count; i++) {
+			if (strcmp(g_viewport_drivers[i].id, st->preferred_driver) == 0) {
+				g_active_driver_idx = (int)i;
+				break;
+			}
+		}
+	}
+
+	bud_node *vport = render_viewport_slot(st);
+	bud_node *map = render_room_map(st);
+	bud_node *modals = render_modals_slot(st);
+
+	int is_seven = (nd_ui_seven_active(st) || (st && st->layout_mode == ND_LAYOUT_GAME_2D));
+
+	if (is_seven) {
+		nd_win_sync_target(st);
+
+		/* 2. Floating Room Title Window (top-center default) */
+		int has_room = (st && (st->room.name[0] || st->room.ref));
+		char title_text[128] = {0};
+		if (st && st->room.name[0])
+			snprintf(title_text, sizeof(title_text), "📍 %s (#%u)", st->room.name, st->room.ref);
+		else if (st && st->room.ref)
+			snprintf(title_text, sizeof(title_text), "📍 Room #%u", st->room.ref);
+
+		bud_node *title_win = render_hud_window(
+			ND_WIN_TITLE, "room-header", "room-header",
+			"title", "📍 Room Title",
+			"hud-win seven-room-header pointer-events-auto",
+			has_room ? "" : " hidden",
+			(
+				<div id="room-header-text"
+				     data-bud-key="title-body"
+				     class="hud-win-body seven-room-title-body truncate">
+					{title_text}
+				</div>
+			),
+			NULL);
+
+		/* 3. Unified Minimap / Look-At Window (top-right default) */
+		bud_node *map_win = NULL;
+		if (map) {
+			bud_node *tc = (st && st->target_ref) ? render_target_card(st) : NULL;
+			int has_target_card = (tc && bud_get_attr(tc, "id") != NULL);
+			if (has_target_card) {
+				bud_set_attr(map, "class", "hidden");
+			} else if (tc) {
+				bud_free(tc);
+				tc = NULL;
+			}
+			map_win = render_hud_window(
+				ND_WIN_MAP, "hud-win-map", "minimap",
+				"map", has_target_card ? "👁️ Look-At" : "🗺️ Minimap",
+				"hud-win hud-win-map rpg-hud-panel pointer-events-auto shadow-lg rounded flex-shrink-0",
+				has_target_card ? " hud-win-map-target" : "",
+				(
+					<div data-bud-key="map-body"
+					     class="hud-win-body flex flex-col items-center justify-center w-full h-full min-h-0 overflow-hidden">
+						{map}
+						{tc}
+					</div>
+				),
+				NULL);
+		}
+
+		/* 4. Floating Room Contents Window (mid-right default + unclipped Popper) */
+		bud_node *contents = render_room_contents(st);
+		bud_node *cnt_win = NULL;
+		if (contents) {
+			cnt_win = render_hud_window(
+				ND_WIN_CONTENTS, "hud-win-contents", "contents",
+				"contents", "📦 Room Contents",
+				"hud-win hud-win-contents rpg-hud-panel pointer-events-auto p-2 flex flex-col flex-initial min-h-[120px] max-h-[36vh]",
+				NULL,
+				(
+					<div data-bud-key="contents-body"
+					     class="hud-win-body flex flex-col flex-1 w-full min-h-0 overflow-hidden">
+						{contents}
+					</div>
+				),
+				render_item_popper(st));
+		}
+
+		bud_node *gauges = render_gauges_slot(st);
+		bud_node *actions = render_action_bar(st);
+
+		/* Full Seven Stage with floating movable & resizable HUD windows */
+		bud_node *main_box = (
+			<div id="main"
+			     data-bud-key="main"
+			     class="flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100">
+				<div id="holder"
+				     data-bud-key="holder"
+				     class="nd game-2d-mode relative flex flex-col flex-1 min-h-0 w-full overflow-hidden">
+					{vport}
+					{render_rpg_chat_terminal(st)}
+					{title_win}
+					<div id="map-overlay"
+					     data-bud-key="map-overlay"
+					     class="absolute inset-0 z-10 opacity-90 pointer-events-none overflow-visible"
+					     style="inset:0;top:12px;right:12px;bottom:76px;max-height:calc(100% - 88px)">
+						{map_win}
+						{cnt_win}
+						{if (gauges)
+							<div data-bud-key="gauges-dock"
+							     class="rpg-hud-panel pointer-events-auto flex flex-col gap-1 items-end p-1.5 w-full flex-shrink-0">
+								{gauges}
+							</div>
+						}
+					</div>
+					{if (actions)
+						<div id="bottom-right-actions"
+						     data-bud-key="bottom-right-actions"
+						     class="hud-actions-dock pointer-events-auto">
+							<div class="hud-win-body flex items-center justify-center w-full h-full">
+								{actions}
+							</div>
+						</div>
+					}
+					{render_closed_windows_dock()}
+				</div>
+				{modals}
+			</div>
+		);
+
+		return wrap_bud_root(main_box, st, 1);
+	}
+
+	const char *rp_class = (st && st->layout_mode == ND_LAYOUT_STAGE_EXPANDED)
+		? "flex flex-col gap-2 w-52 max-w-[220px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden text-xs"
+		: "flex flex-col gap-2 w-80 max-w-[340px] h-full flex-shrink-0 backdrop-blur-[4px] bg-black/40 p-2 border border-neutral-800/80 justify-between select-none overflow-hidden";
+
+	int show_rp = (!st || st->layout_mode != ND_LAYOUT_STAGE_FULLSCREEN);
+	if (!show_rp && map) {
+		bud_free(map);
+		map = NULL;
+	}
+
+	char hcls[160], mcls[128], bg_style[160] = {0};
+	snprintf(hcls, sizeof(hcls), "nd terminal-mode flex flex-1 gap-2 p-2 min-h-0 h-full overflow-hidden %s %s",
+		(st && st->target_ref) ? "targetting" : "",
+		(st && st->layout_mode == ND_LAYOUT_STAGE_FULLSCREEN) ? "fullscreen-layout" : "");
+	snprintf(mcls, sizeof(mcls), "flex flex-col h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 %s",
+		(st && st->target_ref) ? "targetting" : "");
+	if (st && st->room.art[0])
+		snprintf(bg_style, sizeof(bg_style), "background: url('/nd/art/%s') center/cover no-repeat;", st->room.art);
+
+	bud_node *main_box = (
+		<div id="main"
+		     data-bud-key="main"
+		     style={bg_style[0] ? bg_style : NULL}
+		     class={mcls}>
+			<div id="holder" data-bud-key="holder" class={hcls}>
+				{vport}
+				{if (show_rp)
+					<div id="right-panel" data-bud-key="right-panel" class={rp_class}>
+						<div id="cb" class="flex flex-col gap-2 items-center w-full flex-1 min-h-0 overflow-y-auto">
+							{render_target_card(st)}
+							{render_room_header(st)}
+							{map}
+							{render_direction_keypad()}
+							{render_room_contents(st)}
+							{render_item_popper(st)}
+						</div>
+						<div class="w-full flex-shrink-0 flex flex-col gap-2 pt-2 border-t border-neutral-700/40 items-center">
+							{render_gauges_slot(st)}
+							{render_action_bar(st)}
+						</div>
+					</div>
+				}
+			</div>
+			{modals}
+		</div>
+	);
+
+	return wrap_bud_root(main_box, st, 0);
+}

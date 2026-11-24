@@ -30,13 +30,9 @@ static int on_move_l(bud_event *e) { (void)e; ws_send("l\n", 2); return 0; }
 static int on_move_K(bud_event *e) { (void)e; ws_send("K\n", 2); return 0; }
 static int on_move_J(bud_event *e) { (void)e; ws_send("J\n", 2); return 0; }
 
-static int on_action_stats(bud_event *e) { (void)e; nd_ui_toggle_modal("stats"); return 0; }
-static int on_action_equip(bud_event *e) { (void)e; nd_ui_toggle_modal("equip"); return 0; }
-static int on_action_spells(bud_event *e) { (void)e; nd_ui_toggle_modal("spell"); return 0; }
 static int on_action_inv(bud_event *e) { (void)e; ws_send("inventory\n", 10); return 0; }
 static int on_action_look(bud_event *e) { (void)e; ws_send("look\n", 5); return 0; }
 static int on_action_settings(bud_event *e) { (void)e; nd_ui_toggle_modal("settings"); return 0; }
-
 
 int on_cycle_viewport(bud_event *e)
 {
@@ -60,12 +56,16 @@ int on_cycle_viewport(bud_event *e)
 
 bud_node *make_btn(const char *label, const char *title, bud_event_handler_fn handler)
 {
-	return lx_n("button",
-		lx_attr("type", "button"),
-		lx_attr("class", "nd-pad btn round border border-neutral-700 hover:bg-neutral-800 text-neutral-200 shadow-md text-base select-none"),
-		(title && title[0]) ? lx_attr("title", title) : lx_none(),
-		handler ? lx_bind("click", 1, handler) : lx_none(),
-		lx_text(label ? label : ""));
+	bud_node *btn = (
+		<button type="button"
+		        class="nd-pad btn round border border-neutral-700 hover:bg-neutral-800 text-neutral-200 shadow-md text-base select-none"
+		        title={(title && title[0]) ? title : NULL}>
+			{label ? label : ""}
+		</button>
+	);
+	if (handler)
+		bud_bind(btn, "click", 1, handler);
+	return btn;
 }
 
 bud_node *nd_ui_dock_button(const char *icon, const char *title, const char *action_id)
@@ -78,25 +78,26 @@ bud_node *nd_ui_dock_button(const char *icon, const char *title, const char *act
 
 bud_node *render_direction_keypad(void)
 {
-	return lx_n("div",
-		lx_attr("id", "directions"),
-		lx_attr("class", "nd-keypad text-center select-none"),
-		lx_node(bud_element("div")),
-		lx_node(make_btn("↑", "North (k)", on_move_k)),
-		lx_node(make_btn("↗", "Northeast (K)", on_move_K)),
-		lx_node(make_btn("←", "West (h)", on_move_h)),
-		lx_node(bud_element("div")),
-		lx_node(make_btn("→", "East (l)", on_move_l)),
-		lx_node(bud_element("div")),
-		lx_node(make_btn("↓", "South (j)", on_move_j)),
-		lx_node(make_btn("↘", "Southeast (J)", on_move_J)));
+	return (
+		<div id="directions" class="nd-keypad text-center select-none">
+			<div />
+			{make_btn("↑", "North (k)", on_move_k)}
+			{make_btn("↗", "Northeast (K)", on_move_K)}
+			{make_btn("←", "West (h)", on_move_h)}
+			<div />
+			{make_btn("→", "East (l)", on_move_l)}
+			<div />
+			{make_btn("↓", "South (j)", on_move_j)}
+			{make_btn("↘", "Southeast (J)", on_move_J)}
+		</div>
+	);
 }
 
 bud_node *render_action_bar(const nd_client_state_t *st)
 {
-	bud_node *dock = bud_element("div");
-	bud_set_attr(dock, "id", "g-actions");
-	bud_set_attr(dock, "class", "flex flex-wrap gap-1 items-center justify-center");
+	bud_node *dock = (
+		<div id="g-actions" class="flex flex-wrap gap-1 items-center justify-center" />
+	);
 
 	/* Tenant modules contribute their own dock buttons */
 	nd_ui_glue_contribute(ND_UI_SLOT_ACTIONS, dock, st);
@@ -115,5 +116,5 @@ bud_node *render_gauges_slot(const nd_client_state_t *st)
 	bud_node *node = nd_ui_glue_render_slot(ND_UI_SLOT_GAUGES, st);
 	if (node)
 		return node;
-	return bud_element("div");
+	return <div />;
 }

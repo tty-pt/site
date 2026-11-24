@@ -4,20 +4,24 @@ WASM_PATH ?= $(REPO_ROOT)/htdocs
 TARGET = nd.so
 
 ND_UX_MODULES = \
-	ux/glue/attr_ui.c \
-	ux/glue/equip_ui.c \
+	ux/glue/attr_ui.cx \
+	ux/glue/equip_ui.cx \
 	ux/glue/spell_ui.c \
 	ux/glue/fight_ui.c \
 	ux/glue/mortal_ui.c
 
 ND_UX_PARTS = \
-	ux/nd_map_ui.c \
+	ux/nd_win.c \
+	ux/nd_settings_ui.cx \
+	ux/nd_hud_ui.cx \
+	ux/nd_shell_ui.cx \
+	ux/nd_map_ui.cx \
 	ux/nd_seven.c \
 	ux/nd_seven_atlas_draw.c \
 	ux/nd_seven_ground.c \
 	ux/nd_seven_motion.c \
 	ux/nd_seven_objects.c \
-	ux/nd_dock_ui.c \
+	ux/nd_dock_ui.cx \
 	ux/nd_state_io.c \
 	ux/nd_seven_gl_shaders.c \
 	ux/nd_seven_gl_math.c \
@@ -42,7 +46,7 @@ nd-cflags += $(HYLE_BUD_WASM_CFLAGS)
 
 include ../../build.mk
 
-ND_UX_HDRS = ux/nd_ui.h ux/nd_lamina.h ux/nd_seven.h ux/nd_seven_atlas.h ux/nd_seven_gl.h ux/nd_seven_gl_internal.h ux/nd_seven_ground.h ux/nd_seven_mesh3d.h
+ND_UX_HDRS = ux/nd_ui.h ux/nd_ui_internal.h ux/nd_lamina.h ux/nd_seven.h ux/nd_seven_atlas.h ux/nd_seven_gl.h ux/nd_seven_gl_internal.h ux/nd_seven_ground.h ux/nd_seven_mesh3d.h
 
 $(TARGET): $(ND_UX_HDRS) $(REPO_ROOT)/external/nd-world/include/nd/field.h
 

@@ -2,6 +2,17 @@
 set -eu
 
 REPO_ROOT="$(pwd)"
+CX_BIN="$REPO_ROOT/external/libbud/bin/cx"
+for cx_src in \
+	mods/nd/ux/nd_settings_ui.cx \
+	mods/nd/ux/nd_hud_ui.cx \
+	mods/nd/ux/nd_shell_ui.cx \
+	mods/nd/ux/nd_map_ui.cx \
+	mods/nd/ux/nd_dock_ui.cx \
+	mods/nd/ux/glue/equip_ui.cx \
+	mods/nd/ux/glue/attr_ui.cx; do
+	[ -f "${cx_src}.c" ] && [ ! "$cx_src" -nt "${cx_src}.c" ] || "$CX_BIN" "$cx_src" -o "${cx_src}.c"
+done
 
 gcc -g -O0 \
 	-I"$REPO_ROOT/include" \
@@ -26,8 +37,12 @@ gcc -g -O0 \
 	tests/unit/test_ssr_hydration.c \
 	mods/common/ux/site_ui.c \
 	mods/nd/ux/nd_ui.c \
-	mods/nd/ux/nd_map_ui.c \
-	mods/nd/ux/nd_dock_ui.c \
+	mods/nd/ux/nd_win.c \
+	mods/nd/ux/nd_settings_ui.cx.c \
+	mods/nd/ux/nd_hud_ui.cx.c \
+	mods/nd/ux/nd_shell_ui.cx.c \
+	mods/nd/ux/nd_map_ui.cx.c \
+	mods/nd/ux/nd_dock_ui.cx.c \
 	mods/nd/ux/nd_state_io.c \
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
@@ -38,8 +53,8 @@ gcc -g -O0 \
 	mods/nd/ux/nd_seven_ground.c \
 	mods/nd/ux/nd_seven_motion.c \
 	mods/nd/ux/nd_seven_objects.c \
-	mods/nd/ux/glue/equip_ui.c \
-	mods/nd/ux/glue/attr_ui.c \
+	mods/nd/ux/glue/equip_ui.cx.c \
+	mods/nd/ux/glue/attr_ui.cx.c \
 	mods/nd/ux/glue/spell_ui.c \
 	mods/nd/ux/glue/fight_ui.c \
 	mods/nd/ux/glue/mortal_ui.c \

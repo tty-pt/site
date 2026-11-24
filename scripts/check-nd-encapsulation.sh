@@ -7,7 +7,9 @@ if [ -n "$hits" ]; then
 	echo "FAIL: axil-nd names tenant-module concepts:"; echo "$hits"; exit 1
 fi
 # mods/nd host shell must not include module UI headers directly.
-if grep -nE '#include.*(attr|equip|spell|fight|mortal)-ui\.h' mods/nd/ux/nd_ui.c mods/nd/nd.c; then
+if grep -nE '#include.*(attr|equip|spell|fight|mortal)-ui\.h' \
+	mods/nd/ux/nd_ui.c mods/nd/ux/nd_win.c mods/nd/ux/nd_hud_ui.cx \
+	mods/nd/ux/nd_settings_ui.cx mods/nd/ux/nd_shell_ui.cx mods/nd/nd.c; then
 	echo "FAIL: nd host includes module UI header"; exit 1
 fi
 # Sibling domain modules under external/nd-* must not directly link each other via -lnd-*.

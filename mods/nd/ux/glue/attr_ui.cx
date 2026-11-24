@@ -4,6 +4,8 @@
 
 #include <ttypt/xy-mod.h>
 #include <bud/bud.h>
+#include <bud/bud_jsx.h>
+#include <bud/bud_reconcile.h>
 #include <bud/bud_app.h>
 #include <bud/bud_slot.h>
 #include <bud/bud_state.h>
@@ -26,7 +28,6 @@
 
 BUD_DEFINE_STATE(nd_attr_wire_state_t, ND_ATTR_SCHEMA)
 
-
 XY_LISTENER_TAG(int, on_nd_ui_action, attr, const char *, action_id)
 {
 	if (action_id && strcmp(action_id, "stats") == 0) {
@@ -37,20 +38,15 @@ XY_LISTENER_TAG(int, on_nd_ui_action, attr, const char *, action_id)
 	return xy_last(&ret) == XY_OK ? ret : 0;
 }
 
-static void
-attr_stat_row_enhanced(bud_node *col, const char *label, const char *value)
+static bud_node *
+attr_stat_row_enhanced(const char *label, const char *value)
 {
-	bud_node *row = bud_element("div");
-	bud_set_attr(row, "class", "rpg-stat-row flex items-center justify-between gap-3 text-xs");
-	bud_node *l = bud_element("span");
-	bud_set_attr(l, "class", "tbbold rpg-stat-label font-bold text-neutral-300 uppercase tracking-wider");
-	bud_append(l, bud_text(label));
-	bud_node *v = bud_element("span");
-	bud_set_attr(v, "class", "rpg-stat-val font-mono font-bold text-neutral-100");
-	bud_append(v, bud_text(value));
-	bud_append(row, l);
-	bud_append(row, v);
-	bud_append(col, row);
+	return (
+		<div class="rpg-stat-row flex items-center justify-between gap-3 text-xs">
+			<span class="tbbold rpg-stat-label font-bold text-neutral-300 uppercase tracking-wider">{label}</span>
+			<span class="rpg-stat-val font-mono font-bold text-neutral-100">{value}</span>
+		</div>
+	);
 }
 
 static bud_node *
@@ -59,13 +55,6 @@ attr_render_stats_modal_enhanced(const void *state)
 	const nd_client_state_t *st = (const nd_client_state_t *)state;
 	const char *active = nd_ui_get_active_modal();
 	int is_open = (active && strcmp(active, "stats") == 0);
-
-	bud_node *overlay = bud_element("div");
-	bud_set_attr(overlay, "id", "stats-modal");
-	bud_set_attr(overlay, "class", is_open
-		? "modal fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-		: "hidden");
-	bud_bind(overlay, "click", 1, on_attr_modal_close);
 
 	const nd_stats_state_t *ss = (const nd_stats_state_t *)
 		nd_client_ext_get(st, ND_ATTR_EXT_KEY);
@@ -80,56 +69,47 @@ attr_render_stats_modal_enhanced(const void *state)
 		{ "def", EF_DEF }, { "mdef", EF_MDEF },
 	};
 
-	bud_node *card = bud_element("div");
-	bud_set_attr(card, "id", "stats");
-	bud_set_attr(card, "class", "rpg-modal-card stats-card flex flex-col gap-3 p-4 border border-[#9589c5] bg-[#2c2c2c]/90 shadow-2xl min-w-[300px] select-none");
-
-	bud_node *hdr = bud_element("div");
-	bud_set_attr(hdr, "class", "rpg-modal-header flex items-center justify-between gap-2 pb-2 border-b border-[#9589c5]/50");
-	bud_node *title = bud_element("span");
-	bud_set_attr(title, "class", "text-xs font-bold text-neutral-100 tracking-wider uppercase");
-	bud_append(title, bud_text("📋 Character Sheet"));
-	bud_append(hdr, title);
-	bud_append(card, hdr);
-
-	bud_node *body = bud_element("div");
-	bud_set_attr(body, "class", "stats-cols-wrap flex gap-5 w-full");
-
-	bud_node *cols[2];
-	static const char *const col_titles[2] = { "Attributes", "Combat" };
-	for (int c = 0; c < 2; c++) {
-		cols[c] = bud_element("div");
-		bud_set_attr(cols[c], "class", "rpg-stat-col flex flex-col gap-1.5 flex-1");
-		bud_node *ct = bud_element("div");
-		bud_set_attr(ct, "class", "rpg-stat-col-title text-[10px] font-bold text-[#c2b3ff] uppercase tracking-wider pb-1 border-b border-neutral-700/50");
-		bud_append(ct, bud_text(col_titles[c]));
-		bud_append(cols[c], ct);
-		bud_append(body, cols[c]);
-	}
-
-	for (size_t i = 0; i < sizeof(k_attrs) / sizeof(k_attrs[0]); i++) {
-		char v[16];
-		snprintf(v, sizeof(v), "%u", ss ? (unsigned)ss->attr[k_attrs[i].idx] : 0u);
-		attr_stat_row_enhanced(cols[0], k_attrs[i].label, v);
-	}
-	for (size_t i = 0; i < sizeof(k_effects) / sizeof(k_effects[0]); i++) {
-		unsigned val = 0;
-		if (ss) switch (k_effects[i].which) {
-		case EF_DODGE: val = ss->dodge; break;
-		case EF_DMG:   val = ss->dmg;   break;
-		case EF_MDMG:  val = ss->mdmg;  break;
-		case EF_DEF:   val = ss->def;   break;
-		case EF_MDEF:  val = ss->mdef;  break;
-		}
-		char v[16];
-		snprintf(v, sizeof(v), "%u", val);
-		attr_stat_row_enhanced(cols[1], k_effects[i].label, v);
-	}
-
-	bud_append(card, body);
-	bud_bind(card, "click", 1, on_attr_card_click);
-	bud_append(overlay, card);
-	return overlay;
+	return (
+		<div id="stats-modal"
+		     class={is_open
+		            ? "modal fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+		            : "hidden"}
+		     onClick={on_attr_modal_close}>
+			<div id="stats"
+			     class="rpg-modal-card stats-card flex flex-col gap-3 p-4 border border-[#9589c5] bg-[#2c2c2c]/90 shadow-2xl min-w-[300px] select-none"
+			     onClick={on_attr_card_click}>
+				<div class="rpg-modal-header flex items-center justify-between gap-2 pb-2 border-b border-[#9589c5]/50">
+					<span class="text-xs font-bold text-neutral-100 tracking-wider uppercase">📋 Character Sheet</span>
+				</div>
+				<div class="stats-cols-wrap flex gap-5 w-full">
+					<div class="rpg-stat-col flex flex-col gap-1.5 flex-1">
+						<div class="rpg-stat-col-title text-[10px] font-bold text-[#c2b3ff] uppercase tracking-wider pb-1 border-b border-neutral-700/50">Attributes</div>
+						{for (size_t i = 0; i < sizeof(k_attrs) / sizeof(k_attrs[0]); i++) {
+							char v[16];
+							snprintf(v, sizeof(v), "%u", ss ? (unsigned)ss->attr[k_attrs[i].idx] : 0u);
+							<>{attr_stat_row_enhanced(k_attrs[i].label, v)}</>;
+						}}
+					</div>
+					<div class="rpg-stat-col flex flex-col gap-1.5 flex-1">
+						<div class="rpg-stat-col-title text-[10px] font-bold text-[#c2b3ff] uppercase tracking-wider pb-1 border-b border-neutral-700/50">Combat</div>
+						{for (size_t i = 0; i < sizeof(k_effects) / sizeof(k_effects[0]); i++) {
+							unsigned val = 0;
+							if (ss) switch (k_effects[i].which) {
+							case EF_DODGE: val = ss->dodge; break;
+							case EF_DMG:   val = ss->dmg;   break;
+							case EF_MDMG:  val = ss->mdmg;  break;
+							case EF_DEF:   val = ss->def;   break;
+							case EF_MDEF:  val = ss->mdef;  break;
+							}
+							char v[16];
+							snprintf(v, sizeof(v), "%u", val);
+							<>{attr_stat_row_enhanced(k_effects[i].label, v)}</>;
+						}}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
 }
 
 static int
@@ -257,6 +237,5 @@ static int attr_fill_modal(int slot_id, bud_node *parent, const void *state)
 BUD_SLOT_CONTRIBUTE(attr_actions, .slot_id = BUD_SLOT_ACTIONS_DOCK, .name = "stats", .fill = attr_fill_action);
 BUD_SLOT_CONTRIBUTE(attr_modals, .slot_id = BUD_SLOT_MODALS, .name = "stats", .fill = attr_fill_modal);
 BUD_SLOT_CONTRIBUTE(attr_gauges, .slot_id = BUD_SLOT_STATUS_GAUGES, .name = "stats", .render = attr_render_slot);
-
 
 ND_UI_GLUE(attr, .contribute = attr_contribute, .render_slot = attr_render_slot, .state_default = attr_state_default, .state_serialize = attr_state_serialize);

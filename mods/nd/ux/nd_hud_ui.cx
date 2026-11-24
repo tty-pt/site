@@ -1,0 +1,377 @@
+#include "nd_ui_internal.h"
+
+void append_win_chrome(bud_node *win, int win_id, const char *id_prefix, const char *title_txt, int has_expand)
+{
+	char wid_str[16];
+	snprintf(wid_str, sizeof(wid_str), "%d", win_id);
+	bud_set_attr(win, "data-win-id", wid_str);
+	bud_set_attr(win, "data-bud-persist-key", nd_win_persist_key(win_id));
+
+	char style_buf[160];
+	nd_win_format_style(win_id, style_buf, sizeof(style_buf));
+	if (style_buf[0])
+		bud_set_attr(win, "style", style_buf);
+
+	static const struct { const char *suf; const char *cls; const char *mode; } handles[] = {
+		{ "resize-n",  "chat-resize-handle chat-resize-n",  "1" },
+		{ "resize-e",  "chat-resize-handle chat-resize-e",  "2" },
+		{ "resize-s",  "chat-resize-handle chat-resize-s",  "4" },
+		{ "resize-w",  "chat-resize-handle chat-resize-w",  "8" },
+		{ "resize-ne", "chat-resize-handle chat-resize-ne", "3" },
+		{ "resize-nw", "chat-resize-handle chat-resize-nw", "9" },
+		{ "resize-se", "chat-resize-handle chat-resize-se", "6" },
+		{ "resize-sw", "chat-resize-handle chat-resize-sw", "12" }
+	};
+
+	for (size_t i = 0; i < sizeof(handles) / sizeof(handles[0]); i++) {
+		char hid[64];
+		snprintf(hid, sizeof(hid), "%s-%s", id_prefix, handles[i].suf);
+		bud_append(win, (
+			<div id={hid}
+			     data-bud-key={hid}
+			     class={handles[i].cls}
+			     data-win-drag={handles[i].mode}
+			     onMouseDownSelf={on_win_drag_down} />
+		));
+	}
+
+	/* Auto-hiding hover toolbar (draggable header + micro-icon controls) */
+	char hdr_id[64], exp_id[64], rst_id[64], min_id[64];
+	snprintf(hdr_id, sizeof(hdr_id), "%s-toolbar", id_prefix);
+	snprintf(exp_id, sizeof(exp_id), "%s-toggle-btn", id_prefix);
+	snprintf(rst_id, sizeof(rst_id), "%s-reset-btn", id_prefix);
+	snprintf(min_id, sizeof(min_id), "%s-min-btn", id_prefix);
+	int expanded = nd_ui_get_chat_expanded();
+
+	bud_append(win, (
+		<div id={hdr_id}
+		     data-bud-key={hdr_id}
+		     class="hud-win-toolbar chat-header select-none"
+		     data-win-drag="16"
+		     onMouseDownSelf={on_win_drag_down}>
+			<div class="hud-win-title flex items-center gap-1.5 font-bold text-neutral-200 pointer-events-none truncate">
+				{title_txt}
+			</div>
+			<div class="chat-controls flex items-center gap-1">
+				{if (has_expand)
+					<button type="button"
+					        id={exp_id}
+					        class="chat-ctrl-btn"
+					        title={expanded ? "Compact" : "Expand"}
+					        onClick={on_toggle_chat}>
+						{expanded ? "⤡" : "⤢"}
+					</button>
+				}
+				<button type="button"
+				        id={rst_id}
+				        class="chat-ctrl-btn"
+				        title="Reset Position & Size"
+				        onClick={on_win_reset}>
+					↺
+				</button>
+				<button type="button"
+				        id={min_id}
+				        class="chat-ctrl-btn"
+				        title="Close"
+				        onClick={on_win_minimize}>
+					✕
+				</button>
+			</div>
+		</div>
+	));
+}
+
+bud_node *render_rpg_chat_terminal(const nd_client_state_t *st)
+{
+	(void)st;
+	int is_min = nd_ui_get_win_minimized(ND_WIN_CHAT);
+	int is_dragging = nd_win_is_dragging(ND_WIN_CHAT);
+	int expanded = nd_ui_get_chat_expanded();
+	char chat_cls[160];
+	snprintf(chat_cls, sizeof(chat_cls), "hud-win rpg-chat %s%s pointer-events-auto",
+		is_min
+			? "chat-minimized hud-win-minimized"
+			: (expanded ? "chat-expanded" : "chat-compact"),
+		is_dragging ? " chat-resizing hud-win-dragging" : "");
+
+	bud_node *chat = (
+		<div id="rpg-chat" data-bud-key="rpg-chat" class={chat_cls} />
+	);
+	append_win_chrome(chat, ND_WIN_CHAT, "chat", "💬 Chat & Console", 1);
+
+	/* Embedded xterm container */
+	bud_append(chat, (
+		<div id="term"
+		     data-bud-key="term"
+		     data-bud-terminal="1"
+		     data-bud-foreign="1"
+		     data-line-mode="true"
+		     class="hud-win-body flex-1 w-full h-full min-h-0 font-mono text-neutral-200 overflow-hidden relative bg-transparent" />
+	));
+
+	return chat;
+}
+
+bud_node *render_item_popper(const nd_client_state_t *st)
+{
+	uint32_t sel_ref = st ? st->selected_item_ref : 0;
+	if (!sel_ref || !st)
+		return NULL;
+
+	int is_inventory = (st->target_ref && st->me && st->target_ref == st->me);
+	uint32_t container_target = 0;
+	if (st->target_ref && !is_inventory) {
+		for (size_t i = 0; i < st->entity_count; i++) {
+			if (st->entities[i].location == st->target_ref && st->entities[i].ref != st->target_ref) {
+				container_target = st->target_ref;
+				break;
+			}
+		}
+	}
+
+	const nd_entity_desc_t *e = NULL;
+	for (size_t i = 0; i < st->entity_count; i++) {
+		const nd_entity_desc_t *cand = &st->entities[i];
+		if (st->me && cand->ref == st->me)
+			continue;
+		if (is_inventory) {
+			if (!st->me || cand->location != st->me)
+				continue;
+		} else if (container_target) {
+			if (cand->location != container_target)
+				continue;
+		} else {
+			if (st->me && cand->location == st->me)
+				continue;
+		}
+		if (cand->ref == sel_ref) {
+			e = cand;
+			break;
+		}
+	}
+	if (!e)
+		return NULL;
+
+	char ref_buf[32], pstyle[64], look_cmd[48], get_cmd[48], drop_cmd[48], look_title[64];
+	int top_px = nd_win_get_popper_top_px();
+	if (top_px <= 0) top_px = 62;
+	snprintf(ref_buf, sizeof(ref_buf), "%u", e->ref);
+	snprintf(pstyle, sizeof(pstyle), "top:%dpx;right:10px;", top_px);
+	snprintf(look_cmd, sizeof(look_cmd), "look #%s", ref_buf);
+	snprintf(get_cmd, sizeof(get_cmd), "get #%s", ref_buf);
+	snprintf(drop_cmd, sizeof(drop_cmd), "drop #%s", ref_buf);
+	snprintf(look_title, sizeof(look_title), "Look %s", e->name);
+
+	int can_get = ((e->actions & 4) ||
+	               (e->location != st->me && !(e->flags & (ND_EF_PLAYER | ND_EF_CREATURE)) &&
+	                e->type != 1 && e->actions == 0));
+	int can_drop = ((e->actions & 8) || (e->location == st->me));
+
+	return (
+		<div id="contents-item-popper"
+		     data-bud-key="contents-item-popper"
+		     class="nd-item-popup nd-item-popper"
+		     style={pstyle}>
+			<button type="button"
+			        data-action="look"
+			        data-cmd={look_cmd}
+			        class="nd-popper-item btn text-xs"
+			        title={look_title}
+			        onClick={on_data_cmd}>
+				👁️ Look
+			</button>
+			{if (can_get)
+				<button type="button"
+				        data-action="get"
+				        data-cmd={get_cmd}
+				        class="nd-popper-item btn text-xs"
+				        title="Get"
+				        onClick={on_data_cmd}>
+					🖐 Get
+				</button>
+			}
+			{if (can_drop)
+				<button type="button"
+				        data-action="drop"
+				        data-cmd={drop_cmd}
+				        class="nd-popper-item btn text-xs"
+				        title="Drop"
+				        onClick={on_data_cmd}>
+					🪣 Drop
+				</button>
+			}
+		</div>
+	);
+}
+
+bud_node *render_room_contents(const nd_client_state_t *st)
+{
+	int is_inventory = (st && st->target_ref && st->me && st->target_ref == st->me);
+	uint32_t container_target = 0;
+	if (st && st->target_ref && !is_inventory) {
+		for (size_t i = 0; i < st->entity_count; i++) {
+			if (st->entities[i].location == st->target_ref && st->entities[i].ref != st->target_ref) {
+				container_target = st->target_ref;
+				break;
+			}
+		}
+	}
+
+	int any = 0;
+	bud_node *wrap = (
+		<nd-contents id="contents" class="nd-contents w-full">
+			{for (size_t i = 0; st && i < st->entity_count; i++) {
+				const nd_entity_desc_t *e = &st->entities[i];
+				if (st->me && e->ref == st->me)
+					continue;
+				if (is_inventory) {
+					if (!st->me || e->location != st->me)
+						continue;
+				} else if (container_target) {
+					if (e->location != container_target)
+						continue;
+				} else {
+					if (st->me && e->location == st->me)
+						continue;
+				}
+				any = 1;
+
+				char ref_buf[32], row_key[48], rcls[160], gclass[48], art_url[128];
+				snprintf(ref_buf, sizeof(ref_buf), "%u", e->ref);
+				snprintf(row_key, sizeof(row_key), "item-%s", ref_buf);
+				int is_selected = (st->selected_item_ref == e->ref);
+				snprintf(rcls, sizeof(rcls), "nd-row cursor-pointer select-none %s",
+				         is_selected ? "ctb" : "");
+				char glyph[2] = { e->ch ? e->ch : '?', '\0' };
+				snprintf(gclass, sizeof(gclass), "nd-glyph cf%u", e->fg < 8 ? e->fg + 8 : e->fg);
+				if (e->art[0])
+					snprintf(art_url, sizeof(art_url), "/nd/art/%s", e->art);
+
+				<nd-item data-ref={ref_buf}
+				         data-item-ref={ref_buf}
+				         data-bud-key={row_key}
+				         title={e->name}
+				         class={rcls}
+				         onClick={on_item_select}>
+					<nd-avatar>
+						<span class={gclass}>{glyph}</span>
+						{if (e->art[0])
+							<img src={art_url} alt="" />
+						}
+					</nd-avatar>
+					<span class="nd-name grow pointer-events-none">{e->name}</span>
+					<span class="nd-item-caret pointer-events-none">{is_selected ? "▴" : "▾"}</span>
+				</nd-item>;
+			}}
+		</nd-contents>
+	);
+
+	if (!any) {
+		bud_append(wrap, (
+			<div data-bud-key="empty-contents" class="nd-empty italic select-none">
+				{is_inventory ? "Inventory is empty." : "Nothing here."}
+			</div>
+		));
+	}
+
+	return wrap;
+}
+
+bud_node *render_target_card(const nd_client_state_t *st)
+{
+	uint32_t t_ref = st ? st->target_ref : 0;
+	if (!t_ref) return <div />;
+
+	const nd_entity_desc_t *target = NULL;
+	if (st) {
+		for (size_t i = 0; i < st->entity_count; i++) {
+			if (st->entities[i].ref == t_ref) {
+				target = &st->entities[i];
+				break;
+			}
+		}
+	}
+	if (!target) return <div />;
+
+	char tip[96], gclass[48], art_url[128];
+	if (st && st->me && target->ref == st->me)
+		snprintf(tip, sizeof(tip), "%s #%u (You - Inventory)", target->name, target->ref);
+	else
+		snprintf(tip, sizeof(tip), "%s #%u", target->name, target->ref);
+	snprintf(gclass, sizeof(gclass), "target-glyph cf%u", target->fg < 8 ? target->fg + 8 : target->fg);
+	char ch_str[2] = { target->ch ? target->ch : '?', '\0' };
+	if (target->art[0])
+		snprintf(art_url, sizeof(art_url), "/nd/art/%s", target->art);
+
+	return (
+		<div id="target-card" class="target-card" title={tip}>
+			<div class="target-art">
+				<div class={gclass}>{ch_str}</div>
+				{if (target->art[0])
+					<img src={art_url} alt="" />
+				}
+				<div class="target-title">{target->name}</div>
+				<button type="button"
+				        class="target-close"
+				        title="Clear Target"
+				        onClick={on_dismiss_target}>
+					✕
+				</button>
+			</div>
+		</div>
+	);
+}
+
+bud_node *render_closed_windows_dock(void)
+{
+	int any_closed = 0;
+	for (int w = 0; w < ND_WIN_COUNT; w++) {
+		if (w != ND_WIN_ACTIONS && w != ND_WIN_TARGET && nd_ui_get_win_minimized(w)) {
+			any_closed = 1;
+			break;
+		}
+	}
+
+	return (
+		<div id="bottom-left-windows"
+		     data-bud-key="bottom-left-windows"
+		     class={any_closed ? "hud-closed-dock pointer-events-auto" : "hud-closed-dock hidden"}>
+			{for (int w = 0; w < ND_WIN_COUNT; w++) {
+				if (w == ND_WIN_ACTIONS || w == ND_WIN_TARGET || !nd_ui_get_win_minimized(w))
+					continue;
+				const char *id_suf, *icon, *label;
+				nd_win_meta(w, &id_suf, &icon, &label);
+				char bid[48], wid_str[16];
+				snprintf(bid, sizeof(bid), "restore-win-%s", id_suf);
+				snprintf(wid_str, sizeof(wid_str), "%d", w);
+				<button type="button"
+				        id={bid}
+				        class="nd-pad btn round"
+				        data-win-id={wid_str}
+				        title={label}
+				        onClick={on_win_restore}>
+					{icon}
+				</button>;
+			}}
+		</div>
+	);
+}
+
+bud_node *render_room_header(const nd_client_state_t *st)
+{
+	if (!st || (!st->room.name[0] && !st->room.ref))
+		return <div id="room-header" class="hidden" />;
+
+	char text[128];
+	if (st->room.name[0])
+		snprintf(text, sizeof(text), "📍 %s (#%u)", st->room.name, st->room.ref);
+	else
+		snprintf(text, sizeof(text), "📍 Room #%u", st->room.ref);
+
+	return (
+		<div id="room-header"
+		     class="text-center font-mono text-xs text-neutral-300 font-bold px-2 py-0.5 bg-neutral-900/60 rounded border border-neutral-800/60 truncate max-w-full">
+			{text}
+		</div>
+	);
+}
