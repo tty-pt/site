@@ -11,7 +11,12 @@
 /target/
 /etc
 /home
-/lib
+/lib/*
+!/lib/bud-lamina
+/lib/bud-lamina/*.a
+/lib/bud-lamina/test_bud_lamina
+/lib/bud-lamina/test_bud_lamina_asan
+/lib/bud-lamina/test_ws_native
 /lib64
 /users
 /usr
