@@ -1,5 +1,6 @@
 REPO_ROOT != cd ../.. && pwd
 add-prefix-glob ?= ${REPO_ROOT}/external/*
+WASI_CC ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
 -include $(REPO_ROOT)/external/mk/portable.mk
 
 MOD_NAME != basename "$$(pwd)"
@@ -76,12 +77,18 @@ WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_CC      ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
 WASI_SYSROOT ?=
 WASM_CFLAGS-PROFILE-release = -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
-WASM_CFLAGS-PROFILE-dev = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
-WASM_CFLAGS-PROFILE- = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE-dev = -Os -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE- = -Os -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE-debug = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
 WASM_CFLAGS  := ${WASM_CFLAGS-PROFILE-${PROFILE}}
+WASM_STRIP-PROFILE-debug =
+WASM_STRIP-PROFILE-dev = -Wl,--strip-debug
+WASM_STRIP-PROFILE- = -Wl,--strip-debug
+WASM_STRIP-PROFILE-release = -Wl,--strip-debug
 WASM_LDFLAGS := -mexec-model=reactor \
                 -Wl,--gc-sections \
                 -Wl,--no-entry \
+                ${WASM_STRIP-PROFILE-${PROFILE}} \
                 -Wl,--export=malloc \
                 -Wl,--export=free \
                 -Wl,--export=_initialize
@@ -90,6 +97,7 @@ WASM_LDFLAGS := -mexec-model=reactor \
 # silent `env.*` import the browser host would have to stub.
 WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libbud/src/bud_tpl.c $(REPO_ROOT)/external/libbud/src/bud_render.c $(REPO_ROOT)/external/libbud/src/bud_runtime.c $(REPO_ROOT)/external/libbud/src/bud_json.c $(REPO_ROOT)/external/libbud/src/bud_reconcile.c $(REPO_ROOT)/external/libstele/src/stele_wasm_kernel.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/external/libstele/src/stele_wq.c $(REPO_ROOT)/mods/common/ux/site_ui.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
+WASM_OBJ_ROOT != printf '/tmp/site_wasm_objs_%s\n' "$$(printf '%s' '$(REPO_ROOT)' | cksum | cut -d' ' -f1)"
 
 WASM_SRC_ALL = $(foreach t,$(notdir $(WASM_TARGETS:.wasm=)),$($(t)-src))
 WASM_CX_C = $(patsubst %.cx,%.cx.c,$(filter %.cx,$(WASM_SRC_ALL)))
@@ -116,15 +124,55 @@ $(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEP
 				fi; \
 			fi; \
 		done; \
-		rm -f $@.d; \
-		for src in $(patsubst %.cx,%.cx.c,$($*-src)) $(WASM_COMMON_SRC); do \
-			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MP -MT $@ "$$src" >> $@.d || exit 1; \
+		common_key=$$(printf '%s' '$(WASM_COMMON_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
+		mod_key=$$(printf '%s' '$($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
+		common_dir="$(WASM_OBJ_ROOT)/common_$$common_key"; \
+		mod_dir="$(WASM_OBJ_ROOT)/$(MOD_NAME)_$*_$$mod_key"; \
+		mkdir -p "$$common_dir" "$$mod_dir"; \
+		tu_stale() { \
+			src="$$1"; obj="$$2"; dep="$$3"; \
+			[ ! -f "$$obj" ] || [ ! -f "$$dep" ] || [ "$$src" -nt "$$obj" ] && return 0; \
+			for h in $$(sed -e 's/^[^:]*://' -e 's/\\$$//' "$$dep"); do \
+				[ -z "$$h" ] && continue; \
+				case "$$h" in *:) continue ;; esac; \
+				if [ ! -f "$$h" ] || [ "$$h" -nt "$$obj" ]; then return 0; fi; \
+			done; \
+			return 1; \
+		}; \
+		objs=""; \
+		deps_out="$@.d.tmp.$$$$"; \
+		: > "$$deps_out"; \
+		for src in $(patsubst %.cx,%.cx.c,$($*-src)); do \
+			tag=$$(printf '%s' "$$src" | tr '/. ' '___'); \
+			obj="$$mod_dir/$$tag.o"; \
+			dep="$$mod_dir/$$tag.d"; \
+			if tu_stale "$$src" "$$obj" "$$dep"; then \
+				$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MMD -MP -MF "$$dep.tmp.$$$$" -MT "$$obj" -c "$$src" -o "$$obj.tmp.$$$$" || { rm -f "$$dep.tmp.$$$$" "$$obj.tmp.$$$$" "$$deps_out"; exit 1; }; \
+				mv -f "$$dep.tmp.$$$$" "$$dep" && mv -f "$$obj.tmp.$$$$" "$$obj"; \
+			fi; \
+			sed "1s|^[^:]*:|$@:|" "$$dep" >> "$$deps_out"; \
+			objs="$$objs $$obj"; \
 		done; \
+		for src in $(WASM_COMMON_SRC); do \
+			tag=$$(printf '%s' "$$src" | tr '/. ' '___'); \
+			obj="$$common_dir/$$tag.o"; \
+			dep="$$common_dir/$$tag.d"; \
+			if tu_stale "$$src" "$$obj" "$$dep"; then \
+				$(WASI_CC) $(WASM_COMMON_CFLAGS) $(WASM_CFLAGS) -MMD -MP -MF "$$dep.tmp.$$$$" -MT "$$obj" -c "$$src" -o "$$obj.tmp.$$$$" || { rm -f "$$dep.tmp.$$$$" "$$obj.tmp.$$$$" "$$deps_out"; exit 1; }; \
+				mv -f "$$dep.tmp.$$$$" "$$dep" && mv -f "$$obj.tmp.$$$$" "$$obj"; \
+			fi; \
+			sed "1s|^[^:]*:|$@:|" "$$dep" >> "$$deps_out"; \
+			objs="$$objs $$obj"; \
+		done; \
+		mv -f "$$deps_out" "$@.d"; \
 		extra_allowed=""; \
 		for f in $(REPO_ROOT)/external/libstele/wasm-allowed-imports.lst $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
 			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
 		done; \
-		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) $($*-ldflags) $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $(patsubst %.cx,%.cx.c,$($*-src)) $(WASM_COMMON_SRC) || exit 1; \
+		$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) $($*-ldflags) $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $$objs || exit 1; \
+		if [ "$(PROFILE)" != "debug" ] && command -v wasm-strip >/dev/null 2>&1; then \
+			wasm-strip $@; \
+		fi; \
 		sh $(REPO_ROOT)/external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }; \
 	else \
 		echo "Skipping WASM build of $@ — install wasi-sdk or configure WASI_CC"; \
@@ -151,7 +199,7 @@ wasm: $(WASM_TARGETS)
 
 wasm-debug:
 	rm -f $(WASM_TARGETS)
-	$(MAKE) WASM_CFLAGS='$(WASM_CFLAGS) -DBUD_DEBUG' wasm
+	$(MAKE) PROFILE=debug WASM_CFLAGS='$(WASM_CFLAGS-PROFILE-debug) -DBUD_DEBUG' wasm
 
 clean:
 	@test -z "$(TARGET)" || rm -f $(TARGET)

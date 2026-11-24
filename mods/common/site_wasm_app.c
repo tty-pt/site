@@ -29,6 +29,7 @@ static bud_node *(*s_render_fns[BUD_MAX_SLOTS])(void);
 static bud_node *s_retired_roots[BUD_MAX_RETIRED_ROOTS];
 static size_t s_retired_count = 0;
 static int s_dispatch_depth = 0;
+static int s_active_slot = -1;
 static char s_wasm_dbg_buf[65536];
 
 static void retire_vdom_root(bud_node *old_root)
@@ -82,6 +83,22 @@ static bud_node *find_node_by_id(const bud_node *node, unsigned int id)
 	return NULL;
 }
 
+static int resolve_node_slot(const bud_node *node)
+{
+	unsigned int id = bud_node_id(node);
+	if (s_active_slot >= 0 && s_active_slot < BUD_MAX_SLOTS &&
+	    s_runtimes[s_active_slot] &&
+	    find_node_by_id(bud_runtime_root(s_runtimes[s_active_slot]), id))
+		return s_active_slot;
+	if (s_runtimes[1] && find_node_by_id(bud_runtime_root(s_runtimes[1]), id))
+		return 1;
+	for (int i = 0; i < BUD_MAX_SLOTS; i++) {
+		if (s_runtimes[i] && find_node_by_id(bud_runtime_root(s_runtimes[i]), id))
+			return i;
+	}
+	return s_active_slot >= 0 ? s_active_slot : 0;
+}
+
 static int emit_patch_wrapper(
         void *user, const char *op, const char *a, const char *b, const char *c)
 {
@@ -96,9 +113,7 @@ void bud_patch_attr(bud_node *node, const char *name, const char *value)
 {
 	if (!node || !name || !value)
 		return;
-	int slot = 0;
-	if (s_runtimes[1] && find_node_by_id(bud_runtime_root(s_runtimes[1]), bud_node_id(node)))
-		slot = 1;
+	int slot = resolve_node_slot(node);
 	char id_str[16];
 	snprintf(id_str, sizeof(id_str), "%u", bud_node_id(node));
 	stl_host_emit_patch(
@@ -110,9 +125,7 @@ void bud_patch_text(bud_node *node, const char *value)
 {
 	if (!node || !value)
 		return;
-	int slot = 0;
-	if (s_runtimes[1] && find_node_by_id(bud_runtime_root(s_runtimes[1]), bud_node_id(node)))
-		slot = 1;
+	int slot = resolve_node_slot(node);
 	char id_str[16];
 	snprintf(id_str, sizeof(id_str), "%u", bud_node_id(node));
 	stl_host_emit_patch(
@@ -165,14 +178,21 @@ int bud_slot_update(int slot, bud_node *(*render_fn)(void))
 
 void bud_app_set_state(void)
 {
-	if (s_runtimes[1] && s_render_fns[1]) {
-		bud_slot_update(1, s_render_fns[1]);
+	if (s_active_slot >= 0 && s_active_slot < BUD_MAX_SLOTS &&
+	    s_runtimes[s_active_slot] && s_render_fns[s_active_slot]) {
+		bud_slot_update(s_active_slot, s_render_fns[s_active_slot]);
 		return;
 	}
-	if (s_runtimes[0] && s_render_fns[0]) {
-		bud_slot_update(0, s_render_fns[0]);
-		return;
+	int updated = 0;
+	for (int i = 0; i < BUD_MAX_SLOTS; i++) {
+		if (s_runtimes[i] && s_render_fns[i]) {
+			bud_slot_update(i, s_render_fns[i]);
+			updated = 1;
+		}
 	}
+	if (updated)
+		return;
+#ifndef QSYS_UNIFIED_SITE
 	if (s_runtimes[1] && !s_render_fns[1] && &bud_app_render) {
 		bud_slot_update(1, bud_app_render);
 		return;
@@ -184,6 +204,7 @@ void bud_app_set_state(void)
 	if (!s_runtimes[1] && !s_runtimes[0] && &bud_app_render) {
 		bud_slot_mount(1, bud_app_render);
 	}
+#endif
 }
 
 ISO_EXPORT_AS(void, wasm_mount, bud_app_mount)
@@ -191,9 +212,11 @@ ISO_EXPORT_AS(void, wasm_mount, bud_app_mount)
 	bud_host_fetch_fn = (void (*)(const char *, size_t, int))stl_host_fetch;
 	bud_host_log_fn = (void (*)(const char *, size_t))stl_host_log;
 	bud_host_set_location_fn = (void (*)(const char *, size_t))stl_host_set_location;
+#ifndef QSYS_UNIFIED_SITE
 	if (!s_runtimes[1] && !s_runtimes[0] && &bud_app_render) {
 		bud_slot_mount(1, bud_app_render);
 	}
+#endif
 }
 
 ISO_EXPORT_AS(void, wasm_update, bud_app_update)
@@ -224,15 +247,19 @@ int bud_slot_dispatch_event(int slot, unsigned int node_id, const char *event_na
 	bud_node *target = (node_id == 0) ? root : find_node_by_id(root, node_id);
 	if (!target)
 		target = root;
+	int prev_slot = s_active_slot;
+	s_active_slot = slot;
 	s_dispatch_depth++;
 	int rc = bud_runtime_dispatch(s_runtimes[slot], target, event_name, event_data);
 	s_dispatch_depth--;
+	s_active_slot = prev_slot;
 	flush_retired_vdom_roots();
 	return rc;
 }
 
 int bud_slot_dispatch_any(unsigned int node_id, const char *event_name, int bubbles, void *event_data)
 {
+	(void)bubbles;
 	int order[] = { 1, 0, 2, 3 };
 	for (size_t i = 0; i < sizeof(order)/sizeof(order[0]); i++) {
 		int s = order[i];
@@ -240,9 +267,12 @@ int bud_slot_dispatch_any(unsigned int node_id, const char *event_name, int bubb
 			bud_node *root = bud_runtime_root(s_runtimes[s]);
 			bud_node *target = (node_id == 0) ? root : find_node_by_id(root, node_id);
 			if (target) {
+				int prev_slot = s_active_slot;
+				s_active_slot = s;
 				s_dispatch_depth++;
 				int rc = bud_runtime_dispatch(s_runtimes[s], target, event_name, event_data);
 				s_dispatch_depth--;
+				s_active_slot = prev_slot;
 				flush_retired_vdom_roots();
 				return rc;
 			}

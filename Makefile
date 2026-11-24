@@ -12,8 +12,9 @@ PROFILE ?= dev
 WASI_CC ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
 export WASI_CC
 WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
+SITE_WASM_OPT_FLAGS ?= -Os -DNDEBUG -DQSYS_UNIFIED_SITE
 WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
-WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry \
+WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry -Wl,--strip-debug \
 	-Wl,--export=malloc -Wl,--export=free -Wl,--export=_initialize \
 	-Wl,--export=stl_kernel_boot -Wl,--export=stl_kernel_mount -Wl,--export=stl_kernel_mount_bin -Wl,--export=stl_kernel_unmount \
 	-Wl,--export=stl_kernel_update -Wl,--export=stl_kernel_action -Wl,--export=stl_kernel_dispatch_event -Wl,--export=stl_kernel_tick -Wl,--export=stl_kernel_has_tick \
@@ -55,105 +56,111 @@ SITE_WASM_INCLUDES = -Iexternal/libstele/include -Iexternal/libbud/include \
 include external/mk/cx.mk
 
 SITE_WASM_BUILD_DIR = /tmp/site_wasm_build_$(shell pwd | cksum | cut -d' ' -f1)
-SITE_WASM_OBJS = kernel.o stele_event.o bud.o bud_tpl.o bud_render.o bud_runtime.o bud_json.o bud_reconcile.o site_wasm_app.o site_ui.o xylem.o \
+SITE_WASM_OBJS = kernel.o stele_event.o bud.o bud_tpl.o bud_render.o bud_runtime.o bud_json.o bud_reconcile.o site_wasm_app.o site_ui.o \
                  modules.o site_chrome.o chrome.o song.o gig.o list.o \
-                 chat.o chat_ui.o music.o hyle_bud.o filter.o table.o \
+                 chat.o chat_ui.o auren.o auren_ui.o music.o hyle_bud.o filter.o table.o \
                  picker.o form.o hyle_bud_cache.o url.o
 
 $(SITE_WASM_BUILD_DIR)/kernel.o: external/libstele/src/stele_wasm_kernel.c external/libstele/include/ttypt/stele_wasm.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/stele_event.o: external/libstele/src/stele_event.c external/libstele/include/ttypt/stele_wasm.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud.o: external/libbud/src/libbud.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud_tpl.o: external/libbud/src/bud_tpl.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud_render.o: external/libbud/src/bud_render.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud_runtime.o: external/libbud/src/bud_runtime.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud_json.o: external/libbud/src/bud_json.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/bud_reconcile.o: external/libbud/src/bud_reconcile.c external/libbud/src/bud_internal.h external/libbud/include/bud/bud_reconcile.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c mods/common/ux/site_layout.cx.c mods/common/ux/site_forms.cx.c mods/common/ux/site_media.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/xylem.o: external/libxylem/src/libxylem-wasm.c
-	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/modules.o: mods/common/ux/site_modules.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_chrome.o: mods/common/ux/site_chrome.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chrome.o: mods/site_chrome/ux/chrome.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.cx.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.cx.c mods/common/site_wasm_app.h mods/index/ux/list_filters.cx.c mods/index/ux/list_layout.cx.c mods/index/ux/list_render.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_fe.c mods/common/site_wasm_app.h mods/index/ux/list_filters.cx.c mods/index/ux/list_layout.cx.c mods/index/ux/list_render.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chat.o: mods/chat/ux/chat_fe.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chat_ui.o: mods/chat/ux/chat_ui.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/auren.o: mods/auren/ux/auren_fe.c mods/common/site_wasm_app.h
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/auren_ui.o: mods/auren/ux/auren_ui.cx.c
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/music.o: external/libpitch/src/music.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/hyle_bud.o: external/libhyle-bud/src/libhyle-bud.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/filter.o: external/libhyle-bud/src/filter.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/table.o: external/libhyle-bud/src/table.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/picker.o: external/libhyle-bud/src/picker.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/form.o: external/libhyle-bud/src/form.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/hyle_bud_cache.o: external/libhyle-bud/src/hyle-bud-cache.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/url.o: external/libhyle/src/url.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
-	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -c $< -o $@
 
 htdocs/site.wasm: $(addprefix $(SITE_WASM_BUILD_DIR)/,$(SITE_WASM_OBJS))
 	$(if $(filter 0,$(V)),@echo "  LD.WASM $@")
 	$(Q)mkdir -p htdocs
 	$(Q)$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
+	$(Q)if command -v wasm-strip >/dev/null 2>&1; then wasm-strip $@; fi
 	$(Q)sh external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }
 
 # Staged htdocs deploy assets. Exported from each library and module <pkg>/htdocs/.
 DEPLOY_ASSETS = styles.css hyle.css bud-cap.js hyle-cap.js axil-cap.js axil-tty-cap.js lamina-cap.js webgl-cap.js xylem-cap.js stele-client.js stele.wasm
 
+ASSET_SOURCES := $(wildcard external/*/htdocs/* mods/*/htdocs/*)
+
 stage-assets: htdocs/.assets-staged
 
-htdocs/.assets-staged:
+htdocs/.assets-staged: $(ASSET_SOURCES)
 	@mkdir -p htdocs
 	@rm -rf node_modules/@ttypt
 	@mkdir -p node_modules/@tty-pt
@@ -193,7 +200,7 @@ htdocs/.assets-staged:
 	done
 	@for d in external/* mods/*; do \
 		if [ -d "$$d/htdocs" ]; then \
-			cp -u -R "$$d/htdocs/." htdocs/ 2>/dev/null || true; \
+			cp -f -R "$$d/htdocs/." htdocs/ 2>/dev/null || true; \
 		fi; \
 	done
 	@for d in external/axil-nd external/nd-*; do \
@@ -543,7 +550,7 @@ test: boundary-check unit-c-tests unit-tests pages-test integration-tests test-e
 # depends on mods: check-no-tree-rpath inspects built artifacts, which must not
 # be mid-relink when the check runs under -j
 boundary-check: mods
-	sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh external/mk/scripts/wasm-audit.sh --check-substrate && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh && sh scripts/check-pkgconfig-versions.sh
+	sh scripts/check-asset-sync.sh && sh scripts/check-module-boundaries.sh && sh scripts/check-ux-purity.sh && sh scripts/check-no-site-specific-js.sh && sh scripts/check-wasm-imports.sh && sh external/mk/scripts/wasm-audit.sh htdocs/*.wasm && sh external/mk/scripts/wasm-audit.sh --check-substrate && sh scripts/check-no-tree-rpath.sh && sh scripts/check-no-impl-guards.sh && sh scripts/check-nd-encapsulation.sh && sh scripts/check-nd-no-static-load.sh && sh scripts/check-pkgconfig-versions.sh
 
 watch:
 	./scripts/watch.sh
@@ -562,7 +569,7 @@ clean:
 		if [ -f "external/$$p/Makefile" ]; then $(MAKE) -C external/$$p wasmtarget= clean; fi; \
 	done
 	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
-	rm -rf /tmp/site_wasm_build htdocs/site.wasm
+	rm -rf $(SITE_WASM_BUILD_DIR) /tmp/site_wasm_build htdocs/site.wasm
 
 distclean: clean
 

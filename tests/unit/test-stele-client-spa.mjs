@@ -54,7 +54,8 @@ globalThis.document = {
 		if (sel.includes('#bud-state') || sel.includes('#page-state')) return budState;
 		return null;
 	},
-	addEventListener() {}
+	addEventListener() {},
+	removeEventListener() {}
 };
 
 // Set up slot bridge factory mock
@@ -375,4 +376,56 @@ test('SteleWasmClient mountSlot skips duplicate bud capability bridge and BudWas
 	assert.ok(workerMessageLog[restoreIdx].valueStr.includes(customSavedStyle), 'restore-persist must carry saved localStorage settings');
 	assert.equal(settingsCard.getAttribute('style'), customSavedStyle);
 });
+
+test('SteleWasmClient prefers data-wasm-bundle, reuses one instance across slots, and falls back for absent modules', async () => {
+	const fs = await import('node:fs');
+	const path = await import('node:path');
+	const { fileURLToPath } = await import('node:url');
+	const dir = path.dirname(fileURLToPath(import.meta.url));
+	const siteWasmBytes = fs.readFileSync(path.resolve(dir, '../../htdocs/site.wasm'));
+	const songWasmBytes = fs.readFileSync(path.resolve(dir, '../../htdocs/song.wasm'));
+
+	const fetchedUrls = [];
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (url) => {
+		const s = String(url);
+		fetchedUrls.push(s);
+		if (s.endsWith('/site.wasm')) {
+			return { ok: true, status: 200, arrayBuffer: async () => siteWasmBytes.buffer.slice(siteWasmBytes.byteOffset, siteWasmBytes.byteOffset + siteWasmBytes.byteLength) };
+		}
+		if (s.endsWith('/custom_only.wasm')) {
+			return { ok: true, status: 200, arrayBuffer: async () => songWasmBytes.buffer.slice(songWasmBytes.byteOffset, songWasmBytes.byteOffset + songWasmBytes.byteLength) };
+		}
+		return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+	};
+
+	const origBundle = document.body.getAttribute('data-wasm-bundle');
+	document.body.setAttribute('data-wasm-bundle', '/site.wasm');
+	try {
+		const client = new SteleWasmClient({ useWorker: false });
+		const ok0 = await client.mountSlot(0, 'site_chrome', { title: 'T', path: '/song', icon: '', user: '', lang: 'en' });
+		const ok1 = await client.mountSlot(1, 'song_detail', { id: 's1', title: 'Song', transpose: 0, zoom: 100, use_latin: 0 });
+		assert.equal(ok0, true, 'slot 0 site_chrome mounts from /site.wasm');
+		assert.equal(ok1, true, 'slot 1 song_detail mounts from /site.wasm');
+		assert.equal(client.slotInstances.get(0).instance, client.slotInstances.get(1).instance, 'slots 0 and 1 must share one /site.wasm instance');
+		assert.equal(client.slotInstances.get(0).isKernelBundle, true);
+		assert.equal(client.slotInstances.get(1).isKernelBundle, true);
+		assert.equal(fetchedUrls.filter(u => u.endsWith('/site.wasm')).length, 1, '/site.wasm must be fetched only once');
+		assert.equal(fetchedUrls.some(u => u.endsWith('/site_chrome.wasm') || u.endsWith('/song_detail.wasm')), false, 'must not fetch per-module WASM when present in /site.wasm');
+		assert.equal(client.invokeSlotAction(1, 0, ''), true, 'invokeSlotAction routes via stl_kernel_action');
+		assert.equal(client.dispatchToSlot(0, 0, 'click', false, ''), 0, 'slot 0 dispatch routes via stl_kernel_dispatch_event');
+		assert.equal(client.dispatchToSlot(1, 0, 'click', false, ''), 0, 'slot 1 dispatch routes via stl_kernel_dispatch_event');
+
+		// Module absent from /site.wasm must fall back cleanly to /<module>.wasm
+		const ok2 = await client.mountSlot(2, 'custom_only', { id: 's2', title: 'Fallback', transpose: 0, zoom: 100, use_latin: 0 });
+		assert.equal(ok2, true, 'absent module falls back to /custom_only.wasm');
+		assert.equal(fetchedUrls.some(u => u.endsWith('/custom_only.wasm')), true, 'must fetch /custom_only.wasm fallback');
+		assert.notEqual(client.slotInstances.get(2).instance, client.slotInstances.get(0).instance);
+	} finally {
+		globalThis.fetch = origFetch;
+		if (origBundle) document.body.setAttribute('data-wasm-bundle', origBundle);
+		else document.body.attributes.delete('data-wasm-bundle');
+	}
+});
+
 

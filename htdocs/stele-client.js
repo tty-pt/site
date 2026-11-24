@@ -132,7 +132,10 @@ export class SteleWasmClient {
 			? new WebAssembly.Memory(options.maxMemoryPages ? { initial: 256, maximum: options.maxMemoryPages } : { initial: 256 })
 			: null;
 		this.memory = this.sharedMemory;
-		this.slotInstances = new Map(); // slot -> { instance, memory, moduleName, hasTick }
+		this.slotInstances = new Map(); // slot -> { instance, memory, moduleName, hasTick, isKernelBundle }
+		this._bundleInstances = new Map(); // url -> { instance, memory, candidateBridges }
+		this._activeBundleInstance = null;
+		this._activeBundleMemory = null;
 		this.slotBridges = new Map();
 		this.activeBridges = [];
 		if (typeof window !== 'undefined') {
@@ -305,9 +308,12 @@ export class SteleWasmClient {
 	}
 
 	buildSlotImports(slot, wasmModule = null, extraCaps = []) {
+		const resolveMem = (s) => this.slotInstances.get(s)?.memory || this.slotInstances.get(slot)?.memory || this._activeBundleMemory || this.memory;
+		const resolveInst = (s) => this.slotInstances.get(s)?.instance || this.slotInstances.get(slot)?.instance || this._activeBundleInstance || this.instance;
+
 		const hostEmitPatch = (_slot, opPtr, opLen, aPtr, aLen, bPtr, bLen, cPtr, cLen) => {
 			const targetSlot = (typeof slot === 'number' && slot >= 0) ? slot : (typeof _slot === 'number' && _slot >= 0 ? _slot : 0);
-			const mem = this.slotInstances.get(slot)?.memory || this.slotInstances.get(targetSlot)?.memory || this.memory;
+			const mem = resolveMem(targetSlot);
 			const op = this.decodeString(mem, opPtr, opLen);
 			const a = this.decodeString(mem, aPtr, aLen);
 			const b = this.decodeString(mem, bPtr, bLen);
@@ -344,14 +350,13 @@ export class SteleWasmClient {
 		};
 
 		const hostLog = (msgPtr, len) => {
-			const mem = this.slotInstances.get(slot)?.memory || this.memory;
+			const mem = resolveMem(slot);
 			console.log(this.decodeString(mem, msgPtr, len));
 		};
 
 		const hostFetch = (urlPtr, len, reqId) => {
-			const comp = this.slotInstances.get(slot);
-			const inst = comp?.instance || this.instance;
-			const mem = comp?.memory || this.memory;
+			const inst = resolveInst(slot);
+			const mem = resolveMem(slot);
 			if (!inst || !mem) return;
 			const url = this.decodeString(mem, urlPtr, len);
 			const fullUrl = resolveFullUrl(url) || url;
@@ -390,7 +395,7 @@ export class SteleWasmClient {
 		};
 
 		const hostSetLocation = (urlPtr, len) => {
-			const mem = this.slotInstances.get(slot)?.memory || this.memory;
+			const mem = resolveMem(slot);
 			const url = this.decodeString(mem, urlPtr, len);
 			if (!url) return;
 			if (this.isWorkerHost && typeof globalScope.__stele_worker_post === 'function') {
@@ -419,18 +424,22 @@ export class SteleWasmClient {
 
 		const hostEventEmit = (topicPtr, topicLen, payloadPtr, payloadLen) => {
 			const senderSlot = slot;
-			const senderComp = this.slotInstances.get(senderSlot);
-			const mem = senderComp?.memory || this.memory;
+			const senderInst = resolveInst(senderSlot);
+			const mem = resolveMem(senderSlot);
 			const topic = this.decodeString(mem, topicPtr, topicLen);
 			const payloadBytes = (payloadPtr && payloadLen > 0 && mem)
 				? new Uint8Array(mem.buffer.slice(payloadPtr, payloadPtr + payloadLen))
 				: new Uint8Array(0);
 
-			// 1. Deliver to sibling WASM slots
+			// 1. Deliver to sibling WASM slots (skip same instance — already dispatched in-WASM)
+			const deliveredInstances = new Set();
+			if (senderInst) deliveredInstances.add(senderInst);
 			for (const [targetSlot, comp] of this.slotInstances.entries()) {
 				if (targetSlot === senderSlot) continue;
+				if (comp.instance && deliveredInstances.has(comp.instance)) continue;
 				const onEventFn = comp.instance?.exports.stl_on_event || comp.instance?.exports.stele_on_event;
 				if (onEventFn) {
+					if (comp.instance) deliveredInstances.add(comp.instance);
 					const tBuf = comp.instance.exports.malloc ? comp.instance.exports.malloc(topic.length + 1) : 0;
 					const pBuf = (payloadBytes.length > 0 && comp.instance.exports.malloc)
 						? comp.instance.exports.malloc(payloadBytes.length)
@@ -1111,12 +1120,14 @@ export class SteleWasmClient {
 				this._pendingMountPromises.set(slot, resolve);
 			});
 
+			const wasmBundle = (hasDoc ? document.body?.getAttribute?.('data-wasm-bundle') : null) || this.fallbackWasmUrl || null;
 			this.worker.postMessage({
 				type: 'stele:mount_slot',
 				slot,
 				moduleName,
 				state: json,
-				declaredCaps
+				declaredCaps,
+				wasmBundle
 			});
 
 			if (bridge && typeof bridge.mount === 'function') {
@@ -1141,108 +1152,154 @@ export class SteleWasmClient {
 			try {
 				const configuredBundle = (typeof document !== 'undefined' && document.body?.getAttribute?.('data-wasm-bundle')) || this.fallbackWasmUrl;
 				const candidateUrls = [...new Set([
-					`/${moduleName}.wasm`,
-					configuredBundle
+					configuredBundle,
+					`/${moduleName}.wasm`
 				].filter(Boolean))];
 				for (const compUrl of candidateUrls) {
 					const fullUrl = resolveFullUrl(compUrl);
 					if (!fullUrl) continue;
 
-					let wasmModule = await compileWasmModuleCached(compUrl);
-					let wasmBuffer = null;
+					const isBundleCandidate = !!(configuredBundle && compUrl === configuredBundle);
+					let instance = null;
+					let compMemory = null;
+					let compImports = null;
 
-					if (!wasmModule) {
-						try {
-							const res = await fetch(fullUrl);
-							if (res.ok) {
-								wasmBuffer = await res.arrayBuffer();
-								if (typeof WebAssembly.compile === 'function') {
-									wasmModule = await WebAssembly.compile(wasmBuffer);
+					if (isBundleCandidate && this._bundleInstances.has(compUrl)) {
+						const cached = this._bundleInstances.get(compUrl);
+						instance = cached.instance;
+						compMemory = cached.memory;
+					} else {
+						let wasmModule = await compileWasmModuleCached(compUrl);
+						let wasmBuffer = null;
+
+						if (!wasmModule) {
+							try {
+								const res = await fetch(fullUrl);
+								if (res.ok) {
+									wasmBuffer = await res.arrayBuffer();
+									if (typeof WebAssembly.compile === 'function') {
+										wasmModule = await WebAssembly.compile(wasmBuffer);
+									}
+								}
+							} catch (_) {}
+						}
+
+						if (!wasmModule && !wasmBuffer) continue;
+
+						if (Array.isArray(extraCaps) && extraCaps.length > 0) {
+							for (const cap of extraCaps) {
+								if (!globalScope.__wasm_capability_registry[cap]) {
+									await this.resolveCapability(cap);
 								}
 							}
-						} catch (_) {}
-					}
+						}
 
-					if (Array.isArray(extraCaps) && extraCaps.length > 0) {
-						for (const cap of extraCaps) {
-							if (!globalScope.__wasm_capability_registry[cap]) {
-								await this.resolveCapability(cap);
+						if (wasmModule && typeof WebAssembly.Module.imports === 'function') {
+							const requiredNamespaces = new Set(
+								WebAssembly.Module.imports(wasmModule).map(i => i.module)
+							);
+							for (const ns of requiredNamespaces) {
+								if (!globalScope.__wasm_capability_registry[ns]) {
+									await this.resolveCapability(ns);
+								}
+							}
+						}
+
+						compImports = this.buildSlotImports(isBundleCandidate ? -1 : slot, wasmModule, extraCaps);
+						if (wasmModule) {
+							instance = (await WebAssembly.instantiate(wasmModule, compImports));
+						} else if (wasmBuffer) {
+							const res = await WebAssembly.instantiate(wasmBuffer, compImports);
+							instance = res.instance;
+						}
+						if (instance) {
+							compMemory = instance.exports.memory || this.sharedMemory;
+							if (compImports.__candidateBridges) {
+								this.activeBridges.push(...compImports.__candidateBridges);
+								if (typeof window !== 'undefined') {
+									window.__active_bridges = this.activeBridges;
+								}
+							}
+							if (instance.exports._initialize) instance.exports._initialize();
+							if (isBundleCandidate) {
+								const bootFn = instance.exports.stl_kernel_boot || instance.exports.stele_kernel_boot;
+								if (bootFn) bootFn();
+								this._bundleInstances.set(compUrl, { instance, memory: compMemory });
 							}
 						}
 					}
 
-					if (wasmModule && typeof WebAssembly.Module.imports === 'function') {
-						const requiredNamespaces = new Set(
-							WebAssembly.Module.imports(wasmModule).map(i => i.module)
-						);
-						for (const ns of requiredNamespaces) {
-							if (!globalScope.__wasm_capability_registry[ns]) {
-								await this.resolveCapability(ns);
-							}
-						}
-					}
-
-					const compImports = this.buildSlotImports(slot, wasmModule, extraCaps);
-					let instance = null;
-					if (wasmModule) {
-						instance = (await WebAssembly.instantiate(wasmModule, compImports));
-					} else if (wasmBuffer) {
-						const res = await WebAssembly.instantiate(wasmBuffer, compImports);
-						instance = res.instance;
-					} else {
-						const source = await instantiateWasmStreamingWithFallback(compUrl, compImports);
-						instance = source?.instance;
-					}
 					if (instance) {
-						const compMemory = instance.exports.memory || this.sharedMemory;
-						this.slotInstances.set(slot, { instance, memory: compMemory, moduleName, hasTick: false });
-
-						if (compImports.__candidateBridges) {
-							this.activeBridges.push(...compImports.__candidateBridges);
-							if (typeof window !== 'undefined') {
-								window.__active_bridges = this.activeBridges;
-							}
-						}
-
-						if (instance.exports._initialize) instance.exports._initialize();
-
 						const isBin = (json instanceof Uint8Array) || (typeof json === 'object' && json?.type === 'bin');
 						const binBytes = isBin ? (json instanceof Uint8Array ? json : json.data) : null;
 						const jsonStr = isBin ? '{}' : (typeof json === 'string' ? json : (json?.data || JSON.stringify(json || {})));
 
+						const mountBinFn = instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin;
+						const mountFn = instance.exports.stl_kernel_mount || instance.exports.stele_kernel_mount;
+						const useKernelMount = isBundleCandidate && (mountFn || mountBinFn);
+
+						if (useKernelMount) {
+							this._activeBundleInstance = instance;
+							this._activeBundleMemory = compMemory;
+						} else {
+							this.slotInstances.set(slot, { instance, memory: compMemory, moduleName, hasTick: false, isKernelBundle: false });
+						}
+
+						let mountRc = 0;
 						this.beginTurn();
 						try {
-							if (isBin && binBytes && (instance.exports.wasm_init_bin || instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin)) {
+							if (useKernelMount) {
+								if (isBin && binBytes && mountBinFn) {
+									const [namePtr] = this.encodeString(instance, compMemory, moduleName);
+									const [binPtr, binLen] = this.writeBytes(instance, compMemory, binBytes);
+									mountRc = mountBinFn(slot, namePtr, binPtr, binLen);
+									if (instance.exports.free) {
+										instance.exports.free(namePtr);
+										instance.exports.free(binPtr);
+									}
+								} else if (mountFn) {
+									const [namePtr] = this.encodeString(instance, compMemory, moduleName);
+									const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
+									mountRc = mountFn(slot, namePtr, jsonPtr, jsonLen);
+									if (instance.exports.free) {
+										instance.exports.free(namePtr);
+										instance.exports.free(jsonPtr);
+									}
+								} else {
+									mountRc = -1;
+								}
+							} else if (isBin && binBytes && (instance.exports.wasm_init_bin || mountBinFn)) {
 								const [binPtr, binLen] = this.writeBytes(instance, compMemory, binBytes);
 								if (instance.exports.wasm_init_bin) {
 									instance.exports.wasm_init_bin(binPtr, binLen);
-								} else {
-									const mountBinFn = instance.exports.stl_kernel_mount_bin || instance.exports.stele_kernel_mount_bin;
-									if (mountBinFn) {
-										const [namePtr] = this.encodeString(instance, compMemory, moduleName);
-										mountBinFn(slot, namePtr, binPtr, binLen);
-										if (instance.exports.free) instance.exports.free(namePtr);
-									}
+								} else if (mountBinFn) {
+									const [namePtr] = this.encodeString(instance, compMemory, moduleName);
+									mountRc = mountBinFn(slot, namePtr, binPtr, binLen);
+									if (instance.exports.free) instance.exports.free(namePtr);
 								}
 								if (instance.exports.free) instance.exports.free(binPtr);
 							} else if (instance.exports.wasm_init) {
 								const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
 								instance.exports.wasm_init(jsonPtr, jsonLen);
 								if (instance.exports.free) instance.exports.free(jsonPtr);
-							} else {
-								const mountFn = instance.exports.stl_kernel_mount || instance.exports.stele_kernel_mount;
-								if (mountFn) {
-									const [namePtr] = this.encodeString(instance, compMemory, moduleName);
-									const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
-									mountFn(slot, namePtr, jsonPtr, jsonLen);
-									if (instance.exports.free) {
-										instance.exports.free(namePtr);
-										instance.exports.free(jsonPtr);
-									}
+							} else if (mountFn) {
+								const [namePtr] = this.encodeString(instance, compMemory, moduleName);
+								const [jsonPtr, jsonLen] = this.encodeString(instance, compMemory, jsonStr);
+								mountRc = mountFn(slot, namePtr, jsonPtr, jsonLen);
+								if (instance.exports.free) {
+									instance.exports.free(namePtr);
+									instance.exports.free(jsonPtr);
 								}
 							}
 						} finally {
 							this.flushTurn();
+						}
+
+						if (useKernelMount) {
+							if (mountRc !== 0) {
+								continue;
+							}
+							this.slotInstances.set(slot, { instance, memory: compMemory, moduleName, hasTick: false, isKernelBundle: true });
 						}
 
 						const hasTickFn = instance.exports.stl_kernel_has_tick || instance.exports.stele_kernel_has_tick;
@@ -1258,6 +1315,15 @@ export class SteleWasmClient {
 							bridge.memory = compMemory;
 							if (typeof bridge.setWasm === 'function') {
 								bridge.setWasm(instance.exports, compMemory);
+							}
+							if (useKernelMount && !this.worker) {
+								const dispatcher = (nodeId, eventName, bubbles, valueStr) =>
+									this.dispatchToSlot(slot, nodeId, eventName, bubbles, valueStr);
+								if (typeof bridge.setDispatcher === 'function') {
+									bridge.setDispatcher(dispatcher);
+								} else {
+									bridge.onDispatch = dispatcher;
+								}
 							}
 							if (typeof bridge.mount === 'function') {
 								this.beginTurn();
@@ -1361,7 +1427,7 @@ export class SteleWasmClient {
 
 	invokeSlotAction(slot, actionId, actionData = '') {
 		const comp = this.slotInstances.get(slot);
-		if (comp?.instance?.exports?.wasm_action) {
+		if (!comp?.isKernelBundle && comp?.instance?.exports?.wasm_action) {
 			const [dataPtr] = this.encodeString(comp.instance, comp.memory, actionData || '');
 			this.beginTurn();
 			try {
@@ -1407,7 +1473,10 @@ export class SteleWasmClient {
 		const inst = comp?.instance || this.instance;
 		const mem = comp?.memory || this.memory;
 		if (!inst || !mem) return 0;
-		const fn = inst.exports.bud_app_dispatch;
+		const kernelDispatch = comp?.isKernelBundle
+			? (inst.exports.stl_kernel_dispatch_event || inst.exports.stele_kernel_dispatch_event)
+			: null;
+		const fn = kernelDispatch || inst.exports.bud_app_dispatch;
 		if (typeof fn !== 'function') return 0;
 
 		const [namePtr] = this.encodeString(inst, mem, eventName || '');
@@ -1415,7 +1484,9 @@ export class SteleWasmClient {
 		this.beginTurn();
 		let ret = 0;
 		try {
-			ret = fn(nodeId, namePtr || 0, bubbles ? 1 : 0, valPtr || 0);
+			ret = kernelDispatch
+				? kernelDispatch(slot, nodeId, namePtr || 0, bubbles ? 1 : 0, valPtr || 0)
+				: fn(nodeId, namePtr || 0, bubbles ? 1 : 0, valPtr || 0);
 		} finally {
 			this.flushTurn();
 		}
@@ -1433,7 +1504,7 @@ export class SteleWasmClient {
 		}
 		const comp = this.slotInstances.get(slot);
 		if (comp?.instance) {
-			if (comp.instance.exports.wasm_update) {
+			if (!comp.isKernelBundle && comp.instance.exports.wasm_update) {
 				this.beginTurn();
 				try {
 					comp.instance.exports.wasm_update(slot);
@@ -1952,6 +2023,9 @@ if (isWorkerContext) {
 			initChain = initChain.then(async () => {
 				let ok = false;
 				try {
+					if (msg.wasmBundle) {
+						workerClient.fallbackWasmUrl = msg.wasmBundle;
+					}
 					ok = await workerClient.mountSlot(msg.slot, msg.moduleName, msg.state, msg.declaredCaps || []);
 					if (ok) {
 						ensureWorkerTickLoop();

@@ -154,11 +154,12 @@ char *site_ui_page_lang(
 	if (module && module[0]) {
 		snprintf(
 		        module_attr, sizeof(module_attr),
-		        " data-modules=\"site_chrome %s\"", module);
+		        " data-wasm-bundle=\"/site.wasm\" data-modules=\"site_chrome %s\"",
+		        module);
 	} else {
 		snprintf(
 		        module_attr, sizeof(module_attr),
-		        " data-modules=\"site_chrome\"");
+		        " data-wasm-bundle=\"/site.wasm\" data-modules=\"site_chrome\"");
 	}
 
 	if (!extra_head)

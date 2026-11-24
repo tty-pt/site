@@ -13,6 +13,7 @@ extern const stl_module_ops_t stl_mod_song_detail;
 extern const stl_module_ops_t stl_mod_gig_detail;
 extern const stl_module_ops_t stl_mod_list_fe;
 extern const stl_module_ops_t stl_mod_chat_fe;
+extern const stl_module_ops_t stl_mod_auren;
 
 const stl_module_ops_t *g_stl_modules[] = {
 	&stl_mod_site_chrome,
@@ -20,6 +21,7 @@ const stl_module_ops_t *g_stl_modules[] = {
 	&stl_mod_gig_detail,
 	&stl_mod_list_fe,
 	&stl_mod_chat_fe,
+	&stl_mod_auren,
 	NULL
 };
 

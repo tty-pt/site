@@ -29,13 +29,17 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
 #endif
 
 #define BUD_WASM_MODULE(mod_name, init_fn, render_fn, action_fn) \
+    static int _bud_mod_##mod_name##_slot = -1; \
     static int _bud_mod_##mod_name##_mount(int slot) { \
+        _bud_mod_##mod_name##_slot = slot; \
         return bud_slot_mount(slot, (bud_node *(*)(void))render_fn); \
     } \
     static int _bud_mod_##mod_name##_update(int slot) { \
         return bud_slot_update(slot, (bud_node *(*)(void))render_fn); \
     } \
     static int _bud_mod_##mod_name##_dispatch(unsigned int node_id, const char *event_name, int bubbles, void *event_data) { \
+        if (_bud_mod_##mod_name##_slot >= 0) \
+            return bud_slot_dispatch_event(_bud_mod_##mod_name##_slot, node_id, event_name, bubbles, event_data); \
         return bud_slot_dispatch_any(node_id, event_name, bubbles, event_data); \
     } \
     const stl_module_ops_t stl_mod_##mod_name = { \
@@ -64,7 +68,7 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
     }; \
     _BUD_WASM_MOD_REGISTER(mod_name)
 
-#if defined(__wasm__)
+#if defined(__wasm__) && !defined(QSYS_UNIFIED_SITE)
 #define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
     _BUD_WASM_MOD_REGISTER(mod_name) \
     __attribute__((weak)) ISO_EXPORT(bud_node *, bud_app_render, void) { \
@@ -87,6 +91,9 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
         void (*_f_fn)(int, const char *, int) = (void (*)(int, const char *, int))(fetch_fn); \
         if (_f_fn) _f_fn(req_id, data, len); \
     }
+#elif defined(__wasm__)
+#define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
+    _BUD_WASM_MOD_REGISTER(mod_name)
 #else
 #define _BUD_WASM_EXT_EXPORTS(mod_name, init_fn, render_fn, action_fn, fetch_fn) \
     __attribute__((weak)) int wasm_init(const char *json, int len) { \
@@ -96,13 +103,17 @@ static inline int bud_slot_dispatch_any(unsigned int node_id, const char *event_
 #endif
 
 #define BUD_WASM_MODULE_EXT(mod_name, init_fn, render_fn, action_fn, tick_fn, cleanup_fn, fetch_fn) \
+    static int _bud_mod_##mod_name##_slot = -1; \
     static int _bud_mod_##mod_name##_mount(int slot) { \
+        _bud_mod_##mod_name##_slot = slot; \
         return bud_slot_mount(slot, (bud_node *(*)(void))render_fn); \
     } \
     static int _bud_mod_##mod_name##_update(int slot) { \
         return bud_slot_update(slot, (bud_node *(*)(void))render_fn); \
     } \
     static int _bud_mod_##mod_name##_dispatch(unsigned int node_id, const char *event_name, int bubbles, void *event_data) { \
+        if (_bud_mod_##mod_name##_slot >= 0) \
+            return bud_slot_dispatch_event(_bud_mod_##mod_name##_slot, node_id, event_name, bubbles, event_data); \
         return bud_slot_dispatch_any(node_id, event_name, bubbles, event_data); \
     } \
     const stl_module_ops_t stl_mod_##mod_name = { \

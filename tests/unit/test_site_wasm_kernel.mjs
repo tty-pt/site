@@ -178,6 +178,13 @@ test("Unified site.wasm boots and executes multi-slot operations across site_chr
   }));
   assert.equal(listRc, 0, "list_fe must mount cleanly in slot 1");
 
+  // 6b. Soft-navigation in Slot 1: Swap to auren
+  const aurenRc = mount(1, "auren", JSON.stringify({
+    cached: true,
+    webgpu: true
+  }));
+  assert.equal(aurenRc, 0, "auren must mount cleanly in slot 1");
+
   // 7. Verify Slot 0 (site_chrome) remains active and receives actions
   const [dataPtr] = encodeString(instance, memoryRef, "test");
   const actionRc = kernelAction(0, 1, dataPtr);

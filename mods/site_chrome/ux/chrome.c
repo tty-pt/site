@@ -21,14 +21,16 @@ static bud_node *chrome_stl_render(void)
 	return site_ui_chrome(&chrome_state);
 }
 
-BUD_APP_ROUTE(chrome_stl_render);
-
 BUD_WASM_MODULE(site_chrome, chrome_stl_init, chrome_stl_render, NULL);
+
+#ifndef QSYS_UNIFIED_SITE
+BUD_APP_ROUTE(chrome_stl_render);
 
 ISO_EXPORT(int, wasm_init, const char *json, int len)
 {
 	stl_kernel_register_module(&stl_mod_site_chrome);
 	return stl_kernel_mount(0, "site_chrome", json, len);
 }
+#endif
 
 
