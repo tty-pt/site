@@ -390,7 +390,7 @@ int main(void)
 		inv_st.selected_item_ref = 0;
 
 		/* Test BCP item decoding: room item (dynflags=1, type=0) clears target and sets room */
-		uint8_t room_frame[131];
+		uint8_t room_frame[3 + sizeof(nd_entity_packet_t)];
 		memset(room_frame, 0, sizeof(room_frame));
 		room_frame[0] = ND_BCP_MAGIC_0;
 		room_frame[1] = ND_BCP_MAGIC_1;

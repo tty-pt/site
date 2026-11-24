@@ -343,43 +343,26 @@ int main(void)
 		assert(modal_overlay != NULL);
 		assert(strstr(bud_get_attr(modal_overlay, "class"), "modal") != NULL);
 
-		/* Verify initial Medium (Default) state and persisted style attribute */
-		assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
-		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 75);
-		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 75);
-		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
-		assert(nd_seven_get_msaa() == 0);
-		assert(nd_seven_get_fps_cap() == 60);
-		bud_node *settings_card = find_by_attr(root, "id", "settings");
-		assert(settings_card != NULL);
-		const char *init_style = bud_get_attr(settings_card, "style");
-		assert(init_style != NULL);
-		assert(strcmp(init_style, "--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:100;") == 0);
-		html = bud_render_html(root);
-		assert(strstr(html, "⚖️ Medium (Default)") != NULL);
-		bud_free_string(html);
-
-		/* 8b. Graphics Quality Preset cycling: Medium -> High -> Low -> Medium -> High */
-		rt = bud_runtime_new(root);
-		bud_node *preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
-		assert(preset_btn != NULL);
-		bud_runtime_dispatch(rt, preset_btn, "click", "");
+		/* Verify initial High (Default) state and persisted style attribute */
 		assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
 		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 100);
 		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
 		assert(nd_seven_get_msaa() == 1);
 		assert(nd_seven_get_fps_cap() == 0);
-		free(rt);
-
-		root = nd_ui_render(&client_state);
+		bud_node *settings_card = find_by_attr(root, "id", "settings");
+		assert(settings_card != NULL);
+		const char *init_style = bud_get_attr(settings_card, "style");
+		assert(init_style != NULL);
+		assert(strcmp(init_style, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") == 0);
 		html = bud_render_html(root);
 		assert(strstr(html, "✨ High") != NULL);
-		assert(strstr(html, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
+		/* 8b. Graphics Quality Preset cycling: High -> Low -> Medium -> High */
 		rt = bud_runtime_new(root);
-		preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
+		bud_node *preset_btn = find_by_attr(root, "id", "settings-preset-toggle");
+		assert(preset_btn != NULL);
 		bud_runtime_dispatch(rt, preset_btn, "click", "");
 		assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
 		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 67);
