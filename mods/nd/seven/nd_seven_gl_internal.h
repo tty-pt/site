@@ -692,32 +692,11 @@ extern float s_bb_ref_trig[4];
 extern float s_shadow_sun_dir[3];
 extern float s_lamb_shadow_light[4];
 
-/* Shader string declarations (defined in nd_seven_gl_shaders.c) */
-extern const char *s_vs_sky;
-extern const char *s_fs_sky;
-extern const char *s_vs_terrain;
-extern const char *s_fs_terrain;
-extern const char *s_vs_water;
-extern const char *s_fs_water;
-extern const char *s_vs_billboard;
-extern const char *s_fs_billboard;
-extern const char *s_vs_mesh3d;
-extern const char *s_fs_mesh3d;
-extern const char *s_vs_grass;
-extern const char *s_fs_grass;
-extern const char *s_vs_csm;
-extern const char *s_fs_csm;
-extern const char *s_vs_csm_reproj;
-extern const char *s_fs_csm_reproj;
-extern const char *s_vs_cloud;
-extern const char *s_fs_cloud;
-extern const char *s_fs_cloud_comp;
-extern const char *s_fs_hiz_downsample;
-extern const char *s_fs_ssao;
-extern const char *s_fs_bloom;
-extern const char *s_fs_post;
-extern const char *s_vs_terrain_shadow;
-extern const char *s_fs_terrain_shadow;
+/* Internal shader accessors (public ones are in nd_seven_gl.h; all defined in nd_seven_gl_shaders.c) */
+const char *nd_seven_gl_vs_csm_reproj(void);
+const char *nd_seven_gl_fs_csm_reproj(void);
+const char *nd_seven_gl_fs_cloud_comp(void);
+const char *nd_seven_gl_fs_hiz_downsample(void);
 
 /* Shared internal functions across translation units */
 GLuint create_program_async(const char *vs_src, const char *fs_src);

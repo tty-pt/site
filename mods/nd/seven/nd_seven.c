@@ -2481,50 +2481,33 @@ int nd_seven_shaders_ready(void)
 	return nd_seven_gl_pipelines_ready() ? 1 : 0;
 }
 
-void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
+typedef struct {
+	const nd_client_state_t *st;
+	float eff_cam_dist;
+	float max_eff_sz;
+	float max_scenery_cull;
+	float cam_cy;
+	float cam_sy;
+	int obj_i0, obj_i1;
+	int obj_j0, obj_j1;
+	int eff_lamb_row;
+	drawable_3d_t *dr;
+	lam_billboard_gpu_t *batch;
+	uint32_t batch_count;
+} seven_frame_ctx_t;
+
+static void
+seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 {
-	int w = (int)wu, h = (int)hu;
-	static drawable_3d_t dr[MAX_DRAW];
-	static lam_billboard_gpu_t s_all_gpu_batch[ALL_GPU_MAX_DRAW];
-
-	if (w <= 0 || h <= 0)
-		return;
-
-	nd_seven_sync_origin(st);
-
-	if (!nd_seven_gl_pipelines_ready()) {
-		glViewport(0, 0, (GLsizei)w, (GLsizei)h);
-		glClearColor(0.039f, 0.039f, 0.047f, 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		return;
-	}
-
-	atlas_load();
-
-	float zoom = nd_seven_get_zoom();
-	float eff_cam_dist = ND_SEVEN_CAM_DIST / zoom;
-
-	/* Continuous 3D Terrain: Dispatch multi-scale leaf chunks from libareole (view_id = 0) */
-	seven_dispatch_macro_backdrop(w, h, st, zoom, eff_cam_dist);
-
-	int map_w = (st && st->map_data.width > 0) ? (int)st->map_data.width : 7;
-	int map_h = (st && st->map_data.height > 0) ? (int)st->map_data.height : 7;
-	int px = st ? (int)st->map_data.player_x : 3;
-	int py = st ? (int)st->map_data.player_y : 3;
-
-	int obj_i0 = -px;
-	int obj_i1 = map_w - 1 - px;
-	int obj_j0 = -py;
-	int obj_j1 = map_h - 1 - py;
-
-	int lamb_row = ndw_fdiv(nd_seven_get_ly(), NDW_TILE_H);
-	int eff_lamb_row = lamb_row;
-	if (eff_lamb_row < obj_j0) eff_lamb_row = obj_j0;
-	if (eff_lamb_row > obj_j1) eff_lamb_row = obj_j1;
-
-	uint32_t all_gpu_count = 0;
-	float max_eff_sz = seven_max_eff_bb_size();
-	float max_scenery_cull = seven_billboard_cull_dist(max_eff_sz, max_eff_sz);
+	const nd_client_state_t *st = ctx->st;
+	const float eff_cam_dist = ctx->eff_cam_dist;
+	const float max_scenery_cull = ctx->max_scenery_cull;
+	const int obj_i0 = ctx->obj_i0, obj_i1 = ctx->obj_i1;
+	const int obj_j0 = ctx->obj_j0, obj_j1 = ctx->obj_j1;
+	const int eff_lamb_row = ctx->eff_lamb_row;
+	drawable_3d_t *dr = ctx->dr;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
 
 	for (int tj = obj_j0; tj <= obj_j1; tj++) {
 		int n = 0;
@@ -2911,6 +2894,16 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 	}
 
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_living_meadow(seven_frame_ctx_t *ctx)
+{
+	const nd_client_state_t *st = ctx->st;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
+
 	/* Emit deterministic Living Meadow areas, shoreline reed beds, and wildflower glades:
 	 * Spread out on a 26-unit lattice with natural jitter so tufts are less frequent and never cluttered,
 	 * evaluated by the universal size/distance billboard fade & cull law with zero special cases. */
@@ -3097,6 +3090,17 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 	}
 
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_forest_floor_logs(seven_frame_ctx_t *ctx)
+{
+	const nd_client_state_t *st = ctx->st;
+	const float eff_cam_dist = ctx->eff_cam_dist;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
+
 	/* Emit deterministic 3D forest-floor fallen logs & ancient mossy stumps across woodland biomes */
 	if (eff_cam_dist < 1600.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
 		uint16_t u_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
@@ -3234,6 +3238,17 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			}
 		}
 	}
+
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_medium_botanical(seven_frame_ctx_t *ctx)
+{
+	const nd_client_state_t *st = ctx->st;
+	const float eff_cam_dist = ctx->eff_cam_dist;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
 
 	/* Emit deterministic 3D Medium botanical stratum (16-32 wu):
 	 * Macro-patch clustered ferns, heather cushions, creeping juniper, tall meadow grass clumps,
@@ -3436,6 +3451,17 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 	}
 
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_large_undergrowth(seven_frame_ctx_t *ctx)
+{
+	const nd_client_state_t *st = ctx->st;
+	const float eff_cam_dist = ctx->eff_cam_dist;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
+
 	/* Emit deterministic 3D Large undergrowth stratum (36-75 wu):
 	 * Biome-matched juvenile saplings, hazel/berry coppice thickets, tall riparian cattail/bulrush stands,
 	 * and occasional deadwood snags bridging mid-story shrubs into the mature tree canopy. */
@@ -3624,6 +3650,17 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 	}
 
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_geobreak_props(seven_frame_ctx_t *ctx)
+{
+	const nd_client_state_t *st = ctx->st;
+	const float eff_cam_dist = ctx->eff_cam_dist;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
+
 	/* Emit deterministic 3D ground-breaker relief props (mossy hummocks, scree outcrops, turf berms)
 	 * across flat lowlands, riverbanks, grove margins, and footpath shoulders */
 	if (eff_cam_dist < 2200.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
@@ -3777,6 +3814,16 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		}
 	}
 
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_particles_and_sort_batch(seven_frame_ctx_t *ctx)
+{
+	const float eff_cam_dist = ctx->eff_cam_dist;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	uint32_t all_gpu_count = ctx->batch_count;
+
 	/* Append active 3D water splash & surf-spray particles into s_all_gpu_batch */
 	if (s_water_particles && eff_cam_dist < 1800.0f && all_gpu_count < ALL_GPU_MAX_DRAW) {
 		lam_particle_draw_t p_draw[256];
@@ -3852,6 +3899,24 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			}
 		}
 	}
+
+	ctx->cam_cy = cam_cy;
+	ctx->cam_sy = cam_sy;
+	ctx->batch_count = all_gpu_count;
+}
+
+static void
+seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
+{
+	const nd_client_state_t *st = ctx->st;
+	const float max_eff_sz = ctx->max_eff_sz;
+	const float max_scenery_cull = ctx->max_scenery_cull;
+	const float cam_cy = ctx->cam_cy;
+	const float cam_sy = ctx->cam_sy;
+	const int obj_i0 = ctx->obj_i0, obj_i1 = ctx->obj_i1;
+	const int obj_j0 = ctx->obj_j0, obj_j1 = ctx->obj_j1;
+	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
+	const uint32_t all_gpu_count = ctx->batch_count;
 
 	/* Unified Homogeneous Scenery Pass across visible libareole leaves */
 	s_mid_batch_len = 0;
@@ -4231,6 +4296,71 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (!near_flushed && all_gpu_count > 0) {
 		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
+
+}
+
+void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
+{
+	int w = (int)wu, h = (int)hu;
+	static drawable_3d_t dr[MAX_DRAW];
+	static lam_billboard_gpu_t s_all_gpu_batch[ALL_GPU_MAX_DRAW];
+
+	if (w <= 0 || h <= 0)
+		return;
+
+	nd_seven_sync_origin(st);
+
+	if (!nd_seven_gl_pipelines_ready()) {
+		glViewport(0, 0, (GLsizei)w, (GLsizei)h);
+		glClearColor(0.039f, 0.039f, 0.047f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		return;
+	}
+
+	atlas_load();
+
+	float zoom = nd_seven_get_zoom();
+	float eff_cam_dist = ND_SEVEN_CAM_DIST / zoom;
+
+	/* Continuous 3D Terrain: Dispatch multi-scale leaf chunks from libareole (view_id = 0) */
+	seven_dispatch_macro_backdrop(w, h, st, zoom, eff_cam_dist);
+
+	int map_w = (st && st->map_data.width > 0) ? (int)st->map_data.width : 7;
+	int map_h = (st && st->map_data.height > 0) ? (int)st->map_data.height : 7;
+	int px = st ? (int)st->map_data.player_x : 3;
+	int py = st ? (int)st->map_data.player_y : 3;
+
+	int obj_j0 = -py;
+	int obj_j1 = map_h - 1 - py;
+	int eff_lamb_row = ndw_fdiv(nd_seven_get_ly(), NDW_TILE_H);
+	if (eff_lamb_row < obj_j0) eff_lamb_row = obj_j0;
+	if (eff_lamb_row > obj_j1) eff_lamb_row = obj_j1;
+
+	float max_eff_sz = seven_max_eff_bb_size();
+	seven_frame_ctx_t ctx = {
+		.st = st,
+		.eff_cam_dist = eff_cam_dist,
+		.max_eff_sz = max_eff_sz,
+		.max_scenery_cull = seven_billboard_cull_dist(max_eff_sz, max_eff_sz),
+		.obj_i0 = -px,
+		.obj_i1 = map_w - 1 - px,
+		.obj_j0 = obj_j0,
+		.obj_j1 = obj_j1,
+		.eff_lamb_row = eff_lamb_row,
+		.dr = dr,
+		.batch = s_all_gpu_batch,
+		.batch_count = 0,
+	};
+
+	seven_emit_near_room_billboards(&ctx);
+	seven_emit_living_meadow(&ctx);
+	seven_emit_forest_floor_logs(&ctx);
+	seven_emit_medium_botanical(&ctx);
+	seven_emit_large_undergrowth(&ctx);
+	seven_emit_geobreak_props(&ctx);
+	seven_emit_particles_and_sort_batch(&ctx);
+	seven_emit_homogeneous_scenery(&ctx);
+
 	/* GPU-instanced 3D grass & clover carpet, then water pass over submerged sprites, clouds, and present */
 	nd_seven_gl_flush_grass();
 	nd_seven_gl_flush_water();

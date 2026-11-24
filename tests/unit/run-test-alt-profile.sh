@@ -18,9 +18,10 @@ gcc -Wall -Wextra -Werror -O1 -ffunction-sections -Wl,--gc-sections \
     -I"$REPO_ROOT/external/libxylem/include" \
     -I"$REPO_ROOT/external/liblamina/include" \
     -I"$REPO_ROOT/mods/nd/ux" \
+    -I"$REPO_ROOT/mods/nd/seven" \
     -o "$out/test_alt_profile" \
     tests/unit/test_alt_profile.c \
-    mods/nd/ux/nd_seven_ground.c \
+    mods/nd/seven/nd_seven_ground.c \
     -lm
 
 "$out/test_alt_profile"

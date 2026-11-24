@@ -302,7 +302,7 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples, bool try
 
 	/* Create Hi-Z downsample program using full-screen triangle vertex shader s_vs_csm */
 	if (!s_gl.hiz_downsample_prog) {
-		s_gl.hiz_downsample_prog = create_program_async(s_vs_csm, s_fs_hiz_downsample);
+		s_gl.hiz_downsample_prog = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_hiz_downsample());
 	}
 	return true;
 }
@@ -1142,7 +1142,7 @@ void gl_render_cloud_shadow_map(void)
 		glBindTexture(GL_TEXTURE_2D, 0);
 		
 		// Create reprojection shader program
-		s_gl.csm_reproj_prog = create_program_async(s_vs_csm_reproj, s_fs_csm_reproj);
+		s_gl.csm_reproj_prog = create_program_async(nd_seven_gl_vs_csm_reproj(), nd_seven_gl_fs_csm_reproj());
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	

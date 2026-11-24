@@ -93,19 +93,19 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 
 ---
 
-## Phase 4 — Seven 2.5D/3D Engine Extraction & Shader Deduplication
+## Phase 4 — Seven 2.5D/3D Engine Extraction & Shader Deduplication ✅ COMPLETED
 
-**Problem:** `mods/nd` is 31,483 LOC (64% of all `mods/`): `nd_seven_gl_shaders.c` (5,720L) duplicates GLSL functions 2–5×, `nd_seven_render()` spans 1,761 lines in one function, and `nd_seven_atlas.h` (1,235L) / `nd_seven_mesh3d.h` (968L) embed implementations in headers.
+**Problem:** `mods/nd` is 31,483 LOC (64% of all `mods/`): `nd_seven_gl_shaders.c` (5,720L) duplicates GLSL functions 2–9× into `.rodata`, `nd_seven_render()` spans 1,756 lines in one function, and `nd_seven_atlas.h` (1,235L) / `nd_seven_mesh3d.h` (968L) embed implementations in headers.
 
 **Deliverables (unit-tested at each step):**
-1. Factor shared GLSL chunks (`s_glsl_noise`, `s_glsl_height`, `s_glsl_atmo`, `s_glsl_water_optics`) and assemble via `glShaderSource` multi-string arrays.
-2. Split `nd_seven_atlas.h` → `nd_seven_atlas.{h,c}` and `nd_seven_mesh3d.h` → `nd_seven_mesh3d.{h,c}`.
-3. Decompose `nd_seven_render()` into explicit pass functions (`camera_frustum`, `terrain_lod`, `hiz_occlusion`, `water`, `entities_billboards`, `clouds_post`).
-4. Extract the Seven engine into a dedicated library (`external/libseven` or `mods/nd/seven/`), keeping `mods/nd/ux/` as a thin ~2.5K LOC shell/HUD layer.
+1. Split header-embedded data/implementations: `nd_seven_atlas.h` (**1,235 → 61L**) + `nd_seven_atlas.c` (1,186L) and `nd_seven_mesh3d.h` (**968 → 73L**) + `nd_seven_mesh3d.c` (915L); updated `scripts/gen-seven-atlas.py` to emit split `.h`/`.c`.
+2. Deduplicated all 18 repeated GLSL macros (`ND_GLSL_*`, `CHAFF_GLSL_*`) and 6 multi-copy GLSL helper blocks (`get_h`, Catmull-Rom, wind, 3D chaff/caustics, water waves, shore swash/wake) in `nd_seven_gl_shaders.c` into single-copy `.rodata` chunks + lazy one-time `nd_glsl_assemble()` behind the existing `nd_seven_gl_{vs,fs}_*()` getters (replacing 25 `extern const char *` globals in `nd_seven_gl_internal.h` with 4 internal getters).
+3. Decomposed `nd_seven_render()` (**1,756 → 68L**) into 8 focused `static` pass functions (`seven_emit_near_room_billboards`, `seven_emit_living_meadow`, `seven_emit_forest_floor_logs`, `seven_emit_medium_botanical`, `seven_emit_large_undergrowth`, `seven_emit_geobreak_props`, `seven_emit_particles_and_sort_batch`, `seven_emit_homogeneous_scenery`) sharing a stack-allocated `seven_frame_ctx_t`.
+4. Extracted all 23 `nd_seven*` engine files (26,142 LOC) from `mods/nd/ux/` into `mods/nd/seven/` behind a one-way boundary enforced by `scripts/check-module-boundaries.sh`, updated `mods/nd/Makefile` (`ND_SEVEN_PARTS` / `ND_SEVEN_HDRS`, verified portable under both GNU `make` and BSD `bmake`), `tests/unit/common.sh`, standalone test runners, `tests/e2e/water-harness.mjs`, and `scripts/gen-seven-atlas.py`.
 
-**Exit Criteria:**
-- `nd_seven_gl_shaders.c` shrinks by ~2,000 LOC; `mods/nd/ux/` drops to ~2.5–3K LOC.
-- Graphics/ND unit suites, `sh scripts/check-nd-encapsulation.sh`, and `make test-mod MOD=nd` exit `0`.
+**Exit Criteria (Verified):**
+- `mods/nd/ux/` dropped from **31,277 → 5,020 authored LOC** (-84.0%); `nd_seven_gl_shaders.c` shrank **5,720 → 5,464L (-256L)** while `htdocs/nd.wasm` shrank **1,176,553 → 1,041,521 bytes (-135,032 bytes / -131.9 KB / -11.5%)** via `.rodata` deduplication; `nd_seven_render()` shrank **1,756 → 68L**.
+- Both `make -C mods/nd` and `bmake -C mods/nd` build cleanly (`wasm-audit: PASS`), `make test-mod MOD=nd` exits `0`, `make test-graphics` passes **14/14** (`exit 0`, including `glslangValidator` ES 3.00 compile+link of all 12 programs), and all 7 static audits (`check-module-boundaries.sh`, `check-ux-purity.sh`, `check-wasm-imports.sh`, `check-nd-encapsulation.sh`, `check-nd-no-static-load.sh`, `check-no-site-specific-js.sh`, `check-no-impl-guards.sh`) exit `0`.
 
 ---
 

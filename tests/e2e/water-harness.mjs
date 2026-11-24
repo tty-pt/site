@@ -9,7 +9,7 @@
  *   node tests/e2e/water-harness.mjs --dump DIR [--frames N]
  *       writes DIR/<scene>-<frame>.rgba (raw 0xAABBGGRR words) + .json meta.
  *   node tests/e2e/water-harness.mjs --parity
- *       server/browser parity: builds the ground renderer (mods/nd/ux
+ *       server/browser parity: builds the ground renderer (mods/nd/seven
  *       nd_seven_ground.c + motion/objects/atlas_draw) natively (gcc -O2, as
  *       the SSR .so / unit tests) and as WASM (clang wasm32-wasi -O3 -flto
  *       -ffreestanding, as htdocs/nd.wasm), renders the same states (coast
@@ -289,9 +289,9 @@ async function parity() {
 	writeFileSync(drv, PARITY_C);
 	const inc = ['external/nd-world/include', 'external/libchaff/include', 'include',
 		'external/axil-nd/include', 'external/nd-seven/include', 'external/libxylem/include',
-		'mods/nd/ux'].map(d => '-I' + path.join(ROOT, d));
-	const src = ['nd_seven_ground.c', 'nd_seven_motion.c', 'nd_seven_objects.c', 'nd_seven_atlas_draw.c']
-		.map(f => path.join(ROOT, 'mods/nd/ux', f));
+		'mods/nd/seven'].map(d => '-I' + path.join(ROOT, d));
+	const src = ['nd_seven_ground.c', 'nd_seven_motion.c', 'nd_seven_objects.c', 'nd_seven_atlas.c', 'nd_seven_atlas_draw.c', 'nd_seven_mesh3d.c']
+		.map(f => path.join(ROOT, 'mods/nd/seven', f));
 	const nat = path.join(dir, 'parity'), wasm = path.join(dir, 'parity.wasm'), raw = path.join(dir, 'native.rgba');
 	try {
 		execFileSync('gcc', ['-O2', ...inc, '-o', nat, drv, ...src, '-lxxhash'], { stdio: ['ignore', 'ignore', 'inherit'] });

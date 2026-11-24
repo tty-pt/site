@@ -538,19 +538,19 @@ static void init_grid_buffers(void)
 
 static void init_pipelines(void)
 {
-	s_gl.sky_pipe.prog        = create_program_async(s_vs_sky, s_fs_sky);
-	s_gl.terrain_pipe.prog    = create_program_async(s_vs_terrain, s_fs_terrain);
-	s_gl.water_pipe.prog      = create_program_async(s_vs_water, s_fs_water);
-	s_gl.bb_pipe.prog         = create_program_async(s_vs_billboard, s_fs_billboard);
-	s_gl.mesh3d_pipe.prog     = create_program_async(s_vs_mesh3d, s_fs_mesh3d);
-	s_gl.grass_pipe.prog      = create_program_async(s_vs_grass, s_fs_grass);
-	s_gl.cloud_pipe.prog      = create_program_async(s_vs_cloud, s_fs_cloud);
-	s_gl.cloud_comp_pipe.prog = create_program_async(s_vs_csm, s_fs_cloud_comp);
-	s_gl.csm_pipe.prog        = create_program_async(s_vs_csm, s_fs_csm);
-	s_gl.ssao_pipe.prog       = create_program_async(s_vs_csm, s_fs_ssao);
-	s_gl.bloom_pipe.prog      = create_program_async(s_vs_csm, s_fs_bloom);
-	s_gl.post_pipe.prog       = create_program_async(s_vs_csm, s_fs_post);
-	s_gl.terrain_shadow_pipe.prog = create_program_async(s_vs_terrain_shadow, s_fs_terrain_shadow);
+	s_gl.sky_pipe.prog        = create_program_async(nd_seven_gl_vs_sky(), nd_seven_gl_fs_sky());
+	s_gl.terrain_pipe.prog    = create_program_async(nd_seven_gl_vs_terrain(), nd_seven_gl_fs_terrain());
+	s_gl.water_pipe.prog      = create_program_async(nd_seven_gl_vs_water(), nd_seven_gl_fs_water());
+	s_gl.bb_pipe.prog         = create_program_async(nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard());
+	s_gl.mesh3d_pipe.prog     = create_program_async(nd_seven_gl_vs_mesh3d(), nd_seven_gl_fs_mesh3d());
+	s_gl.grass_pipe.prog      = create_program_async(nd_seven_gl_vs_grass(), nd_seven_gl_fs_grass());
+	s_gl.cloud_pipe.prog      = create_program_async(nd_seven_gl_vs_cloud(), nd_seven_gl_fs_cloud());
+	s_gl.cloud_comp_pipe.prog = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_cloud_comp());
+	s_gl.csm_pipe.prog        = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_csm());
+	s_gl.ssao_pipe.prog       = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_ssao());
+	s_gl.bloom_pipe.prog      = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_bloom());
+	s_gl.post_pipe.prog       = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_post());
+	s_gl.terrain_shadow_pipe.prog = create_program_async(nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow());
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;

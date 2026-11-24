@@ -112,6 +112,22 @@ done <<EOF
 $(CDPATH= cd -- "$root" && rg -n '"(poem|song|gig|grp)"' mods/common mods/index --glob '*.c' --glob '*.cx' --glob '*.h' --glob '!*.cx.c' --glob '!*.cx.h' 2>/dev/null || true)
 EOF
 
+# -- Seven engine one-way boundary (mods/nd/seven -> zero UX/UI/server deps) --
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	printf '%s:%s: prohibited UX/shell include in mods/nd/seven (one-way boundary): %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n '^[[:space:]]*#include[[:space:]]*["<](nd_ui|nd_lamina|nd_viewport|nd_win|nd_scene|bud|stele|site_)' mods/nd/seven --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+while IFS=: read -r file line text; do
+	[ -z "$file" ] && continue
+	printf '%s:%s: prohibited server/XY symbol in mods/nd/seven: %s\n' "$file" "$line" "$text" >&2
+	failed=1
+done <<EOF
+$(CDPATH= cd -- "$root" && rg -n '\b(XY_DECL|XY_IMPL|xy_load|corm_|source_|axil_|hyle_source)\b' mods/nd/seven --glob '*.c' --glob '*.h' 2>/dev/null || true)
+EOF
+
 # -- W06 wasm-native leakage (D18) ------------------------------------------
 if ls "$root"/htdocs/*.wasm >/dev/null 2>&1; then
 	if ! sh "$root/scripts/check-wasm-imports.sh" >/dev/null 2>&1; then

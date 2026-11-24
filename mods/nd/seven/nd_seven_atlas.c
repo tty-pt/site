@@ -3,56 +3,10 @@
  * Palette-indexed, run-length encoded sprite atlas for the 2D
  * seven stage (see nd_seven.c).  Index 0 is transparent. */
 
-#ifndef ND_SEVEN_ATLAS_H
-#define ND_SEVEN_ATLAS_H
 
-#include <stdint.h>
+#include "nd_seven_atlas.h"
 
-#define ND_SEVEN_ATLAS_W 512
-#define ND_SEVEN_ATLAS_H_PX 325
-
-#define ND_SEVEN_PALETTE_N 177
-
-enum nd_seven_sprite {
-	NDS_GRASS,
-	NDS_PATH,
-	NDS_PATH2,
-	NDS_PATH3,
-	NDS_PATH4,
-	NDS_WALL,
-	NDS_WALL2,
-	NDS_WALL3,
-	NDS_WALL4,
-	NDS_DECOR_YEL,
-	NDS_DECOR_YEL2,
-	NDS_DECOR_ORG,
-	NDS_DECOR_PINK,
-	NDS_TREE_OAK,
-	NDS_TREE_BIG,
-	NDS_TREE_APPLE,
-	NDS_TREE_APPLE2,
-	NDS_TREE_ROUND,
-	NDS_BUSH_DARK,
-	NDS_BUSH_TEAL,
-	NDS_ROCK_TAN_BIG,
-	NDS_ROCK_WHITE_BIG,
-	NDS_ROCK_TAN,
-	NDS_ROCK_TAN_SM,
-	NDS_ROCK_TAN_TINY,
-	NDS_ROCK_WHITE,
-	NDS_ROCK_GREY,
-	NDS_STONE_BLUE,
-	NDS_STONE_BLUE_SM,
-	NDS_STONE_GREY,
-	NDS_STONE_FLAT,
-	NDS_STONE_TINY,
-	NDS_LAMB,
-	NDS_COUNT
-};
-
-typedef struct { uint16_t x, y, w, h; } nd_seven_sprite_rect_t;
-
-static const nd_seven_sprite_rect_t nd_seven_sprite_rects[NDS_COUNT] = {
+const nd_seven_sprite_rect_t nd_seven_sprite_rects[NDS_COUNT] = {
 	[NDS_GRASS] = { 358, 256, 16, 16 },
 	[NDS_PATH] = { 374, 256, 16, 16 },
 	[NDS_PATH2] = { 390, 256, 16, 16 },
@@ -89,7 +43,7 @@ static const nd_seven_sprite_rect_t nd_seven_sprite_rects[NDS_COUNT] = {
 };
 
 /* 0xAARRGGBB-in-memory-order pixels (little endian R,G,B,A bytes as the canvas wants). */
-static const uint32_t nd_seven_palette[ND_SEVEN_PALETTE_N] = {
+const uint32_t nd_seven_palette[ND_SEVEN_PALETTE_N] = {
 	0x00000000, 0xFF4A7844, 0xFF548A54, 0xFF42693A, 0xFF4D8344, 0xFF388854, 0xFF317848, 0xFF2D729A,
 	0xFF4E9173, 0xFF548953, 0xFF35522C, 0xFF3B905B, 0xFF419B66, 0xFF2A663A, 0xFF3889B7, 0xFF4198C6,
 	0xFF3E93C2, 0xFF3685B2, 0xFF46703E, 0xFF579655, 0xFF518B4A, 0xFF47A672, 0xFF343744, 0xFF375526,
@@ -115,8 +69,7 @@ static const uint32_t nd_seven_palette[ND_SEVEN_PALETTE_N] = {
 	0xFF3D684E,
 };
 
-#define ND_SEVEN_RLE_LEN 35594
-static const uint8_t nd_seven_rle[ND_SEVEN_RLE_LEN] = {
+const uint8_t nd_seven_rle[ND_SEVEN_RLE_LEN] = {
 	227,0,0,1,0,0,1,1,0,2,2,0,1,3,44,0,0,4,57,0,2,5,1,0,2,6,43,0,1,7,5,0,
 	3,7,57,0,2,8,0,0,1,8,1,0,1,8,254,0,0,2,9,0,2,1,0,3,0,1,0,9,0,0,0,10,
 	0,3,45,0,0,4,49,0,1,11,0,0,3,12,0,0,5,5,1,6,0,11,1,0,1,13,38,0,0,14,0,15,
@@ -1231,5 +1184,3 @@ static const uint8_t nd_seven_rle[ND_SEVEN_RLE_LEN] = {
 	255,0,211,0,0,86,3,119,1,125,0,119,1,120,0,86,11,0,2,129,255,0,230,0,3,86,1,119,0,120,1,86,
 	255,0,250,0,2,86,255,0,244,0,
 };
-
-#endif /* ND_SEVEN_ATLAS_H */

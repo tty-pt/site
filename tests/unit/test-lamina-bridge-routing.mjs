@@ -60,7 +60,7 @@ assert.deepEqual([fitMini.width, fitMini.height], [224, 224]);
 console.log('PASS: a fit canvas is resized to the flushed frame; fixed canvases are untouched');
 
 // Verify 3D scene and shader logic has been migrated out of JS to pure C (nd_seven_gl.c)
-assert.equal(SHADERS, undefined, '3D shaders must live in pure C (mods/nd/ux/nd_seven_gl.c), not lamina-bridge.js');
+assert.equal(SHADERS, undefined, '3D shaders must live in pure C (mods/nd/seven/nd_seven_gl.c), not lamina-bridge.js');
 
 console.log('PASS: lamina-bridge.js is purely 2D canvas pass-through with zero 3D shaders in JS');
 

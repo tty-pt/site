@@ -18,14 +18,17 @@ gcc -Wall -Wextra -Werror -O1 \
     -I"$REPO_ROOT/external/libxylem/include" \
     -I"$REPO_ROOT/external/liblamina/include" \
     -I"$REPO_ROOT/mods/nd/ux" \
+    -I"$REPO_ROOT/mods/nd/seven" \
     -o "$out/test_ground_zoom_lod" \
     tests/unit/test_ground_zoom_lod.c \
-    mods/nd/ux/nd_seven.c \
-    mods/nd/ux/nd_seven_gl_shaders.c mods/nd/ux/nd_seven_gl_math.c mods/nd/ux/nd_seven_gl_billboard.c mods/nd/ux/nd_seven_gl_occ.c mods/nd/ux/nd_seven_gl_clouds.c mods/nd/ux/nd_seven_gl.c \
-    mods/nd/ux/nd_seven_atlas_draw.c \
-    mods/nd/ux/nd_seven_ground.c \
-    mods/nd/ux/nd_seven_motion.c \
-    mods/nd/ux/nd_seven_objects.c \
+    mods/nd/seven/nd_seven.c \
+    mods/nd/seven/nd_seven_gl_shaders.c mods/nd/seven/nd_seven_gl_math.c mods/nd/seven/nd_seven_gl_billboard.c mods/nd/seven/nd_seven_gl_occ.c mods/nd/seven/nd_seven_gl_clouds.c mods/nd/seven/nd_seven_gl.c \
+    mods/nd/seven/nd_seven_atlas.c \
+    mods/nd/seven/nd_seven_atlas_draw.c \
+    mods/nd/seven/nd_seven_mesh3d.c \
+    mods/nd/seven/nd_seven_ground.c \
+    mods/nd/seven/nd_seven_motion.c \
+    mods/nd/seven/nd_seven_objects.c \
     mods/nd/ux/nd_lamina.c \
     external/libareole/src/areole.c external/liblamina/src/particle.c \
     -lxxhash -lm

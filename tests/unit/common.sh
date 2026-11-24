@@ -140,7 +140,8 @@ ND_UX_INCLUDES="\
 	-I$REPO_ROOT/external/nd-world/include \
 	-I$REPO_ROOT/external/nd-plant/include \
 	-I$REPO_ROOT/mods/common/ux \
-	-I$REPO_ROOT/mods/nd/ux"
+	-I$REPO_ROOT/mods/nd/ux \
+	-I$REPO_ROOT/mods/nd/seven"
 
 ND_UX_CX_SRCS="\
 	mods/common/ux/site_layout.cx \
@@ -157,17 +158,19 @@ ND_UX_CX_SRCS="\
 ND_SEVEN_SRCS="\
 	mods/nd/ux/nd_scene.c \
 	mods/nd/ux/nd_lamina.c \
-	mods/nd/ux/nd_seven.c \
-	mods/nd/ux/nd_seven_gl_shaders.c \
-	mods/nd/ux/nd_seven_gl_math.c \
-	mods/nd/ux/nd_seven_gl_billboard.c \
-	mods/nd/ux/nd_seven_gl_occ.c \
-	mods/nd/ux/nd_seven_gl_clouds.c \
-	mods/nd/ux/nd_seven_gl.c \
-	mods/nd/ux/nd_seven_atlas_draw.c \
-	mods/nd/ux/nd_seven_ground.c \
-	mods/nd/ux/nd_seven_motion.c \
-	mods/nd/ux/nd_seven_objects.c \
+	mods/nd/seven/nd_seven.c \
+	mods/nd/seven/nd_seven_gl_shaders.c \
+	mods/nd/seven/nd_seven_gl_math.c \
+	mods/nd/seven/nd_seven_gl_billboard.c \
+	mods/nd/seven/nd_seven_gl_occ.c \
+	mods/nd/seven/nd_seven_gl_clouds.c \
+	mods/nd/seven/nd_seven_gl.c \
+	mods/nd/seven/nd_seven_atlas.c \
+	mods/nd/seven/nd_seven_atlas_draw.c \
+	mods/nd/seven/nd_seven_mesh3d.c \
+	mods/nd/seven/nd_seven_ground.c \
+	mods/nd/seven/nd_seven_motion.c \
+	mods/nd/seven/nd_seven_objects.c \
 	external/libareole/src/areole.c \
 	external/liblamina/src/particle.c \
 	external/libstele/src/stele_wq.c"
