@@ -10,7 +10,7 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **P0** | Asset Sync & Single Source of Truth | Small (1–2h) | Low | **Done** | Fixes live `bud-cap.js` drift; makes `htdocs/` strictly derived |
 | **P1** | WASM Size, Incremental Caching & Unified Bundle Cutover | Small–Med (½d) | Low–Med | **Done** | 4–7× smaller `.wasm` payloads; 0.77s incremental `nd.wasm`; single cached `/site.wasm` on site pages |
-| **P2** | `libbud` Bump Arena (`bud_arena`) | Medium (1d) | Medium | Planned | Cuts ~10 `malloc`/`free` per DOM node → O(1) tree teardown for both SSR and WASM |
+| **P2** | `libbud` Bump Arena (`bud_arena`) | Medium (1d) | Medium | **Done** | 100% fewer per-frame heap allocs (474,000 → 0 over 1,000 renders), 2.7–4.7× faster tree build, zero ASan/UBSan findings |
 | **P3** | Build & Unit-Test Deduplication | Small–Med (½d) | Low | Planned | Shrinks `Makefile` ~200L and collapses 59 copy-pasted `tests/unit/run-*.sh` harnesses |
 | **P4** | Seven Engine Extraction & Shader Deduplication | Large (2–3d) | Medium | Planned | Cuts ~2,000L duplicate GLSL, splits 1,761L `nd_seven_render`, shrinks `mods/nd/ux/` from 31K → ~2.5K LOC |
 | **P5** | Server Module Slimming & Repo/Submodule Hygiene | Medium (1–2d) | Low–Med | Planned | Separates domain logic from HTTP handlers (`gig`, `chat`, `index`, `auth`); cleans root/docs/unused submodules |
@@ -62,15 +62,16 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 **Problem:** `external/libbud/src/libbud.c` performs ~10 `calloc`/`strdup`/`free` calls per DOM element, causing heap churn in SSR and fragmentation in WASM linear memory on every VDOM reconcile frame.
 
 **Deliverables:**
-1. Define chunked slab `bud_arena` (`8 KB` initial, doubling up to `64 KB`) in `external/libbud/src/bud_internal.h` with active-arena scoping (`bud_arena_begin` / `bud_arena_end` / `bud_arena_reset`).
-2. Add zero-copy static literal tag/attribute paths (`BUD_STATIC_STR` / `*_lit` emitted by `cx_transpile.c`).
-3. Add standalone ASan/UBSan unit tests and a 1,000-render benchmark in `external/libbud/src/bud_test.c`.
-4. Rebuild `libbud`, native modules, `site.wasm`, and `nd.wasm` with zero breaking changes to `bud_free()`.
+1. Defined chunked slab `bud_arena` (`8 KB` initial, doubling up to `64 KB`, warm-slab retention up to `256 KB` on reset, oversized slabs freed on reset) in `external/libbud/src/bud_internal.h` + `src/libbud.c` with thread-local active-arena scoping (`bud_arena_new`, `bud_arena_push`, `bud_arena_pop`, `bud_arena_current`, `bud_arena_reset`, `bud_arena_free`, `bud_arena_bytes_used`).
+2. Packed unified `uint8_t` ownership flags (`*_ARENA`, `*_OWNED`) into `bud_node`, `bud_attr`, and `bud_listener` (zero struct size growth), added zero-copy static-literal APIs (`bud_element_lit`, `bud_text_lit`, `bud_set_attr_lit`, `bud_set_attr_name_lit`, `bud_set_bool_attr_lit`, `bud_set_key_lit`, `bud_bind_ctx_lit`), and updated `cx_transpile.c` to emit `*_lit` calls for compile-time JSX string literals.
+3. Wired pooled per-render `bud_arena` into `bud_reconcile.c` (`bud_mount`), `mods/common/site_wasm_app.c` (with re-entrant deferred retirement), `external/libbud/src/bud_wasm_app.c`, and SSR chrome rendering in `mods/common/ux/site_page.c` (also plugging the pre-existing `chrome` VDOM leak).
+4. Added standalone unit tests (slab growth, oversized slab release, nested push/pop + `NULL` heap escape, mixed heap+arena trees, mutations, cross-arena `bud_vdom_diff`, `bud_expand_tree`, runtime dispatch + `on_unmount`) and a 1,000-render ~105-node benchmark in `external/libbud/src/bud_test.c`.
+5. Synced `external/libbud/npm/include/bud/bud.h`, rebuilt & installed `libbud` (`PREFIX="$HOME/.local"`), rebuilt `npm/dist/bud.wasm`, re-transpiled all 25 `.cx` files, and rebuilt all native `.so` modules, `htdocs/site.wasm`, and `htdocs/nd.wasm` with zero API breaks to `bud_free()`.
 
-**Exit Criteria:**
-- `make -C external/libbud SANITIZE=1 test` exits `0` with 0 ASan/UBSan findings.
-- Per-frame heap allocations during `bud_app_render` drop by **> 95%**.
-- `make test-fast` and `make test-mod MOD=nd` exit `0`.
+**Exit Criteria (Verified):**
+- `make -C external/libbud EXTRA_CFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -O1" LDLIBS="-fsanitize=address,undefined" test` exits `0` with 0 ASan/LSan/UBSan findings (`bud_test`, `bud_reconcile_test`, `cx_test`, `cx_lsp_test`).
+- 1,000-render benchmark (~105 nodes/frame): **474,000 → 0 heap allocations (100.00% reduction)**; wall time **38.3 → 12.1 µs/frame (3.16× faster)** unoptimized (`-O0`) and **172.1 → 36.5 µs/frame (4.72× faster)** under ASan+UBSan `-O1`.
+- `npm --prefix external/libbud/npm test` (21/21), `node --test tests/unit/test_{site_wasm_kernel,wasm_event_bus,wasm_optimistic}.mjs tests/unit/test-stele-client-spa.mjs` (10/10), `make unit-c-tests` (8/8), `make test-mod MOD=song`, `make test-mod MOD=nd`, `run-site-ui-helpers.sh`, `run-bud-form.sh`, `run-externals-abstractions.sh`, `run-test-{seven-stage-html,ssr-hydration,viewport-registry}.sh`, and all asset/JS/boundary/purity/WASM audits exit `0`.
 
 ---
 

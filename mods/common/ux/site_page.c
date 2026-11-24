@@ -135,10 +135,18 @@ char *site_ui_page_lang(
 	snprintf(state.icon, sizeof(state.icon), "%s", icon ? icon : "");
 	snprintf(state.user, sizeof(state.user), "%s", user ? user : "");
 	snprintf(state.lang, sizeof(state.lang), "%s", locale);
-	chrome = bud_slot_render(BUD_SLOT_SHELL_NAV, &state);
-	if (!chrome)
-		chrome = site_ui_chrome(&state);
-	chrome_html = chrome ? bud_render_hydrated_html(chrome) : NULL;
+	{
+		bud_arena *chrome_arena = bud_arena_new(4096);
+		bud_arena *prev_arena = bud_arena_push(chrome_arena);
+		chrome = bud_slot_render(BUD_SLOT_SHELL_NAV, &state);
+		if (!chrome)
+			chrome = site_ui_chrome(&state);
+		bud_arena_pop(prev_arena);
+		chrome_html = chrome ? bud_render_hydrated_html(chrome) : NULL;
+		if (chrome)
+			bud_free(chrome);
+		bud_arena_free(chrome_arena);
+	}
 	if (!chrome_html) {
 		bud_free_string(body_html);
 		return NULL;

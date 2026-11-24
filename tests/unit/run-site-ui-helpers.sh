@@ -21,6 +21,7 @@ ${CC:-clang} -Wall -Wextra -Werror \
 	-L"$repo/external/libstele/lib" -Wl,-rpath,"$repo/external/libstele/lib" \
 	-L"$repo/external/libcorm/lib" -Wl,-rpath,"$repo/external/libcorm/lib" \
 	-L"$repo/external/libxylem/lib" -Wl,-rpath,"$repo/external/libxylem/lib" \
+	-L"$repo/external/libbud/lib" -Wl,-rpath,"$repo/external/libbud/lib" \
 	-L"$repo/external/liblemma/lib" -Wl,-rpath,"$repo/external/liblemma/lib" \
 	-lhyle-bud \
 	-lbud \

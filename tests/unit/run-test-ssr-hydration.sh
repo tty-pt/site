@@ -58,9 +58,10 @@ gcc -g -O0 \
 	mods/nd/ux/glue/spell_ui.c \
 	mods/nd/ux/glue/fight_ui.c \
 	mods/nd/ux/glue/mortal_ui.c \
+	-L"$REPO_ROOT/external/libbud/lib" \
 	-L"$REPO_ROOT/external/axil/lib" \
 	-L"$REPO_ROOT/external/libstele/lib" \
 	-lbud -laxil -lxylem -lhyle-bud -lstele -lxxhash -lm
 
-LD_LIBRARY_PATH="$REPO_ROOT/external/axil/lib:$REPO_ROOT/external/libstele/lib:${LD_LIBRARY_PATH:-}" ./tests/unit/test_ssr_hydration
+LD_LIBRARY_PATH="$REPO_ROOT/external/libbud/lib:$REPO_ROOT/external/axil/lib:$REPO_ROOT/external/libstele/lib:${LD_LIBRARY_PATH:-}" ./tests/unit/test_ssr_hydration
 rm -f tests/unit/test_ssr_hydration

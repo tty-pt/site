@@ -164,4 +164,5 @@ Operational guides, build steps, and test instructions for sibling ports and aux
 | NeverDark pluggable viewports (ANSI TTY, 2D Lamina, 3D WebGL) | `docs/ND-VIEWPORTS.md` |
 | Hyle ecosystem & cross-framework convergence (React/Next.js) | `ROADMAP.md` |
 | Codebase improvement roadmap (asset sync, WASM, bud arena, Seven, hygiene) | `docs/CODEBASE_IMPROVEMENT_ROADMAP.md` |
+| NeverDark performance & efficiency roadmap (profiler, JS bridge, CPU/GPU, server) | `docs/ND_PERFORMANCE_ROADMAP.md` |
 | Axil PDF resume ingestion & job search service (`axil-resume-search`) | `external/axil-resume-search/README.md` |
