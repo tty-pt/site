@@ -48,6 +48,21 @@ endif
 .DEFAULT_GOAL := all
 
 -include $(REPO_ROOT)/external/mk/iso.mk
+-include $(REPO_ROOT)/external/mk/cx.mk
+
+SRC_C = ${SRC:.cx=.cx.c}
+
+SITE_UI_DEPS = $(REPO_ROOT)/mods/common/ux/site_ui.c \
+	$(REPO_ROOT)/mods/common/ux/site_ui.h \
+	$(REPO_ROOT)/mods/common/ux/site_cx.h \
+	$(REPO_ROOT)/mods/common/ux/site_paths.c \
+	$(REPO_ROOT)/mods/common/ux/site_layout.cx.c \
+	$(REPO_ROOT)/mods/common/ux/site_forms.c \
+	$(REPO_ROOT)/mods/common/ux/site_media.c \
+	$(REPO_ROOT)/mods/common/ux/site_page.c \
+	$(REPO_ROOT)/mods/common/ux/site_chrome.cx.c \
+	$(REPO_ROOT)/mods/common/ux/site_chrome.h \
+	$(REPO_ROOT)/mods/common/viewer_zoom.h
 
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_CC      ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
@@ -65,8 +80,11 @@ WASM_LDFLAGS := -mexec-model=reactor \
 # No --allow-undefined: host imports must be declared with an explicit
 # import_module (ISO_IMPORT); anything else is a link error instead of a
 # silent `env.*` import the browser host would have to stub.
-WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libbud/src/bud_tpl.c $(REPO_ROOT)/external/libbud/src/bud_render.c $(REPO_ROOT)/external/libbud/src/bud_runtime.c $(REPO_ROOT)/external/libbud/src/bud_json.c $(REPO_ROOT)/external/libstele/src/stele_wasm_kernel.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/external/libstele/src/stele_wq.c $(REPO_ROOT)/mods/common/ux/site_ui.c
+WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/external/libbud/src/bud_tpl.c $(REPO_ROOT)/external/libbud/src/bud_render.c $(REPO_ROOT)/external/libbud/src/bud_runtime.c $(REPO_ROOT)/external/libbud/src/bud_json.c $(REPO_ROOT)/external/libbud/src/bud_reconcile.c $(REPO_ROOT)/external/libstele/src/stele_wasm_kernel.c $(REPO_ROOT)/external/libstele/src/stele_event.c $(REPO_ROOT)/external/libstele/src/stele_wq.c $(REPO_ROOT)/mods/common/ux/site_ui.c
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
+
+WASM_SRC_ALL = $(foreach t,$(notdir $(WASM_TARGETS:.wasm=)),$($(t)-src))
+WASM_CX_C = $(patsubst %.cx,%.cx.c,$(filter %.cx,$(WASM_SRC_ALL)))
 
 # BSD/GNU portable: keep `all` as first target
 all: dirs $(TARGET) $(WASM_TARGETS)
@@ -77,7 +95,7 @@ VERSION_GEN ?= $(REPO_ROOT)/mods/common/ux/version.gen.h
 $(VERSION_GEN): $(REPO_ROOT)/htdocs/styles.css $(REPO_ROOT)/htdocs/hyle.css $(REPO_ROOT)/htdocs/stele-client.js $(REPO_ROOT)/htdocs/bud-cap.js $(REPO_ROOT)/htdocs/hyle-cap.js $(REPO_ROOT)/scripts/gen-asset-version.sh
 	@sh $(REPO_ROOT)/scripts/gen-asset-version.sh
 
-$(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
+$(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEPS)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
 		for src in $($*-src); do \
 			case "$$src" in *libxylem-wasm.c|*hyle-bud*) continue ;; esac; \
@@ -91,14 +109,14 @@ $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 			fi; \
 		done; \
 		rm -f $@.d; \
-		for src in $($*-src) $(WASM_COMMON_SRC); do \
-			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
+		for src in $(patsubst %.cx,%.cx.c,$($*-src)) $(WASM_COMMON_SRC); do \
+			$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MM -MP -MT $@ "$$src" >> $@.d || exit 1; \
 		done; \
 		extra_allowed=""; \
 		for f in $(REPO_ROOT)/external/libstele/wasm-allowed-imports.lst $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
 			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
 		done; \
-		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) $($*-ldflags) $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $($*-src) $(WASM_COMMON_SRC) || exit 1; \
+		$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $(WASM_LDFLAGS) $($*-ldflags) $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $(patsubst %.cx,%.cx.c,$($*-src)) $(WASM_COMMON_SRC) || exit 1; \
 		sh $(REPO_ROOT)/external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }; \
 	else \
 		echo "Skipping WASM build of $@ — install wasi-sdk or configure WASI_CC"; \
@@ -107,12 +125,16 @@ $(WASM_PATH)/%.wasm: $($*-src) $(WASM_COMMON_SRC)
 dirs:
 	@for d in $(DIRS); do mkdir -p $(REPO_ROOT)/$$d 2>/dev/null || true; done
 
-$(TARGET): $(SRC) $(MAKEFILE_DEPS)
-	@rm -f $@.d; for src in $(SRC); do \
-		$(CC) $(CFLAGS) -MM -MT $@ "$$src" >> $@.d || exit 1; \
+ifneq ($(filter auth chat auren common gig grp index nd poem software song,$(MOD_NAME)),)
+$(TARGET): $(SITE_UI_DEPS)
+endif
+
+$(TARGET): $(CX_HEADERS) $(SRC_C) $(MAKEFILE_DEPS)
+	@rm -f $@.d; for src in $(SRC_C); do \
+		$(CC) $(CFLAGS) -MM -MP -MT $@ "$$src" >> $@.d || exit 1; \
 	done
 	$(if $(filter 0,$(V)),@echo "  CC      $@")
-	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(MODULE_EXTRA_SRC) $(LDLIBS)
+	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC_C) $(MODULE_EXTRA_SRC) $(LDLIBS)
 
 MOD_DEPS != for f in $(TARGET) $(WASM_TARGETS); do [ -n "$$f" ] && [ -f "$$f.d" ] && printf '%s.d ' "$$f"; done; printf '/dev/null'
 -include $(MOD_DEPS)
@@ -125,7 +147,7 @@ wasm-debug:
 
 clean:
 	@test -z "$(TARGET)" || rm -f $(TARGET)
-	rm -f $(WASM_TARGETS)
+	rm -f $(WASM_TARGETS) *.cx.c *.cx.h ux/*.cx.c ux/*.cx.h
 	@for f in $(TARGET) $(WASM_TARGETS); do [ -n "$$f" ] && rm -f "$$f.d"; done
 
 distclean: clean

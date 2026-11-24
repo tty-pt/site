@@ -1,3 +1,5 @@
+#include "site_cx.h"
+
 static char *sanitize_groff_html(const char *raw)
 {
 	return site_ui_sanitize_html(raw);
@@ -91,36 +93,32 @@ static char *rewrite_image_paths(const char *html, const char *id)
 	return out;
 }
 
-static bud_node *
+bud_node *
 poem_render_detail_body(const char *content, const char *owner, const char *id)
 {
 	bud_node *inner = NULL;
 
 	if (content && content[0]) {
 		char *sanitized = sanitize_groff_html(content);
-		char *fixed =
-		        sanitized ? rewrite_image_paths(sanitized, id) : NULL;
+		char *fixed = sanitized ? rewrite_image_paths(sanitized, id) : NULL;
 
 		free(sanitized);
 		if (fixed) {
-			inner =
-			        bud_tpl("<div class='poem-body font-serif "
-			                "leading-relaxed'>%raw</div>",
-			                fixed);
+			inner = (
+				<div class="poem-body font-serif leading-relaxed">
+					{bud_raw(fixed)}
+				</div>
+			);
 			free(fixed);
 		}
 	}
 	if (!inner)
-		inner = bud_tpl(
-		        "<p class='text-muted'>No content uploaded yet.</p>");
+		inner = <p class="text-muted">No content uploaded yet.</p>;
 
-	bud_node *owner_node =
-	        (owner && owner[0]) ? bud_tpl("<div class='text-sm text-muted "
-	                                      "text-right'>By %s</div>",
-	                                      owner)
-	                            : NULL;
-
-	return bud_tpl(
-	        "<div class='flex flex-col gap-4'>%node %node</div>", inner,
-	        owner_node);
+	return (
+		<div class="flex flex-col gap-4">
+			{inner}
+			{if (owner && owner[0]) <div class="text-sm text-muted text-right">By {owner}</div>}
+		</div>
+	);
 }

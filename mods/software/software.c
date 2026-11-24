@@ -19,7 +19,10 @@
 #include "dict.h"
 #include "markdown.h"
 
-#include "ux/all.c"
+#include "site_ui.h"
+bud_node *software_render_detail_body(
+	const software_cache_t *meta, const char *rendered_html,
+	const char *owner, const char *id);
 
 /* ── Meta reader ──────────────────────────────────────────────── */
 

@@ -19,7 +19,9 @@
 #include "../source/source.h"
 #include "auth-types.h"
 #include "dict.h"
-#include "ux/all.c"
+#include "site_ui.h"
+bud_node *auth_render_login(const char *user, const char *ret, const char *error);
+bud_node *auth_render_register(const char *user);
 
 /* ------------------------------------------------------------------ */
 /* CSRF helpers                                                         */

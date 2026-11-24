@@ -52,8 +52,10 @@ SITE_WASM_INCLUDES = -Iexternal/libstele/include -Iexternal/libbud/include \
                      -I/usr/include/json-c -Imods/common -Imods/common/ux \
                      -Imods/song/include -Imods/gig/include -Imods/index/include -Imods/chat/include
 
+include external/mk/cx.mk
+
 SITE_WASM_BUILD_DIR = /tmp/site_wasm_build_$(shell pwd | cksum | cut -d' ' -f1)
-SITE_WASM_OBJS = kernel.o stele_event.o bud.o bud_tpl.o bud_render.o bud_runtime.o bud_json.o site_wasm_app.o site_ui.o xylem.o \
+SITE_WASM_OBJS = kernel.o stele_event.o bud.o bud_tpl.o bud_render.o bud_runtime.o bud_json.o bud_reconcile.o site_wasm_app.o site_ui.o xylem.o \
                  modules.o site_chrome.o chrome.o song.o gig.o list.o \
                  chat.o chat_ui.o music.o hyle_bud.o filter.o table.o \
                  picker.o form.o hyle_bud_cache.o url.o
@@ -79,10 +81,13 @@ $(SITE_WASM_BUILD_DIR)/bud_runtime.o: external/libbud/src/bud_runtime.c external
 $(SITE_WASM_BUILD_DIR)/bud_json.o: external/libbud/src/bud_json.c external/libbud/src/bud_internal.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
+$(SITE_WASM_BUILD_DIR)/bud_reconcile.o: external/libbud/src/bud_reconcile.c external/libbud/src/bud_internal.h external/libbud/include/bud/bud_reconcile.h
+	$(if $(filter 0,$(V)),@echo "  WASM    $@")
+	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c
+$(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c mods/common/ux/site_layout.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/xylem.o: external/libxylem/src/libxylem-wasm.c
@@ -91,13 +96,13 @@ $(SITE_WASM_BUILD_DIR)/xylem.o: external/libxylem/src/libxylem-wasm.c
 $(SITE_WASM_BUILD_DIR)/modules.o: mods/common/ux/site_modules.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/site_chrome.o: mods/common/ux/site_chrome.c
+$(SITE_WASM_BUILD_DIR)/site_chrome.o: mods/common/ux/site_chrome.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chrome.o: mods/site_chrome/ux/chrome.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.c mods/common/site_wasm_app.h
+$(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.cx.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.c mods/common/site_wasm_app.h

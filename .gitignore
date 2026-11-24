@@ -5,6 +5,8 @@
 *.so
 *.o
 *.d
+*.cx.c
+*.cx.h
 *.swp
 /deno.lock
 /.cache

@@ -1,0 +1,105 @@
+#ifndef SITE_LAYOUT_C
+#define SITE_LAYOUT_C
+
+#include "site_cx.h"
+
+static bud_node *menu_btn(const char *href, const char *icon, const char *label)
+{
+	return (
+		<a class="btn" href={href ? href : ""}>
+			<span>{icon ? icon : ""}</span>
+			<span>{label ? label : ""}</span>
+		</a>
+	);
+}
+
+SITE_UI_WEAK bud_node *site_ui_menu(const char *user, const char *path)
+{
+	if (user && user[0]) {
+		char me_href[PATH_MAX] = "";
+		snprintf(me_href, sizeof(me_href), "/%s/", user);
+		return (
+			<>
+				{menu_btn(me_href, "👤", ui_t("Me"))}
+				{menu_btn("/auth/logout", "🚪", ui_t("Logout"))}
+			</>
+		);
+	}
+
+	char login_buf[1024] = "";
+	char reg_href[PATH_MAX] = "";
+	login_href(path, login_buf, sizeof(login_buf));
+	auth_path("register", reg_href, sizeof(reg_href));
+	return (
+		<>
+			{menu_btn(login_buf, "🔑", ui_t("Login"))}
+			{menu_btn(reg_href, "📝", ui_t("Register"))}
+		</>
+	);
+}
+
+SITE_UI_WEAK bud_node *site_ui_item_menu(const char *module, const char *id, int is_owner)
+{
+	if (!is_owner)
+		return NULL;
+
+	char edit_href[PATH_MAX];
+	char del_href[PATH_MAX];
+	item_action_path(module, id, "edit", edit_href, sizeof(edit_href));
+	item_action_path(module, id, "delete", del_href, sizeof(del_href));
+
+	return (
+		<>
+			{menu_btn(edit_href, "✏️", ui_t("Edit"))}
+			{menu_btn(del_href, "🗑️", ui_t("Delete"))}
+		</>
+	);
+}
+
+SITE_UI_WEAK bud_node *site_ui_empty_state(const char *message)
+{
+	return <p class="text-muted">{message ? message : ""}</p>;
+}
+
+SITE_UI_WEAK bud_node *site_ui_layout(
+        const char *title, const char *path, const char *icon, const char *user,
+        bud_node *menu_items, bud_node *children)
+{
+	(void)title;
+	(void)icon;
+
+	return (
+		<>
+			<main class="main">{children}</main>
+			<nav class="menu" aria-label={ui_t("Site Navigation")}>
+				<span class="functions flex-1 fixed top-0 right-0 z-50 h-full overflow-y-auto text-sm capitalize flex flex-col p-4">
+					<div class="relative z-20 flex flex-col gap-2">
+						{site_ui_menu(user, path)}
+						{if (menu_items) <>
+							<div class="menu-separator"></div>
+							<div class="module-menu">{menu_items}</div>
+						</>}
+					</div>
+					<label for="menu-functions" class="absolute inset-0 z-10 cursor-pointer" aria-label={ui_t("Close Menu")}></label>
+				</span>
+			</nav>
+		</>
+	);
+}
+
+SITE_UI_WEAK bud_node *site_ui_form_page(
+        const char *user, const char *title, const char *path, const char *icon,
+        const char *heading, const char *extra_head, bud_node *children)
+{
+	(void)extra_head;
+	bud_node *center = (
+		<div class="center">
+			{if (heading && heading[0]) <h1>{heading}</h1>}
+			{children}
+		</div>
+	);
+
+	return site_ui_layout(title, path, icon, user, NULL, center);
+}
+
+#endif

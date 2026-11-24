@@ -326,7 +326,7 @@ XY_IMPL(int, source_after_update,
 	return 0;
 }
 
-#include "ux/detail.c"
+#include "ux/detail.cx.c"
 
 
 /* ── HTTP handlers ────────────────────────────────────────────── */

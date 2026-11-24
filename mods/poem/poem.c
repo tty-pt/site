@@ -18,7 +18,8 @@
 #include "fields.h"
 #include "dict.h"
 
-#include "ux/all.c"
+#include "site_ui.h"
+bud_node *poem_render_detail_body(const char *content, const char *owner, const char *id);
 
 /* ── Meta reader ──────────────────────────────────────────────── */
 

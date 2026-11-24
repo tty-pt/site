@@ -134,7 +134,7 @@ int bud_slot_mount(int slot, bud_node *(*render_fn)(void))
 		retire_vdom_root(old_root);
 		s_runtimes[slot] = NULL;
 	}
-	bud_node *root = render_fn();
+	bud_node *root = bud_expand_tree(render_fn());
 	if (root) {
 		bud_render_ops(root, noop_emit, NULL);
 		s_runtimes[slot] = bud_runtime_new(root);
@@ -152,7 +152,7 @@ int bud_slot_update(int slot, bud_node *(*render_fn)(void))
 	if (!render_fn || !s_runtimes[slot])
 		return -1;
 	bud_node *old_root = bud_runtime_root(s_runtimes[slot]);
-	bud_node *new_root = render_fn();
+	bud_node *new_root = bud_expand_tree(render_fn());
 	if (!new_root)
 		return -1;
 	bud_vdom_diff(old_root, new_root, emit_patch_wrapper, (void *)(intptr_t)slot);

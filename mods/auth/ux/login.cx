@@ -1,0 +1,26 @@
+#include "site_cx.h"
+
+bud_node *
+auth_render_login(const char *user, const char *ret, const char *error)
+{
+	bud_node *frag = (
+		<>
+			{if (error && error[0]) <p class="error">{error}</p>}
+			<form action="/auth/login" method="POST" class="auth-form flex flex-col gap-4">
+				<label>
+					{ui_t("Username:")}
+					<input required name="username" autocomplete="username" autofocus />
+				</label>
+				<label>
+					{ui_t("Password:")}
+					<input required name="password" type="password" autocomplete="current-password" />
+				</label>
+				{if (ret && ret[0]) <input type="hidden" name="ret" value={ret} />}
+				<button type="submit">{ui_t("Sign in")}</button>
+			</form>
+		</>
+	);
+
+	return site_ui_form_page(
+		user, ui_t("Sign in"), "/auth/login", "\xf0\x9f\x94\x91", NULL, NULL, frag);
+}

@@ -44,6 +44,6 @@ include ../../build.mk
 
 ND_UX_HDRS = ux/nd_ui.h ux/nd_lamina.h ux/nd_seven.h ux/nd_seven_atlas.h ux/nd_seven_gl.h ux/nd_seven_gl_internal.h ux/nd_seven_ground.h ux/nd_seven_mesh3d.h
 
-$(TARGET): $(ND_UX_HDRS) ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/ux/site_page.c ../common/ux/site_chrome.c ../common/ux/site_chrome.h $(REPO_ROOT)/external/nd-world/include/nd/field.h
+$(TARGET): $(ND_UX_HDRS) $(REPO_ROOT)/external/nd-world/include/nd/field.h
 
-$(WASM_PATH)/nd.wasm: $(nd-src) $(ND_UX_HDRS) $(REPO_ROOT)/external/nd-seven/include/nd/seven-world.h $(REPO_ROOT)/external/nd-world/include/nd/field.h $(REPO_ROOT)/external/axil-nd/include/nd/bcp.h $(REPO_ROOT)/external/axil/include/ttypt/axil-ws.h $(REPO_ROOT)/external/liblamina/include/ttypt/lam.h ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/viewer_zoom.h
+$(WASM_PATH)/nd.wasm: $(nd-src) $(ND_UX_HDRS) $(REPO_ROOT)/external/nd-seven/include/nd/seven-world.h $(REPO_ROOT)/external/nd-world/include/nd/field.h $(REPO_ROOT)/external/axil-nd/include/nd/bcp.h $(REPO_ROOT)/external/axil/include/ttypt/axil-ws.h $(REPO_ROOT)/external/liblamina/include/ttypt/lam.h

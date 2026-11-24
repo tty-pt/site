@@ -1,0 +1,227 @@
+#include "site_cx.h"
+#include "../../common/site_wasm_app.h"
+#include <ttypt/stele_wasm.h>
+
+#include "../../common/viewer_zoom.h"
+#include <ttypt/pitch.h>
+#include "../../common/ux/site_music.h"
+
+#include "../fields.h"
+
+static app_state_t app_state = { 0 };
+static bud_node *g_main = NULL;
+
+static int on_zoom_change(bud_event *event)
+{
+	const char *value = (const char *)event->user;
+	int z;
+
+	if (!value)
+		return 0;
+
+	z = atoi(value);
+	if (z < VIEWER_ZOOM_MIN)
+		z = VIEWER_ZOOM_MIN;
+	if (z > VIEWER_ZOOM_MAX)
+		z = VIEWER_ZOOM_MAX;
+	app_state.zoom = z;
+	ui_apply_zoom(g_main, NULL, z);
+
+	bud_set_attr_fmt(event->target, "value", "%d", z);
+
+	return bud_api_action_handler(event);
+}
+
+static void song_fetch_callback(int request_id, const char *data, int data_len)
+{
+	(void)request_id;
+	hyle_bud_state_apply_len(
+	        &app_state.cache, song_fields, data, (size_t)data_len);
+	bud_state_apply_len(
+	        &app_state, song_app_fields, data, (size_t)data_len);
+	bud_json_data_len(
+	        data, (size_t)data_len, app_state.chord_html,
+	        sizeof(app_state.chord_html));
+	site_ui_set_locale(app_state.lang);
+	bud_app_set_state();
+}
+
+static int song_stl_init(const char *json, int len)
+{
+	size_t jlen = len >= 0 ? (size_t)len : 0;
+	wasm_state_init(json, len, song_app_fields, &app_state);
+	hyle_bud_state_apply_len(&app_state.cache, song_fields, json, jlen);
+	site_ui_set_locale(app_state.lang);
+	return 0;
+}
+
+/* ── Page builder helpers ──────────────────────────── */
+
+static bud_node *render_key_options(void)
+{
+	return site_ui_render_key_options(
+	        app_state.transpose, app_state.original_key,
+	        app_state.use_latin);
+}
+
+static bud_node *render_transpose_form(bud_node *key_options)
+{
+	char data_action[256];
+	snprintf(
+		data_action, sizeof(data_action), "/api/song/%s/transpose?h=1",
+		app_state.cache.id);
+
+	return (
+		<form
+			id="transpose-form"
+			method="GET"
+			action={app_state.path}
+			data-song-id={app_state.cache.id}
+			data-action={data_action}
+		>
+			<label>
+				{ui_t("Key")}:{" "}
+				<select name="t" onChange={bud_api_action_handler}>
+					{key_options}
+				</select>
+			</label>
+			{site_ui_checkbox(
+				"l", ui_t("Latin"), app_state.use_latin,
+				bud_api_action_handler)}
+			<label>
+				{ui_t("Zoom")}{" "}
+				<input
+					type="range"
+					name="z"
+					min={VIEWER_ZOOM_MIN}
+					max={VIEWER_ZOOM_MAX}
+					step="10"
+					value={app_state.zoom}
+					data-detail-viewer-zoom="1"
+					onInput={on_zoom_change}
+					onChange={on_zoom_change}
+				/>
+			</label>
+			<button type="submit" class="btn" data-wasm-hide="1">
+				{ui_t("Apply")}
+			</button>
+		</form>
+	);
+}
+
+static bud_node *render_chord_viewer(void)
+{
+	char zoom_style[64];
+	site_ui_zoom_style(app_state.zoom, zoom_style, sizeof(zoom_style));
+
+	bud_node *media_slot = site_ui_render_media_slot(
+	        app_state.cache.yt, app_state.cache.audio, app_state.cache.pdf);
+	bud_node *meta_card = bind_schema_summary(song_fields, &app_state.cache);
+
+	return (
+		<div
+			id="main"
+			data-song-id={app_state.cache.id}
+			data-use-latin={app_state.use_latin ? 1 : 0}
+			data-show-media={app_state.show_media ? 1 : 0}
+			data-yt={app_state.cache.yt}
+			data-audio={app_state.cache.audio}
+			data-pdf={app_state.cache.pdf}
+			data-original-key={app_state.original_key}
+			data-save-url={app_state.save_url}
+			data-detail-viewer-controls="song"
+			data-is-owner={app_state.is_owner ? 1 : 0}
+			data-transpose={app_state.transpose}
+			data-zoom={app_state.zoom}
+			style={zoom_style}
+			data-type-display={app_state.cache.type}
+			data-author={app_state.cache.author}
+		>
+			<div class="flex flex-col gap-4 w-full max-w-xl">
+				<div
+					id="song-detail-body"
+					class="flex justify-between items-center w-full max-w-xl text-xs text-muted gap-2"
+					data-detail-viewer-scope="1"
+				>
+					{meta_card}
+					<div
+						class="flex justify-end items-center gap-2 flex-shrink-0 ml-auto"
+						data-song-media="1"
+					>
+						{media_slot}
+					</div>
+				</div>
+				<div
+					class="detail-viewer-scroll w-full max-w-xl"
+					data-detail-viewer-scroll="1"
+				>
+					<pre
+						id="chord-data"
+						data-detail-viewer-target="1"
+						class="whitespace-pre-wrap font-mono p-4 rounded chord-data"
+					>
+						{bud_raw(app_state.chord_html)}
+					</pre>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+static bud_node *song_slot_render_primary(int slot_id, const void *state)
+{
+	if (state != &app_state)
+		return NULL;
+	if (slot_id == BUD_SLOT_PRIMARY_VIEW)
+		return render_chord_viewer();
+	return NULL;
+}
+
+static int song_slot_fill_actions(int slot_id, bud_node *parent, const void *state)
+{
+	if (state != &app_state)
+		return -1;
+	if (slot_id == BUD_SLOT_ACTIONS_DOCK) {
+		bud_node *key_options = render_key_options();
+		bud_node *form = render_transpose_form(key_options);
+		bud_append(parent, form);
+		return 0;
+	}
+	return -1;
+}
+
+BUD_SLOT_CONTRIBUTE(song_primary, .slot_id = BUD_SLOT_PRIMARY_VIEW, .name = "song_chords", .render = song_slot_render_primary);
+BUD_SLOT_CONTRIBUTE(song_actions, .slot_id = BUD_SLOT_ACTIONS_DOCK, .name = "song_transpose", .fill = song_slot_fill_actions);
+
+static bud_node *song_stl_render(void)
+{
+	bud_node *main_node = bud_slot_render(BUD_SLOT_PRIMARY_VIEW, &app_state);
+	if (!main_node)
+		main_node = render_chord_viewer();
+	g_main = main_node;
+
+	bud_node *dock = bud_element("div");
+	bud_slot_fill(BUD_SLOT_ACTIONS_DOCK, dock, &app_state);
+
+	bud_node *menu_items = (
+		<>
+			{render_transpose_form(render_key_options())}
+			{site_ui_item_menu("song", app_state.cache.id, app_state.is_owner)}
+		</>
+	);
+
+	bud_node *inner = site_ui_layout(
+		app_state.cache.title, app_state.path,
+		site_ui_module_icon("song"), app_state.page_user, menu_items,
+		<div class="center flex flex-col gap-4">{main_node}</div>);
+
+	return <div id="bud-root" data-slot="1">{inner}</div>;
+}
+
+static void song_stl_cleanup(void)
+{
+	memset(&app_state, 0, sizeof(app_state));
+	g_main = NULL;
+}
+
+BUD_WASM_MODULE_EXT(song_detail, song_stl_init, song_stl_render, NULL, NULL, song_stl_cleanup, song_fetch_callback);

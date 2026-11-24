@@ -10,5 +10,3 @@ include ../../build.mk
 
 $(WASM_PATH)/auren_fe.wasm: $(WASM_PATH)/auren.wasm
 	ln -sf auren.wasm $@
-
-$(TARGET): ../common/ux/site_ui.c ../common/ux/site_ui.h ../common/ux/site_paths.c ../common/ux/site_layout.c ../common/ux/site_forms.c ../common/ux/site_media.c ../common/ux/site_page.c ../common/ux/site_chrome.c ../common/ux/site_chrome.h

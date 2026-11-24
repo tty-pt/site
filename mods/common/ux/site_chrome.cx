@@ -8,6 +8,7 @@
 #include "bud/bud_app.h"
 #include "bud/bud_jsx.h"
 #include "bud/bud_slot.h"
+#include "bud/bud_reconcile.h"
 #include "site_chrome.h"
 #include "site_paths.c"
 #include "../../i18n/i18n_dict.h"
@@ -90,51 +91,57 @@ static int site_chrome_on_scroll(bud_event *event)
 
 bud_node *site_ui_chrome(const site_ui_chrome_state *state)
 {
-	const char *path;
-	const char *icon;
-	char up[SITE_CHROME_PATH_MAX];
-	bud_node *back = NULL;
-	bud_node *bar;
+	const char *path = state ? state->path : "";
+	const char *icon = (state && state->icon[0]) ? state->icon : "🏠";
+	const char *lang = state ? state->lang : NULL;
+	char up[SITE_CHROME_PATH_MAX] = "";
 
-	path = state ? state->path : "";
-	icon = state && state->icon[0] ? state->icon : "🏠";
-	up[0] = '\0';
 	if (path[0] && strcmp(path, "/") != 0)
 		parent_path(path, up, sizeof(up));
-	if (up[0]) {
-		const char *back_label = i18n_t(state ? state->lang : NULL, "Back");
-		back = bud_tpl(
-		        "<a class='btn nav-back' href='%s' aria-label='%s'>"
-		        "  <span aria-hidden='true'>↩️</span>"
-		        "</a>",
-		        up, back_label);
-	}
 
-	const char *menu_label = i18n_t(state ? state->lang : NULL, "Menu");
-	const char *close_menu_label = i18n_t(state ? state->lang : NULL, "Close Menu");
+	const char *menu_label = i18n_t(lang, "Menu");
+	const char *close_menu_label = i18n_t(lang, "Close Menu");
 
-	bar =
-	        bud_tpl("<header class='nav-bar' data-site-chrome='1' %bind>"
-	                "  <span class='nav-bar-slot'>%node</span>"
-	                "  <h1 class='nav-bar-title'>%s</h1>"
-	                "  <span class='nav-bar-slot'>"
-	                "    <label for='menu-functions' class='menu-toggle "
-	                "btn' aria-label='%s' data-menu-toggle='1'>%s</label>"
-	                "  </span>"
-	                "</header>",
-	                "scroll@window", site_chrome_on_scroll, back,
-	                state ? state->title : "", menu_label, icon);
-
-	return bud_tpl(
-	        "<div id='chrome-root' data-slot='0' data-module='site_chrome'>"
-	        "  <input id='menu-functions' name='functions' type='checkbox' "
-	        "class='menu-control' aria-label='%s'/>"
-	        "  <label for='menu-functions' class='menu-overlay' "
-	        "aria-label='%s'></label>"
-	        "  %node"
-	        "</div>",
-	        menu_label, close_menu_label,
-	        bar);
+	return (
+		<div id="chrome-root" data-slot="0" data-module="site_chrome">
+			<input
+				id="menu-functions"
+				name="functions"
+				type="checkbox"
+				class="menu-control"
+				aria-label={menu_label}
+			/>
+			<label
+				for="menu-functions"
+				class="menu-overlay"
+				aria-label={close_menu_label}
+			></label>
+			<header
+				class="nav-bar"
+				data-site-chrome="1"
+				onWindowScroll={site_chrome_on_scroll}
+			>
+				<span class="nav-bar-slot">
+					{if (up[0])
+						<a class="btn nav-back" href={up} aria-label={i18n_t(lang, "Back")}>
+							<span aria-hidden="true">↩️</span>
+						</a>
+					}
+				</span>
+				<h1 class="nav-bar-title">{state ? state->title : ""}</h1>
+				<span class="nav-bar-slot">
+					<label
+						for="menu-functions"
+						class="menu-toggle btn"
+						aria-label={menu_label}
+						data-menu-toggle="1"
+					>
+						{icon}
+					</label>
+				</span>
+			</header>
+		</div>
+	);
 }
 
 static bud_node *site_chrome_slot_render(int slot_id, const void *state)

@@ -1,0 +1,29 @@
+#include "site_cx.h"
+
+bud_node *auth_render_register(const char *user)
+{
+	bud_node *frag = (
+		<form action="/auth/register" method="POST" class="flex flex-col gap-4">
+			<label>
+				{ui_t("Username:")}
+				<input required name="username" />
+			</label>
+			<label>
+				{ui_t("Password:")}
+				<input required name="password" type="password" />
+			</label>
+			<label>
+				{ui_t("Confirm password:")}
+				<input required name="password2" type="password" />
+			</label>
+			<label>
+				Email:
+				<input required name="email" type="email" />
+			</label>
+			<button type="submit">{ui_t("Register")}</button>
+		</form>
+	);
+
+	return site_ui_form_page(
+		user, ui_t("Register"), "/auth/register", "\xf0\x9f\x93\x9d", NULL, NULL, frag);
+}

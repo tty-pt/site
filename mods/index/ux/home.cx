@@ -1,0 +1,18 @@
+#include "site_cx.h"
+
+bud_node *idx_home_layout(
+        const char *user, const char **mod_names, const char **mod_titles,
+        size_t mod_count)
+{
+	bud_node *frag = (
+		<div class="center flex flex-col gap-2">
+			{for (size_t i = 0; i < mod_count; i++) {
+				char href[256];
+				site_ui_collection_path(mod_names[i], href, sizeof(href));
+				<a href={href} class="btn">{ui_t(mod_titles[i])}</a>;
+			}}
+		</div>
+	);
+
+	return site_ui_form_page(user, "tty.pt", "/", "🏠", NULL, NULL, frag);
+}

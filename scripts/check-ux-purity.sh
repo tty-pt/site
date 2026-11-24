@@ -9,8 +9,8 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
-# Find all UX .c files (excluding mods/nd/ux which embeds the in-WASM Xylem reactor)
-ux_files=$(find "$root/mods" -type f -path "*/ux/*.c" | sort)
+# Find all UX .c/.cx files (excluding generated *.cx.c)
+ux_files=$(find "$root/mods" -type f \( -path "*/ux/*.c" -o -path "*/ux/*.cx" \) ! -name "*.cx.c" | sort)
 
 # ---- Check 1: XY hooks in UX (hard violation of isolation) ----
 xy_patterns='XY_DECL|XY_IMPL|xy_load|xy_install|XY_MODULE_API|XY_CALL'
@@ -42,11 +42,11 @@ is_allowed() {
         # Include guards at line 1
         "$root/mods/common/ux/site_ui.c:1") return 0 ;;
         "$root/mods/common/ux/site_forms.c:1") return 0 ;;
-        "$root/mods/common/ux/site_layout.c:1") return 0 ;;
+        "$root/mods/common/ux/site_layout.cx:1") return 0 ;;
         "$root/mods/common/ux/site_media.c:1") return 0 ;;
         "$root/mods/common/ux/site_page.c:1") return 0 ;;
         "$root/mods/common/ux/site_paths.c:1") return 0 ;;
-        "$root/mods/common/ux/site_chrome.c:1") return 0 ;;
+        "$root/mods/common/ux/site_chrome.cx:1") return 0 ;;
         "$root/mods/common/ux/list_bin.c:1") return 0 ;;
         "$root/mods/index/ux/list.c:1") return 0 ;;
         "$root/mods/index/ux/list_filters.c:1") return 0 ;;
