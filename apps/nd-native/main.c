@@ -361,11 +361,14 @@ int main(int argc, char **argv)
 	if (cookie && cookie[0])
 		axil_ws_native_set_cookie(cookie);
 
-	/* Select preferred viewport driver (server BCP can still override) */
+	/* Select preferred viewport driver (preserved across ALLOW_CHOICE regions) */
 	char init_json[256];
+	unsigned init_layout = (strcmp(driver, "lamina-seven") == 0)
+	                       ? (unsigned)ND_LAYOUT_GAME_2D
+	                       : (unsigned)ND_LAYOUT_STANDARD_HYBRID;
 	snprintf(init_json, sizeof(init_json),
-	         "{\"preferred_driver\":\"%s\",\"preferred_map_driver\":\"lamina\"}",
-	         driver);
+	         "{\"preferred_driver\":\"%s\",\"preferred_map_driver\":\"lamina\",\"layout_mode\":%u}",
+	         driver, init_layout);
 	nd_stl_init(init_json, (int)strlen(init_json));
 
 	/* If CLI passed a custom path other than "/nd", connect to it explicitly */

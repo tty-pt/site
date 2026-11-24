@@ -589,9 +589,9 @@ void nd_seven_gl_flush_clouds(void)
 	}
 
 	glUniform3f(s_gl.cloud_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.cloud_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform1f(s_gl.cloud_pipe.uSeaLevel, s_gl.cur_base_sea_level);
 

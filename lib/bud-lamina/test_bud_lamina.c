@@ -318,6 +318,14 @@ static void test_reconcile_events_and_widgets(void)
 	bud_lamina_handle_event(bl, &ev);
 	assert(g_app.keydowns == 2);
 	assert(strcmp(g_app.last_key, "w") == 0);
+	ev.type = LAM_EV_KEY; ev.code = 340; ev.action = 1; ev.mods = 1; /* Left Shift */
+	bud_lamina_handle_event(bl, &ev);
+	assert(g_app.keydowns == 3);
+	assert(strcmp(g_app.last_key, "Shift") == 0);
+	ev.type = LAM_EV_KEY; ev.code = 344; ev.action = 1; ev.mods = 1; /* Right Shift */
+	bud_lamina_handle_event(bl, &ev);
+	assert(g_app.keydowns == 4);
+	assert(strcmp(g_app.last_key, "Shift") == 0);
 
 	/* 7. Click #term -> type command -> Enter submits via term_input_fn */
 	ev.type = LAM_EV_MOUSE_BTN; ev.code = 0; ev.action = 1; ev.x = 100; ev.y = 420;

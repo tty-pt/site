@@ -56,6 +56,8 @@
 #define K_KP_SUB     333
 #define K_KP_ADD     334
 #define K_KP_ENTER   335
+#define K_LEFT_SHIFT 340
+#define K_RIGHT_SHIFT 344
 
 #define MOD_SHIFT    1
 #define MOD_CTRL     2
@@ -1134,6 +1136,8 @@ static const char *glfw_key_to_w3c(uint32_t code, int mods, char scratch[4])
 	case K_APOSTROPHE: return shift ? "\"" : "'";
 	case K_GRAVE:      return shift ? "~" : "`";
 	case K_BACKSLASH:  return shift ? "|" : "\\";
+	case K_LEFT_SHIFT:
+	case K_RIGHT_SHIFT: return "Shift";
 	default:
 		if (code >= K_F1 && code <= K_F12) {
 			static char fbuf[4];

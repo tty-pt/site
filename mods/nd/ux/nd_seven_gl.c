@@ -1053,9 +1053,9 @@ static void gl_render_sky(float space_t)
 	glUniform3fv(s_gl.sky_pipe.uSunDir, 1, s_gl.cur_sun_dir);
 	glUniform3fv(s_gl.sky_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
 	glUniform3f(s_gl.sky_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.sky_pipe.uCamDist, s_gl.cur_dist);
 	glUniform1f(s_gl.sky_pipe.uAnimTime, s_gl.cur_anim_time);
 	if (s_gl.sky_pipe.uTorusEye >= 0 && s_gl.sky_pipe.uTorusRadii >= 0 && s_gl.sky_pipe.uAtmoHaloVis >= 0) {
@@ -1256,9 +1256,9 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	glDisable(GL_CULL_FACE);
 
 	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
-	float sky_r = 0.55f * (1.0f - space_t) + 0.012f * space_t;
-	float sky_g = 0.70f * (1.0f - space_t) + 0.016f * space_t;
-	float sky_b = 0.85f * (1.0f - space_t) + 0.035f * space_t;
+	float sky_r = 0.55f * (1.0f - space_t) + 0.002f * space_t;
+	float sky_g = 0.70f * (1.0f - space_t) + 0.003f * space_t;
+	float sky_b = 0.85f * (1.0f - space_t) + 0.006f * space_t;
 
 	glClearColor(sky_r, sky_g, sky_b, 1.0f);
 	glClearStencil(0);
@@ -1526,9 +1526,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	glUniform1f(s_gl.terrain_pipe.uAnimTime, s_gl.cur_anim_time);
 
 	glUniform3f(s_gl.terrain_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.terrain_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform4f(s_gl.terrain_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
@@ -1712,9 +1712,9 @@ void nd_seven_gl_flush_grass(void)
 	glUniform1f(s_gl.grass_pipe.uAnimTime, s_gl.cur_anim_time);
 	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 	glUniform3f(s_gl.grass_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.grass_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform4f(s_gl.grass_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
@@ -1817,9 +1817,9 @@ void nd_seven_gl_flush_water(void)
 
 	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 	glUniform3f(s_gl.water_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.water_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform4f(s_gl.water_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],

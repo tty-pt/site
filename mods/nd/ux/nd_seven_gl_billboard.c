@@ -1192,9 +1192,9 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	glUniform1f(s_gl.mesh3d_pipe.uFogStart, s_gl.cur_dist * 1.5f);
 	glUniform1f(s_gl.mesh3d_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
 	glUniform3f(s_gl.mesh3d_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.mesh3d_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform4f(s_gl.mesh3d_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
@@ -1489,9 +1489,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 
 	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 	glUniform3f(s_gl.bb_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.012f * space_t,
-	            0.70f * (1.0f - space_t) + 0.016f * space_t,
-	            0.85f * (1.0f - space_t) + 0.035f * space_t);
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
 	glUniform1f(s_gl.bb_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform4f(s_gl.bb_pipe.uLambLight,
 	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],

@@ -45,6 +45,7 @@ int on_cycle_viewport(bud_event *e)
 		g_active_driver_idx = (g_active_driver_idx + 1) % (int)g_driver_count;
 		const nd_viewport_driver_t *drv = nd_get_viewport_driver_at(g_active_driver_idx);
 		if (drv && drv->id) {
+			g_user_driver_override = 1;
 			snprintf(client_state.preferred_driver, sizeof(client_state.preferred_driver), "%s", drv->id);
 			if (strcmp(drv->id, "lamina-seven") == 0) {
 				client_state.layout_mode = ND_LAYOUT_GAME_2D;

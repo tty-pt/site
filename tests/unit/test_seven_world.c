@@ -1292,6 +1292,47 @@ int main(void)
 		printf("PASS: runtime-parameterized room dimensions (320x256 -> 160x128), proportional sub-room geometry, and §7.3 procedural canopy occupation verified\n");
 	}
 
+	/* Lamb unstuck recovery: off-center seam crossing into a walled room must never wedge Lamb */
+	{
+		nd_client_state_t st;
+		memset(&st, 0, sizeof(st));
+		st.map_data.width = 3;
+		st.map_data.height = 3;
+		st.map_data.player_x = 1;
+		st.map_data.player_y = 1;
+		st.map_data.pos[0] = 5;
+		st.map_data.pos[1] = 5;
+		for (int i = 0; i < 9; i++) {
+			st.map_data.tiles[i].bio_idx = 10;
+			st.map_data.tiles[i].exits = NDW_EXIT_N | NDW_EXIT_S | NDW_EXIT_E | NDW_EXIT_W;
+		}
+		/* Center tile is a walled room (walls on 0..16 & 112..128 outside gate x in 48..112) */
+		st.map_data.tiles[4].flags = ND_MAP_FLAG_ROOM | ND_MAP_FLAG_PLAYER;
+
+		nd_seven_forget();
+		nd_seven_sync_origin(&st);
+
+		/* Place Lamb deep inside the South-West wall band (x=25, y=125) and verify move frees Lamb */
+		nd_seven_set_lamb(25, 125);
+		assert(nd_seven_collision(&st, 25, 125) == 1);
+		nd_seven_key("ArrowUp", 1);
+		nd_seven_tick(&st, 0.05f);
+		nd_seven_key("ArrowUp", 0);
+		int fx = 0, fy = 0;
+		nd_seven_lamb(&fx, &fy, NULL, NULL);
+		assert(nd_seven_collision(&st, fx, fy) == 0);
+		assert(fx != 25 || fy != 125);
+
+		/* Simulate stepping North off-center from an open tile into a walled room */
+		st.map_data.pos[1] = 6;
+		st.map_data.tiles[4].exits = NDW_EXIT_S | NDW_EXIT_E | NDW_EXIT_W; /* no North exit */
+		nd_seven_set_lamb(20, 2);
+		nd_seven_sync_origin(&st);
+		nd_seven_lamb(&fx, &fy, NULL, NULL);
+		assert(nd_seven_collision(&st, fx, fy) == 0);
+		printf("PASS: Lamb unstuck recovery frees wall overlaps on tile entry and movement\n");
+	}
+
 	printf("ALL SEVEN WORLD TESTS PASSED\n");
 	return 0;
 }

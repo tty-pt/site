@@ -284,10 +284,13 @@ void nd_negotiate_regional_driver(const nd_client_state_t *st)
 	(void)st;
 }
 
+int g_user_driver_override = 0;
+
 int nd_stl_init(const char *json, int len)
 {
 	nd_ui_init_defaults();
 	memset(&client_state, 0, sizeof(client_state));
+	g_user_driver_override = 0;
 	client_state.pres_flags = ND_REGION_ALLOW_CHOICE;
 	snprintf(client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver), "ascii-bud");
 	nd_ui_glue_state_default(&client_state);
@@ -338,6 +341,8 @@ int nd_stl_init(const char *json, int len)
 		bud_json_str(json, "preferred_map_driver", client_state.preferred_map_driver, sizeof(client_state.preferred_map_driver));
 		client_state.layout_mode = (uint8_t)bud_json_int(json, "layout_mode", 0);
 		client_state.pres_flags = (uint8_t)bud_json_int(json, "pres_flags", ND_REGION_ALLOW_CHOICE);
+		if (client_state.preferred_driver[0])
+			g_user_driver_override = 1;
 
 		/* Rehydrate room info */
 		client_state.room.ref = (uint32_t)bud_json_int(json, "room_ref", 0);
@@ -384,8 +389,19 @@ ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t
 
 	if (channel == 1 || (buf[0] == ND_BCP_MAGIC_0 && buf[1] == ND_BCP_MAGIC_1)) {
 		uint8_t opcode = (len >= 3) ? buf[2] : 0xFF;
+		char prev_driver[sizeof(client_state.preferred_driver)];
+		uint8_t prev_layout = client_state.layout_mode;
+		memcpy(prev_driver, client_state.preferred_driver, sizeof(prev_driver));
+
 		int ret = nd_bcp_decode(buf, len, &client_state);
 		if (ret > 0) {
+			if (opcode == ND_BCP_REGION && g_user_driver_override && prev_driver[0] &&
+			    (client_state.pres_flags & ND_REGION_LOCKED) == 0 &&
+			    (client_state.pres_flags & ND_REGION_ALLOW_CHOICE) != 0) {
+				memcpy(client_state.preferred_driver, prev_driver,
+				       sizeof(client_state.preferred_driver));
+				client_state.layout_mode = prev_layout;
+			}
 			nd_spatial_resolver_invalidate();
 			nd_scene_sync(&g_scene, &client_state);
 			g_map_dirty = 1;

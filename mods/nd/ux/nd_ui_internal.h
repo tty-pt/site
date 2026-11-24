@@ -26,6 +26,7 @@ extern char g_active_modal[32];
 extern nd_viewport_driver_t g_viewport_drivers[ND_VIEWPORT_MAX_DRIVERS];
 extern size_t g_driver_count;
 extern int g_active_driver_idx;
+extern int g_user_driver_override;
 
 /* Map UI */
 bud_node *render_room_map(const nd_client_state_t *st);

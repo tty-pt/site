@@ -109,6 +109,7 @@ static void recentre(int drop_keys)
 }
 
 static void known_tile_ingest_map(const nd_client_state_t *st);
+static void unstuck_lamb(const nd_client_state_t *st);
 
 void nd_seven_sync_origin(const nd_client_state_t *st)
 {
@@ -131,6 +132,7 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		s_have = 1;
 		nd_seven_collision_invalidate();
 		nd_spatial_resolver_invalidate();
+		unstuck_lamb(st);
 		return;
 	}
 	if (!memcmp(pos, s_pos, sizeof(s_pos))) {
@@ -203,6 +205,7 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 		memcpy(s_pos, pos, sizeof(s_pos));
 		nd_seven_collision_invalidate();
 		nd_spatial_resolver_invalidate();
+		unstuck_lamb(st);
 	}
 }
 
@@ -1050,13 +1053,73 @@ static int is_motion_blocked(const nd_client_state_t *st, int fx, int fy)
 	return 0;
 }
 
+static void unstuck_lamb(const nd_client_state_t *st)
+{
+	if (!st || st->map_data.width == 0 || st->map_data.height == 0)
+		return;
+	if (!is_motion_blocked(st, s_lx, s_ly))
+		return;
+
+	int cx = NDW_CENTER_X;
+	int cy = NDW_CENTER_Y;
+	int dx = cx - s_lx;
+	int dy = cy - s_ly;
+	int steps = (dx < 0 ? -dx : dx);
+	int ay = (dy < 0 ? -dy : dy);
+	if (ay > steps)
+		steps = ay;
+	if (steps > 0) {
+		for (int s = 2; s <= steps; s += 2) {
+			int tx = s_lx + (dx * s) / steps;
+			int ty = s_ly + (dy * s) / steps;
+			if (!is_motion_blocked(st, tx, ty)) {
+				s_lx = tx;
+				s_ly = ty;
+				return;
+			}
+		}
+	}
+	if (!is_motion_blocked(st, cx, cy)) {
+		s_lx = cx;
+		s_ly = cy;
+		return;
+	}
+	static const int dirs[8][2] = {
+		{1, 0}, {-1, 0}, {0, 1}, {0, -1},
+		{1, 1}, {-1, 1}, {1, -1}, {-1, -1}
+	};
+	for (int r = 6; r <= 36; r += 6) {
+		for (int d = 0; d < 8; d++) {
+			int tx = cx + dirs[d][0] * r;
+			int ty = cy + dirs[d][1] * r;
+			if (tx >= NDW_FOOT_HW && tx < NDW_TILE_W - NDW_FOOT_HW &&
+			    ty >= NDW_FOOT_H && ty < NDW_TILE_H &&
+			    !is_motion_blocked(st, tx, ty)) {
+				s_lx = tx;
+				s_ly = ty;
+				return;
+			}
+		}
+	}
+}
+
 static void move_axis(const nd_client_state_t *st, int dx, int dy)
 {
 	int nx = s_lx + dx, ny = s_ly + dy;
-	if (is_motion_blocked(st, nx, ny))
+	if (!is_motion_blocked(st, nx, ny)) {
+		s_lx = nx;
+		s_ly = ny;
 		return;
-	s_lx = nx;
-	s_ly = ny;
+	}
+	if (is_motion_blocked(st, s_lx, s_ly)) {
+		unstuck_lamb(st);
+		nx = s_lx + dx;
+		ny = s_ly + dy;
+		if (!is_motion_blocked(st, nx, ny)) {
+			s_lx = nx;
+			s_ly = ny;
+		}
+	}
 }
 
 int nd_seven_collision(const nd_client_state_t *st, int x, int y)

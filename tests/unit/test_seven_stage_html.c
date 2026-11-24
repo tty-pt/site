@@ -90,6 +90,40 @@ int main(void)
 	assert(strstr(html, "id=\"term\""));
 	bud_free_string(html);
 
+	/* User-selected Seven driver survives ALLOW_CHOICE ND_BCP_REGION frames,
+	 * while ND_REGION_LOCKED still overrides user choice. */
+	{
+		extern void wasm_ws_on_channel(uint8_t channel, const uint8_t *buf, size_t len);
+		const char *init = "{\"preferred_driver\":\"lamina-seven\",\"preferred_map_driver\":\"lamina\",\"layout_mode\":3}";
+		assert(nd_stl_init(init, (int)strlen(init)) == 0);
+		assert(g_user_driver_override == 1);
+		assert(strcmp(client_state.preferred_driver, "lamina-seven") == 0);
+		assert(client_state.layout_mode == ND_LAYOUT_GAME_2D);
+
+		uint8_t rframe[128];
+		nd_bcp_writer_t w;
+		nd_bcp_writer_init(&w, rframe, sizeof(rframe));
+		nd_bcp_write_u8(&w, ND_BCP_MAGIC_0);
+		nd_bcp_write_u8(&w, ND_BCP_MAGIC_1);
+		nd_bcp_write_u8(&w, ND_BCP_REGION);
+		nd_bcp_write_str(&w, "tty");
+		nd_bcp_write_str(&w, "ascii-bud");
+		nd_bcp_write_u8(&w, ND_LAYOUT_STANDARD_HYBRID);
+		nd_bcp_write_u8(&w, ND_REGION_ALLOW_CHOICE | ND_REGION_UNIVERSE_OWNER);
+		size_t rn = nd_bcp_writer_len(&w, rframe);
+		wasm_ws_on_channel(1, rframe, rn);
+		assert(strcmp(client_state.preferred_driver, "lamina-seven") == 0);
+		assert(client_state.layout_mode == ND_LAYOUT_GAME_2D);
+		assert((client_state.pres_flags & ND_REGION_UNIVERSE_OWNER) != 0);
+
+		/* Locked region must still override user choice */
+		rframe[rn - 1] = ND_REGION_LOCKED;
+		wasm_ws_on_channel(1, rframe, rn);
+		assert(strcmp(client_state.preferred_driver, "tty") == 0);
+		assert(client_state.layout_mode == ND_LAYOUT_STANDARD_HYBRID);
+		printf("PASS: user-selected viewport driver survives ALLOW_CHOICE ND_BCP_REGION and respects LOCKED\n");
+	}
+
 	printf("PASS: seven stage and mini-map canvases are distinct-size, bridge-routable\n");
 	return 0;
 }
