@@ -4034,10 +4034,11 @@ int main(void)
 				assert(fmaxf(test_bbs[2].width, test_bbs[2].height) == 40.0f);
 				assert(fmaxf(test_bbs[3].width, test_bbs[3].height) == 16.0f);
 
-				/* Verify nd_seven_meadow_lattice_step scales lattice stride with camera distance */
+				/* Verify nd_seven_meadow_lattice_step scales lattice stride smoothly with camera distance */
 				assert(nd_seven_meadow_lattice_step(400.0f, 3800.0f) == 16);
-				assert(nd_seven_meadow_lattice_step(1600.0f, 3800.0f) == 32);
-				assert(nd_seven_meadow_lattice_step(2800.0f, 3800.0f) == 64);
+				assert(nd_seven_meadow_lattice_step(1000.0f, 3800.0f) == 24);
+				assert(nd_seven_meadow_lattice_step(1600.0f, 3800.0f) == 36);
+				assert(nd_seven_meadow_lattice_step(2800.0f, 3800.0f) == 56);
 				assert(nd_seven_meadow_lattice_step(4000.0f, 3800.0f) == 0);
 
 				/* Verify libcorolla analytical ray-cloud-shell intersection (nd_seven_gl_cloud_shell_ray_hit) */
@@ -4049,13 +4050,13 @@ int main(void)
 				assert(hit_t > 3000.0f && hit_t < 4000.0f);
 				assert(nd_seven_gl_cloud_shell_ray_hit(orig_out, dir_out, 1620.0f, p1, &hit_wx, &hit_wy, &hit_t) == false);
 
-				/* Verify configurable graphics quality presets & render resolution scaling across full nd_seven_render pipeline */
+				/* Verify configurable graphics quality presets & zero-reallocation dynamic sub-rect scaling */
 				uint32_t rw = 0, rh = 0;
 				uint32_t st_w = 0, st_h = 0, sc_w = 0, sc_h = 0, cl_w = 0, cl_h = 0;
 				int sc_samples = -1;
 				bool csm_act = false;
 
-				/* 1) High Preset (100% res, 100% detail, High 1/2 clouds + CSM, 4x MSAA, Uncapped FPS) */
+				/* 1) High Preset (100% res, 100% detail, High 0.50x->1.00x clouds + CSM, 4x MSAA, Uncapped FPS) */
 				nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 				nd_seven_set_zoom(0.08f);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
@@ -4072,7 +4073,7 @@ int main(void)
 				uint32_t bbs_detail_100 = nd_seven_last_mid_billboard_count();
 				assert(bbs_detail_100 > 10);
 
-				/* 2) Low Preset (67% res, 72% detail, Low 1/4 clouds, No CSM, 1x Off MSAA, 30 FPS) */
+				/* 2) Low Preset (67% res sub-rect -> 100% in orbit, 72% detail, non-compounding 0.35x->0.67x clouds) */
 				nd_seven_apply_quality_preset(ND_QUALITY_LOW);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_LOW);
 				assert(fabsf(nd_seven_get_res_scale() - 0.67f) < 1e-4f);
@@ -4085,15 +4086,24 @@ int main(void)
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
-				assert(st_w == 1286 && st_h == 724);
+				assert(st_w == 1920 && st_h == 1080);
 				assert(sc_w == 1286 && sc_h == 724);
 				assert(sc_samples == 0);
-				assert(cl_w == 321 && cl_h == 181);
+				assert(cl_w == 672 && cl_h == 378);
 				assert(csm_act == false);
 				uint32_t bbs_detail_low = nd_seven_last_mid_billboard_count();
 				assert(bbs_detail_low > 0 && bbs_detail_low < bbs_detail_100);
 
-				/* 3) Medium Preset (75% res, 75% detail, Medium 1/3 clouds + CSM, 1x Off MSAA, 60 FPS) */
+				/* Verify Low preset smoothly relaxes to native 1920x1080 scene + 0.67x clouds in orbit */
+				nd_seven_set_zoom(0.0001f);
+				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+				assert(st_w == 1920 && st_h == 1080);
+				assert(sc_w == 1920 && sc_h == 1080);
+				assert(cl_w == 1286 && cl_h == 724);
+				nd_seven_set_zoom(0.08f);
+
+				/* 3) Medium Preset (75% res sub-rect, 75% detail, non-compounding 0.42x->0.75x clouds + CSM) */
 				nd_seven_apply_quality_preset(ND_QUALITY_MEDIUM);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
 				assert(fabsf(nd_seven_get_res_scale() - 0.75f) < 1e-4f);
@@ -4106,15 +4116,15 @@ int main(void)
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
-				assert(st_w == 1440 && st_h == 810);
+				assert(st_w == 1920 && st_h == 1080);
 				assert(sc_w == 1440 && sc_h == 810);
 				assert(sc_samples == 0);
-				assert(cl_w == 480 && cl_h == 270);
+				assert(cl_w == 806 && cl_h == 454);
 				assert(csm_act == true);
 				uint32_t bbs_detail_75 = nd_seven_last_mid_billboard_count();
 				assert(bbs_detail_75 > bbs_detail_low && bbs_detail_75 < bbs_detail_100);
 
-				/* 4) Custom Settings: 25% resolution scale, 200% scenery detail, Clouds Off, MSAA On */
+				/* 4) Custom Settings: 25% resolution sub-rect, 200% scenery detail, Clouds Off, MSAA On */
 				nd_seven_set_res_scale(0.25f);
 				nd_seven_set_detail_scale(2.00f);
 				nd_seven_set_cloud_quality(ND_CLOUD_QUALITY_OFF);
@@ -4124,7 +4134,7 @@ int main(void)
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
-				assert(st_w == 480 && st_h == 270);
+				assert(st_w == 1920 && st_h == 1080);
 				assert(sc_w == 480 && sc_h == 270);
 				assert(sc_samples == 4);
 				assert(csm_act == false);
@@ -4618,8 +4628,9 @@ int main(void)
 				}
 
 				assert(nd_seven_meadow_lattice_step(280.0f, 2160.0f) == 16);
-				assert(nd_seven_meadow_lattice_step(800.0f, 2160.0f) == 32);
-				assert(nd_seven_meadow_lattice_step(1500.0f, 2160.0f) == 64);
+				assert(nd_seven_meadow_lattice_step(800.0f, 2160.0f) == 24);
+				assert(nd_seven_meadow_lattice_step(1000.0f, 2160.0f) == 36);
+				assert(nd_seven_meadow_lattice_step(1500.0f, 2160.0f) == 56);
 				assert(strstr(nd_seven_gl_fs_mesh3d(), "isGrassMesh") != NULL);
 				assert(strstr(nd_seven_gl_fs_mesh3d(), "rootT") != NULL);
 

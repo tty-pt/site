@@ -95,6 +95,7 @@ EXTRA_OBJS = \
 	$(BUILD_DIR)/extra/corolla.o
 
 ALL_OBJS = $(APP_OBJ) $(UX_OBJS) $(EXTRA_OBJS)
+DEP_FLAGS = -MMD -MP
 
 .PHONY: all clean bud-lamina
 
@@ -110,23 +111,25 @@ $(TARGET): $(ALL_OBJS) $(BUD_LAMINA_LIB)
 
 $(BUILD_DIR)/main.o: main.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(DEFS) $(INCS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEP_FLAGS) $(DEFS) $(INCS) -c -o $@ $<
 
 $(BUILD_DIR)/ux/%.o: $(ND_UX_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function $(DEFS) $(INCS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter -Wno-unused-function $(DEFS) $(INCS) -c -o $@ $<
 
 $(BUILD_DIR)/extra/site_ui.o: $(REPO_ROOT)/mods/common/ux/site_ui.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function $(DEFS) $(INCS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter -Wno-unused-function $(DEFS) $(INCS) -c -o $@ $<
 
 $(BUILD_DIR)/extra/areole.o: $(REPO_ROOT)/external/libareole/src/areole.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
 
 $(BUILD_DIR)/extra/corolla.o: $(REPO_ROOT)/external/libcorolla/src/corolla.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
+
+-include $(ALL_OBJS:.o=.d)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)

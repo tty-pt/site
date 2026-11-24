@@ -258,6 +258,7 @@ void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,
 uint32_t nd_seven_gl_get_frame_count(void);
 
 void nd_seven_gl_set_focal_water(float water_level);
+void nd_seven_gl_set_render_scales(float res_scale, float cloud_scale);
 void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
                                 float tx, float ty, float tz,
                                 float dist, float yaw_deg, float pitch_deg, float fov_deg,

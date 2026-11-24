@@ -55,6 +55,21 @@ bool nd_seven_gl_csm_window(float dist, float tx, float ty, nd_seven_gl_csm_wind
 	return true;
 }
 
+static void gl_cloud_alloc_dims(uint32_t w, uint32_t h, int cq, uint32_t *out_w, uint32_t *out_h)
+{
+	/* Allocate cloud FBO at the orbital ceiling so zoom-out scales smoothly via viewport sub-rect with zero reallocation:
+	 * High: 1.00x native, Medium: 0.75x native, Low: 0.67x native. */
+	float max_scale = (cq <= ND_CLOUD_QUALITY_LOW) ? 0.67f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 0.75f : 1.00f);
+	uint32_t cw = (uint32_t)((float)w * max_scale + 0.5f);
+	uint32_t ch = (uint32_t)((float)h * max_scale + 0.5f);
+	if (cw < 1u) cw = 1u;
+	if (ch < 1u) ch = 1u;
+	if (cw > w) cw = w;
+	if (ch > h) ch = h;
+	*out_w = cw;
+	*out_h = ch;
+}
+
 static void gl_free_scene_targets(void)
 {
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -81,10 +96,10 @@ static void gl_free_scene_targets(void)
 	if (s_gl.bloom_fbo[1]) glDeleteFramebuffer(s_gl.bloom_fbo[1]);
 	if (s_gl.scene_rb_color) glDeleteRenderbuffer(s_gl.scene_rb_color);
 	if (s_gl.scene_rb_depth) glDeleteRenderbuffer(s_gl.scene_rb_depth);
-	if (s_gl.cloud_depth_rb) glDeleteRenderbuffer(s_gl.cloud_depth_rb);
 	if (s_gl.res_color_tex) glDeleteTexture(s_gl.res_color_tex);
 	if (s_gl.res_depth_tex) glDeleteTexture(s_gl.res_depth_tex);
 	if (s_gl.cloud_tex) glDeleteTexture(s_gl.cloud_tex);
+	if (s_gl.cloud_depth_tex) glDeleteTexture(s_gl.cloud_depth_tex);
 	if (s_gl.ssao_tex) glDeleteTexture(s_gl.ssao_tex);
 	if (s_gl.bloom_tex[0]) glDeleteTexture(s_gl.bloom_tex[0]);
 	if (s_gl.bloom_tex[1]) glDeleteTexture(s_gl.bloom_tex[1]);
@@ -97,8 +112,8 @@ static void gl_free_scene_targets(void)
 	}
 	s_gl.scene_fbo = s_gl.res_fbo = s_gl.cloud_fbo = 0;
 	s_gl.ssao_fbo = s_gl.bloom_fbo[0] = s_gl.bloom_fbo[1] = 0;
-	s_gl.scene_rb_color = s_gl.scene_rb_depth = s_gl.cloud_depth_rb = 0;
-	s_gl.res_color_tex = s_gl.res_depth_tex = s_gl.cloud_tex = 0;
+	s_gl.scene_rb_color = s_gl.scene_rb_depth = 0;
+	s_gl.res_color_tex = s_gl.res_depth_tex = s_gl.cloud_tex = s_gl.cloud_depth_tex = 0;
 	s_gl.ssao_tex = s_gl.bloom_tex[0] = s_gl.bloom_tex[1] = 0;
 	s_gl.cloud_w = s_gl.cloud_h = 0;
 	s_gl.post_half_w = s_gl.post_half_h = 0;
@@ -157,25 +172,29 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples, bool try
 	glClearStencil(0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-	/* Volumetric cloud pass FBO (1/2 res for High, 1/3 res for Medium, 1/4 res for Low; single-sampled RGBA8 + depth/stencil) */
+	/* Volumetric cloud pass FBO (HDR color + sampleable depth/stencil texture for bilateral upsampling) */
 	int cq = nd_seven_get_cloud_quality();
-	uint32_t cdiv = (cq <= ND_CLOUD_QUALITY_LOW) ? 4u : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3u : 2u);
-	uint32_t cw = (w > cdiv) ? (w / cdiv) : 1u;
-	uint32_t ch = (h > cdiv) ? (h / cdiv) : 1u;
+	uint32_t cw = 1u, ch = 1u;
+	gl_cloud_alloc_dims(w, h, cq, &cw, &ch);
 	s_gl.cloud_tex = glCreateTexture();
 	glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)cw, (GLsizei)ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	s_gl.cloud_depth_rb = glCreateRenderbuffer();
-	glBindRenderbuffer(GL_RENDERBUFFER, s_gl.cloud_depth_rb);
-	glRenderbufferStorageMultisample(GL_RENDERBUFFER, 0, GL_DEPTH32F_STENCIL8, (GLsizei)cw, (GLsizei)ch);
+	glTexImage2D(GL_TEXTURE_2D, 0, color_ifmt, (GLsizei)cw, (GLsizei)ch, 0, GL_RGBA, color_type, NULL);
+	s_gl.cloud_depth_tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, s_gl.cloud_depth_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH32F_STENCIL8, (GLsizei)cw, (GLsizei)ch, 0, GL_DEPTH_STENCIL,
+	             GL_FLOAT_32_UNSIGNED_INT_24_8_REV, NULL);
 	s_gl.cloud_fbo = glCreateFramebuffer();
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.cloud_tex, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s_gl.cloud_depth_rb);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_gl.cloud_depth_tex, 0);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
 	glViewport(0, 0, (GLsizei)cw, (GLsizei)ch);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -185,7 +204,6 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples, bool try
 	glClearStencil(0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 	s_gl.cloud_w = cw;
 	s_gl.cloud_h = ch;
 
@@ -295,9 +313,8 @@ void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 	if (s_gl.scene_failed || w == 0 || h == 0) return;
 	int want_samples = nd_seven_get_msaa() ? ND_SCENE_MSAA_SAMPLES : 0;
 	int cq = nd_seven_get_cloud_quality();
-	uint32_t cdiv = (cq <= ND_CLOUD_QUALITY_LOW) ? 4u : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3u : 2u);
-	uint32_t want_cw = (w > cdiv) ? (w / cdiv) : 1u;
-	uint32_t want_ch = (h > cdiv) ? (h / cdiv) : 1u;
+	uint32_t want_cw = 1u, want_ch = 1u;
+	gl_cloud_alloc_dims(w, h, cq, &want_cw, &want_ch);
 	if (s_gl.scene_ok && s_gl.scene_w == w && s_gl.scene_h == h &&
 	    s_gl.scene_samples == want_samples &&
 	    s_gl.cloud_w == want_cw && s_gl.cloud_h == want_ch)
@@ -341,11 +358,13 @@ bool gl_build_hiz_pyramid(void)
 		return false;
 	}
 
-	/* Resolve current terrain depth buffer into s_gl.res_depth_tex (level 0) */
+	/* Resolve active terrain depth sub-rect into s_gl.res_depth_tex (level 0) */
+	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
+	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.res_fbo);
-	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
-	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
+	glBlitFramebuffer(0, 0, (GLint)rw, (GLint)rh,
+	                  0, 0, (GLint)rw, (GLint)rh,
 	                  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 
 	glUseProgram(prog);
@@ -355,6 +374,10 @@ bool gl_build_hiz_pyramid(void)
 
 	GLint loc_tex = glGetUniformLocation(prog, "uDepthTex", 9);
 	GLint loc_ts  = glGetUniformLocation(prog, "uTexelSize", 10);
+	GLint loc_uvs = glGetUniformLocation(prog, "uUvScale", 8);
+
+	float scene_uv_x = (s_gl.scene_w > 0) ? ((float)rw / (float)s_gl.scene_w) : 1.0f;
+	float scene_uv_y = (s_gl.scene_h > 0) ? ((float)rh / (float)s_gl.scene_h) : 1.0f;
 
 	for (int level = 1; level < s_gl.hiz_levels; level++) {
 		uint32_t lw = (s_gl.hiz_w > (1u << level)) ? (s_gl.hiz_w >> level) : 1u;
@@ -368,6 +391,12 @@ bool gl_build_hiz_pyramid(void)
 		glBindTexture(GL_TEXTURE_2D, s_gl.hiz_mip_tex[level - 1]);
 		glUniform1i(loc_tex, 0);
 		glUniform2f(loc_ts, 1.0f / (float)sw, 1.0f / (float)sh);
+		if (loc_uvs >= 0) {
+			if (level == 1)
+				glUniform2f(loc_uvs, scene_uv_x, scene_uv_y);
+			else
+				glUniform2f(loc_uvs, 1.0f, 1.0f);
+		}
 		glDrawArrays(GL_TRIANGLES, 0, 3);
 	}
 
@@ -460,11 +489,18 @@ int nd_seven_occ2d_test_water_chunk(int32_t ox, int32_t oy, int32_t span_w, int3
     return 0;
 }
 
-/* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and the stage viewport. */
+/* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and active sub-rect viewport. */
 void gl_bind_scene_target(void)
 {
-	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.scene_ok ? s_gl.scene_fbo : 0);
-	glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
+	if (s_gl.scene_ok) {
+		uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
+		uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.scene_fbo);
+		glViewport(0, 0, (GLsizei)rw, (GLsizei)rh);
+	} else {
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
+	}
 }
 
 GLuint gl_ensure_tree_shadow_dummy(void)
@@ -632,14 +668,16 @@ void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActiv
 	glActiveTexture(GL_TEXTURE0);
 }
 
-/* Resolve the multisampled scene into the sampleable colour (and depth) textures. */
+/* Resolve the multisampled scene active sub-rect into the sampleable colour (and depth) textures. */
 void gl_resolve_scene(GLbitfield mask)
 {
 	if (!s_gl.scene_ok) return;
+	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
+	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.res_fbo);
-	glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
-	                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, mask, GL_NEAREST);
+	glBlitFramebuffer(0, 0, (GLint)rw, (GLint)rh,
+	                  0, 0, (GLint)rw, (GLint)rh, mask, GL_NEAREST);
 	gl_bind_scene_target();
 }
 
@@ -658,6 +696,15 @@ void nd_seven_gl_end_frame(void)
 		}
 	}
 	if (!s_gl.scene_ok) return;
+	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
+	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
+	uint32_t prw = (s_gl.post_rw > 0 && s_gl.post_rw <= s_gl.post_half_w) ? s_gl.post_rw : s_gl.post_half_w;
+	uint32_t prh = (s_gl.post_rh > 0 && s_gl.post_rh <= s_gl.post_half_h) ? s_gl.post_rh : s_gl.post_half_h;
+	float scene_uv_x = (s_gl.scene_w > 0) ? ((float)rw / (float)s_gl.scene_w) : 1.0f;
+	float scene_uv_y = (s_gl.scene_h > 0) ? ((float)rh / (float)s_gl.scene_h) : 1.0f;
+	float post_uv_x = (s_gl.post_half_w > 0) ? ((float)prw / (float)s_gl.post_half_w) : 1.0f;
+	float post_uv_y = (s_gl.post_half_h > 0) ? ((float)prh / (float)s_gl.post_half_h) : 1.0f;
+
 	bool run_post = (s_gl.pipelines_ready && s_gl.post_pipe.prog && s_gl.post_targets_ok);
 	gl_resolve_scene(run_post ? (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) : GL_COLOR_BUFFER_BIT);
 	if (run_post) {
@@ -671,27 +718,29 @@ void nd_seven_gl_end_frame(void)
 		glDisable(GL_BLEND);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-		float ssao_fade = (s_gl.ssao_pipe.prog && s_gl.ssao_fbo && s_gl.ssao_tex && s_gl.cur_dist <= 2600.0f)
-			? fminf(1.0f, fmaxf(0.0f, (2600.0f - s_gl.cur_dist) / 1200.0f))
+		float ssao_fade = (s_gl.ssao_pipe.prog && s_gl.ssao_fbo && s_gl.ssao_tex && s_gl.cur_dist <= 2200.0f)
+			? fminf(1.0f, fmaxf(0.0f, (2200.0f - s_gl.cur_dist) / 1000.0f))
 			: 0.0f;
 		if (ssao_fade > 0.001f) {
 			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.ssao_fbo);
-			glViewport(0, 0, (GLsizei)s_gl.post_half_w, (GLsizei)s_gl.post_half_h);
+			glViewport(0, 0, (GLsizei)prw, (GLsizei)prh);
 			glUseProgram(s_gl.ssao_pipe.prog);
 			glActiveTexture(GL_TEXTURE0 + 5);
 			glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
 			glUniform1i(s_gl.ssao_pipe.uDepthTex, 5);
 			glUniform2f(s_gl.ssao_pipe.uNearFar, s_gl.cur_near, s_gl.cur_far);
 			glUniform2f(s_gl.ssao_pipe.uProjScale, s_gl.cur_tan_half * s_gl.cur_aspect, s_gl.cur_tan_half);
-			glUniform2f(s_gl.ssao_pipe.uViewport, (float)s_gl.post_half_w, (float)s_gl.post_half_h);
+			glUniform2f(s_gl.ssao_pipe.uViewport, (float)prw, (float)prh);
 			glUniform1f(s_gl.ssao_pipe.uAnimTime, s_gl.cur_anim_time);
+			if (s_gl.ssao_pipe.uSceneUvScale >= 0)
+				glUniform2f(s_gl.ssao_pipe.uSceneUvScale, scene_uv_x, scene_uv_y);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 		}
 
 		bool do_bloom = (s_gl.bloom_pipe.prog && s_gl.bloom_fbo[0] && s_gl.bloom_fbo[1] &&
 		                 s_gl.bloom_tex[0] && s_gl.bloom_tex[1]);
 		if (do_bloom) {
-			glViewport(0, 0, (GLsizei)s_gl.post_half_w, (GLsizei)s_gl.post_half_h);
+			glViewport(0, 0, (GLsizei)prw, (GLsizei)prh);
 			glUseProgram(s_gl.bloom_pipe.prog);
 
 			/* Pass 0: 2x2 downsample + soft-knee highlight extraction */
@@ -701,6 +750,8 @@ void nd_seven_gl_end_frame(void)
 			glUniform1i(s_gl.bloom_pipe.uSrcTex, 4);
 			glUniform2f(s_gl.bloom_pipe.uTexelSize, 1.0f / (float)s_gl.scene_w, 1.0f / (float)s_gl.scene_h);
 			glUniform2f(s_gl.bloom_pipe.uPassDir, 0.0f, 0.0f);
+			if (s_gl.bloom_pipe.uUvScale >= 0)
+				glUniform2f(s_gl.bloom_pipe.uUvScale, scene_uv_x, scene_uv_y);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 
 			/* Pass 1: horizontal separable Gaussian blur */
@@ -709,6 +760,8 @@ void nd_seven_gl_end_frame(void)
 			glUniform1i(s_gl.bloom_pipe.uSrcTex, 4);
 			glUniform2f(s_gl.bloom_pipe.uTexelSize, 1.0f / (float)s_gl.post_half_w, 1.0f / (float)s_gl.post_half_h);
 			glUniform2f(s_gl.bloom_pipe.uPassDir, 1.0f, 0.0f);
+			if (s_gl.bloom_pipe.uUvScale >= 0)
+				glUniform2f(s_gl.bloom_pipe.uUvScale, post_uv_x, post_uv_y);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 
 			/* Pass 2: vertical separable Gaussian blur */
@@ -717,10 +770,12 @@ void nd_seven_gl_end_frame(void)
 			glUniform1i(s_gl.bloom_pipe.uSrcTex, 4);
 			glUniform2f(s_gl.bloom_pipe.uTexelSize, 1.0f / (float)s_gl.post_half_w, 1.0f / (float)s_gl.post_half_h);
 			glUniform2f(s_gl.bloom_pipe.uPassDir, 0.0f, 1.0f);
+			if (s_gl.bloom_pipe.uUvScale >= 0)
+				glUniform2f(s_gl.bloom_pipe.uUvScale, post_uv_x, post_uv_y);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 		}
 
-		/* Final HDR ACES tone-mapping + SSAO + bloom composite to default framebuffer 0 */
+		/* Final HDR ACES tone-mapping + native-res FXAA + SSAO + bloom composite to default framebuffer 0 */
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glViewport(0, 0, (GLsizei)s_gl.stage_w, (GLsizei)s_gl.stage_h);
 		glUseProgram(s_gl.post_pipe.prog);
@@ -737,6 +792,15 @@ void nd_seven_gl_end_frame(void)
 		glUniform1f(s_gl.post_pipe.uBloomActive, do_bloom ? 1.0f : 0.0f);
 		glUniform1f(s_gl.post_pipe.uExposure, 1.12f);
 		glUniform1f(s_gl.post_pipe.uCamDist, s_gl.cur_dist);
+		if (s_gl.post_pipe.uSceneUvScale >= 0)
+			glUniform2f(s_gl.post_pipe.uSceneUvScale, scene_uv_x, scene_uv_y);
+		if (s_gl.post_pipe.uPostUvScale >= 0)
+			glUniform2f(s_gl.post_pipe.uPostUvScale, post_uv_x, post_uv_y);
+		if (s_gl.post_pipe.uSceneTexel >= 0)
+			glUniform2f(s_gl.post_pipe.uSceneTexel, 1.0f / (float)s_gl.scene_w, 1.0f / (float)s_gl.scene_h);
+		if (s_gl.post_pipe.uFxaaActive >= 0)
+			glUniform1f(s_gl.post_pipe.uFxaaActive,
+			            (s_gl.scene_samples == 0 || s_gl.cur_dist > 100000.0f) ? 1.0f : 0.0f);
 		glDrawArrays(GL_TRIANGLES, 0, 3);
 
 		glActiveTexture(GL_TEXTURE0 + 8);
@@ -754,8 +818,8 @@ void nd_seven_gl_end_frame(void)
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
-		                  0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		glBlitFramebuffer(0, 0, (GLint)rw, (GLint)rh,
+		                  0, 0, (GLint)s_gl.stage_w, (GLint)s_gl.stage_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 
@@ -776,11 +840,11 @@ void nd_seven_gl_get_target_info(uint32_t *out_stage_w, uint32_t *out_stage_h,
 {
 	if (out_stage_w) *out_stage_w = s_gl.stage_w;
 	if (out_stage_h) *out_stage_h = s_gl.stage_h;
-	if (out_scene_w) *out_scene_w = s_gl.scene_w;
-	if (out_scene_h) *out_scene_h = s_gl.scene_h;
+	if (out_scene_w) *out_scene_w = s_gl.render_w ? s_gl.render_w : s_gl.scene_w;
+	if (out_scene_h) *out_scene_h = s_gl.render_h ? s_gl.render_h : s_gl.scene_h;
 	if (out_samples) *out_samples = s_gl.scene_samples;
-	if (out_cloud_w) *out_cloud_w = s_gl.cloud_w;
-	if (out_cloud_h) *out_cloud_h = s_gl.cloud_h;
+	if (out_cloud_w) *out_cloud_w = s_gl.cloud_rw ? s_gl.cloud_rw : s_gl.cloud_w;
+	if (out_cloud_h) *out_cloud_h = s_gl.cloud_rh ? s_gl.cloud_rh : s_gl.cloud_h;
 	if (out_csm_active) *out_csm_active = (nd_seven_get_cloud_quality() >= ND_CLOUD_QUALITY_MEDIUM);
 }
 

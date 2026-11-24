@@ -848,21 +848,17 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	float cull_margin = 180.0f;
 	s_frame_sag_radius = r_planet;
 
-	float target_quad_px = 2.0f * (32.0f / 48.0f);
+	s_frame_detail_scale = nd_seven_get_detail_scale();
+	nd_seven_alt_profile_t alt_prof;
+	nd_seven_eval_alt_profile(dist, s_frame_detail_scale,
+	                          nd_seven_get_res_scale(),
+	                          nd_seven_get_cloud_quality(), &alt_prof);
+	nd_seven_gl_set_render_scales(alt_prof.eff_res_scale, alt_prof.eff_cloud_scale);
+	float target_quad_px = alt_prof.target_quad_px;
+	float ar_vp_w = fmaxf(1.0f, (float)w * alt_prof.eff_res_scale);
+	float ar_vp_h = fmaxf(1.0f, (float)h * alt_prof.eff_res_scale);
 	size_t max_leaves = SEVEN_MAX_VISIBLE_LEAVES;
-	uint8_t min_lvl = 0;
-
-	/* Continuous logarithmic LOD stepping function from atmosphere through orbital space:
-	 * Preserves higher chunk and biome resolution during zoom-out so biomes remain crisp
-	 * multi-octave provinces rather than collapsing prematurely into coarse LODs. */
-	if (dist >= 2500.0f) {
-		float atmo_t = fminf(1.0f, fmaxf(0.0f, (dist - 2500.0f) / 42000.0f));
-		target_quad_px = 1.33f + 3.80f * atmo_t;
-		int lvl_step = (int)floorf(log2f(dist * (1.0f / 5000.0f)));
-		if (lvl_step < 1) lvl_step = 1;
-		if (lvl_step > 4) lvl_step = 4;
-		min_lvl = (uint8_t)lvl_step;
-	}
+	uint8_t min_lvl = alt_prof.min_level;
 
 	seven_bounds_3d_ctx_t primary_bctx;
 	memset(&primary_bctx, 0, sizeof(primary_bctx));
@@ -897,11 +893,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		primary_bctx.has_tube_occ = true;
 	}
 
-	s_frame_detail_scale = nd_seven_get_detail_scale();
-	if (dist > 650.0f && s_frame_detail_scale < 0.99f) {
-		target_quad_px /= fmaxf(0.35f, s_frame_detail_scale);
-	}
-
 	ar_occluder_t *occ = nd_seven_gl_begin_terrain_occluder(mvp_3d, ref_origin, pdef);
 	float prim_inner_r = pdef->major_r - pdef->minor_r;
 	if (prim_inner_r < 1.0f) prim_inner_r = 1.0f;
@@ -919,13 +910,13 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.bounds_ctx = &primary_bctx,
 		.margin = cull_margin,
 		.target_quad_px = target_quad_px,
-		.viewport_w = (float)w,
-		.viewport_h = (float)h,
+		.viewport_w = ar_vp_w,
+		.viewport_h = ar_vp_h,
 		.min_level = min_lvl,
 		.max_level = 14,
 		.view_id = 0,
 		.max_populates_per_query = 0,
-		.split_hysteresis = 0.0f,
+		.split_hysteresis = 0.15f,
 		.occluder = occ,
 		.occluder_z_bias = 1.5f,
 		.occluder_texel_bias = 0.0f,
@@ -1536,7 +1527,7 @@ static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, i
 }
 
 #define BLOCK_BB_CACHE_SLOTS 4096u
-#define BLOCK_BB_ARENA_CAP   131072u
+#define BLOCK_BB_ARENA_CAP   262144u
 #define BLOCK_BB_MAX_PER_BLK 192u
 #define BLOCK_BB_STAGING_SLOTS 64u
 
@@ -2492,9 +2483,7 @@ int nd_seven_shaders_ready(void)
 
 void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
-	uint32_t eff_wu = wu, eff_hu = hu;
-	nd_seven_scaled_dims(wu, hu, &eff_wu, &eff_hu);
-	int w = (int)eff_wu, h = (int)eff_hu;
+	int w = (int)wu, h = (int)hu;
 	static drawable_3d_t dr[MAX_DRAW];
 	static lam_billboard_gpu_t s_all_gpu_batch[ALL_GPU_MAX_DRAW];
 
@@ -2943,6 +2932,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		if (dyn_rad < 624) dyn_rad = 624;
 		if (dyn_rad > (int32_t)max_meadow_horiz) dyn_rad = (int32_t)max_meadow_horiz;
 		if (dyn_rad > 1404) dyn_rad = 1404;
+		int32_t max_rad_for_step = step * 24;
+		if (dyn_rad > max_rad_for_step) dyn_rad = max_rad_for_step;
 		const int32_t rad = (dyn_rad / step) * step;
 		int32_t cx0 = ndw_fdiv(lwx - rad, step) * step;
 		int32_t cy0 = ndw_fdiv(lwy - rad, step) * step;

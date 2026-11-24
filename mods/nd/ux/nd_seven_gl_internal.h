@@ -50,8 +50,8 @@
 #define GL_TOTAL_VERTS_MACRO (GL_GRID_VERTS_MACRO * GL_GRID_VERTS_MACRO)
 #define GL_TOTAL_INDICES_MACRO (GL_GRID_QUADS_MACRO * GL_GRID_QUADS_MACRO * 6)
 
-/* Level 1..2 standard grid: 32x32 quads = 33x33 vertices = 1,089 vertices (2,048 triangles) */
-#define GL_GRID_QUADS_LO 32
+/* Mid-altitude station-aligned grid: 24x24 quads = 25x25 vertices = 625 vertices (1,152 triangles, 4x lighter than 48x48, exact 1:2 border alignment) */
+#define GL_GRID_QUADS_LO 24
 #define GL_GRID_QUADS GL_GRID_QUADS_LO
 #define GL_GRID_VERTS (GL_GRID_QUADS + 1)
 #define GL_TOTAL_VERTS (GL_GRID_VERTS * GL_GRID_VERTS)
@@ -250,6 +250,9 @@ typedef struct {
 	GLint uSkyColor;
 	GLint uCamDist;
 	GLint uAnimTime;
+	GLint uTorusEye;
+	GLint uTorusRadii;
+	GLint uAtmoHaloVis;
 } gl_sky_pipe_t;
 
 typedef struct {
@@ -366,6 +369,7 @@ typedef struct {
 	GLint uClusterLightCount;
 	GLint uClusterLightData;
 	GLint uClusterLightListsTex;
+	GLint uCloudResScale;
 } gl_cloud_pipe_t;
 
 typedef struct {
@@ -383,6 +387,11 @@ typedef struct {
 typedef struct {
 	GLuint prog;
 	GLint uCloudTex;
+	GLint uCloudUvScale;
+	GLint uSceneUvScale;
+	GLint uCloudDepthTex;
+	GLint uSceneDepthTex;
+	GLint uBilateralActive;
 } gl_cloud_comp_pipe_t;
 
 typedef struct {
@@ -392,6 +401,7 @@ typedef struct {
 	GLint uProjScale;
 	GLint uViewport;
 	GLint uAnimTime;
+	GLint uSceneUvScale;
 } gl_ssao_pipe_t;
 
 typedef struct {
@@ -399,6 +409,7 @@ typedef struct {
 	GLint uSrcTex;
 	GLint uTexelSize;
 	GLint uPassDir;
+	GLint uUvScale;
 } gl_bloom_pipe_t;
 
 typedef struct {
@@ -410,6 +421,10 @@ typedef struct {
 	GLint uBloomActive;
 	GLint uExposure;
 	GLint uCamDist;
+	GLint uSceneUvScale;
+	GLint uPostUvScale;
+	GLint uSceneTexel;
+	GLint uFxaaActive;
 } gl_post_pipe_t;
 
 typedef struct {
@@ -507,19 +522,28 @@ typedef struct {
 	GLuint res_depth_tex;
 	GLuint cloud_fbo;
 	GLuint cloud_tex;
-	GLuint cloud_depth_rb;
+	GLuint cloud_depth_tex;
 	GLuint ssao_fbo;
 	GLuint ssao_tex;
 	GLuint bloom_fbo[2];
 	GLuint bloom_tex[2];
 	uint32_t post_half_w;
 	uint32_t post_half_h;
+	uint32_t post_rw;
+	uint32_t post_rh;
 	bool scene_hdr;
 	bool post_targets_ok;
 	uint32_t cloud_w;
 	uint32_t cloud_h;
+	uint32_t cloud_rw;
+	uint32_t cloud_rh;
 	uint32_t scene_w;
 	uint32_t scene_h;
+	uint32_t render_w;
+	uint32_t render_h;
+	float cur_res_scale;
+	float cur_cloud_scale;
+	bool render_scales_set;
 	int scene_samples;
 	bool scene_ok;
 	bool scene_failed;

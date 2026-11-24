@@ -127,4 +127,21 @@ void nd_seven_apply_quality_preset(int preset);
 int  nd_seven_get_quality_preset(void);
 void nd_seven_cycle_quality_preset(void);
 
+/* Unified continuous altitude profile evaluated in log2(cam_dist) space.
+ * Eliminates disjoint step-function cliffs and aligns CPU/GPU cutoffs. */
+typedef struct {
+	float    target_quad_px;   /* U-shaped: crisp close -> lean mid-zoom -> crisp orbit */
+	float    eff_res_scale;    /* Smoothly relaxes base_res_scale -> 1.0 in orbit */
+	float    eff_cloud_scale;  /* Relative to NATIVE viewport (never compounded with res_scale) */
+	float    grass_max_dist;   /* Shared CPU/VS grass cutoff (1450 wu) */
+	float    ssao_max_dist;    /* Shared CPU/FS SSAO cutoff (2200 wu) */
+	float    eco_detail_fade;  /* Smooth 1 -> 0 across 2500..6500 wu */
+	uint8_t  min_level;        /* 0: continuous target_quad_px + hysteresis drives splits */
+	uint16_t chunk_budget;     /* Incremental libareole populate budget per frame */
+} nd_seven_alt_profile_t;
+
+void nd_seven_eval_alt_profile(float cam_dist, float detail_scale,
+                               float base_res_scale, int cloud_quality,
+                               nd_seven_alt_profile_t *out);
+
 #endif /* ND_SEVEN_GROUND_H */

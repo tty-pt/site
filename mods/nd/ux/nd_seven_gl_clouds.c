@@ -241,8 +241,8 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 		moon->type = (float)ND_LIGHT_TYPE_DIRECTIONAL;
 	}
 
-	/* Auto-populate universe-owner glowing Lamb point light if active */
-	if (s_gl.cur_lamb_light[3] > 0.01f && count < ND_MAX_TOTAL_LIGHTS) {
+	/* Auto-populate universe-owner glowing Lamb point light if active & within visible range */
+	if (s_gl.cur_lamb_light[3] > 0.01f && s_gl.cur_dist < 6000.0f && count < ND_MAX_TOTAL_LIGHTS) {
 		nd_cluster_light_t *lamb = &s_gl.active_lights[count++];
 		memset(lamb, 0, sizeof(*lamb));
 		lamb->pos_x = s_gl.cur_lamb_light[0] - s_gl.cur_tx;
@@ -258,15 +258,17 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 	}
 
 	/* Append user/entity local point & spot lights (converted to camera-relative XY) */
-	for (uint32_t i = 0; i < s_gl.local_light_count && count < ND_MAX_TOTAL_LIGHTS; i++) {
-		nd_cluster_light_t L = s_gl.local_lights[i];
-		if ((int)(L.type + 0.5f) != ND_LIGHT_TYPE_DIRECTIONAL) {
-			L.pos_x -= s_gl.cur_tx;
-			L.pos_y -= s_gl.cur_ty;
+	if (s_gl.cur_dist < 6000.0f) {
+		for (uint32_t i = 0; i < s_gl.local_light_count && count < ND_MAX_TOTAL_LIGHTS; i++) {
+			nd_cluster_light_t L = s_gl.local_lights[i];
+			if ((int)(L.type + 0.5f) != ND_LIGHT_TYPE_DIRECTIONAL) {
+				L.pos_x -= s_gl.cur_tx;
+				L.pos_y -= s_gl.cur_ty;
+			}
+			if (fabsf(L.pos_x) > 32760.0f || fabsf(L.pos_y) > 32760.0f)
+				continue;
+			s_gl.active_lights[count++] = L;
 		}
-		if (fabsf(L.pos_x) > 32760.0f || fabsf(L.pos_y) > 32760.0f)
-			continue;
-		s_gl.active_lights[count++] = L;
 	}
 
 	s_gl.active_light_count = count;
@@ -299,11 +301,25 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 	}
 
 	const uint32_t stride = ND_MAX_LIGHTS_PER_CLUSTER + 1;
+	static uint32_t s_prev_cl_hash = 0;
+	static uint32_t s_prev_cl_count = 0;
+	uint32_t cl_hash = count * 2654435761u;
+	cl_hash ^= (uint32_t)(int32_t)(s_gl.cur_tx * 0.25f) * 2246822519u;
+	cl_hash ^= (uint32_t)(int32_t)(s_gl.cur_ty * 0.25f) * 3266489917u;
+	cl_hash ^= (uint32_t)(int32_t)(s_gl.cur_dist * 0.25f) * 668265263u;
+	cl_hash ^= (uint32_t)(int32_t)(s_gl.cur_yaw_deg * 2.0f) * 374761393u;
+	cl_hash ^= (uint32_t)(int32_t)(s_gl.cur_pitch_deg * 2.0f) * 1103515245u;
+
 	bool need_list_upload = true;
 	if (count == 2 && s_gl.cluster_ssbo_valid && s_gl.cluster_dirs_only_cached) {
 		need_list_upload = false;
 		s_gl.active_cluster_count = ND_CLUSTER_TOTAL;
+	} else if (s_gl.cluster_ssbo_valid && count == s_prev_cl_count && cl_hash == s_prev_cl_hash) {
+		need_list_upload = false;
+		s_gl.active_cluster_count = ND_CLUSTER_TOTAL;
 	} else {
+		s_prev_cl_hash = cl_hash;
+		s_prev_cl_count = count;
 		/* Fast initialize all 6,144 clusters with the 2 primary directional lights (Sun=0, Moon=1) */
 		for (uint32_t c = 0; c < ND_CLUSTER_TOTAL; c++) {
 			uint8_t *entry = &s_gl.cluster_list_tex_data[c * stride];
@@ -448,17 +464,22 @@ void nd_seven_gl_flush_clouds(void)
 	gl_update_clustered_cloud_lighting(cluster_depth_params);
 
 	bool half_res = (s_gl.scene_ok && s_gl.cloud_fbo != 0 && s_gl.cloud_comp_pipe.prog != 0);
+	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
+	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
+	uint32_t crw = (s_gl.cloud_rw > 0 && s_gl.cloud_rw <= s_gl.cloud_w) ? s_gl.cloud_rw : s_gl.cloud_w;
+	uint32_t crh = (s_gl.cloud_rh > 0 && s_gl.cloud_rh <= s_gl.cloud_h) ? s_gl.cloud_rh : s_gl.cloud_h;
+
 	if (half_res) {
-		/* Resolve MSAA depth to res_fbo, then downsample depth to half-res cloud_fbo
+		/* Resolve MSAA depth to res_fbo, then downsample depth to cloud_fbo active sub-rect
 		 * so hardware GL_DEPTH_TEST (GL_LEQUAL) occludes far-side torus cloud shells. */
 		gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.cloud_fbo);
-		glBlitFramebuffer(0, 0, (GLint)s_gl.scene_w, (GLint)s_gl.scene_h,
-		                  0, 0, (GLint)s_gl.cloud_w, (GLint)s_gl.cloud_h,
+		glBlitFramebuffer(0, 0, (GLint)rw, (GLint)rh,
+		                  0, 0, (GLint)crw, (GLint)crh,
 		                  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
-		glViewport(0, 0, (GLsizei)s_gl.cloud_w, (GLsizei)s_gl.cloud_h);
+		glViewport(0, 0, (GLsizei)crw, (GLsizei)crh);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glStencilMask(0xFF);
@@ -485,9 +506,13 @@ void nd_seven_gl_flush_clouds(void)
 
 	/* Bind Clustered Cloud Lighting textures and uniforms */
 	{
-		uint32_t vp_w = half_res ? s_gl.cloud_w : s_gl.stage_w;
-		uint32_t vp_h = half_res ? s_gl.cloud_h : s_gl.stage_h;
+		uint32_t vp_w = half_res ? crw : rw;
+		uint32_t vp_h = half_res ? crh : rh;
 		glUniform2f(s_gl.cloud_pipe.uViewport, (float)vp_w, (float)vp_h);
+		if (s_gl.cloud_pipe.uCloudResScale >= 0) {
+			float res_sc = (s_gl.stage_w > 0u) ? ((float)vp_w / (float)s_gl.stage_w) : 1.0f;
+			glUniform1f(s_gl.cloud_pipe.uCloudResScale, res_sc);
+		}
 		glUniform3fv(s_gl.cloud_pipe.uMoonDir, 1, s_gl.cur_moon_dir);
 		glUniform3f(s_gl.cloud_pipe.uClusterGridDim,
 		            (float)ND_CLUSTER_GRID_X, (float)ND_CLUSTER_GRID_Y, (float)ND_CLUSTER_GRID_Z);
@@ -570,16 +595,21 @@ void nd_seven_gl_flush_clouds(void)
 	glUniform1f(s_gl.cloud_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
 	glUniform1f(s_gl.cloud_pipe.uSeaLevel, s_gl.cur_base_sea_level);
 
-	/* Always bind the lightweight 16x16 macro grid (512 triangles) for the smooth concentric
-	 * screen-projection proxy shell — eliminates 81x redundant vertex shader & triangle setup overhead! */
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_macro);
+	/* Use smooth 48x48 torus-curved shell for high-level / orbital chunks to eliminate chord sagitta clipping
+	 * and faceted cloud horizons; keep lightweight 16x16 macro grid at mid-zoom. */
+	int bound_hi = -1;
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
 
 	for (uint32_t i = 0; i < s_gl.cloud_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.cloud_queue[i];
-		GLsizei c_indices = GL_TOTAL_INDICES_MACRO;
+		int want_hi = (chk->level >= 9u || s_gl.cur_dist >= 200000.0f) ? 1 : 0;
+		if (want_hi != bound_hi) {
+			glBindBuffer(GL_ARRAY_BUFFER, want_hi ? s_gl.grid_vbo_hi : s_gl.grid_vbo_macro);
+			glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, want_hi ? s_gl.grid_ibo_hi : s_gl.grid_ibo_macro);
+			bound_hi = want_hi;
+		}
+		GLsizei c_indices = want_hi ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES_MACRO;
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, chk->substrate_tex);
@@ -625,8 +655,40 @@ void nd_seven_gl_flush_clouds(void)
 		glActiveTexture(GL_TEXTURE0 + 6);
 		glBindTexture(GL_TEXTURE_2D, s_gl.cloud_tex);
 		glUniform1i(s_gl.cloud_comp_pipe.uCloudTex, 6);
+		if (s_gl.cloud_comp_pipe.uCloudUvScale >= 0) {
+			float cuvx = (s_gl.cloud_w > 0) ? ((float)crw / (float)s_gl.cloud_w) : 1.0f;
+			float cuvy = (s_gl.cloud_h > 0) ? ((float)crh / (float)s_gl.cloud_h) : 1.0f;
+			glUniform2f(s_gl.cloud_comp_pipe.uCloudUvScale, cuvx, cuvy);
+		}
+		if (s_gl.cloud_comp_pipe.uSceneUvScale >= 0) {
+			float suvx = (s_gl.scene_w > 0) ? ((float)rw / (float)s_gl.scene_w) : 1.0f;
+			float suvy = (s_gl.scene_h > 0) ? ((float)rh / (float)s_gl.scene_h) : 1.0f;
+			glUniform2f(s_gl.cloud_comp_pipe.uSceneUvScale, suvx, suvy);
+		}
+		bool use_bilateral = (s_gl.cloud_depth_tex != 0 && s_gl.res_depth_tex != 0 &&
+		                      (crw < rw || crh < rh));
+		if (s_gl.cloud_comp_pipe.uSceneDepthTex >= 0) {
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
+			glUniform1i(s_gl.cloud_comp_pipe.uSceneDepthTex, 5);
+		}
+		if (s_gl.cloud_comp_pipe.uCloudDepthTex >= 0) {
+			glActiveTexture(GL_TEXTURE0 + 11);
+			glBindTexture(GL_TEXTURE_2D, s_gl.cloud_depth_tex);
+			glUniform1i(s_gl.cloud_comp_pipe.uCloudDepthTex, 11);
+		}
+		if (s_gl.cloud_comp_pipe.uBilateralActive >= 0) {
+			glUniform1f(s_gl.cloud_comp_pipe.uBilateralActive, use_bilateral ? 1.0f : 0.0f);
+		}
 		glActiveTexture(GL_TEXTURE0);
 		glDrawArrays(GL_TRIANGLES, 0, 3);
+		glActiveTexture(GL_TEXTURE0 + 11);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0 + 6);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0 + 5);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0);
 	}
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

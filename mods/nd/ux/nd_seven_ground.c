@@ -598,10 +598,79 @@ int32_t nd_seven_meadow_lattice_step(float cam_dist, float max_meadow_cull)
 {
 	if (cam_dist >= max_meadow_cull || max_meadow_cull <= 1.0f)
 		return 0;
-	if (cam_dist >= max_meadow_cull * 0.65f)
-		return 64; /* 4x sub-lattice (16 * 4) */
-	if (cam_dist >= max_meadow_cull * 0.32f)
-		return 32; /* 2x sub-lattice (16 * 2) */
+	float r = cam_dist / max_meadow_cull;
+	if (r >= 0.65f)
+		return 56;
+	if (r >= 0.40f)
+		return 36;
+	if (r >= 0.22f)
+		return 24;
 	return 16;
 }
 
+static float alt_smoothstep(float e0, float e1, float x)
+{
+	float t = (x - e0) / (e1 - e0);
+	if (t < 0.0f) t = 0.0f;
+	if (t > 1.0f) t = 1.0f;
+	return t * t * (3.0f - 2.0f * t);
+}
+
+void nd_seven_eval_alt_profile(float cam_dist, float detail_scale,
+                               float base_res_scale, int cloud_quality,
+                               nd_seven_alt_profile_t *out)
+{
+	if (!out)
+		return;
+
+	float d = (cam_dist > 35.0f) ? cam_dist : 35.0f;
+	float ld = log2f(d);
+
+	/* Smooth C1 transitions in log2(dist) space so scroll-wheel zooming feels uniform */
+	/* log2(600)=9.2288, log2(3500)=11.7731, log2(45000)=15.4576, log2(800000)=19.6096 */
+	float t_mid   = alt_smoothstep(9.2288f, 11.7731f, ld);
+	float t_orbit = alt_smoothstep(15.4576f, 19.6096f, ld);
+
+	float det = detail_scale;
+	if (det < 0.55f) det = 0.55f;
+	if (det > 1.00f) det = 1.00f;
+	/* Map detail_scale [0.55..1.00] -> mild quality factor [1.42..1.00] */
+	float q_mul = 1.0f + (1.0f - det) * 0.9333f;
+
+	/* U-shaped target_quad_px:
+	 * Close (d<=600): 1.333 px (crisp 1:1 ground detail)
+	 * Mid-altitude (3.5k..45k): 2.80..4.00 px (lean vertex/leaf budget during overlap)
+	 * Orbit (800k..28M): tightens back to 2.00..2.80 px (keeps planet at L12-L13, not L14!) */
+	float close_px = 2.0f * (32.0f / 48.0f);
+	float mid_px   = 2.80f * q_mul;
+	float orbit_px = 2.35f * q_mul;
+	float mid_or_orbit = mid_px + (orbit_px - mid_px) * t_orbit;
+	out->target_quad_px = close_px + (mid_or_orbit - close_px) * t_mid;
+
+	/* Smoothly relax resolution scaling back to 1.00 in orbit (log2(40k)=15.2877 -> log2(400k)=18.6096) */
+	float br = base_res_scale;
+	if (br < ND_SEVEN_RES_MIN) br = ND_SEVEN_RES_MIN;
+	if (br > ND_SEVEN_RES_MAX) br = ND_SEVEN_RES_MAX;
+	float t_res = alt_smoothstep(15.2877f, 18.6096f, ld);
+	out->eff_res_scale = br + (1.0f - br) * t_res;
+
+	/* Cloud resolution scale relative to NATIVE viewport (never compounded with res_scale) */
+	float c_mid, c_orb;
+	if (cloud_quality <= ND_CLOUD_QUALITY_LOW) {
+		c_mid = 0.35f;
+		c_orb = 0.67f;
+	} else if (cloud_quality == ND_CLOUD_QUALITY_MEDIUM) {
+		c_mid = 0.42f;
+		c_orb = 0.75f;
+	} else {
+		c_mid = 0.50f;
+		c_orb = 1.00f;
+	}
+	out->eff_cloud_scale = c_mid + (c_orb - c_mid) * t_orbit;
+
+	out->grass_max_dist  = 1450.0f;
+	out->ssao_max_dist   = 2200.0f;
+	out->eco_detail_fade = 1.0f - alt_smoothstep(2500.0f, 6500.0f, d);
+	out->min_level       = 0u;
+	out->chunk_budget    = 8u;
+}

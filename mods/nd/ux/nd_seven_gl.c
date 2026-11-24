@@ -609,6 +609,9 @@ static bool check_pipelines_ready(void)
 			s_gl.sky_pipe.uSkyColor      = glGetUniformLocation(p, "uSkyColor", 9);
 			s_gl.sky_pipe.uCamDist       = glGetUniformLocation(p, "uCamDist", 8);
 			s_gl.sky_pipe.uAnimTime      = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.sky_pipe.uTorusEye      = glGetUniformLocation(p, "uTorusEye", 9);
+			s_gl.sky_pipe.uTorusRadii    = glGetUniformLocation(p, "uTorusRadii", 11);
+			s_gl.sky_pipe.uAtmoHaloVis   = glGetUniformLocation(p, "uAtmoHaloVis", 12);
 		}
 	}
 
@@ -877,6 +880,7 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_pipe.uClusterLightCount    = glGetUniformLocation(p, "uClusterLightCount", 18);
 			s_gl.cloud_pipe.uClusterLightData     = glGetUniformLocation(p, "uClusterLightData", 17);
 			s_gl.cloud_pipe.uClusterLightListsTex = glGetUniformLocation(p, "uClusterLightListsTex", 21);
+			s_gl.cloud_pipe.uCloudResScale        = glGetUniformLocation(p, "uCloudResScale", 14);
 			s_gl.cloud_pipe.aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
 		}
 	}
@@ -888,7 +892,12 @@ static bool check_pipelines_ready(void)
 			s_gl.cloud_comp_pipe.prog = 0;
 		} else {
 			GLuint p = s_gl.cloud_comp_pipe.prog;
-			s_gl.cloud_comp_pipe.uCloudTex = glGetUniformLocation(p, "uCloudTex", 9);
+			s_gl.cloud_comp_pipe.uCloudTex        = glGetUniformLocation(p, "uCloudTex", 9);
+			s_gl.cloud_comp_pipe.uCloudUvScale    = glGetUniformLocation(p, "uCloudUvScale", 13);
+			s_gl.cloud_comp_pipe.uSceneUvScale    = glGetUniformLocation(p, "uSceneUvScale", 13);
+			s_gl.cloud_comp_pipe.uCloudDepthTex   = glGetUniformLocation(p, "uCloudDepthTex", 14);
+			s_gl.cloud_comp_pipe.uSceneDepthTex   = glGetUniformLocation(p, "uSceneDepthTex", 14);
+			s_gl.cloud_comp_pipe.uBilateralActive = glGetUniformLocation(p, "uBilateralActive", 16);
 		}
 	}
 
@@ -912,11 +921,12 @@ static bool check_pipelines_ready(void)
 			s_gl.ssao_pipe.prog = 0;
 		} else {
 			GLuint p = s_gl.ssao_pipe.prog;
-			s_gl.ssao_pipe.uDepthTex  = glGetUniformLocation(p, "uDepthTex", 9);
-			s_gl.ssao_pipe.uNearFar   = glGetUniformLocation(p, "uNearFar", 8);
-			s_gl.ssao_pipe.uProjScale = glGetUniformLocation(p, "uProjScale", 10);
-			s_gl.ssao_pipe.uViewport  = glGetUniformLocation(p, "uViewport", 9);
-			s_gl.ssao_pipe.uAnimTime  = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.ssao_pipe.uDepthTex     = glGetUniformLocation(p, "uDepthTex", 9);
+			s_gl.ssao_pipe.uNearFar      = glGetUniformLocation(p, "uNearFar", 8);
+			s_gl.ssao_pipe.uProjScale    = glGetUniformLocation(p, "uProjScale", 10);
+			s_gl.ssao_pipe.uViewport     = glGetUniformLocation(p, "uViewport", 9);
+			s_gl.ssao_pipe.uAnimTime     = glGetUniformLocation(p, "uAnimTime", 9);
+			s_gl.ssao_pipe.uSceneUvScale = glGetUniformLocation(p, "uSceneUvScale", 13);
 		}
 	}
 
@@ -930,23 +940,28 @@ static bool check_pipelines_ready(void)
 			s_gl.bloom_pipe.uSrcTex    = glGetUniformLocation(p, "uSrcTex", 7);
 			s_gl.bloom_pipe.uTexelSize = glGetUniformLocation(p, "uTexelSize", 10);
 			s_gl.bloom_pipe.uPassDir   = glGetUniformLocation(p, "uPassDir", 8);
+			s_gl.bloom_pipe.uUvScale   = glGetUniformLocation(p, "uUvScale", 8);
 		}
 	}
 
-	/* HDR ACES tone-mapping + SSAO + bloom composite pipeline */
+	/* HDR ACES tone-mapping + SSAO + bloom + FXAA composite pipeline */
 	if (s_gl.post_pipe.prog) {
 		if (!glGetProgramParameter(s_gl.post_pipe.prog, GL_LINK_STATUS)) {
 			glDeleteProgram(s_gl.post_pipe.prog);
 			s_gl.post_pipe.prog = 0;
 		} else {
 			GLuint p = s_gl.post_pipe.prog;
-			s_gl.post_pipe.uSceneTex    = glGetUniformLocation(p, "uSceneTex", 9);
-			s_gl.post_pipe.uBloomTex    = glGetUniformLocation(p, "uBloomTex", 9);
-			s_gl.post_pipe.uSsaoTex     = glGetUniformLocation(p, "uSsaoTex", 8);
-			s_gl.post_pipe.uSsaoActive  = glGetUniformLocation(p, "uSsaoActive", 11);
-			s_gl.post_pipe.uBloomActive = glGetUniformLocation(p, "uBloomActive", 12);
-			s_gl.post_pipe.uExposure    = glGetUniformLocation(p, "uExposure", 9);
-			s_gl.post_pipe.uCamDist     = glGetUniformLocation(p, "uCamDist", 8);
+			s_gl.post_pipe.uSceneTex     = glGetUniformLocation(p, "uSceneTex", 9);
+			s_gl.post_pipe.uBloomTex     = glGetUniformLocation(p, "uBloomTex", 9);
+			s_gl.post_pipe.uSsaoTex      = glGetUniformLocation(p, "uSsaoTex", 8);
+			s_gl.post_pipe.uSsaoActive   = glGetUniformLocation(p, "uSsaoActive", 11);
+			s_gl.post_pipe.uBloomActive  = glGetUniformLocation(p, "uBloomActive", 12);
+			s_gl.post_pipe.uExposure     = glGetUniformLocation(p, "uExposure", 9);
+			s_gl.post_pipe.uCamDist      = glGetUniformLocation(p, "uCamDist", 8);
+			s_gl.post_pipe.uSceneUvScale = glGetUniformLocation(p, "uSceneUvScale", 13);
+			s_gl.post_pipe.uPostUvScale  = glGetUniformLocation(p, "uPostUvScale", 12);
+			s_gl.post_pipe.uSceneTexel   = glGetUniformLocation(p, "uSceneTexel", 11);
+			s_gl.post_pipe.uFxaaActive   = glGetUniformLocation(p, "uFxaaActive", 11);
 		}
 	}
 
@@ -968,6 +983,17 @@ void nd_seven_gl_set_focal_water(float water_level)
 		if (s_gl.cur_sea_level <= -900.0f || water_level > s_gl.cur_sea_level)
 			s_gl.cur_sea_level = water_level;
 	}
+}
+
+void nd_seven_gl_set_render_scales(float res_scale, float cloud_scale)
+{
+	if (res_scale < 0.25f) res_scale = 0.25f;
+	if (res_scale > 1.0f) res_scale = 1.0f;
+	if (cloud_scale < 0.125f) cloud_scale = 0.125f;
+	if (cloud_scale > 1.0f) cloud_scale = 1.0f;
+	s_gl.cur_res_scale = res_scale;
+	s_gl.cur_cloud_scale = cloud_scale;
+	s_gl.render_scales_set = true;
 }
 
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity)
@@ -1032,6 +1058,17 @@ static void gl_render_sky(float space_t)
 	            0.85f * (1.0f - space_t) + 0.035f * space_t);
 	glUniform1f(s_gl.sky_pipe.uCamDist, s_gl.cur_dist);
 	glUniform1f(s_gl.sky_pipe.uAnimTime, s_gl.cur_anim_time);
+	if (s_gl.sky_pipe.uTorusEye >= 0 && s_gl.sky_pipe.uTorusRadii >= 0 && s_gl.sky_pipe.uAtmoHaloVis >= 0) {
+		float eye_t[3] = {
+			(float)(s_gl.cur_origin[0] + (double)s_gl.cur_eye[0] - (double)s_gl.cur_pdef.center[0]),
+			(float)(s_gl.cur_origin[1] + (double)s_gl.cur_eye[1] - (double)s_gl.cur_pdef.center[1]),
+			(float)(s_gl.cur_origin[2] + (double)s_gl.cur_eye[2] - (double)s_gl.cur_pdef.center[2])
+		};
+		float halo_vis = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 20000.0f) / 100000.0f));
+		glUniform3fv(s_gl.sky_pipe.uTorusEye, 1, eye_t);
+		glUniform2f(s_gl.sky_pipe.uTorusRadii, s_gl.cur_pdef.major_r, s_gl.cur_pdef.minor_r);
+		glUniform1f(s_gl.sky_pipe.uAtmoHaloVis, (s_gl.cur_pdef.major_r > 1.0f && s_gl.cur_pdef.minor_r > 1.0f) ? halo_vis : 0.0f);
+	}
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
@@ -1178,6 +1215,40 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	glViewport(0, 0, (GLsizei)stage_w, (GLsizei)stage_h);
 	if (s_gl.pipelines_ready)
 		gl_ensure_scene_targets(stage_w, stage_h);
+
+	/* Compute active sub-rect dimensions inside persistent native-sized FBOs (zero reallocation on zoom) */
+	float res_sc = s_gl.render_scales_set ? s_gl.cur_res_scale : 1.0f;
+	uint32_t rw = (uint32_t)((float)stage_w * res_sc + 0.5f);
+	uint32_t rh = (uint32_t)((float)stage_h * res_sc + 0.5f);
+	if (rw < 1u) rw = 1u;
+	if (rh < 1u) rh = 1u;
+	if (s_gl.scene_w > 0 && rw > s_gl.scene_w) rw = s_gl.scene_w;
+	if (s_gl.scene_h > 0 && rh > s_gl.scene_h) rh = s_gl.scene_h;
+	s_gl.render_w = rw;
+	s_gl.render_h = rh;
+
+	uint32_t prw = (rw > 1u) ? (rw >> 1) : 1u;
+	uint32_t prh = (rh > 1u) ? (rh >> 1) : 1u;
+	if (s_gl.post_half_w > 0 && prw > s_gl.post_half_w) prw = s_gl.post_half_w;
+	if (s_gl.post_half_h > 0 && prh > s_gl.post_half_h) prh = s_gl.post_half_h;
+	s_gl.post_rw = prw;
+	s_gl.post_rh = prh;
+
+	if (s_gl.render_scales_set) {
+		uint32_t crw = (uint32_t)((float)stage_w * s_gl.cur_cloud_scale + 0.5f);
+		uint32_t crh = (uint32_t)((float)stage_h * s_gl.cur_cloud_scale + 0.5f);
+		if (crw < 1u) crw = 1u;
+		if (crh < 1u) crh = 1u;
+		if (s_gl.cloud_w > 0 && crw > s_gl.cloud_w) crw = s_gl.cloud_w;
+		if (s_gl.cloud_h > 0 && crh > s_gl.cloud_h) crh = s_gl.cloud_h;
+		s_gl.cloud_rw = crw;
+		s_gl.cloud_rh = crh;
+	} else {
+		s_gl.cloud_rw = s_gl.cloud_w;
+		s_gl.cloud_rh = s_gl.cloud_h;
+	}
+	s_gl.render_scales_set = false;
+
 	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
@@ -1219,17 +1290,27 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 static void select_grid_buffers(uint8_t level, int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                 GLuint *out_vbo, GLuint *out_ibo, GLsizei *out_indices)
 {
-	/* Always bind the 48x48 quad mesh (exact 1:1 vertex alignment with the 49x49 chunk
-	 * heightmap texture) across all quadtree LOD levels so 3D vertex relief is never
-	 * decimated or flattened and 2:1 LOD borders share exact vertex stations. */
-	(void)level;
+	/* Station-aligned terrain mesh LOD:
+	 * - 48x48 HI: close near-field (L0..L1) and curved orbital chunks (L11+ or dist >= 200k)
+	 * - 24x24 LO: mid-altitude hills (L2..L5, exact 1:2 vertex station alignment with 48x48)
+	 * - 16x16 MACRO: distant mid-zoom horizon chunks (L6..L10, exact 1:3 station alignment) */
 	(void)ox;
 	(void)oy;
 	(void)span_w;
 	(void)span_h;
-	*out_vbo = s_gl.grid_vbo_hi;
-	*out_ibo = s_gl.grid_ibo_hi;
-	*out_indices = GL_TOTAL_INDICES_HI;
+	if (level <= 1u || level >= 11u || s_gl.cur_dist >= 200000.0f) {
+		*out_vbo = s_gl.grid_vbo_hi;
+		*out_ibo = s_gl.grid_ibo_hi;
+		*out_indices = GL_TOTAL_INDICES_HI;
+	} else if (level <= 5u) {
+		*out_vbo = s_gl.grid_vbo;
+		*out_ibo = s_gl.grid_ibo;
+		*out_indices = GL_TOTAL_INDICES;
+	} else {
+		*out_vbo = s_gl.grid_vbo_macro;
+		*out_ibo = s_gl.grid_ibo_macro;
+		*out_indices = GL_TOTAL_INDICES_MACRO;
+	}
 }
 
 void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev,
@@ -1300,10 +1381,11 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		glActiveTexture(GL_TEXTURE1);
 		slot->substrate_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 4);
 	}
 
 	bool needs_upload = (!slot->active || slot->rev != rev ||
@@ -1332,7 +1414,46 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		glActiveTexture(GL_TEXTURE1);
 		glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, chunk_w, chunk_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, color_rgba);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, chunk_w, chunk_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, color_rgba);
+		{
+			/* Build full CPU mipmap chain (box 2x2 downsample) for smooth orbital/oblique filtering */
+			static uint8_t s_mip_a[128 * 128 * 4];
+			static uint8_t s_mip_b[128 * 128 * 4];
+			const uint8_t *src_px = (const uint8_t *)color_rgba;
+			uint32_t mw = chunk_w;
+			uint32_t mh = chunk_h;
+			int mip = 0;
+			if (mw <= 256u && mh <= 256u && src_px != NULL) {
+				while (mw > 1u || mh > 1u) {
+					uint32_t nw = (mw > 1u) ? (mw >> 1) : 1u;
+					uint32_t nh = (mh > 1u) ? (mh >> 1) : 1u;
+					uint8_t *dst_px = (mip & 1) ? s_mip_b : s_mip_a;
+					for (uint32_t y = 0; y < nh; y++) {
+						uint32_t sy0 = (y * 2u < mh) ? (y * 2u) : (mh - 1u);
+						uint32_t sy1 = (sy0 + 1u < mh) ? (sy0 + 1u) : (mh - 1u);
+						for (uint32_t x = 0; x < nw; x++) {
+							uint32_t sx0 = (x * 2u < mw) ? (x * 2u) : (mw - 1u);
+							uint32_t sx1 = (sx0 + 1u < mw) ? (sx0 + 1u) : (mw - 1u);
+							const uint8_t *p00 = src_px + ((size_t)sy0 * mw + sx0) * 4u;
+							const uint8_t *p10 = src_px + ((size_t)sy0 * mw + sx1) * 4u;
+							const uint8_t *p01 = src_px + ((size_t)sy1 * mw + sx0) * 4u;
+							const uint8_t *p11 = src_px + ((size_t)sy1 * mw + sx1) * 4u;
+							uint8_t *out = dst_px + ((size_t)y * nw + x) * 4u;
+							out[0] = (uint8_t)((p00[0] + p10[0] + p01[0] + p11[0] + 2u) >> 2);
+							out[1] = (uint8_t)((p00[1] + p10[1] + p01[1] + p11[1] + 2u) >> 2);
+							out[2] = (uint8_t)((p00[2] + p10[2] + p01[2] + p11[2] + 2u) >> 2);
+							out[3] = (uint8_t)((p00[3] + p10[3] + p01[3] + p11[3] + 2u) >> 2);
+						}
+					}
+					mip++;
+					glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, (GLsizei)nw, (GLsizei)nh, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst_px);
+					src_px = dst_px;
+					mw = nw;
+					mh = nh;
+				}
+			}
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip);
+		}
 	}
 	slot->last_touch = s_gl.frame_count;
 
@@ -1442,9 +1563,9 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	GLuint active_vbo = 0, active_ibo = 0;
 	GLsizei active_indices = 0;
 	select_grid_buffers(level, ox, oy, span_w, span_h, &active_vbo, &active_ibo, &active_indices);
-	GLsizei draw_indices = active_indices + ((active_indices == GL_TOTAL_INDICES_HI)
-	                                         ? (4 * GL_GRID_QUADS_HI * 6)
-	                                         : (4 * GL_GRID_QUADS_MACRO * 6));
+	GLsizei skirt_quads = (active_indices == GL_TOTAL_INDICES_HI) ? GL_GRID_QUADS_HI
+	                    : ((active_indices == GL_TOTAL_INDICES) ? GL_GRID_QUADS_LO : GL_GRID_QUADS_MACRO);
+	GLsizei draw_indices = active_indices + (4 * skirt_quads * 6);
 
 	glBindBuffer(GL_ARRAY_BUFFER, active_vbo);
 	glEnableVertexAttribArray(0);
@@ -1483,7 +1604,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	/* Enqueue primary-world near-field chunks (Level <= 1) for GPU-instanced 3D grass & clover carpet */
 	if (world == s_gl.cur_pdef.world_id && level <= 1 &&
 	    s_gl.grass_pipe.prog && s_gl.grass_idx_count > 0 &&
-	    s_gl.cur_dist < 2600.0f && s_gl.grass_q_count < MAX_GRASS_CHUNKS) {
+	    s_gl.cur_dist < 1450.0f && s_gl.grass_q_count < MAX_GRASS_CHUNKS) {
 		float g_pad = 1180.0f + (float)span_w * 0.5f;
 		float cx = (float)ox + (float)span_w * 0.5f;
 		float cy = (float)oy + (float)span_h * 0.5f;
@@ -1508,7 +1629,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
-	if (s_gl.cloud_count < (uint32_t)nd_seven_gl_max_water_queue() &&
+	uint32_t max_cloud_q = (s_gl.cur_dist > 20000.0f) ? (uint32_t)MAX_WATER_QUEUE_BASE : (uint32_t)nd_seven_gl_max_water_queue();
+	if (s_gl.cloud_count < max_cloud_q &&
 	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
 		gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
 		cq->ox = ox;
@@ -1554,7 +1676,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 void nd_seven_gl_flush_grass(void)
 {
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.grass_pipe.prog ||
-	    s_gl.grass_q_count == 0 || s_gl.grass_idx_count <= 0 || s_gl.cur_dist >= 2600.0f) {
+	    s_gl.grass_q_count == 0 || s_gl.grass_idx_count <= 0 || s_gl.cur_dist >= 1450.0f) {
 		s_gl.grass_q_count = 0;
 		return;
 	}

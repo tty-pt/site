@@ -1378,8 +1378,9 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 	if (!batch || count == 0) return;
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
 
-	/* Build GPU Hi-Z depth pyramid once after terrain pass and before first billboard batch */
-	if (!s_gl.gpu_hiz_built && s_gl.scene_ok && s_gl.hiz_valid) {
+	/* Build GPU Hi-Z depth pyramid once after terrain pass and before first non-trivial billboard batch */
+	if (!s_gl.gpu_hiz_built && s_gl.scene_ok && s_gl.hiz_valid &&
+	    !(count <= 2u && s_gl.cur_dist > 2500.0f)) {
 		(void)gl_build_hiz_pyramid();
 	}
 

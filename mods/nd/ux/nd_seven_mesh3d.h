@@ -557,7 +557,24 @@ nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
 	const float by_scr = (float)H - (float)slice->anchor_y - 2.0f;
 	const float mw = (slice->mesh_w_wu > 1.0f) ? slice->mesh_w_wu : (float)W;
 	const float mh = (slice->mesh_h_wu > 1.0f) ? slice->mesh_h_wu : (float)H;
-	const float px_per_wu = fminf((float)W / mw, (float)H / mh);
+	float px_per_wu = fminf((float)W / mw, (float)H / mh);
+	{
+		float max_abs_x = 1.0f;
+		float max_proj_y = 1.0f;
+		uint32_t v_end = slice->first_vert + slice->vert_count;
+		for (uint32_t vi = slice->first_vert; vi < v_end; vi++) {
+			float ax = fabsf(verts[vi].pos[0]);
+			float py = verts[vi].pos[2] * sin_p - verts[vi].pos[1] * cos_p;
+			if (ax > max_abs_x) max_abs_x = ax;
+			if (py > max_proj_y) max_proj_y = py;
+		}
+		float avail_top = fmaxf(1.0f, by_scr - 2.0f);
+		float avail_half_w = fmaxf(1.0f, cx_scr - 2.0f);
+		float fit_top = avail_top / max_proj_y;
+		float fit_x = avail_half_w / max_abs_x;
+		if (fit_top < px_per_wu) px_per_wu = fit_top;
+		if (fit_x < px_per_wu) px_per_wu = fit_x;
+	}
 
 	for (uint32_t ii = 0; ii + 2u < slice->idx_count; ii += 3u) {
 		const nd_mesh3d_vert_t *v0 = &verts[ indices[slice->first_idx + ii + 0u] ];
