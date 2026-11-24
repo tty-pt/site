@@ -57,12 +57,20 @@ SITE_UI_DEPS = $(REPO_ROOT)/mods/common/ux/site_ui.c \
 	$(REPO_ROOT)/mods/common/ux/site_cx.h \
 	$(REPO_ROOT)/mods/common/ux/site_paths.c \
 	$(REPO_ROOT)/mods/common/ux/site_layout.cx.c \
-	$(REPO_ROOT)/mods/common/ux/site_forms.c \
-	$(REPO_ROOT)/mods/common/ux/site_media.c \
+	$(REPO_ROOT)/mods/common/ux/site_forms.cx.c \
+	$(REPO_ROOT)/mods/common/ux/site_media.cx.c \
 	$(REPO_ROOT)/mods/common/ux/site_page.c \
 	$(REPO_ROOT)/mods/common/ux/site_chrome.cx.c \
 	$(REPO_ROOT)/mods/common/ux/site_chrome.h \
 	$(REPO_ROOT)/mods/common/viewer_zoom.h
+
+LIST_UX_DEPS = $(REPO_ROOT)/mods/index/ux/list.c \
+	$(REPO_ROOT)/mods/index/ux/list_state.h \
+	$(REPO_ROOT)/mods/index/ux/list_query.c \
+	$(REPO_ROOT)/mods/index/ux/list_filters.cx.c \
+	$(REPO_ROOT)/mods/index/ux/list_layout.cx.c \
+	$(REPO_ROOT)/mods/index/ux/list_json.c \
+	$(REPO_ROOT)/mods/index/ux/list_render.cx.c
 
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_CC      ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)

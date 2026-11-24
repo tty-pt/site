@@ -2,45 +2,49 @@ static bud_node *ch_render_detail_header(const char *title, const char *owner)
 {
 	(void)title;
 	if (owner && owner[0]) {
-		return bud_tpl(
-		        "<div class='flex justify-end'>"
-		        "  <a href='/' class='text-xs text-muted'>By %s</a>"
-		        "</div>",
-		        owner);
+		return (
+			<div class="flex justify-end">
+				<a href="/" class="text-xs text-muted">{"By "}{owner}</a>
+			</div>
+		);
 	}
 	return NULL;
 }
 
 static bud_node *ch_render_gigs_header(void)
 {
-	return bud_tpl("<h3>Gigs</h3>");
+	return <h3>Gigs</h3>;
 }
 
 static bud_node *ch_render_gigs_empty(void)
 {
-	return bud_tpl("<p class='text-muted'>No gigs yet.</p>");
+	return <p class="text-muted">No gigs yet.</p>;
 }
 
 static bud_node *ch_render_gig_link(const char *title, const char *href)
 {
-	return bud_tpl("<a class='btn' href='%s'>%s</a>", href, title);
+	return <a class="btn" href={href}>{title}</a>;
 }
 
 static bud_node *ch_render_repertoire_header(void)
 {
-	return bud_tpl("<h3>Repertoire</h3>");
+	return <h3>Repertoire</h3>;
 }
 
 static bud_node *ch_render_members_section(
         const char *grp_id, const char *members, int is_owner,
         const char *owner, const char *csrf_token)
 {
+	char members_action[256];
+	snprintf(members_action, sizeof(members_action), "/api/grp/%s/members", grp_id);
+	const char *csrf = csrf_token ? csrf_token : "";
+
 	bud_node *frag = bud_fragment();
-	bud_append(frag, bud_tpl("<h3>Members</h3>"));
+	bud_append(frag, <h3>Members</h3>);
 	if (!members || !members[0]) {
-		bud_append(frag, bud_tpl("<p class='text-muted'>No members yet.</p>"));
+		bud_append(frag, <p class="text-muted">No members yet.</p>);
 	} else {
-		bud_node *list = bud_tpl("<ul class='list-disc pl-5'></ul>");
+		bud_node *list = <ul class="list-disc pl-5" />;
 		const char *p = members;
 		while (*p) {
 			while (*p == ' ' || *p == ',')
@@ -59,27 +63,26 @@ static bud_node *ch_render_members_section(
 			if (is_owner && owner && strcmp(m, owner) != 0) {
 				bud_append(
 				        list,
-				        bud_tpl(
-				                "<li class='flex items-center justify-between py-1'>"
-				                "  <span>%s</span>"
-				                "  <form method='post' action='/api/grp/%s/members' class='inline'>"
-				                "    <input type='hidden' name='csrf_token' value='%s'/>"
-				                "    <input type='hidden' name='action' value='del'/>"
-				                "    <input type='hidden' name='member' value='%s'/>"
-				                "    <button type='submit' class='btn btn-xs text-danger'>Dismiss</button>"
-				                "  </form>"
-				                "</li>",
-				                m, grp_id, csrf_token ? csrf_token : "", m));
+				        <li class="flex items-center justify-between py-1">
+				                <span>{m}</span>
+				                <form method="post" action={members_action} class="inline">
+				                        <input type="hidden" name="csrf_token" value={csrf} />
+				                        <input type="hidden" name="action" value="del" />
+				                        <input type="hidden" name="member" value={m} />
+				                        <button type="submit" class="btn btn-xs text-danger">Dismiss</button>
+				                </form>
+				        </li>);
 			} else if (owner && strcmp(m, owner) == 0) {
 				bud_append(
 				        list,
-				        bud_tpl(
-				                "<li class='flex items-center justify-between py-1'>"
-				                "  <span>%s <span class='text-xs text-muted'>(owner)</span></span>"
-				                "</li>",
-				                m));
+				        <li class="flex items-center justify-between py-1">
+				                <span>
+				                        {m}{" "}
+				                        <span class="text-xs text-muted">(owner)</span>
+				                </span>
+				        </li>);
 			} else {
-				bud_append(list, bud_tpl("<li class='py-1'>%s</li>", m));
+				bud_append(list, <li class="py-1">{m}</li>);
 			}
 			p = end;
 		}
@@ -88,28 +91,28 @@ static bud_node *ch_render_members_section(
 	if (is_owner) {
 		bud_append(
 		        frag,
-		        bud_tpl(
-		                "<form method='post' action='/api/grp/%s/members' class='mt-2 flex gap-2 items-center'>"
-		                "  <input type='hidden' name='csrf_token' value='%s'/>"
-		                "  <input type='hidden' name='action' value='add'/>"
-		                "  <input type='text' name='member' placeholder='Username' class='input input-sm' required/>"
-		                "  <button type='submit' class='btn btn-sm'>Add Member</button>"
-		                "</form>",
-		                grp_id, csrf_token ? csrf_token : ""));
+		        <form method="post" action={members_action} class="mt-2 flex gap-2 items-center">
+		                <input type="hidden" name="csrf_token" value={csrf} />
+		                <input type="hidden" name="action" value="add" />
+		                <input type="text" name="member" placeholder="Username" class="input input-sm" required />
+		                <button type="submit" class="btn btn-sm">Add Member</button>
+		        </form>);
 	}
 	return frag;
 }
 
 static bud_node *ch_render_repertoire_empty(void)
 {
-	return bud_tpl("<p class='text-muted'>No songs in repertoire yet.</p>");
+	return <p class="text-muted">No songs in repertoire yet.</p>;
 }
 
 static bud_node *ch_render_key_selector(int orig_key, int transpose)
 {
-	return bud_tpl(
-	        "<select name='key' class='text-xs p-1'>%node</select>",
-	        site_ui_render_key_options(transpose, orig_key, 0));
+	return (
+		<select name="key" class="text-xs p-1">
+			{site_ui_render_key_options(transpose, orig_key, 0)}
+		</select>
+	);
 }
 
 static bud_node *ch_render_song_row(
@@ -131,9 +134,12 @@ static bud_node *ch_render_song_row(
 		                         "btn btn-danger text-xs py-1 px-2")
 		               : NULL;
 
-		controls =
-		        bud_tpl("<div class='flex gap-2'>%node %node</div>",
-		                set_form, rem_form);
+		controls = (
+			<div class="flex gap-2">
+				{set_form}
+				{rem_form}
+			</div>
+		);
 	}
 
 	return site_ui_item_row(s_title, song_href, key_label, controls);
@@ -141,10 +147,11 @@ static bud_node *ch_render_song_row(
 
 static bud_node *ch_render_add_gig_link(const char *href)
 {
-	return bud_tpl(
-	        "<div class='mt-4'><a href='%s' class='btn'>\xe2\x9e\x95 add "
-	        "gig</a></div>",
-	        href);
+	return (
+		<div class="mt-4">
+			<a href={href} class="btn">{"\xe2\x9e\x95 add gig"}</a>
+		</div>
+	);
 }
 
 /* ── Data-driven section builders (WASM-safe: no site headers) ── */
@@ -198,9 +205,10 @@ static bud_node *ch_render_repertoire_section(
 	bud_append(frag, ch_render_repertoire_header());
 	if (is_owner)
 		bud_append(
-		        frag, bud_tpl("<p class='text-xs text-muted'>Built "
-		                      "from your gigs. Set a key to pin a "
-		                      "song; pinned songs stay.</p>"));
+		        frag,
+		        <p class="text-xs text-muted">
+		                Built from your gigs. Set a key to pin a song; pinned songs stay.
+		        </p>);
 	if (n_repertoire == 0) {
 		bud_append(frag, ch_render_repertoire_empty());
 	} else {
@@ -228,35 +236,20 @@ ch_render_add_song_section(const char *grp_id, const char *csrf_token)
 	const char *col_keys[LIST_MAX_COLS];
 	const char *col_labels[LIST_MAX_COLS];
 	hyle_bud_row_action_t act;
-	bud_node *frag, *hint, *form, *chrome, *table, *pag, *post;
+	bud_node *table = NULL, *pag = NULL;
 	int i;
 
-	frag = bud_fragment();
-	if (!frag)
-		return NULL;
 	snprintf(action, sizeof(action), "/grp/%s", grp_id);
 	snprintf(add_action, sizeof(add_action), "/api/grp/%s/songs", grp_id);
+	snprintf(sbh, sizeof(sbh), "/gig/add?grp=%s", grp_id);
 
 	for (i = 0; i < g_ch_pick_state.ncols && i < LIST_MAX_COLS; i++) {
 		col_keys[i] = g_ch_pick_state.cols[i].key;
 		col_labels[i] = g_ch_pick_state.cols[i].label;
 	}
 
-	if (list_has_query(&g_ch_pick_state)) {
-		hint = bud_tpl("<div class='text-xs text-muted'>Click a song "
-		               "to add it.</div>");
-		if (hint)
-			bud_append(frag, hint);
-	}
-
-	form = bud_tpl(
-	        "<form method='get' action='%s' class='list-form'></form>",
-	        action);
-	chrome = idx_filter_chrome(&g_ch_pick_state);
-	if (form && chrome)
-		bud_append(form, chrome);
-
-	if (form && list_has_query(&g_ch_pick_state)) {
+	int has_q = list_has_query(&g_ch_pick_state);
+	if (has_q) {
 		act.kind = HYLE_ROW_ACTION_SUBMIT;
 		act.css_class = NULL;
 		act.label = NULL;
@@ -274,22 +267,22 @@ ch_render_add_song_section(const char *grp_id, const char *csrf_token)
 		pag = hyle_bud_pagination(
 		        g_ch_pick_state.page, g_ch_pick_state.per_page,
 		        g_ch_pick_state.total, g_ch_pick_state.nids, "");
-		if (table)
-			bud_append(form, table);
-		if (pag)
-			bud_append(form, pag);
 	}
-	if (form)
-		bud_append(frag, form);
-	post =
-	        bud_tpl("<form id='ch-pick-post' method='post' action='%s'>"
-	                "  <input type='hidden' name='csrf_token' value='%s'/>"
-	                "</form>",
-	                add_action, csrf_token ? csrf_token : "");
-	if (post)
-		bud_append(frag, post);
 
-	snprintf(sbh, sizeof(sbh), "/gig/add?grp=%s", grp_id);
-	bud_append(frag, ch_render_add_gig_link(sbh));
-	return frag;
+	return (
+		<>
+			{has_q
+				? <div class="text-xs text-muted">Click a song to add it.</div>
+				: NULL}
+			<form method="get" action={action} class="list-form">
+				{idx_filter_chrome(&g_ch_pick_state)}
+				{table}
+				{pag}
+			</form>
+			<form id="ch-pick-post" method="post" action={add_action}>
+				<input type="hidden" name="csrf_token" value={csrf_token ? csrf_token : ""} />
+			</form>
+			{ch_render_add_gig_link(sbh)}
+		</>
+	);
 }

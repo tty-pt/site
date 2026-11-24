@@ -25,8 +25,8 @@ SITE_UI_WEAK void wasm_state_init(const char *json, int len, const bud_field_des
 
 #include "site_paths.c"
 #include "site_layout.cx.c"
-#include "site_forms.c"
-#include "site_media.c"
+#include "site_forms.cx.c"
+#include "site_media.cx.c"
 #include "list_bin.c"
 
 #ifndef __wasm__

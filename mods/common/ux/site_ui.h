@@ -6,6 +6,7 @@
 #endif
 
 #include "bud/bud.h"
+#include "bud/bud_reconcile.h"
 #include "../site_wasm_app.h"
 #include "site_chrome.h"
 #include "../../i18n/i18n_dict.h"

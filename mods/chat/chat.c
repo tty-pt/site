@@ -21,7 +21,6 @@
 #include "../common/common.h"
 #include "chat-types.h"
 #include "ux/chat_ui.h"
-#include "ux/chat_ui.c"
 
 #define AUREN_DEFAULT_HOST "127.0.0.1"
 #define AUREN_DEFAULT_PORT 4242

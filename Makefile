@@ -87,7 +87,7 @@ $(SITE_WASM_BUILD_DIR)/bud_reconcile.o: external/libbud/src/bud_reconcile.c exte
 $(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c mods/common/ux/site_layout.cx.c
+$(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c mods/common/ux/site_layout.cx.c mods/common/ux/site_forms.cx.c mods/common/ux/site_media.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/xylem.o: external/libxylem/src/libxylem-wasm.c
@@ -105,16 +105,16 @@ $(SITE_WASM_BUILD_DIR)/chrome.o: mods/site_chrome/ux/chrome.c mods/common/site_w
 $(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.cx.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.c mods/common/site_wasm_app.h
+$(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.cx.c mods/common/site_wasm_app.h mods/index/ux/list_filters.cx.c mods/index/ux/list_layout.cx.c mods/index/ux/list_render.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_fe.c mods/common/site_wasm_app.h
+$(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_fe.c mods/common/site_wasm_app.h mods/index/ux/list_filters.cx.c mods/index/ux/list_layout.cx.c mods/index/ux/list_render.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/chat.o: mods/chat/ux/chat_fe.c mods/common/site_wasm_app.h
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
-$(SITE_WASM_BUILD_DIR)/chat_ui.o: mods/chat/ux/chat_ui.c
+$(SITE_WASM_BUILD_DIR)/chat_ui.o: mods/chat/ux/chat_ui.cx.c
 	$(if $(filter 0,$(V)),@echo "  WASM    $@")
 	$(Q)mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_INCLUDES) -O2 -c $< -o $@
 $(SITE_WASM_BUILD_DIR)/music.o: external/libpitch/src/music.c

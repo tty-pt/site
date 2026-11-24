@@ -17,21 +17,17 @@ static bud_node *idx_list_layout(const list_state_t *state)
 		char sort_val[128];
 		snprintf(sort_val, sizeof(sort_val), "%s:%s",
 		         state->sort_field, state->sort_asc ? "asc" : "desc");
-		sort_hidden = bud_tpl(
-		        "<input type='hidden' name='sort' value='%s'/>",
-		        sort_val);
+		sort_hidden = <input type="hidden" name="sort" value={sort_val} />;
 	}
 
 	if (state->nids == 0) {
-		form = bud_tpl(
-		        "<form method='get' action='' class='list-form'>"
-		        "  %node"
-		        "  %node"
-		        "  %node"
-		        "</form>",
-		        filter_wrap,
-		        site_ui_empty_state(ui_t("No items found")),
-		        sort_hidden);
+		form = (
+			<form method="get" action="" class="list-form">
+				{filter_wrap}
+				{site_ui_empty_state(ui_t("No items found"))}
+				{sort_hidden}
+			</form>
+		);
 	} else {
 		const char *col_keys[LIST_MAX_COLS];
 		const char *col_labels[LIST_MAX_COLS];
@@ -62,14 +58,14 @@ static bud_node *idx_list_layout(const list_state_t *state)
 		        state->page, state->per_page, state->total,
 		        state->nids, state->query);
 
-		form = bud_tpl(
-		        "<form method='get' action='' class='list-form'>"
-		        "  %node"
-		        "  %node"
-		        "  %node"
-		        "  %node"
-		        "</form>",
-		        filter_wrap, table, pagination, sort_hidden);
+		form = (
+			<form method="get" action="" class="list-form">
+				{filter_wrap}
+				{table}
+				{pagination}
+				{sort_hidden}
+			</form>
+		);
 	}
 
 	snprintf(title, sizeof(title), "%ss", state->display_name);
@@ -78,15 +74,14 @@ static bud_node *idx_list_layout(const list_state_t *state)
 	site_ui_collection_path(state->module, path, sizeof(path));
 
 	snprintf(href_buf, sizeof(href_buf), "/%s/add", state->module);
-	add_btn = (state->username[0])
-	                  ? bud_tpl("<a href='%s' class='btn'>+ %s</a>",
-	                            href_buf, ui_t("Add"))
-	                  : NULL;
+	add_btn = state->username[0]
+	        ? <a href={href_buf} class="btn">{"+ "}{ui_t("Add")}</a>
+	        : NULL;
 
 	return site_ui_layout(
 	        ui_t(title), path, site_ui_module_icon(state->module),
 	        state->username, add_btn,
-	        bud_tpl("<div class='center'>%node</div>", form));
+	        <div class="center">{form}</div>);
 }
 
 static inline bud_node *idx_list_empty_layout(const list_state_t *state)

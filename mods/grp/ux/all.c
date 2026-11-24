@@ -15,4 +15,4 @@
 #include <pitch/music.h>
 #include "../../common/ux/site_music.h"
 
-#include "detail.c"
+#include "detail.cx.c"

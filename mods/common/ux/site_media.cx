@@ -1,15 +1,8 @@
 #ifndef SITE_MEDIA_C
 #define SITE_MEDIA_C
 
-#include "site_ui.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../viewer_zoom.h"
-#include "bud/bud_app.h"
-#include "bud/bud_jsx.h"
+#include "site_cx.h"
 
 void site_ui_zoom_style(int zoom, char *buf, size_t len)
 {
@@ -58,85 +51,43 @@ bud_node *site_ui_viewer_controls(
 	if (zoom_text_out)
 		*zoom_text_out = zoom_text_node;
 
-	if (on_zoom_change) {
-		return bud_tpl(
-		        "<div class='viewer-controls' "
-		        "data-detail-viewer-controls='%s' "
-		        "data-detail-viewer-save-url='%s'>"
-		        "  <label>%s"
-		        "    <input type='range' min='" VZ_STR(
-		                VIEWER_ZOOM_MIN) "' max='" VZ_STR(VIEWER_ZOOM_MAX) "' step='10' value='%d' data-detail-viewer-zoom='1' %bind %bind/>"
-		                                                                "  </label>"
-		                                                                "  <p class='text-xs text-muted' data-detail-viewer-zoom-label='1'>%node</p>"
-		                                                                "  <label>"
-		                                                                "    <input type='checkbox' checked data-detail-viewer-wrap='1'/>"
-		                                                                "    %s"
-		                                                                "  </label>"
-		                                                                "</div>",
-		        module ? module : "", save_url ? save_url : "", ui_t("Zoom"), zoom,
-		        "input", on_zoom_change, "change", on_zoom_change,
-		        zoom_text_node, ui_t("Wrap lines"));
-	}
-
-	return bud_tpl(
-	        "<div class='viewer-controls' data-detail-viewer-controls='%s' "
-	        "data-detail-viewer-save-url='%s'>"
-	        "  <label>%s"
-	        "    <input type='range' min='" VZ_STR(
-	                VIEWER_ZOOM_MIN) "' max='" VZ_STR(VIEWER_ZOOM_MAX) "' "
-	                                                                "step='"
-	                                                                "10' "
-	                                                                "value="
-	                                                                "'%d' "
-	                                                                "data-"
-	                                                                "detail"
-	                                                                "-viewe"
-	                                                                "r-"
-	                                                                "zoom='"
-	                                                                "1'/>"
-	                                                                "  "
-	                                                                "</"
-	                                                                "label>"
-	                                                                "  <p "
-	                                                                "class="
-	                                                                "'text-"
-	                                                                "xs "
-	                                                                "text-"
-	                                                                "muted'"
-	                                                                " data-"
-	                                                                "detail"
-	                                                                "-viewe"
-	                                                                "r-"
-	                                                                "zoom-"
-	                                                                "label="
-	                                                                "'1'>%"
-	                                                                "node</"
-	                                                                "p>"
-	                                                                "  "
-	                                                                "<label"
-	                                                                ">"
-	                                                                "    "
-	                                                                "<input"
-	                                                                " type="
-	                                                                "'check"
-	                                                                "box' "
-	                                                                "checke"
-	                                                                "d "
-	                                                                "data-"
-	                                                                "detail"
-	                                                                "-viewe"
-	                                                                "r-"
-	                                                                "wrap='"
-	                                                                "1'/>"
-	                                                                "    "
-	                                                                "%s"
-	                                                                "  "
-	                                                                "</"
-	                                                                "label>"
-	                                                                "</"
-	                                                                "div>",
-	        module ? module : "", save_url ? save_url : "", ui_t("Zoom"), zoom,
-	        zoom_text_node, ui_t("Wrap lines"));
+	return (
+		<div
+			class="viewer-controls"
+			data-detail-viewer-controls={module ? module : ""}
+			data-detail-viewer-save-url={save_url ? save_url : ""}
+		>
+			<label>
+				{ui_t("Zoom")}
+				{on_zoom_change
+					? <input
+						type="range"
+						min={VZ_STR(VIEWER_ZOOM_MIN)}
+						max={VZ_STR(VIEWER_ZOOM_MAX)}
+						step="10"
+						value={zoom}
+						data-detail-viewer-zoom="1"
+						onInput={on_zoom_change}
+						onChange={on_zoom_change}
+					/>
+					: <input
+						type="range"
+						min={VZ_STR(VIEWER_ZOOM_MIN)}
+						max={VZ_STR(VIEWER_ZOOM_MAX)}
+						step="10"
+						value={zoom}
+						data-detail-viewer-zoom="1"
+					/>}
+			</label>
+			<p class="text-xs text-muted" data-detail-viewer-zoom-label="1">
+				{zoom_text_node}
+			</p>
+			<label>
+				<input type="checkbox" checked data-detail-viewer-wrap="1" />
+				{ui_t("Wrap lines")}
+			</label>
+		</div>
+	);
 }
 
 bud_node *site_ui_checkbox(
@@ -146,23 +97,16 @@ bud_node *site_ui_checkbox(
 	if (!name || !label)
 		return NULL;
 
-	if (on_change) {
-		return bud_tpl(
-		        "<label>"
-		        "  <input type='checkbox' name='%s' value='1' %b "
-		        "%bind/>"
-		        "  %s"
-		        "</label>",
-		        name, checked ? "checked" : NULL, "change", on_change,
-		        label);
-	}
+	const char *chk = checked ? "" : NULL;
 
-	return bud_tpl(
-	        "<label>"
-	        "  <input type='checkbox' name='%s' value='1' %b/>"
-	        "  %s"
-	        "</label>",
-	        name, checked ? "checked" : NULL, label);
+	return (
+		<label>
+			{on_change
+				? <input type="checkbox" name={name} value="1" checked={chk} onChange={on_change} />
+				: <input type="checkbox" name={name} value="1" checked={chk} />}
+			{label}
+		</label>
+	);
 }
 
 static int is_yt_id_char(char c)
@@ -368,47 +312,44 @@ site_ui_render_media_slot(const char *yt, const char *audio, const char *pdf)
 	if (!has_btns && !has_audio)
 		return NULL;
 
-	bud_node *btn_row =
-	        has_btns
-	                ? bud_tpl("<div class='media-buttons flex flex-row "
-	                          "items-center justify-end gap-2'>"
-	                          "  %node"
-	                          "  %node"
-	                          "</div>",
-	                          has_yt ? bud_tpl("<a href='%s' "
-	                                           "target='_blank' "
-	                                           "rel='noopener noreferrer' "
-	                                           "class='btn btn-icon "
-	                                           "btn-sm' title='%s' "
-	                                           "aria-label='%s'>\xe2\x96\xb6</a>",
-	                                           yt_url, ui_t("Watch on YouTube"), ui_t("Watch on YouTube"))
-	                                 : NULL,
-	                          has_pdf ? bud_tpl("<a href='%s' "
-	                                            "target='_blank' "
-	                                            "rel='noopener noreferrer' "
-	                                            "class='btn btn-icon "
-	                                            "btn-sm' title='%s' "
-	                                            "aria-label='%s'>\xf0\x9f\x93\x84</a>",
-	                                            pdf_url, ui_t("View PDF"), ui_t("View PDF"))
-	                                  : NULL)
-	                : NULL;
+	const char *yt_lbl = has_yt ? ui_t("Watch on YouTube") : NULL;
+	const char *pdf_lbl = has_pdf ? ui_t("View PDF") : NULL;
 
-	bud_node *audio_slot =
-	        has_audio ? bud_tpl("<div class='audio-slot flex flex-col "
-	                            "gap-2 w-full'>"
-	                            "  <audio controls class='w-full'>"
-	                            "    <source src='%s' type='audio/mpeg'/>"
-	                            "  </audio>"
-	                            "</div>",
-	                            audio_url)
-	                  : NULL;
-
-	return bud_tpl(
-	        "<div class='media-slot flex flex-col gap-2 w-full'>"
-	        "  %node"
-	        "  %node"
-	        "</div>",
-	        btn_row, audio_slot);
+	return (
+		<div class="media-slot flex flex-col gap-2 w-full">
+			{has_btns
+				? <div class="media-buttons flex flex-row items-center justify-end gap-2">
+					{has_yt
+						? <a
+							href={yt_url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn btn-icon btn-sm"
+							title={yt_lbl}
+							aria-label={yt_lbl}
+						>{"\xe2\x96\xb6"}</a>
+						: NULL}
+					{has_pdf
+						? <a
+							href={pdf_url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn btn-icon btn-sm"
+							title={pdf_lbl}
+							aria-label={pdf_lbl}
+						>{"\xf0\x9f\x93\x84"}</a>
+						: NULL}
+				</div>
+				: NULL}
+			{has_audio
+				? <div class="audio-slot flex flex-col gap-2 w-full">
+					<audio controls class="w-full">
+						<source src={audio_url} type="audio/mpeg" />
+					</audio>
+				</div>
+				: NULL}
+		</div>
+	);
 }
 
 int site_ui_build_media_html(

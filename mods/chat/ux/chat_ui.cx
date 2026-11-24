@@ -1,0 +1,191 @@
+#ifndef CHAT_UI_C
+#define CHAT_UI_C
+
+#include "site_cx.h"
+#include "chat_ui.h"
+#include "../markdown.h"
+
+#define GENERATING_SENTINEL "[generating...]"
+
+static bud_node *render_msg_node(const chat_msg_t *msg)
+{
+	const char *role_class = "msg-user";
+	const char *role_label = "You";
+
+	if (msg->role == CHAT_ROLE_ASSISTANT) {
+		role_class = "msg-assistant";
+		role_label = "Auren Assistant";
+	} else if (msg->role == CHAT_ROLE_SYSTEM) {
+		role_class = "msg-system";
+		role_label = "System";
+	}
+
+	if (strcmp(msg->content, GENERATING_SENTINEL) == 0) {
+		return (
+			<div class="chat-message msg-assistant msg-generating">
+				<div class="msg-header">Auren Assistant</div>
+				<div class="msg-body">
+					<span class="thinking-spinner" />
+					{" Thinking..."}
+				</div>
+			</div>
+		);
+	}
+
+	char *html_content = chat_markdown_to_html(msg->content);
+	const char *rendered = html_content ? html_content : msg->content;
+
+	char cls[64];
+	snprintf(cls, sizeof(cls), "chat-message %s", role_class);
+
+	bud_node *node = (
+		<div class={cls}>
+			<div class="msg-header">{role_label}</div>
+			<div class="msg-body">{bud_raw(rendered)}</div>
+		</div>
+	);
+
+	if (html_content)
+		free(html_content);
+
+	return node;
+}
+
+bud_node *chat_ui_render_view(
+        const chat_session_t *session,
+        const chat_session_summary_t *summaries,
+        size_t summary_count,
+        const char *user,
+        const char *error_msg)
+{
+	(void)user;
+
+	/* 1. Build session list sidebar */
+	bud_node *session_items = NULL;
+	if (summary_count > 0) {
+		session_items = bud_fragment();
+		for (size_t i = 0; i < summary_count; i++) {
+			const chat_session_summary_t *s = &summaries[i];
+			int is_active = (session && strcmp(session->id, s->id) == 0);
+			const char *active_cls = is_active ? "session-item active" : "session-item";
+			char href[CHAT_ID_MAX + 16];
+			char del_action[CHAT_ID_MAX + 32];
+			char cnt_buf[32];
+			snprintf(href, sizeof(href), "/chat/%s", s->id);
+			snprintf(del_action, sizeof(del_action), "/chat/%s/delete", s->id);
+			snprintf(cnt_buf, sizeof(cnt_buf), "%zu", s->msg_count);
+
+			bud_append(
+			        session_items,
+			        <div class={active_cls}>
+			                <a href={href} class="session-link">
+			                        <span class="session-title">
+			                                {s->title[0] ? s->title : "New Conversation"}
+			                        </span>
+			                        <span class="session-count">{cnt_buf}</span>
+			                </a>
+			                <form
+			                        method="POST"
+			                        action={del_action}
+			                        class="session-del-form"
+			                        onsubmit="return confirm('Delete this conversation?');"
+			                >
+			                        <button type="submit" class="btn-del" title="Delete conversation">
+			                                {"\xc3\x97"}
+			                        </button>
+			                </form>
+			        </div>);
+		}
+	} else {
+		session_items = <p class="text-muted p-2">No active conversations.</p>;
+	}
+
+	bud_node *sidebar = (
+		<aside class="chat-sidebar">
+			<div class="sidebar-header">
+				<h2>Conversations</h2>
+				<form method="POST" action="/chat/new" class="m-0">
+					<button type="submit" class="btn btn-sm">+ New</button>
+				</form>
+			</div>
+			<div class="session-list">
+				{session_items}
+			</div>
+		</aside>
+	);
+
+	/* 2. Build message log */
+	bud_node *messages_node = NULL;
+	if (session && session->msg_count > 0) {
+		messages_node = bud_fragment();
+		for (size_t i = 0; i < session->msg_count; i++)
+			bud_append(messages_node, render_msg_node(&session->messages[i]));
+	} else {
+		messages_node = (
+			<div class="chat-welcome">
+				<h3>Auren Neural Chat</h3>
+				<p>Start a conversation powered by in-process local inference on the NeverDark stack.</p>
+			</div>
+		);
+	}
+
+	bud_node *err_node = (error_msg && error_msg[0])
+	        ? <div class="chat-error-banner">{error_msg}</div>
+	        : NULL;
+
+	/* 3. Build input form */
+	const char *sid = (session && session->id[0]) ? session->id : "";
+	char post_action[CHAT_ID_MAX + 32] = "/chat/send";
+	if (sid[0])
+		snprintf(post_action, sizeof(post_action), "/chat/%s/send", sid);
+
+	bud_node *input_form = (
+		<form method="POST" action={post_action} class="chat-input-row" data-ws-session={sid}>
+			<input
+				type="text"
+				name="prompt"
+				placeholder="Ask anything..."
+				required
+				autofocus
+				class="chat-input-field"
+				autocomplete="off"
+			/>
+			<button type="submit" class="btn">Send</button>
+		</form>
+	);
+
+	/* 4. Combine into full chat layout */
+	const char *current_title = (session && session->title[0]) ? session->title : "Conversation";
+	const char *current_model = (session && session->model[0]) ? session->model : "olmoe";
+	char ws_url[CHAT_ID_MAX + 16];
+	snprintf(ws_url, sizeof(ws_url), "/chat/%s", sid);
+
+	bud_node *main_chat = (
+		<div class="chat-main">
+			<div class="chat-header">
+				<div class="chat-title-group">
+					<span class="chat-title">{current_title}</span>
+					<span class="model-badge">{current_model}</span>
+				</div>
+			</div>
+			{err_node}
+			<div class="chat-messages">
+				{messages_node}
+			</div>
+			<div class="chat-footer">
+				{input_form}
+			</div>
+		</div>
+	);
+
+	return (
+		<div class="chat-wrapper" data-axil-ws={ws_url}>
+			<div class="chat-panel">
+				{sidebar}
+				{main_chat}
+			</div>
+		</div>
+	);
+}
+
+#endif

@@ -1,29 +1,22 @@
 #ifndef SITE_FORMS_C
 #define SITE_FORMS_C
 
-#include "site_ui.h"
-#include "bud/bud_app.h"
-
-#include <limits.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
-#include "bud/bud_jsx.h"
+#include "site_cx.h"
+
 bud_node *site_ui_form_actions(
         const char *cancel_href, const char *submit_label, bud_node *extra)
 {
 	const char *sub = submit_label ? ui_t(submit_label) : ui_t("Submit");
 	const char *canc = ui_t("Cancel");
-	return bud_tpl(
-	        "<div class='flex gap-2'>"
-	        "  <button type='submit' class='btn btn-primary'>%s</button>"
-	        "  %node"
-	        "  <a href='%s' class='btn btn-secondary'>%s</a>"
-	        "</div>",
-	        sub, extra,
-	        cancel_href ? cancel_href : "", canc);
+	return (
+		<div class="flex gap-2">
+			<button type="submit" class="btn btn-primary">{sub}</button>
+			{extra}
+			<a href={cancel_href ? cancel_href : ""} class="btn btn-secondary">{canc}</a>
+		</div>
+	);
 }
 
 bud_node *site_ui_delete_confirm(
@@ -37,20 +30,17 @@ bud_node *site_ui_delete_confirm(
 	site_ui_item_path(module, id, cancel_path, sizeof(cancel_path));
 
 	const char *prompt = ui_t("Are you sure you want to delete");
+	const char *label = (title && title[0]) ? title : (id ? id : "");
 
-	return bud_tpl(
-	        "<div class='center'>"
-	        "  <p>%s <strong>%s</strong>?</p>"
-	        "  <form method='POST' action='%s' "
-	        "enctype='multipart/form-data'>"
-	        "    %node"
-	        "    %node"
-	        "  </form>"
-	        "</div>",
-	        prompt,
-	        (title && title[0]) ? title : (id ? id : ""), action_path,
-	        csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL,
-	        site_ui_form_actions(cancel_path, "Delete", NULL));
+	return (
+		<div class="center">
+			<p>{prompt}{" "}<strong>{label}</strong>?</p>
+			<form method="POST" action={action_path} enctype="multipart/form-data">
+				{csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL}
+				{site_ui_form_actions(cancel_path, "Delete", NULL)}
+			</form>
+		</div>
+	);
 }
 
 bud_node *site_ui_add_form(
@@ -64,23 +54,21 @@ bud_node *site_ui_add_form(
 
 	const char *title_lbl = ui_t("Title:");
 
-	return bud_tpl(
-	        "%node"
-	        "<form action='%s' method='POST' enctype='multipart/form-data' "
-	        "class='flex flex-col gap-4'>"
-	        "  %node"
-	        "  <label>%s"
-	        "    <input name='title'/>"
-	        "  </label>"
-	        "  %node"
-	        "</form>",
-	        (has_error && error_msg)
-	                ? bud_tpl("<p class='text-error'>%s</p>", error_msg)
-	                : NULL,
-	        action,
-	        csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL,
-	        title_lbl,
-	        site_ui_form_actions(cancel_href, "Add", NULL));
+	return (
+		<>
+			{(has_error && error_msg)
+				? <p class="text-error">{error_msg}</p>
+				: NULL}
+			<form action={action} method="POST" enctype="multipart/form-data" class="flex flex-col gap-4">
+				{csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL}
+				<label>
+					{title_lbl}
+					<input name="title" />
+				</label>
+				{site_ui_form_actions(cancel_href, "Add", NULL)}
+			</form>
+		</>
+	);
 }
 
 /* ── Declarative Schema-Driven Form Builder ──────────────────────── */
@@ -171,11 +159,12 @@ bud_node *site_ui_row_replace_picker(
 	snprintf(n_str, sizeof(n_str), "%d", row_idx);
 	snprintf(form_id, sizeof(form_id), "pick-replace-post-%d", row_idx);
 
-	bud_node *extra = bud_fragment();
-	bud_append(extra, bud_hidden_input_int("n", row_idx));
-	if (back_href && back_href[0]) {
-		bud_append(extra, bud_hidden_input("back", back_href));
-	}
+	bud_node *extra = (
+		<>
+			{bud_hidden_input_int("n", row_idx)}
+			{(back_href && back_href[0]) ? bud_hidden_input("back", back_href) : NULL}
+		</>
+	);
 
 	snprintf(
 	        header_buf, sizeof(header_buf),
@@ -212,48 +201,39 @@ bud_node *site_ui_action_form(
         const char *action, const char *csrf_token, const char *method,
         bud_node *inputs, const char *btn_label, const char *btn_class)
 {
-	bud_node *form = bud_element("form");
-	if (!form)
-		return NULL;
-	bud_set_attr(form, "action", action ? action : "");
-	bud_set_attr(form, "method", (method && method[0]) ? method : "POST");
-	bud_set_attr(form, "class", "flex gap-1 items-center");
-	if (csrf_token)
-		bud_append(form, bud_hidden_input("csrf_token", csrf_token));
-	if (inputs)
-		bud_append(form, inputs);
-	if (btn_label && btn_label[0])
-		bud_append(
-		        form,
-		        bud_submit_btn(
-		                btn_label,
-		                btn_class ? btn_class : "btn text-xs py-1 px-2"));
-	return form;
+	return (
+		<form
+			action={action ? action : ""}
+			method={(method && method[0]) ? method : "POST"}
+			class="flex gap-1 items-center"
+		>
+			{csrf_token ? bud_hidden_input("csrf_token", csrf_token) : NULL}
+			{inputs}
+			{(btn_label && btn_label[0])
+				? bud_submit_btn(
+				        btn_label,
+				        btn_class ? btn_class : "btn text-xs py-1 px-2")
+				: NULL}
+		</form>
+	);
 }
 
 bud_node *site_ui_item_row(
         const char *title, const char *href, const char *subtitle,
         bud_node *action_controls)
 {
-	return bud_tpl(
-	        "<div class='flex justify-between items-center p-2 bg-surface "
-	        "rounded'>"
-	        "  <div class='flex flex-col'>"
-	        "    %node"
-	        "    %node"
-	        "  </div>"
-	        "  %node"
-	        "</div>",
-	        (href && href[0])
-	                ? bud_tpl("<a class='font-bold' href='%s'>%s</a>", href,
-	                          title ? title : "")
-	                : bud_tpl("<a class='font-bold'>%s</a>",
-	                          title ? title : ""),
-	        (subtitle && subtitle[0])
-	                ? bud_tpl("<span class='text-xs text-muted'>%s</span>",
-	                          subtitle)
-	                : NULL,
-	        action_controls);
+	const char *t = title ? title : "";
+	return (
+		<div class="flex justify-between items-center p-2 bg-surface rounded">
+			<div class="flex flex-col">
+				<a class="font-bold" href={(href && href[0]) ? href : NULL}>{t}</a>
+				{(subtitle && subtitle[0])
+					? <span class="text-xs text-muted">{subtitle}</span>
+					: NULL}
+			</div>
+			{action_controls}
+		</div>
+	);
 }
 
 /* ── Generic Row / Cell Picker Primitives (Entity Pattern) ───────── */
@@ -278,11 +258,13 @@ bud_node *site_ui_filter_bar(
         const site_ui_filter_spec_t *specs, int n_specs, const char *action,
         const char *current_q, const pick_view_t *pv)
 {
-	bud_node *bar = lx_n("form",
-	                     lx_attr("class", "hyle-filter-bar flex flex-wrap "
-	                                      "gap-2 items-center"),
-	                     lx_attr("method", "GET"),
-	                     lx_attr("action", action ? action : ""));
+	bud_node *bar = (
+		<form
+			class="hyle-filter-bar flex flex-wrap gap-2 items-center"
+			method="GET"
+			action={action ? action : ""}
+		/>
+	);
 
 	for (int i = 0; i < n_specs; i++) {
 		const site_ui_filter_spec_t *s = &specs[i];
@@ -292,16 +274,13 @@ bud_node *site_ui_filter_bar(
 		if (s->kind == FILTER_SEARCH) {
 			bud_append(
 			        bar,
-			        lx_n("input", lx_attr("type", "search"),
-			             lx_attr("name", s->field),
-			             lx_attr("placeholder",
-			                     s->label ? ui_t(s->label)
-			                              : ui_t("Search…")),
-			             lx_attr("class", "border rounded px-2 "
-			                              "py-1 text-sm"),
-			             (current_q && current_q[0])
-			                     ? lx_attr("value", current_q)
-			                     : lx_none()));
+			        <input
+			                type="search"
+			                name={s->field}
+			                placeholder={s->label ? ui_t(s->label) : ui_t("Search…")}
+			                class="border rounded px-2 py-1 text-sm"
+			                value={(current_q && current_q[0]) ? current_q : NULL}
+			        />);
 		} else if (
 		        s->kind == FILTER_SINGLE_DROPDOWN ||
 		        s->kind == FILTER_MULTISELECT)
@@ -333,9 +312,9 @@ bud_node *site_ui_filter_bar(
 
 	bud_append(
 	        bar,
-	        lx_n("button", lx_attr("type", "submit"),
-	             lx_attr("class", "btn btn-primary text-sm py-1 px-3"),
-	             lx_textf("%s", ui_t("Filter"))));
+	        <button type="submit" class="btn btn-primary text-sm py-1 px-3">
+	                {ui_t("Filter")}
+	        </button>);
 
 	return bar;
 }

@@ -341,9 +341,9 @@ static int handle_sb_add(int fd, char *body)
 	return axil_redirect(fd, location);
 }
 
-#include "ux/detail.c"
+#include "ux/detail.cx.c"
 #include "ux/add.c"
-#include "ux/edit.c"
+#include "ux/edit.cx.c"
 
 static const hyle_schema_desc_t sb_pick_song_schema[] = {
 	{ .key = "song_id",

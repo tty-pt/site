@@ -9,13 +9,18 @@ static bud_node *idx_content_lookup(
 
 	idx_query_param(qs, field, cur, sizeof(cur));
 
-	return bud_tpl(
-	        "<label class='filter-field filter-lookup'>%s:"
-	        "  <input type='text' name='%s' class='filter-lookup' "
-	        "placeholder='%s' value='%s'/>"
-	        "</label>",
-	        label ? ui_t(label) : "", field ? field : "",
-	        placeholder ? ui_t(placeholder) : "", cur);
+	return (
+		<label class="filter-field filter-lookup">
+			{label ? ui_t(label) : ""}:
+			<input
+				type="text"
+				name={field ? field : ""}
+				class="filter-lookup"
+				placeholder={placeholder ? ui_t(placeholder) : ""}
+				value={cur}
+			/>
+		</label>
+	);
 }
 
 static void
@@ -52,12 +57,17 @@ idx_mode_href(char *out, size_t n, const list_state_t *s, int custom)
 
 static bud_node *idx_omnisearch_field(const char *q)
 {
-	return bud_tpl(
-	        "<label class='hyle-omnisearch' data-hyle-omnisearch='1'>"
-	        "  <input type='search' name='q' placeholder='%s' "
-	        "aria-label='%s' value='%s'/>"
-	        "</label>",
-	        ui_t("Search…"), ui_t("Search everything"), q ? q : "");
+	return (
+		<label class="hyle-omnisearch" data-hyle-omnisearch="1">
+			<input
+				type="search"
+				name="q"
+				placeholder={ui_t("Search…")}
+				aria-label={ui_t("Search everything")}
+				value={q ? q : ""}
+			/>
+		</label>
+	);
 }
 
 static bud_node *idx_filter_bar(const list_state_t *state)
@@ -108,10 +118,6 @@ static bud_node *idx_filter_bar(const list_state_t *state)
 static bud_node *idx_filter_chrome(const list_state_t *state)
 {
 	bud_node *bar;
-	bud_node *wrap;
-	bud_node *actions;
-	bud_node *hidden;
-	bud_node *toggle;
 	char href[256];
 	const char *other;
 	const char *icon;
@@ -132,36 +138,23 @@ static bud_node *idx_filter_chrome(const list_state_t *state)
 		aria = ui_t("Search everything");
 	}
 	idx_mode_href(href, sizeof(href), state, omni ? 1 : 0);
-	toggle = bud_tpl(
-	        "<a class='hyle-mode-toggle' data-hyle-mode-toggle='%s' "
-	        "href='%s' aria-label='%s'>%s</a>",
-	        other, href, aria, icon);
 
-	wrap =
-	        bud_tpl("<div class='hyle-filter-bar' data-hyle-mode='%s'>"
-	                "  %node"
-	                "  %node"
-	                "</div>",
-	                omni ? "omni" : "custom", toggle, bar);
-	if (!wrap)
-		return bar;
-
-	if (state->custom) {
-		hidden = bud_tpl(
-		        "<input type='hidden' name='custom' value='1'/>");
-		if (hidden)
-			bud_append(wrap, hidden);
-	}
-	actions = bud_tpl(
-	        "<div class='hyle-filter-actions'>"
-	        "  %node"
-	        "  <button type='submit'>%s</button>"
-	        "</div>",
-	        omni ? NULL : bud_tpl("<button type='reset'>%s</button>", ui_t("Clear")),
-	        ui_t("Apply"));
-	if (actions)
-		bud_append(wrap, actions);
-	return wrap;
+	return (
+		<div class="hyle-filter-bar" data-hyle-mode={omni ? "omni" : "custom"}>
+			<a
+				class="hyle-mode-toggle"
+				data-hyle-mode-toggle={other}
+				href={href}
+				aria-label={aria}
+			>{icon}</a>
+			{bar}
+			{state->custom ? <input type="hidden" name="custom" value="1" /> : NULL}
+			<div class="hyle-filter-actions">
+				{omni ? NULL : <button type="reset">{ui_t("Clear")}</button>}
+				<button type="submit">{ui_t("Apply")}</button>
+			</div>
+		</div>
+	);
 }
 
 #endif

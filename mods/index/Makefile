@@ -12,12 +12,11 @@ WASM_TARGETS = $(WASM_PATH)/list.wasm $(WASM_PATH)/list_fe.wasm
 list-src = ux/list_fe.c $(HYLE_BUD_WASM_SRC) $(REPO_ROOT)/mods/common/site_wasm_app.c
 list-cflags = $(HYLE_BUD_WASM_CFLAGS) -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/mods/index/include
 
-LIST_UX_DEPS = ux/list.c ux/list_state.h ux/list_query.c ux/list_filters.c \
-	ux/list_layout.c ux/list_json.c ux/list_render.c
-
 SRC = index.c ux/home.cx
 
 include ../../build.mk
+
+$(WASM_PATH)/list.wasm: $(LIST_UX_DEPS)
 
 $(WASM_PATH)/list_fe.wasm: $(WASM_PATH)/list.wasm
 	ln -sf list.wasm $@
