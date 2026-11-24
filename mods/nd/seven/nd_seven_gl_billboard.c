@@ -1152,6 +1152,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			s_mesh3d_sorted[s_mesh3d_cursors[mid]++] = s_mesh3d_staging[i];
 	}
 
+	s_gl.terrain_pass_active = false;
 	glUseProgram(s_gl.mesh3d_pipe.prog);
 	gl_bind_csm(s_gl.mesh3d_pipe.uCloudShadowMap, s_gl.mesh3d_pipe.uCsm);
 	if (s_gl.fol_atlas_tex && s_gl.mesh3d_pipe.uBranchletTex >= 0) {
@@ -1377,6 +1378,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 {
 	if (!batch || count == 0) return;
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
+	s_gl.perf_bb_flushes++;
 
 	/* Build GPU Hi-Z depth pyramid once after terrain pass and before first non-trivial billboard batch */
 	if (!s_gl.gpu_hiz_built && s_gl.scene_ok && s_gl.hiz_valid &&
@@ -1452,6 +1454,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		sin_p = sinf(pitch_rad);
 	}
 
+	s_gl.terrain_pass_active = false;
 	glUseProgram(s_gl.bb_pipe.prog);
 	glUniform4f(s_gl.bb_pipe.uCamAngles, cos_y, sin_y, cos_p, sin_p);
 	glEnable(GL_DEPTH_TEST);
@@ -1599,6 +1602,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		if (last || core_n + need_core > MAX_BB_INSTANCES || other_n + need_other > MAX_BB_INSTANCES ||
 		    mesh3d_n + need_mesh3d > MAX_BB_INSTANCES) {
 			if (mesh3d_n > 0) {
+				s_gl.perf_mesh3d_count += mesh3d_n;
 				flush_mesh3d_staging(mesh3d_n, bb_sea_level, space_t,
 				                     mesh3d_any_sun_sh, mesh3d_any_lamb_sh);
 				mesh3d_n = 0;
@@ -1606,6 +1610,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				mesh3d_any_lamb_sh = false;
 			}
 			if (core_n > 0) {
+				s_gl.perf_bb_count += core_n;
 				glBufferData(GL_ARRAY_BUFFER, s_bb_instances, core_n * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
 				/* pass 0: core */
 				glUniform1i(s_gl.bb_pipe.uPass, 0);

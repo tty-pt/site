@@ -91,9 +91,9 @@ LIST_UX_DEPS = $(REPO_ROOT)/mods/index/ux/list.c \
 
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 WASI_SYSROOT ?=
-WASM_CFLAGS-PROFILE-release = -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
-WASM_CFLAGS-PROFILE-dev = -Os -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
-WASM_CFLAGS-PROFILE- = -Os -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE-release = -O3 -fno-math-errno -ffunction-sections -fdata-sections -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE-dev = -Os -fno-math-errno -ffunction-sections -fdata-sections -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
+WASM_CFLAGS-PROFILE- = -Os -fno-math-errno -ffunction-sections -fdata-sections -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
 WASM_CFLAGS-PROFILE-debug = -g -O0 -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
 WASM_CFLAGS  := ${WASM_CFLAGS-PROFILE-${PROFILE}}
 WASM_STRIP-PROFILE-debug =
@@ -141,8 +141,10 @@ $(WASM_BUILD_TARGETS): $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_D
 				fi; \
 			fi; \
 		done; \
+		opt_cflags=""; \
+		if [ "$(PROFILE)" != "debug" ]; then opt_cflags="${${@:$(WASM_PATH)/%.wasm=%}-opt-cflags}"; fi; \
 		common_key=$$(printf '%s' '$(WASM_COMMON_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
-		mod_key=$$(printf '%s' '${${@:$(WASM_PATH)/%.wasm=%}-cflags} $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
+		mod_key=$$(printf '%s' '${${@:$(WASM_PATH)/%.wasm=%}-cflags} $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS)' " $$opt_cflags" | cksum | cut -d' ' -f1); \
 		common_dir="$(WASM_OBJ_ROOT)/common_$$common_key"; \
 		mod_dir="$(WASM_OBJ_ROOT)/$(MOD_NAME)_${@:$(WASM_PATH)/%.wasm=%}_$$mod_key"; \
 		mkdir -p "$$common_dir" "$$mod_dir"; \
@@ -164,7 +166,7 @@ $(WASM_BUILD_TARGETS): $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_D
 			obj="$$mod_dir/$$tag.o"; \
 			dep="$$mod_dir/$$tag.d"; \
 			if tu_stale "$$src" "$$obj" "$$dep"; then \
-				$(WASI_CC) ${${@:$(WASM_PATH)/%.wasm=%}-cflags} $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MMD -MP -MF "$$dep.tmp.$$$$" -MT "$$obj" -c "$$src" -o "$$obj.tmp.$$$$" || { rm -f "$$dep.tmp.$$$$" "$$obj.tmp.$$$$" "$$deps_out"; exit 1; }; \
+				$(WASI_CC) ${${@:$(WASM_PATH)/%.wasm=%}-cflags} $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) $$opt_cflags -MMD -MP -MF "$$dep.tmp.$$$$" -MT "$$obj" -c "$$src" -o "$$obj.tmp.$$$$" || { rm -f "$$dep.tmp.$$$$" "$$obj.tmp.$$$$" "$$deps_out"; exit 1; }; \
 				mv -f "$$dep.tmp.$$$$" "$$dep" && mv -f "$$obj.tmp.$$$$" "$$obj"; \
 			fi; \
 			sed "1s|^[^:]*:|$@:|" "$$dep" >> "$$deps_out"; \
@@ -186,7 +188,7 @@ $(WASM_BUILD_TARGETS): $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_D
 		for f in $(REPO_ROOT)/external/libstele/wasm-allowed-imports.lst ${${@:$(WASM_PATH)/%.wasm=%}-wasm-allowed} $(EXTRA_WASM_ALLOWED); do \
 			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
 		done; \
-		$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) ${${@:$(WASM_PATH)/%.wasm=%}-ldflags} $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $$objs || exit 1; \
+		$(WASI_CC) $(WASM_CFLAGS) $$opt_cflags $(WASM_LDFLAGS) ${${@:$(WASM_PATH)/%.wasm=%}-ldflags} $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $$objs || exit 1; \
 		if [ "$(PROFILE)" != "debug" ] && command -v wasm-strip >/dev/null 2>&1; then \
 			wasm-strip $@; \
 		fi; \

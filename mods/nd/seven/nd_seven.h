@@ -262,4 +262,33 @@ float nd_seven_eval_trail_weight(float wx, float wy, float slope_mag);
 #define ND_SEVEN_BLEND_MAX_WEIGHT            128    /* Fixed-point blend weight denominator (0..128) */
 #define ND_SEVEN_MAX_COLOR_CHANNEL           255    /* 8-bit color channel maximum value */
 
+/* Frame-phase CPU profiler (zero overhead when disabled; updated in-place per frame) */
+typedef struct {
+	uint32_t enabled;
+	uint32_t frame_count;
+	float total_ms;
+	float sync_ms;
+	float macro_backdrop_ms;
+	float near_room_ms;
+	float botanical_ms;
+	float sort_batch_ms;
+	float scenery_ms;
+	float grass_water_clouds_ms;
+	float end_frame_ms;
+	uint32_t terrain_chunks;
+	uint32_t flora_probes;
+	uint32_t bb_flushes;
+	uint32_t mesh3d_count;
+	uint32_t bb_count;
+	uint32_t water_queued;
+	uint32_t cloud_queued;
+	uint32_t ar_populates;
+	uint32_t ar_active_chunks;
+} nd_seven_perf_t;
+
+void nd_seven_perf_set_enabled(int enabled);
+int  nd_seven_perf_get_enabled(void);
+const nd_seven_perf_t *nd_seven_perf_last(void);
+void nd_seven_perf_reset(void);
+
 #endif /* ND_SEVEN_H */

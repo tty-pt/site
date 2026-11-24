@@ -419,9 +419,6 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 		s_prev_seven_active = now_seven;
 	}
 
-	nd_seven_sync_origin(&client_state);
-	sync_room_objects(&client_state);
-
 	int map_on = nd_map_canvas_enabled(&client_state);
 
 	/* Phase 3 & 4: Simulation + Presentation at capped FPS */
@@ -431,6 +428,8 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 		float min_dt = (fps_cap == 30) ? 0.031f : (fps_cap == 60 ? 0.0155f : 0.0f);
 		s_render_accum_dt += (dt > 0.0f ? dt : 0.016f);
 		if (min_dt <= 0.0f || s_render_accum_dt >= min_dt || g_map_dirty) {
+			nd_seven_sync_origin(&client_state);
+			sync_room_objects(&client_state);
 			float sim_dt = (s_render_accum_dt > 0.0f) ? s_render_accum_dt : (dt > 0.0f ? dt : 0.016f);
 			s_render_accum_dt = 0.0f;
 			/* Run simulation tick at the capped frame rate */
@@ -462,11 +461,15 @@ ISO_EXPORT(void, wasm_tick, float dt, int width, int height)
 				s_last_map_tod = client_state.tod;
 			}
 		}
-	} else if (map_on && (g_map_dirty || (s_tick_counter % 3) == 0)) {
-		/* Server frames only mark the map dirty (nd_state_io.c); the
-		 * redraw happens here, never inside the websocket handler. */
-		nd_map_canvas_redraw(&client_state);
-		g_map_dirty = 0;
+	} else {
+		nd_seven_sync_origin(&client_state);
+		sync_room_objects(&client_state);
+		if (map_on && (g_map_dirty || (s_tick_counter % 3) == 0)) {
+			/* Server frames only mark the map dirty (nd_state_io.c); the
+			 * redraw happens here, never inside the websocket handler. */
+			nd_map_canvas_redraw(&client_state);
+			g_map_dirty = 0;
+		}
 	}
 
 	if (!now_seven && !map_on) {

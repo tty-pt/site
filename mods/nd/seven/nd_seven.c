@@ -1,5 +1,9 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <ttypt/lam.h>
 #include <ttypt/areole.h>
 #include <nd/seven-world.h>
@@ -4071,7 +4075,7 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 
 					uint8_t blk_w = (uint8_t)(bx1 - bx0);
 					uint8_t blk_h = (uint8_t)(by1 - by0);
-					if (b_frustum_state == 2 && tint_scenery != 0 &&
+					if (b_frustum_state >= 1 && tint_scenery != 0 &&
 					    blk_w >= 1u && blk_w <= 8u && blk_h >= 1u && blk_h <= 8u &&
 					    !overlaps_near && !straddles_near_flush &&
 					    nd_seven_rect_is_pure_virgin(st, (int16_t)world, base_rz,
@@ -4087,7 +4091,7 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 							    (((uint32_t)node->level & 3u) << 10) ^
 							    (((uint32_t)world & 3u) << 8)) & (BLOCK_BB_CACHE_SLOTS - 1u));
 						block_bb_cache_slot_t *slot = &s_block_bb_cache[slot_idx];
-						if (stl_wq_done(&slot->async_task)) {
+						if (atomic_load_explicit(&slot->async_task.state, memory_order_acquire) == (uint8_t)STL_WQ_DONE) {
 							if (slot->bx0 == bx0 && slot->by0 == by0 &&
 							    slot->bw == blk_w && slot->bh == blk_h &&
 							    slot->world == (int16_t)world && slot->rz == base_rz &&
@@ -4117,7 +4121,7 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 								slot->forget_seq = cur_forget_seq;
 								slot->valid = 1;
 							}
-							slot->async_task.state = STL_WQ_IDLE;
+							atomic_store_explicit(&slot->async_task.state, (uint8_t)STL_WQ_IDLE, memory_order_release);
 						}
 						if (stl_wq_busy(&slot->async_task)) {
 							continue;
@@ -4299,6 +4303,40 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 
 }
 
+static nd_seven_perf_t s_perf = {0};
+
+static double seven_perf_now_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+		return 0.0;
+	return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec * 1e-6;
+}
+
+void nd_seven_perf_set_enabled(int enabled)
+{
+	s_perf.enabled = enabled ? 1u : 0u;
+	nd_seven_ground_perf_set(enabled ? 1 : 0);
+}
+
+int nd_seven_perf_get_enabled(void)
+{
+	return (int)s_perf.enabled;
+}
+
+const nd_seven_perf_t *nd_seven_perf_last(void)
+{
+	return &s_perf;
+}
+
+void nd_seven_perf_reset(void)
+{
+	uint32_t en = s_perf.enabled;
+	memset(&s_perf, 0, sizeof(s_perf));
+	s_perf.enabled = en;
+	(void)nd_seven_ground_perf_take_probes();
+}
+
 void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 {
 	int w = (int)wu, h = (int)hu;
@@ -4308,7 +4346,23 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	if (w <= 0 || h <= 0)
 		return;
 
+	int perf_on = (s_perf.enabled != 0u);
+	double t0 = 0.0, t_sync = 0.0, t_macro = 0.0, t_near = 0.0;
+	double t_bot = 0.0, t_sort = 0.0, t_scen = 0.0, t_gwc = 0.0, t_end = 0.0;
+	size_t ar_pop_before = 0;
+	if (perf_on) {
+		(void)nd_seven_ground_perf_take_probes();
+		if (s_seven_chunk_sys) {
+			ar_stats_t as;
+			ar_system_get_stats(s_seven_chunk_sys, &as);
+			ar_pop_before = as.sampler_invocations_total;
+		}
+		t0 = seven_perf_now_ms();
+	}
+
 	nd_seven_sync_origin(st);
+	if (perf_on)
+		t_sync = seven_perf_now_ms();
 
 	if (!nd_seven_gl_pipelines_ready()) {
 		glViewport(0, 0, (GLsizei)w, (GLsizei)h);
@@ -4324,6 +4378,8 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 
 	/* Continuous 3D Terrain: Dispatch multi-scale leaf chunks from libareole (view_id = 0) */
 	seven_dispatch_macro_backdrop(w, h, st, zoom, eff_cam_dist);
+	if (perf_on)
+		t_macro = seven_perf_now_ms();
 
 	int map_w = (st && st->map_data.width > 0) ? (int)st->map_data.width : 7;
 	int map_h = (st && st->map_data.height > 0) ? (int)st->map_data.height : 7;
@@ -4353,19 +4409,64 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 	};
 
 	seven_emit_near_room_billboards(&ctx);
+	if (perf_on)
+		t_near = seven_perf_now_ms();
+
 	seven_emit_living_meadow(&ctx);
 	seven_emit_forest_floor_logs(&ctx);
 	seven_emit_medium_botanical(&ctx);
 	seven_emit_large_undergrowth(&ctx);
 	seven_emit_geobreak_props(&ctx);
+	if (perf_on)
+		t_bot = seven_perf_now_ms();
+
 	seven_emit_particles_and_sort_batch(&ctx);
+	if (perf_on)
+		t_sort = seven_perf_now_ms();
+
 	seven_emit_homogeneous_scenery(&ctx);
+	if (perf_on)
+		t_scen = seven_perf_now_ms();
 
 	/* GPU-instanced 3D grass & clover carpet, then water pass over submerged sprites, clouds, and present */
 	nd_seven_gl_flush_grass();
 	nd_seven_gl_flush_water();
 	nd_seven_gl_flush_clouds();
+	if (perf_on)
+		t_gwc = seven_perf_now_ms();
+
 	nd_seven_gl_end_frame();
+	if (perf_on) {
+		t_end = seven_perf_now_ms();
+		s_perf.frame_count++;
+		s_perf.total_ms              = (float)(t_end - t0);
+		s_perf.sync_ms               = (float)(t_sync - t0);
+		s_perf.macro_backdrop_ms     = (float)(t_macro - t_sync);
+		s_perf.near_room_ms          = (float)(t_near - t_macro);
+		s_perf.botanical_ms          = (float)(t_bot - t_near);
+		s_perf.sort_batch_ms         = (float)(t_sort - t_bot);
+		s_perf.scenery_ms            = (float)(t_scen - t_sort);
+		s_perf.grass_water_clouds_ms = (float)(t_gwc - t_scen);
+		s_perf.end_frame_ms          = (float)(t_end - t_gwc);
+		s_perf.flora_probes          = nd_seven_ground_perf_take_probes();
+		nd_seven_gl_get_perf_counters(&s_perf.terrain_chunks,
+		                              &s_perf.bb_flushes,
+		                              &s_perf.mesh3d_count,
+		                              &s_perf.bb_count);
+		nd_seven_gl_get_occlusion_stats(NULL, NULL, NULL,
+		                                &s_perf.water_queued,
+		                                &s_perf.cloud_queued);
+		if (s_seven_chunk_sys) {
+			ar_stats_t as;
+			ar_system_get_stats(s_seven_chunk_sys, &as);
+			s_perf.ar_populates = (as.sampler_invocations_total >= ar_pop_before)
+				? (uint32_t)(as.sampler_invocations_total - ar_pop_before) : 0u;
+			s_perf.ar_active_chunks = (uint32_t)as.active_chunks_last_frame;
+		} else {
+			s_perf.ar_populates = 0u;
+			s_perf.ar_active_chunks = 0u;
+		}
+	}
 }
 
 uint32_t nd_seven_last_mid_billboard_count(void)

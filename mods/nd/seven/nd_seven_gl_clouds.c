@@ -419,6 +419,7 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 	}
 
 	glActiveTexture(GL_TEXTURE0);
+	bool init_storage = false;
 	if (!s_gl.cluster_ssbo_valid) {
 		s_gl.cluster_light_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);
@@ -436,17 +437,28 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 
 		s_gl.cluster_ssbo_valid = 1;
 		need_list_upload = true;
+		init_storage = true;
 	}
 
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, ND_MAX_TOTAL_LIGHTS, 0,
-	             GL_RGBA, GL_UNSIGNED_BYTE, s_gl.cluster_light_tex_data);
+	if (init_storage) {
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, ND_MAX_TOTAL_LIGHTS, 0,
+		             GL_RGBA, GL_UNSIGNED_BYTE, s_gl.cluster_light_tex_data);
+	} else if (count > 0) {
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, (GLsizei)count,
+		                GL_RGBA, GL_UNSIGNED_BYTE, s_gl.cluster_light_tex_data);
+	}
 
 	if (need_list_upload) {
 		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)stride, ND_CLUSTER_TOTAL, 0,
-		             GL_RED, GL_UNSIGNED_BYTE, s_gl.cluster_list_tex_data);
+		if (init_storage) {
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)stride, ND_CLUSTER_TOTAL, 0,
+			             GL_RED, GL_UNSIGNED_BYTE, s_gl.cluster_list_tex_data);
+		} else {
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)stride, ND_CLUSTER_TOTAL,
+			                GL_RED, GL_UNSIGNED_BYTE, s_gl.cluster_list_tex_data);
+		}
 	}
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	glBindTexture(GL_TEXTURE_2D, 0);
@@ -501,6 +513,7 @@ void nd_seven_gl_flush_clouds(void)
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
+	s_gl.terrain_pass_active = false;
 	glUseProgram(s_gl.cloud_pipe.prog);
 	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap, s_gl.cloud_pipe.uCsm);
 

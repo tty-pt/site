@@ -303,6 +303,10 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples, bool try
 	/* Create Hi-Z downsample program using full-screen triangle vertex shader s_vs_csm */
 	if (!s_gl.hiz_downsample_prog) {
 		s_gl.hiz_downsample_prog = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_hiz_downsample());
+		s_gl.hiz_prog_ready = false;
+		s_gl.hiz_uDepthTex = -1;
+		s_gl.hiz_uTexelSize = -1;
+		s_gl.hiz_uUvScale = -1;
 	}
 	return true;
 }
@@ -351,11 +355,18 @@ bool gl_build_hiz_pyramid(void)
 {
 	if (!s_gl.scene_ok || !s_gl.hiz_valid || s_gl.hiz_levels <= 1) return false;
 	GLuint prog = s_gl.hiz_downsample_prog;
-	if (!prog || !glGetProgramParameter(prog, GL_COMPLETION_STATUS_KHR)) return false;
-	if (!glGetProgramParameter(prog, GL_LINK_STATUS)) {
-		glDeleteProgram(prog);
-		s_gl.hiz_downsample_prog = 0;
-		return false;
+	if (!prog) return false;
+	if (!s_gl.hiz_prog_ready) {
+		if (!glGetProgramParameter(prog, GL_COMPLETION_STATUS_KHR)) return false;
+		if (!glGetProgramParameter(prog, GL_LINK_STATUS)) {
+			glDeleteProgram(prog);
+			s_gl.hiz_downsample_prog = 0;
+			return false;
+		}
+		s_gl.hiz_uDepthTex  = glGetUniformLocation(prog, "uDepthTex", 9);
+		s_gl.hiz_uTexelSize = glGetUniformLocation(prog, "uTexelSize", 10);
+		s_gl.hiz_uUvScale   = glGetUniformLocation(prog, "uUvScale", 8);
+		s_gl.hiz_prog_ready = true;
 	}
 
 	/* Resolve active terrain depth sub-rect into s_gl.res_depth_tex (level 0) */
@@ -367,14 +378,16 @@ bool gl_build_hiz_pyramid(void)
 	                  0, 0, (GLint)rw, (GLint)rh,
 	                  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 
+	s_gl.terrain_pass_active = false;
 	glUseProgram(prog);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-	GLint loc_tex = glGetUniformLocation(prog, "uDepthTex", 9);
-	GLint loc_ts  = glGetUniformLocation(prog, "uTexelSize", 10);
-	GLint loc_uvs = glGetUniformLocation(prog, "uUvScale", 8);
+	GLint loc_tex = s_gl.hiz_uDepthTex;
+	GLint loc_ts  = s_gl.hiz_uTexelSize;
+	GLint loc_uvs = s_gl.hiz_uUvScale;
+	glUniform1i(loc_tex, 0);
 
 	float scene_uv_x = (s_gl.scene_w > 0) ? ((float)rw / (float)s_gl.scene_w) : 1.0f;
 	float scene_uv_y = (s_gl.scene_h > 0) ? ((float)rh / (float)s_gl.scene_h) : 1.0f;
@@ -389,12 +402,11 @@ bool gl_build_hiz_pyramid(void)
 		glViewport(0, 0, (GLsizei)lw, (GLsizei)lh);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, s_gl.hiz_mip_tex[level - 1]);
-		glUniform1i(loc_tex, 0);
 		glUniform2f(loc_ts, 1.0f / (float)sw, 1.0f / (float)sh);
 		if (loc_uvs >= 0) {
 			if (level == 1)
 				glUniform2f(loc_uvs, scene_uv_x, scene_uv_y);
-			else
+			else if (level == 2)
 				glUniform2f(loc_uvs, 1.0f, 1.0f);
 		}
 		glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -708,6 +720,7 @@ void nd_seven_gl_end_frame(void)
 	bool run_post = (s_gl.pipelines_ready && s_gl.post_pipe.prog && s_gl.post_targets_ok);
 	gl_resolve_scene(run_post ? (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) : GL_COLOR_BUFFER_BIT);
 	if (run_post) {
+		s_gl.terrain_pass_active = false;
 		glDisableVertexAttribArray(0);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -865,6 +878,17 @@ void nd_seven_gl_get_occlusion_stats(uint32_t *out_water_culled,
 	if (out_billboard_culled) *out_billboard_culled = s_gl.billboard_culled_hiz;
 	if (out_water_queued) *out_water_queued = s_gl.water_count;
 	if (out_cloud_queued) *out_cloud_queued = s_gl.cloud_count;
+}
+
+void nd_seven_gl_get_perf_counters(uint32_t *out_terrain_chunks,
+                                   uint32_t *out_bb_flushes,
+                                   uint32_t *out_mesh3d_count,
+                                   uint32_t *out_bb_count)
+{
+	if (out_terrain_chunks) *out_terrain_chunks = s_gl.perf_terrain_chunks;
+	if (out_bb_flushes)     *out_bb_flushes     = s_gl.perf_bb_flushes;
+	if (out_mesh3d_count)   *out_mesh3d_count   = s_gl.perf_mesh3d_count;
+	if (out_bb_count)       *out_bb_count       = s_gl.perf_bb_count;
 }
 
 bool nd_seven_gl_is_gpu_hiz_active(void)
@@ -1156,6 +1180,7 @@ void gl_render_cloud_shadow_map(void)
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	s_gl.terrain_pass_active = false;
 	glUseProgram(s_gl.csm_pipe.prog);
 	glUniform3f(s_gl.csm_pipe.uCsm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
 	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);

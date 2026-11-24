@@ -764,11 +764,13 @@ int nd_seven_action_execute(const nd_client_state_t *st, char *out, size_t sz)
 
 /* --- Shared Spatial Entity Resolver -------------------------------------- */
 
-static nd_spatial_tile_t s_spatial_cache[3][3];
+static nd_spatial_tile_t s_spatial_cache[8][8];
 
 void nd_spatial_resolver_invalidate(void)
 {
-	memset(s_spatial_cache, 0, sizeof(s_spatial_cache));
+	for (int j = 0; j < 8; j++)
+		for (int i = 0; i < 8; i++)
+			s_spatial_cache[j][i].valid = 0;
 }
 
 int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spatial_tile_t *out)
@@ -786,8 +788,9 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 	if (!kind)
 		return 0;
 
-	int ci = ti + 1, cj = tj + 1;
-	if (ci >= 0 && ci < 3 && cj >= 0 && cj < 3 && (ti != 0 || tj != 0)) {
+	unsigned ci = (unsigned)(uint16_t)pos[0] & 7u;
+	unsigned cj = (unsigned)(uint16_t)pos[1] & 7u;
+	if (ti != 0 || tj != 0) {
 		if (s_spatial_cache[cj][ci].valid &&
 		    memcmp(s_spatial_cache[cj][ci].pos, pos, sizeof(pos)) == 0) {
 			*out = s_spatial_cache[cj][ci];
@@ -978,7 +981,7 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 		}
 	}
 
-	if (ci >= 0 && ci < 3 && cj >= 0 && cj < 3 && (ti != 0 || tj != 0)) {
+	if (ti != 0 || tj != 0) {
 		s_spatial_cache[cj][ci] = *out;
 	}
 	return 1;

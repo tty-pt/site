@@ -144,4 +144,7 @@ void nd_seven_eval_alt_profile(float cam_dist, float detail_scale,
                                float base_res_scale, int cloud_quality,
                                nd_seven_alt_profile_t *out);
 
+void nd_seven_ground_perf_set(int enabled);
+uint32_t nd_seven_ground_perf_take_probes(void);
+
 #endif /* ND_SEVEN_GROUND_H */

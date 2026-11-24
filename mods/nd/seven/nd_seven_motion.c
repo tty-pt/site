@@ -396,10 +396,24 @@ static void known_tile_remember(const int16_t pos[4], const ndw_tile_t *t)
 	target->valid = 1;
 }
 
+static nd_map_data_t s_last_ingested_map;
+static uint32_t s_last_ingested_room_ref;
+static size_t s_last_ingested_entity_count;
+static int s_last_ingested_valid;
+
 static void known_tile_ingest_map(const nd_client_state_t *st)
 {
 	if (!st || st->map_data.width == 0 || st->map_data.height == 0)
 		return;
+	if (s_last_ingested_valid &&
+	    s_last_ingested_room_ref == st->room.ref &&
+	    s_last_ingested_entity_count == st->entity_count &&
+	    memcmp(&s_last_ingested_map, &st->map_data, sizeof(s_last_ingested_map)) == 0)
+		return;
+	s_last_ingested_map = st->map_data;
+	s_last_ingested_room_ref = st->room.ref;
+	s_last_ingested_entity_count = st->entity_count;
+	s_last_ingested_valid = 1;
 	int w = (int)st->map_data.width;
 	int h = (int)st->map_data.height;
 	for (int row = 0; row < h; row++) {
@@ -705,6 +719,7 @@ void nd_seven_forget(void)
 	memset(s_centre, 0, sizeof(s_centre));
 	memset(s_centre_next, 0, sizeof(s_centre_next));
 	memset(s_known_tiles, 0, sizeof(s_known_tiles));
+	s_last_ingested_valid = 0;
 	s_known_seq = 0;
 	s_known_min_x = 32767;
 	s_known_max_x = -32768;

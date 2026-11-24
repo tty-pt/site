@@ -536,8 +536,26 @@ void nd_seven_ground_cache_forget(void)
 	}
 }
 
+static int s_ground_perf_enabled = 0;
+static uint32_t s_ground_perf_probes = 0;
+
+void nd_seven_ground_perf_set(int enabled)
+{
+	s_ground_perf_enabled = enabled ? 1 : 0;
+	s_ground_perf_probes = 0;
+}
+
+uint32_t nd_seven_ground_perf_take_probes(void)
+{
+	uint32_t n = s_ground_perf_probes;
+	s_ground_perf_probes = 0;
+	return n;
+}
+
 int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 {
+	if (s_ground_perf_enabled)
+		s_ground_perf_probes++;
 	uint16_t world = (uint16_t)nd_seven_get_world();
 	ar_system_t *cs = nd_seven_get_chunk_sys();
 	if (cs) {

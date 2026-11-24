@@ -64,6 +64,7 @@
 #define GL_TOTAL_INDICES_HI (GL_GRID_QUADS_HI * GL_GRID_QUADS_HI * 6)
 
 #define MAX_CHUNK_TEXTURES 384
+#define CHUNK_CACHE_HASH_SIZE 1024
 #define MAX_WATER_QUEUE_BASE 192
 #define MAX_BB_VERTS 65536
 #define MAX_BB_OTHER_VERTS 32768
@@ -596,7 +597,20 @@ typedef struct {
 	uint32_t atlas_ver;
 
 	gl_chunk_tex_t chunk_cache[MAX_CHUNK_TEXTURES];
+	uint16_t chunk_hash[CHUNK_CACHE_HASH_SIZE]; /* 0 = empty, slot_idx + 1 = occupied */
+	uint32_t chunk_cache_used;
 	uint32_t frame_count;
+
+	/* Hoisted terrain pass state (reset on begin_frame and non-terrain passes) */
+	bool terrain_pass_active;
+	bool terrain_pass_has_body;
+	bool terrain_pass_has_sea;
+	uint16_t terrain_pass_world;
+	nd_planet_def_t terrain_pass_pdef;
+	float terrain_pass_rel_center[3];
+	float terrain_pass_rot_mat4[16];
+	float terrain_pass_sea_level;
+	GLuint terrain_pass_vbo;
 
 	gl_water_chunk_t water_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t water_count;
@@ -607,6 +621,12 @@ typedef struct {
 	uint32_t water_culled_occ2d;
 	uint32_t cloud_culled_hiz;
 	uint32_t billboard_culled_hiz;
+
+	/* Per-frame render counters for P0 profiler */
+	uint32_t perf_terrain_chunks;
+	uint32_t perf_bb_flushes;
+	uint32_t perf_mesh3d_count;
+	uint32_t perf_bb_count;
 
 	float cur_mvp[16];
 	ar_frustum_t cur_frustum;
@@ -664,6 +684,10 @@ typedef struct {
 	bool hiz_failed;
 	bool gpu_hiz_built;
 	GLuint hiz_downsample_prog;
+	bool hiz_prog_ready;
+	GLint hiz_uDepthTex;
+	GLint hiz_uTexelSize;
+	GLint hiz_uUvScale;
 
 	/* GPU Indirect Draw Command Buffer & Stats */
 	nd_gpu_draw_elements_indirect_cmd_t indirect_cmds[ND_GPU_INDIRECT_MAX];

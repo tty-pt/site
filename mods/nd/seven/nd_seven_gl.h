@@ -519,6 +519,11 @@ const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_vs_terrain_shadow(void);
 const char *nd_seven_gl_fs_terrain_shadow(void);
 
+void     nd_seven_gl_get_perf_counters(uint32_t *out_terrain_chunks,
+                                       uint32_t *out_bb_flushes,
+                                       uint32_t *out_mesh3d_count,
+                                       uint32_t *out_bb_count);
+
 #ifdef __cplusplus
 }
 #endif

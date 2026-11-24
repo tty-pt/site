@@ -35,6 +35,9 @@ function makeGl(log) {
 		},
 		getUniformLocation: (p, name) => linked.has(p) ? { prog: p.n, name } : null,
 		uniform1i: (loc, v) => log.push(['uniform1i', loc ? loc.prog : 0, loc ? loc.name : '', v]),
+		uniform2fv: (loc, arr) => log.push(['uniform2fv', loc ? loc.name : '', arr.length]),
+		uniform3fv: (loc, arr) => log.push(['uniform3fv', loc ? loc.name : '', arr.length]),
+		uniformMatrix4fv: (loc, trans, arr) => log.push(['uniformMatrix4fv', loc ? loc.name : '', !!trans, arr.length]),
 		drawArraysInstanced: (m, f, c, ic) => {
 			if (!activeProgram || !linked.has(activeProgram)) throw new Error('drawArraysInstanced: current program is not linked');
 			log.push(['drawArraysInstanced', activeProgram.n, ic]);
@@ -85,8 +88,9 @@ const glA = makeGl(log);
 const glB = makeGl(log);
 let current = glA;
 let canvasA = { isConnected: true, getContext: () => glA };
-let canvasB = { isConnected: true, getContext: () => glB };
+let canvasB = { isConnected: false, getContext: () => glB };
 let canvas = canvasA;
+const swapCanvas = (next) => { canvas.isConnected = false; next.isConnected = true; canvas = next; };
 globalThis.document = { querySelector: () => canvas, querySelectorAll: () => [canvas] };
 globalThis.requestAnimationFrame = () => {};
 const { createWebGlBridge } = await import('../../external/liblamina/htdocs/webgl-cap.js');
@@ -135,7 +139,7 @@ imp.glFramebufferTexture2D(GL_FRAMEBUFFER, DEPTH, 0x0DE1, tex, 0);
 
 // Context swap: every renderbuffer/framebuffer and its attachments are recreated on the new context.
 log.length = 0;
-canvas = canvasB;
+swapCanvas(canvasB);
 imp.glActiveTexture(0x84C0);
 const restored = log.slice();
 assert.ok(restored.some((e) => e[0] === 'rbStorageMS' && e[1] === 4 && e[3] === 320), 'renderbuffer storage restored');
@@ -168,7 +172,7 @@ const r8Tex = imp.glCreateTexture();
 imp.glBindTexture(0x0DE1, r8Tex);
 imp.glTexImage2D(0x0DE1, 0, 0x8229, 4, 16, 0, 0x1903, 0x1401, 16384 - 64);
 log.length = 0;
-canvas = canvasA;
+swapCanvas(canvasA);
 imp.glActiveTexture(0x84C0);
 const mipRestored = log.filter((e) => e[0] === 'texImage2D');
 assert.ok(mipRestored.some((e) => e[2] === 0 && e[4] === 8 && e[5] === 8 && e[6] === 256), 'mip level 0 restored');
@@ -184,7 +188,7 @@ imp.glPixelStorei(0x0CF5, 1);
 imp.glTexImage2D(0x0DE1, 0, 0x822E, 49, 49, 0, 0x8D94, 0x1402, 256);
 imp.glPixelStorei(0x0CF5, 4);
 log.length = 0;
-canvas = canvasB;
+swapCanvas(canvasB);
 imp.glActiveTexture(0x84C0);
 const r16Restored = log.filter((e) => e[0] === 'texImage2D' && e[4] === 49 && e[5] === 49);
 assert.equal(r16Restored.length, 1, '49x49 GL_R16I texture replayed');
@@ -216,7 +220,7 @@ assert.ok(uLoc > 0, 'uniform location allocated');
 imp.glUseProgram(prog);
 imp.glDrawArraysInstanced(0x0005, 0, 4, 3);
 log.length = 0;
-canvas = canvasA;
+swapCanvas(canvasA);
 imp.glDrawArraysInstanced(0x0005, 0, 4, 3);
 imp.glUniform1i(uLoc, 7);
 assert.ok(log.some((e) => e[0] === 'drawArraysInstanced' && e[2] === 3), 'glDrawArraysInstanced executes cleanly after context swap');
@@ -244,7 +248,7 @@ imp.glTexParameteri(0x0DE1, 0x2801, 0x2600);
 imp.glActiveTexture(0x84C1);
 imp.glTexParameteri(0x0DE1, 0x2801, 0x2601);
 log.length = 0;
-canvas = canvasB;
+swapCanvas(canvasB);
 imp.glViewport(0, 0, 800, 600);
 assert.ok(log.some((e) => e[0] === 'texImage2D' && e[4] === 4 && e[5] === 4), 'unit 0 texture metadata preserved across unit 12 unbind');
 assert.ok(log.some((e) => e[0] === 'texImage2D' && e[4] === 8 && e[5] === 8), 'unit 1 texture metadata preserved across unit 12 unbind');
@@ -275,3 +279,35 @@ assert.equal(nonSevenImp.glCreateTexture(), 0, 'DOM bridge stays unbound when on
 assert.equal(mapCtxRequested, false, 'DOM bridge must never request WebGL context on plain [data-bud-canvas]');
 globalThis.document = prevDoc;
 console.log('PASS: DOM WebGL bridge never hijacks plain [data-bud-canvas] in non-Seven areas');
+
+// Optional WebGL bridge profiler counters & P1 fast-path getGl() (0 DOM queries steady-state).
+assert.equal(bridge.perf.isEnabled(), false, 'bridge perf profiler disabled by default');
+bridge.perf.reset();
+imp.glUniform1i(uLoc, 1);
+assert.equal(bridge.perf.snapshot().uniformUploads, 0, 'disabled profiler records 0 uniformUploads');
+bridge.perf.enable(true);
+bridge.perf.reset();
+imp.glGetUniformLocation(prog, uPtr, uLen);
+imp.glUniform1i(uLoc, 2);
+imp.glUniformMatrix4fv(uLoc, 1, 0, 256);
+imp.glBufferData(0x8892, 64, 16, 0x88E8);
+imp.glDrawArraysInstanced(0x0005, 0, 4, 2);
+imp.glBlitFramebuffer(0, 0, 10, 10, 0, 0, 10, 10, 0x4000, 0x2600);
+const snap = bridge.perf.snapshot();
+assert.equal(snap.enabled, true, 'profiler reports enabled');
+assert.equal(snap.getUniformLocationCalls, 1, 'counts glGetUniformLocation calls');
+assert.equal(snap.uniformUploads, 2, 'counts uniform uploads (1i + Matrix4fv)');
+assert.equal(snap.bufferUploads, 1, 'counts buffer uploads');
+assert.equal(snap.draws, 1, 'counts draw calls');
+assert.equal(snap.blits, 1, 'counts framebuffer blits');
+assert.ok(snap.getGlCalls >= 6, 'counts getGl calls');
+assert.equal(snap.domQueries, 0, 'steady-state getGl() performs 0 DOM queries');
+assert.ok(snap.uniformLocsLen >= 2, 'reports uniformLocs table length');
+assert.ok(log.some((e) => e[0] === 'uniformMatrix4fv' && e[3] === 16), 'glUniformMatrix4fv forwards 16 floats via cached view');
+// bridge.mount() forces a canvas re-check even if the old canvas remains connected.
+canvasA.isConnected = true;
+canvas = canvasA;
+bridge.mount();
+assert.equal(bridge.perf.snapshot().domQueries, 1, 'mount() triggers exactly 1 DOM query to detect canvas replacement');
+bridge.perf.enable(false);
+console.log('PASS: WebGL bridge fast-path getGl() (0 DOM queries steady-state) & profiler counters verified');

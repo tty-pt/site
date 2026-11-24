@@ -14,6 +14,8 @@ globalScope.registerWasmCapability = (namespace, factory) => {
 };
 
 const isWorkerContext = typeof WorkerGlobalScope !== 'undefined' && globalScope instanceof WorkerGlobalScope;
+const TEXT_DECODER_UTF8 = new TextDecoder('utf-8');
+const TEXT_ENCODER = new TextEncoder();
 
 let s_bridgeFactory = null;
 const s_wasmModuleCache = new Map();
@@ -197,14 +199,14 @@ export class SteleWasmClient {
 		const mem = memory || this.memory;
 		if (!ptr || len <= 0 || !mem) return '';
 		const bytes = new Uint8Array(mem.buffer, ptr, len);
-		return new TextDecoder('utf-8').decode(bytes);
+		return TEXT_DECODER_UTF8.decode(bytes);
 	}
 
 	encodeString(instance, memory, str) {
 		const inst = instance || this.instance;
 		const mem = memory || this.memory;
 		if (!inst?.exports.malloc || !mem) return [0, 0];
-		const encoded = new TextEncoder().encode(str);
+		const encoded = TEXT_ENCODER.encode(str);
 		const ptr = inst.exports.malloc(encoded.length + 1);
 		const view = new Uint8Array(mem.buffer, ptr, encoded.length + 1);
 		view.set(encoded);
@@ -445,7 +447,7 @@ export class SteleWasmClient {
 						? comp.instance.exports.malloc(payloadBytes.length)
 						: 0;
 					if (tBuf) {
-						new Uint8Array(comp.memory.buffer, tBuf, topic.length + 1).set(new TextEncoder().encode(topic + '\0'));
+						new Uint8Array(comp.memory.buffer, tBuf, topic.length + 1).set(TEXT_ENCODER.encode(topic + '\0'));
 						if (pBuf && payloadBytes.length > 0) {
 							new Uint8Array(comp.memory.buffer, pBuf, payloadBytes.length).set(payloadBytes);
 						}
@@ -515,6 +517,24 @@ export class SteleWasmClient {
 			stele_host_spawn_worker: hostSpawnWorker
 		};
 
+		const getWasm = () => {
+			return this.slotInstances.get(slot)?.instance?.exports || (this.instance ? this.instance.exports : null);
+		};
+		const wasiTarget = {
+			clock_time_get: (clockId, _precision, outPtr) => {
+				const mem = getWasm()?.memory || this.sharedMemory;
+				if (!mem) return 0;
+				const ms = (clockId === 0)
+					? Date.now()
+					: (typeof performance !== 'undefined' ? performance.now() : Date.now());
+				const wholeMs = Math.floor(ms);
+				const fracNs = Math.round((ms - wholeMs) * 1e6);
+				const ns = BigInt(wholeMs >= 0 ? wholeMs : 0) * 1000000n + BigInt(fracNs >= 0 ? fracNs : 0);
+				new DataView(mem.buffer).setBigUint64(outPtr >>> 0, ns, true);
+				return 0;
+			}
+		};
+
 		const imports = {
 			env: new Proxy({
 				memory: this.sharedMemory,
@@ -529,7 +549,9 @@ export class SteleWasmClient {
 			}),
 			stele: steleImports,
 			stl: steleImports,
-			wasi_snapshot_preview1: new Proxy({}, { get: () => () => 0 })
+			wasi_snapshot_preview1: new Proxy(wasiTarget, {
+				get: (target, prop) => (prop in target ? target[prop] : () => 0)
+			})
 		};
 
 		// 1. Give the active slot bridge a chance to provide its own namespace
@@ -542,9 +564,6 @@ export class SteleWasmClient {
 		}
 
 		// 2. Dynamically satisfy any declared external capability imports
-		const getWasm = () => {
-			return this.slotInstances.get(slot)?.instance?.exports || (this.instance ? this.instance.exports : null);
-		};
 		const hasDoc = typeof document !== 'undefined';
 		const slotRoot = this.slotBridges.get(slot)?.root || (hasDoc
 			? (slot === 0 ? (document.querySelector?.('[data-slot="0"]') || document.getElementById?.('chrome-root')) : document.querySelector?.('[data-slot="1"], [data-slot]'))
@@ -1579,8 +1598,8 @@ export class SteleWasmClient {
 
 	emit(topic, payload = '') {
 		const payloadBytes = typeof payload === 'string'
-			? new TextEncoder().encode(payload)
-			: (payload instanceof Uint8Array ? payload : new TextEncoder().encode(JSON.stringify(payload)));
+			? TEXT_ENCODER.encode(payload)
+			: (payload instanceof Uint8Array ? payload : TEXT_ENCODER.encode(JSON.stringify(payload)));
 
 		if (this.worker && !this.isWorkerHost) {
 			this.worker.postMessage({
@@ -1598,7 +1617,7 @@ export class SteleWasmClient {
 					? comp.instance.exports.malloc(payloadBytes.length)
 					: 0;
 				if (tBuf) {
-					new Uint8Array(comp.memory.buffer, tBuf, topic.length + 1).set(new TextEncoder().encode(topic + '\0'));
+					new Uint8Array(comp.memory.buffer, tBuf, topic.length + 1).set(TEXT_ENCODER.encode(topic + '\0'));
 					if (pBuf && payloadBytes.length > 0) {
 						new Uint8Array(comp.memory.buffer, pBuf, payloadBytes.length).set(payloadBytes);
 					}
@@ -1983,6 +2002,7 @@ if (isWorkerContext) {
 					height: h,
 					slot: msg.slot
 				});
+				globalScope.__stele_worker_canvases_gen = (globalScope.__stele_worker_canvases_gen || 0) + 1;
 			}
 			break;
 		}
@@ -2152,7 +2172,7 @@ if (isWorkerContext) {
 					const malloc = comp?.instance?.exports?.malloc;
 					const free = comp?.instance?.exports?.free;
 					if (fn && malloc && comp.memory) {
-						const bytes = new TextEncoder().encode(msg.data || '');
+						const bytes = TEXT_ENCODER.encode(msg.data || '');
 						const ptr = malloc(bytes.length);
 						if (ptr) {
 							new Uint8Array(comp.memory.buffer, ptr, bytes.length).set(bytes);
