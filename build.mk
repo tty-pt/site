@@ -1,6 +1,15 @@
 REPO_ROOT != cd ../.. && pwd
+V ?= 0
+V_IS_0 != test "$(V)" = "0" && echo 0 || echo 1
+Q-0 = @
+Q-1 =
+Q = $(Q-$(V_IS_0))
+ECHO_V-0 = @echo
+ECHO_V-1 = @:
+ECHO_V = $(ECHO_V-$(V_IS_0))
 add-prefix-glob ?= ${REPO_ROOT}/external/*
-WASI_CC ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
+WASI_CC_DEFAULT != command -v clang-18 2>/dev/null || command -v clang 2>/dev/null || echo clang
+WASI_CC ?= $(WASI_CC_DEFAULT)
 -include $(REPO_ROOT)/external/mk/portable.mk
 
 MOD_NAME != basename "$$(pwd)"
@@ -34,19 +43,26 @@ CFLAGS += -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/
 CFLAGS += $(EXTRA_CFLAGS)
 
 LDFLAGS += -shared
-ifeq ($(uname),Linux)
-LDFLAGS += $(foreach d,$(add-prefix-dirs),-Wl,-rpath-link,$(d)/lib)
-endif
+LDFLAGS-RPATH != if [ "$(uname)" = "Linux" ]; then for d in $(add-prefix-dirs); do printf '%s ' "-Wl,-rpath-link,$$d/lib"; done; fi
+LDFLAGS += $(LDFLAGS-RPATH)
 
 LDLIBS += -laxil -lcorm
 LDLIBS += $(EXTRA_LDLIBS)
 LDLIBS += $(EXTRA_LDLIBS-$(uname))
 
-ifneq ($(filter auth gig grp index nd poem software song,$(MOD_NAME)),)
-MODULE_EXTRA_SRC ?= $(REPO_ROOT)/mods/common/ux/site_ui.c
-endif
+MOD_EXTRA_SRC-auth     = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-gig      = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-grp      = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-index    = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-nd       = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-poem     = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-software = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MOD_EXTRA_SRC-song     = $(REPO_ROOT)/mods/common/ux/site_ui.c
+MODULE_EXTRA_SRC ?= $(MOD_EXTRA_SRC-$(MOD_NAME))
 
-.DEFAULT_GOAL := all
+# Ensure `all` is the first (default) target in both GNU Make and bmake before
+# included *.mk files define auxiliary targets such as check-wasm.
+all:
 
 -include $(REPO_ROOT)/external/mk/iso.mk
 -include $(REPO_ROOT)/external/mk/cx.mk
@@ -74,7 +90,6 @@ LIST_UX_DEPS = $(REPO_ROOT)/mods/index/ux/list.c \
 	$(REPO_ROOT)/mods/index/ux/list_render.cx.c
 
 WASM_PATH ?= $(REPO_ROOT)/htdocs
-WASI_CC      ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
 WASI_SYSROOT ?=
 WASM_CFLAGS-PROFILE-release = -O2 -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
 WASM_CFLAGS-PROFILE-dev = -Os -DNDEBUG -D__wasm__ --target=wasm32-wasi -fvisibility=hidden
@@ -99,8 +114,10 @@ WASM_COMMON_SRC   = $(REPO_ROOT)/external/libbud/src/libbud.c $(REPO_ROOT)/exter
 WASM_COMMON_CFLAGS = -I$(REPO_ROOT)/include -I$(REPO_ROOT)/mods/common -I$(REPO_ROOT)/mods/common/ux -I$(REPO_ROOT)/external/libstele/include -I$(REPO_ROOT)/external/libbud/include
 WASM_OBJ_ROOT != printf '/tmp/site_wasm_objs_%s\n' "$$(printf '%s' '$(REPO_ROOT)' | cksum | cut -d' ' -f1)"
 
-WASM_SRC_ALL = $(foreach t,$(notdir $(WASM_TARGETS:.wasm=)),$($(t)-src))
-WASM_CX_C = $(patsubst %.cx,%.cx.c,$(filter %.cx,$(WASM_SRC_ALL)))
+WASM_BUILD_TARGETS != for t in $(WASM_TARGETS); do b=$$(basename "$$t" .wasm); grep -qE "^[[:space:]]*$${b}-src[[:space:]]*[:+?]?=" Makefile && echo "$$t"; done || true
+WASM_PRIMARY_NAME != set -- $(WASM_BUILD_TARGETS); [ -n "$$1" ] && basename "$$1" .wasm || true
+WASM_SRC_ALL = $($(WASM_PRIMARY_NAME)-src)
+WASM_CX_C != for f in $(WASM_SRC_ALL); do case "$$f" in *.cx) echo "$${f%.cx}.cx.c" ;; esac; done || true
 
 # BSD/GNU portable: keep `all` as first target
 all: dirs $(TARGET) $(WASM_TARGETS)
@@ -111,9 +128,9 @@ VERSION_GEN ?= $(REPO_ROOT)/mods/common/ux/version.gen.h
 $(VERSION_GEN): $(REPO_ROOT)/htdocs/styles.css $(REPO_ROOT)/htdocs/hyle.css $(REPO_ROOT)/htdocs/stele-client.js $(REPO_ROOT)/htdocs/bud-cap.js $(REPO_ROOT)/htdocs/hyle-cap.js $(REPO_ROOT)/scripts/gen-asset-version.sh
 	@sh $(REPO_ROOT)/scripts/gen-asset-version.sh
 
-$(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEPS)
+$(WASM_BUILD_TARGETS): $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEPS)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
-		for src in $($*-src); do \
+		for src in ${${@:$(WASM_PATH)/%.wasm=%}-src}; do \
 			case "$$src" in *libxylem-wasm.c|*hyle-bud*) continue ;; esac; \
 			if [ -f "$$src" ]; then \
 				bad=$$(sed -e 's,//.*,,g' -e 's,/\*.*\*/,,g' "$$src" | grep -En '\b(corm_|source_|axil_|hyle_source|XY_DECL|XY_IMPL)\b' || true); \
@@ -125,9 +142,9 @@ $(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEP
 			fi; \
 		done; \
 		common_key=$$(printf '%s' '$(WASM_COMMON_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
-		mod_key=$$(printf '%s' '$($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
+		mod_key=$$(printf '%s' '${${@:$(WASM_PATH)/%.wasm=%}-cflags} $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS)' | cksum | cut -d' ' -f1); \
 		common_dir="$(WASM_OBJ_ROOT)/common_$$common_key"; \
-		mod_dir="$(WASM_OBJ_ROOT)/$(MOD_NAME)_$*_$$mod_key"; \
+		mod_dir="$(WASM_OBJ_ROOT)/$(MOD_NAME)_${@:$(WASM_PATH)/%.wasm=%}_$$mod_key"; \
 		mkdir -p "$$common_dir" "$$mod_dir"; \
 		tu_stale() { \
 			src="$$1"; obj="$$2"; dep="$$3"; \
@@ -142,12 +159,12 @@ $(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEP
 		objs=""; \
 		deps_out="$@.d.tmp.$$$$"; \
 		: > "$$deps_out"; \
-		for src in $(patsubst %.cx,%.cx.c,$($*-src)); do \
+		for src in ${${@:$(WASM_PATH)/%.wasm=%}-src:%.cx=%.cx.c}; do \
 			tag=$$(printf '%s' "$$src" | tr '/. ' '___'); \
 			obj="$$mod_dir/$$tag.o"; \
 			dep="$$mod_dir/$$tag.d"; \
 			if tu_stale "$$src" "$$obj" "$$dep"; then \
-				$(WASI_CC) $($*-cflags) $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MMD -MP -MF "$$dep.tmp.$$$$" -MT "$$obj" -c "$$src" -o "$$obj.tmp.$$$$" || { rm -f "$$dep.tmp.$$$$" "$$obj.tmp.$$$$" "$$deps_out"; exit 1; }; \
+				$(WASI_CC) ${${@:$(WASM_PATH)/%.wasm=%}-cflags} $(WASM_COMMON_CFLAGS) $(EXTRA_CFLAGS) $(WASM_CFLAGS) -MMD -MP -MF "$$dep.tmp.$$$$" -MT "$$obj" -c "$$src" -o "$$obj.tmp.$$$$" || { rm -f "$$dep.tmp.$$$$" "$$obj.tmp.$$$$" "$$deps_out"; exit 1; }; \
 				mv -f "$$dep.tmp.$$$$" "$$dep" && mv -f "$$obj.tmp.$$$$" "$$obj"; \
 			fi; \
 			sed "1s|^[^:]*:|$@:|" "$$dep" >> "$$deps_out"; \
@@ -166,10 +183,10 @@ $(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEP
 		done; \
 		mv -f "$$deps_out" "$@.d"; \
 		extra_allowed=""; \
-		for f in $(REPO_ROOT)/external/libstele/wasm-allowed-imports.lst $($*-wasm-allowed) $(EXTRA_WASM_ALLOWED); do \
+		for f in $(REPO_ROOT)/external/libstele/wasm-allowed-imports.lst ${${@:$(WASM_PATH)/%.wasm=%}-wasm-allowed} $(EXTRA_WASM_ALLOWED); do \
 			if [ -f "$$f" ]; then extra_allowed="$$extra_allowed -Wl,--allow-undefined-file=$$f"; fi; \
 		done; \
-		$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) $($*-ldflags) $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $$objs || exit 1; \
+		$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) ${${@:$(WASM_PATH)/%.wasm=%}-ldflags} $(EXTRA_WASM_LDFLAGS) $$extra_allowed -o $@ $$objs || exit 1; \
 		if [ "$(PROFILE)" != "debug" ] && command -v wasm-strip >/dev/null 2>&1; then \
 			wasm-strip $@; \
 		fi; \
@@ -181,15 +198,24 @@ $(WASM_PATH)/%.wasm: $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEP
 dirs:
 	@for d in $(DIRS); do mkdir -p $(REPO_ROOT)/$$d 2>/dev/null || true; done
 
-ifneq ($(filter auth chat auren common gig grp index nd poem software song,$(MOD_NAME)),)
-$(TARGET): $(SITE_UI_DEPS)
-endif
+MOD_SITE_UI_DEPS-auth     = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-chat     = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-auren    = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-common   = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-gig      = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-grp      = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-index    = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-nd       = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-poem     = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-software = $(SITE_UI_DEPS)
+MOD_SITE_UI_DEPS-song     = $(SITE_UI_DEPS)
+$(TARGET): $(MOD_SITE_UI_DEPS-$(MOD_NAME))
 
 $(TARGET): $(CX_HEADERS) $(SRC_C) $(MAKEFILE_DEPS)
 	@rm -f $@.d; for src in $(SRC_C); do \
 		$(CC) $(CFLAGS) -MM -MP -MT $@ "$$src" >> $@.d || exit 1; \
 	done
-	$(if $(filter 0,$(V)),@echo "  CC      $@")
+	$(ECHO_V) "  CC      $@"
 	$(Q)$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC_C) $(MODULE_EXTRA_SRC) $(LDLIBS)
 
 MOD_DEPS != for f in $(TARGET) $(WASM_TARGETS); do [ -n "$$f" ] && [ -f "$$f.d" ] && printf '%s.d ' "$$f"; done; printf '/dev/null'

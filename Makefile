@@ -1,16 +1,19 @@
 CC  ?= clang
 V   ?= 0
-ifeq ($(V),0)
-  Q = @
-  MAKEFLAGS += --no-print-directory -s
-else
-  Q =
-endif
-export V Q
+V_IS_0 != test "$(V)" = "0" && echo 0 || echo 1
+Q-0 = @
+Q-1 =
+Q = $(Q-$(V_IS_0))
+ECHO_V-0 = @echo
+ECHO_V-1 = @:
+ECHO_V = $(ECHO_V-$(V_IS_0))
+SUB_MAKE_FLAGS-0 = -s
+SUB_MAKE_FLAGS-1 =
+SUB_MAKE_FLAGS = $(SUB_MAKE_FLAGS-$(V_IS_0))
 DEV ?= 0
 PROFILE ?= dev
-WASI_CC ?= $(shell which clang-18 2>/dev/null || which clang 2>/dev/null || echo clang)
-export WASI_CC
+WASI_CC_DEFAULT != command -v clang-18 2>/dev/null || command -v clang 2>/dev/null || echo clang
+WASI_CC ?= $(WASI_CC_DEFAULT)
 WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
 SITE_WASM_OPT_FLAGS ?= -Os -DNDEBUG -DQSYS_UNIFIED_SITE
 WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
@@ -24,10 +27,13 @@ WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry -Wl,--stri
 	-Wl,--export=stele_kernel_version -Wl,--export=stele_kernel_register_module \
 	-Wl,--export=wasm_fetch_callback
 
+REPO_DIR != pwd
+REPO_CKSUM != pwd | cksum | cut -d' ' -f1
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
 all: stage-assets stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib chaff-lib areole-lib sepal-lib hyle-lib pitch-lib bud-lib hyle-source hyle-bud axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm
+.MAIN: all
 
 .PHONY: check
 check: boundary-check
@@ -35,13 +41,13 @@ check: boundary-check
 .PHONY: $(MOD_DIRS) $(CLIENT_DIRS)
 mods: $(MOD_DIRS)
 $(MOD_DIRS):
-	$(if $(filter 0,$(V)),@echo "  MOD     $@")
-	$(Q)$(MAKE) -C $@
+	$(ECHO_V) "  MOD     $@"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C $@ V="$(V)" WASI_CC="$(WASI_CC)" PROFILE="$(PROFILE)" $(SANITIZE_ARG)
 
 clients: $(CLIENT_DIRS)
 $(CLIENT_DIRS):
-	$(if $(filter 0,$(V)),@echo "  CLIENT  $@")
-	$(Q)$(MAKE) -C $@
+	$(ECHO_V) "  CLIENT  $@"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C $@ V="$(V)" WASI_CC="$(WASI_CC)" PROFILE="$(PROFILE)" $(SANITIZE_ARG)
 
 site-wasm: htdocs/site.wasm
 
@@ -55,61 +61,67 @@ SITE_WASM_INCLUDES = -Iexternal/libstele/include -Iexternal/libbud/include \
 
 include external/mk/cx.mk
 
-SITE_WASM_BUILD_DIR = /tmp/site_wasm_build_$(shell pwd | cksum | cut -d' ' -f1)
-SITE_WASM_SPECS := \
-	kernel:external/libstele/src/stele_wasm_kernel.c \
-	stele_event:external/libstele/src/stele_event.c \
-	bud:external/libbud/src/libbud.c \
-	bud_tpl:external/libbud/src/bud_tpl.c \
-	bud_render:external/libbud/src/bud_render.c \
-	bud_runtime:external/libbud/src/bud_runtime.c \
-	bud_json:external/libbud/src/bud_json.c \
-	bud_reconcile:external/libbud/src/bud_reconcile.c \
-	site_wasm_app:mods/common/site_wasm_app.c \
-	site_ui:mods/common/ux/site_ui.c \
-	modules:mods/common/ux/site_modules.c \
-	site_chrome:mods/common/ux/site_chrome.cx.c \
-	chrome:mods/site_chrome/ux/chrome.c \
-	song:mods/song/ux/detail.cx.c \
-	gig:mods/gig/ux/detail.cx.c \
-	list:mods/index/ux/list_fe.c \
-	chat:mods/chat/ux/chat_fe.c \
-	chat_ui:mods/chat/ux/chat_ui.cx.c \
-	auren:mods/auren/ux/auren_fe.c \
-	auren_ui:mods/auren/ux/auren_ui.cx.c \
-	music:external/libpitch/src/music.c \
-	hyle_bud:external/libhyle-bud/src/libhyle-bud.c \
-	filter:external/libhyle-bud/src/filter.c \
-	table:external/libhyle-bud/src/table.c \
-	picker:external/libhyle-bud/src/picker.c \
-	form:external/libhyle-bud/src/form.c \
-	hyle_bud_cache:external/libhyle-bud/src/hyle-bud-cache.c \
-	url:external/libhyle/src/url.c
+SITE_WASM_BUILD_DIR = /tmp/site_wasm_build_$(REPO_CKSUM)
+SITE_WASM_OBJS = \
+	kernel.o stele_event.o bud.o bud_tpl.o bud_render.o bud_runtime.o \
+	bud_json.o bud_reconcile.o site_wasm_app.o site_ui.o modules.o \
+	site_chrome.o chrome.o song.o gig.o list.o chat.o chat_ui.o \
+	auren.o auren_ui.o music.o hyle_bud.o filter.o table.o picker.o \
+	form.o hyle_bud_cache.o url.o
+SITE_WASM_OBJ_PATHS = $(SITE_WASM_OBJS:%=$(SITE_WASM_BUILD_DIR)/%)
 
-SITE_WASM_OBJS := $(foreach s,$(SITE_WASM_SPECS),$(word 1,$(subst :, ,$(s))).o)
-
-define SITE_WASM_RULE
-$(SITE_WASM_BUILD_DIR)/$(1).o: $(2)
-	$$(if $$(filter 0,$$(V)),@echo "  WASM    $$@")
-	$$(Q)mkdir -p $$(SITE_WASM_BUILD_DIR) && $$(WASI_CC) $$(WASM_CFLAGS) $$(SITE_WASM_OPT_FLAGS) $$(SITE_WASM_INCLUDES) -MMD -MP -MT $$@ -MF $$@.d -c $$< -o $$@.tmp && mv -f $$@.tmp $$@
-endef
-$(foreach s,$(SITE_WASM_SPECS),$(eval $(call SITE_WASM_RULE,$(word 1,$(subst :, ,$(s))),$(word 2,$(subst :, ,$(s))))))
+# Primary source prerequisites (kept ahead of extra prereqs and -include depfiles
+# so $$1 from `$< ${.ALLSRC}` is always the primary TU in both GNU Make and bmake).
+$(SITE_WASM_BUILD_DIR)/kernel.o: external/libstele/src/stele_wasm_kernel.c
+$(SITE_WASM_BUILD_DIR)/stele_event.o: external/libstele/src/stele_event.c
+$(SITE_WASM_BUILD_DIR)/bud.o: external/libbud/src/libbud.c
+$(SITE_WASM_BUILD_DIR)/bud_tpl.o: external/libbud/src/bud_tpl.c
+$(SITE_WASM_BUILD_DIR)/bud_render.o: external/libbud/src/bud_render.c
+$(SITE_WASM_BUILD_DIR)/bud_runtime.o: external/libbud/src/bud_runtime.c
+$(SITE_WASM_BUILD_DIR)/bud_json.o: external/libbud/src/bud_json.c
+$(SITE_WASM_BUILD_DIR)/bud_reconcile.o: external/libbud/src/bud_reconcile.c
+$(SITE_WASM_BUILD_DIR)/site_wasm_app.o: mods/common/site_wasm_app.c
+$(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_ui.c
+$(SITE_WASM_BUILD_DIR)/modules.o: mods/common/ux/site_modules.c
+$(SITE_WASM_BUILD_DIR)/site_chrome.o: mods/common/ux/site_chrome.cx.c
+$(SITE_WASM_BUILD_DIR)/chrome.o: mods/site_chrome/ux/chrome.c
+$(SITE_WASM_BUILD_DIR)/song.o: mods/song/ux/detail.cx.c
+$(SITE_WASM_BUILD_DIR)/gig.o: mods/gig/ux/detail.cx.c
+$(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_fe.c
+$(SITE_WASM_BUILD_DIR)/chat.o: mods/chat/ux/chat_fe.c
+$(SITE_WASM_BUILD_DIR)/chat_ui.o: mods/chat/ux/chat_ui.cx.c
+$(SITE_WASM_BUILD_DIR)/auren.o: mods/auren/ux/auren_fe.c
+$(SITE_WASM_BUILD_DIR)/auren_ui.o: mods/auren/ux/auren_ui.cx.c
+$(SITE_WASM_BUILD_DIR)/music.o: external/libpitch/src/music.c
+$(SITE_WASM_BUILD_DIR)/hyle_bud.o: external/libhyle-bud/src/libhyle-bud.c
+$(SITE_WASM_BUILD_DIR)/filter.o: external/libhyle-bud/src/filter.c
+$(SITE_WASM_BUILD_DIR)/table.o: external/libhyle-bud/src/table.c
+$(SITE_WASM_BUILD_DIR)/picker.o: external/libhyle-bud/src/picker.c
+$(SITE_WASM_BUILD_DIR)/form.o: external/libhyle-bud/src/form.c
+$(SITE_WASM_BUILD_DIR)/hyle_bud_cache.o: external/libhyle-bud/src/hyle-bud-cache.c
+$(SITE_WASM_BUILD_DIR)/url.o: external/libhyle/src/url.c
 
 $(SITE_WASM_BUILD_DIR)/site_ui.o: mods/common/ux/site_layout.cx.c mods/common/ux/site_forms.cx.c mods/common/ux/site_media.cx.c
 $(SITE_WASM_BUILD_DIR)/gig.o $(SITE_WASM_BUILD_DIR)/list.o: mods/index/ux/list_filters.cx.c mods/index/ux/list_layout.cx.c mods/index/ux/list_render.cx.c
--include $(wildcard $(SITE_WASM_BUILD_DIR)/*.o.d)
 
-htdocs/site.wasm: $(addprefix $(SITE_WASM_BUILD_DIR)/,$(SITE_WASM_OBJS))
-	$(if $(filter 0,$(V)),@echo "  LD.WASM $@")
+SITE_WASM_DEP_FILES != for f in $(SITE_WASM_OBJ_PATHS); do [ -f "$$f.d" ] && echo "$$f.d"; done; echo /dev/null
+-include $(SITE_WASM_DEP_FILES)
+
+$(SITE_WASM_OBJ_PATHS):
+	$(ECHO_V) "  WASM    $@"
+	$(Q)set -- $< ${.ALLSRC}; mkdir -p $(SITE_WASM_BUILD_DIR) && $(WASI_CC) $(WASM_CFLAGS) $(SITE_WASM_OPT_FLAGS) $(SITE_WASM_INCLUDES) -MMD -MP -MT $@ -MF $@.d -c "$$1" -o $@.tmp && mv -f $@.tmp $@
+
+htdocs/site.wasm: $(SITE_WASM_OBJ_PATHS)
+	$(ECHO_V) "  LD.WASM $@"
 	$(Q)mkdir -p htdocs
-	$(Q)$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $^
+	$(Q)$(WASI_CC) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $(SITE_WASM_OBJ_PATHS)
 	$(Q)if command -v wasm-strip >/dev/null 2>&1; then wasm-strip $@; fi
 	$(Q)sh external/mk/scripts/wasm-audit.sh $@ || { rm -f $@; exit 1; }
 
 # Staged htdocs deploy assets. Exported from each library and module <pkg>/htdocs/.
 DEPLOY_ASSETS = styles.css hyle.css bud-cap.js hyle-cap.js axil-cap.js axil-tty-cap.js lamina-cap.js webgl-cap.js xylem-cap.js stele-client.js stele.wasm
-ASSET_SOURCES := $(wildcard external/*/htdocs/* mods/*/htdocs/*)
-NPM_LINK_SPECS := \
+ASSET_SOURCES != for f in external/*/htdocs/* mods/*/htdocs/*; do [ -e "$$f" ] && echo "$$f"; done || true
+NPM_LINK_SPECS = \
 	stele:libstele corm:libcorm joint:libjoint islet:libislet lemma:liblemma sepal:libsepal \
 	hyle:libhyle bud:libbud xylem:libxylem hyle-bud:libhyle-bud hyle-source:libhyle-source \
 	lamina:liblamina pitch:libpitch transp:libpitch chaff:libchaff noise:libchaff \
@@ -161,49 +173,70 @@ htdocs/.assets-staged: $(ASSET_SOURCES)
 
 assets-sync: stage-assets
 
-# Keep the PREFIX table in sync with external/mk/portable.mk:16-29.
+# Keep the PREFIX table in sync with external/mk/portable.mk:12-25.
 # External packages own their install into $(DESTDIR)$(PREFIX)/{lib,bin,include};
 # there is no -L into the tree at link time (build.mk + check-no-tree-rpath.sh).
-UNAME_S := $(shell uname -s)
-ARCH_M := $(shell uname -m)
-PREFIX ?= $(if $(filter Linux,$(UNAME_S)),/usr, \
-	$(if $(filter NetBSD,$(UNAME_S)),/usr/pkg, \
-	$(if $(and $(filter Darwin,$(UNAME_S)),$(filter arm64,$(ARCH_M))),/opt/homebrew, \
-	/usr/local)))
-SUDO ?= $(if $(filter /usr% /opt%,$(PREFIX)),sudo,)
+UNAME_S != uname -s
+ARCH_M != uname -m
+PREFIX-Linux = /usr
+PREFIX-NetBSD = /usr/pkg
+PREFIX-Darwin-arm64 = /opt/homebrew
+PREFIX-Darwin-x86_64 = /usr/local
+PREFIX-Darwin = $(PREFIX-Darwin-$(ARCH_M))
+PREFIX-OpenBSD = /usr/local
+PREFIX-FreeBSD = /usr/local
+PREFIX-DragonFly = /usr/local
+PREFIX-$(UNAME_S) ?= /usr/local
+PREFIX ?= $(PREFIX-$(UNAME_S))
 
-EXT_RPATH_LINK := $(if $(filter Linux,$(UNAME_S)),$(foreach d,$(wildcard $(CURDIR)/external/*),-Wl,-rpath-link,$(d)/lib),)
+SUDO_DEFAULT != case "$(PREFIX)" in /usr*|/opt*) echo sudo ;; esac
+SUDO ?= $(SUDO_DEFAULT)
+
+EXT_RPATH_LINK != if [ "$(UNAME_S)" = "Linux" ]; then for d in $(REPO_DIR)/external/*; do [ -d "$$d" ] && printf '%s ' "-Wl,-rpath-link,$$d/lib"; done; fi
 EXT_MAKE_ARGS = add-prefix-glob="../*" LDFLAGS-Unix="$(EXT_RPATH_LINK)"
-LIB_MAKE_ARGS = $(EXT_MAKE_ARGS) PREFIX="$(PREFIX)" PROFILE="$(PROFILE)" $(if $(SANITIZE),SANITIZE="$(SANITIZE)",)
+SANITIZE_ARG != [ -n "$(SANITIZE)" ] && printf 'SANITIZE=%s' "$(SANITIZE)" || true
+LIB_MAKE_ARGS = $(EXT_MAKE_ARGS) PREFIX="$(PREFIX)" PROFILE="$(PROFILE)" $(SANITIZE_ARG)
 
-define LIB_TARGET
-.PHONY: $(1)
-$(1): $(3)
-	$$(if $$(filter 0,$$(V)),@echo "  LIB     $(2)")
-	$$(Q)$$(MAKE) -C external/$(2) $$(LIB_MAKE_ARGS)
-endef
+LIB_STD_TARGETS = stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib \
+	chaff-lib areole-lib corolla-lib sepal-lib hyle-lib pitch-lib bud-lib jarvis-lib
+LIB_AXIL_TARGETS = axil-lib axil-auth-lib axil-tty-lib axil-nd-lib
 
-$(eval $(call LIB_TARGET,stele-lib,libstele,))
-$(eval $(call LIB_TARGET,corm-lib,libcorm,stele-lib))
-$(eval $(call LIB_TARGET,xylem-lib,libxylem,stele-lib corm-lib))
-$(eval $(call LIB_TARGET,lemma-lib,liblemma,stele-lib corm-lib))
-$(eval $(call LIB_TARGET,joint-lib,libjoint,stele-lib corm-lib))
-$(eval $(call LIB_TARGET,islet-lib,libislet,stele-lib corm-lib))
-$(eval $(call LIB_TARGET,chaff-lib,libchaff,stele-lib))
-$(eval $(call LIB_TARGET,areole-lib,libareole,islet-lib))
-$(eval $(call LIB_TARGET,corolla-lib,libcorolla,chaff-lib))
-$(eval $(call LIB_TARGET,sepal-lib,libsepal,stele-lib corm-lib))
-$(eval $(call LIB_TARGET,hyle-lib,libhyle,lemma-lib corm-lib))
-$(eval $(call LIB_TARGET,pitch-lib,libpitch,stele-lib))
-$(eval $(call LIB_TARGET,bud-lib,libbud,stele-lib))
-$(eval $(call LIB_TARGET,hyle-source,libhyle-source,hyle-lib corm-lib lemma-lib stele-lib))
-$(eval $(call LIB_TARGET,hyle-bud,libhyle-bud,hyle-lib bud-lib hyle-source))
-$(eval $(call LIB_TARGET,axil-lib,axil,stele-lib corm-lib xylem-lib))
-$(eval $(call LIB_TARGET,axil-auth-lib,axil-auth,axil-lib corm-lib xylem-lib))
-$(eval $(call LIB_TARGET,axil-hyle,axil-hyle,axil-lib hyle-source axil-auth-lib))
-$(eval $(call LIB_TARGET,axil-tty-lib,axil-tty,axil-lib corm-lib xylem-lib))
-$(eval $(call LIB_TARGET,axil-nd-lib,axil-nd,axil-tty-lib axil-lib corm-lib xylem-lib islet-lib stele-lib))
-$(eval $(call LIB_TARGET,jarvis-lib,libjarvis,stele-lib corm-lib xylem-lib))
+corm-lib:       stele-lib
+xylem-lib:      stele-lib corm-lib
+lemma-lib:      stele-lib corm-lib
+joint-lib:      stele-lib corm-lib
+islet-lib:      stele-lib corm-lib
+chaff-lib:      stele-lib
+areole-lib:     islet-lib
+corolla-lib:    chaff-lib
+sepal-lib:      stele-lib corm-lib
+hyle-lib:       lemma-lib corm-lib
+pitch-lib:      stele-lib
+bud-lib:        stele-lib
+hyle-source:    hyle-lib corm-lib lemma-lib stele-lib
+hyle-bud:       hyle-lib bud-lib hyle-source
+axil-lib:       stele-lib corm-lib xylem-lib
+axil-auth-lib:  axil-lib corm-lib xylem-lib
+axil-hyle:      axil-lib hyle-source axil-auth-lib
+axil-tty-lib:   axil-lib corm-lib xylem-lib
+axil-nd-lib:    axil-tty-lib axil-lib corm-lib xylem-lib islet-lib stele-lib
+jarvis-lib:     stele-lib corm-lib xylem-lib
+
+$(LIB_STD_TARGETS):
+	$(ECHO_V) "  LIB     $(@:%-lib=lib%)"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C external/$(@:%-lib=lib%) $(LIB_MAKE_ARGS)
+
+$(LIB_AXIL_TARGETS):
+	$(ECHO_V) "  LIB     $(@:%-lib=%)"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C external/$(@:%-lib=%) $(LIB_MAKE_ARGS)
+
+hyle-source hyle-bud:
+	$(ECHO_V) "  LIB     lib$@"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C external/lib$@ $(LIB_MAKE_ARGS)
+
+axil-hyle:
+	$(ECHO_V) "  LIB     $@"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C external/$@ $(LIB_MAKE_ARGS)
 
 qsys-lib: stele-lib
 noise-lib: chaff-lib
@@ -211,17 +244,17 @@ chunk-lib: areole-lib
 transp-lib: pitch-lib
 
 pi-mm-zip:
-	$(Q)$(MAKE) -C .pi/extensions/pi-mm zip
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C .pi/extensions/pi-mm zip
 
 nd-libs: axil-nd-lib chaff-lib areole-lib
-	@$(MAKE) -C external/nd-bus $(LIB_MAKE_ARGS) || exit 1
+	@$(MAKE) $(SUB_MAKE_FLAGS) -C external/nd-bus $(LIB_MAKE_ARGS) || exit 1
 	@for d in external/nd-*; do \
 		[ "$$d" = "external/nd-bus" ] && continue; \
-		if [ -f "$$d/Makefile" ]; then $(MAKE) -C "$$d" $(LIB_MAKE_ARGS) || exit 1; fi; \
+		if [ -f "$$d/Makefile" ]; then $(MAKE) $(SUB_MAKE_FLAGS) -C "$$d" $(LIB_MAKE_ARGS) || exit 1; fi; \
 	done
 
 INSTALL_ND_CORE = nd-bus nd-core nd-obj nd-region nd-world
-INSTALL_ND_OTHER = $(filter-out $(INSTALL_ND_CORE),$(patsubst external/%,%,$(wildcard external/nd-*)))
+INSTALL_ND_OTHER != for d in external/nd-*; do [ -d "$$d" ] || continue; b=$$(basename "$$d"); case " $(INSTALL_ND_CORE) " in *" $$b "*) ;; *) echo "$$b" ;; esac; done
 INSTALL_PKGS = libstele libcorm libxylem liblemma libjoint libislet libsepal \
 	libhyle libpitch libbud libhyle-source libhyle-bud libchaff libareole \
 	axil axil-auth axil-hyle axil-tty axil-nd \
@@ -427,7 +460,7 @@ clean:
 		if [ -f "external/$$p/Makefile" ]; then $(MAKE) -C external/$$p wasmtarget= clean; fi; \
 	done
 	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
-	rm -rf $(SITE_WASM_BUILD_DIR) /tmp/site_wasm_build /tmp/site_unit_cache_$(shell pwd | cksum | cut -d' ' -f1) htdocs/site.wasm
+	rm -rf $(SITE_WASM_BUILD_DIR) /tmp/site_wasm_build /tmp/site_unit_cache_$(REPO_CKSUM) htdocs/site.wasm
 
 distclean: clean
 
@@ -482,7 +515,7 @@ debug-logs:
 # Clean debug logs
 # Run hyle workspace crate tests (core, axil, source-corm)
 hyle-tests:
-	LIBRARY_PATH="$(CURDIR)/external/liblemma/lib:$${LIBRARY_PATH:-}" RUSTFLAGS="-l corm -l lemma" cargo test --workspace \
+	LIBRARY_PATH="$(REPO_DIR)/external/liblemma/lib:$${LIBRARY_PATH:-}" RUSTFLAGS="-l corm -l lemma" cargo test --workspace \
 		--manifest-path external/libhyle/Cargo.toml 2>&1
 
 debug-clean:
@@ -537,4 +570,4 @@ run-universe:
 run-sector32:
 	@$(MAKE) run-universe ND_PLANETS=32 ND_DB=var/nd/sector32.db
 
-.PHONY: all mods clients run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm bud-lib hyle-lib pitch-lib transp-lib lemma-lib joint-lib islet-lib sepal-lib areole-lib chunk-lib chaff-lib noise-lib pi-mm-zip axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs corm-lib xylem-lib install install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-e2e stage-assets assets-sync seed-universe test-universe run-universe run-sector32
+.PHONY: all mods clients site-wasm run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm $(LIB_STD_TARGETS) $(LIB_AXIL_TARGETS) hyle-source hyle-bud axil-hyle qsys-lib noise-lib chunk-lib transp-lib pi-mm-zip nd-libs install install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-integration test-wasm test-graphics test-nd-harvest test-e2e restart npm-build-all npm-test-all stage-assets assets-sync seed-universe test-universe run-universe run-sector32

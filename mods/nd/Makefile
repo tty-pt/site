@@ -1,4 +1,4 @@
-REPO_ROOT ?= $(shell cd ../.. && pwd)
+REPO_ROOT != cd ../.. && pwd
 WASM_PATH ?= $(REPO_ROOT)/htdocs
 
 TARGET = nd.so
