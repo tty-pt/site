@@ -34,7 +34,7 @@ done
 
 for f in "$root/build.mk" "$root/Makefile" "$root"/mods/*/Makefile; do
 	[ -f "$f" ] || continue
-	hit=$(grep -n -- '-L' "$f" | grep -v ':[[:space:]]*#' || true)
+	hit=$(grep -nE -- '(^|[[:space:]])-L' "$f" | grep -v ':[[:space:]]*#' || true)
 	[ -z "$hit" ] || {
 		printf '%s: forced library search path (link must use the system path):\n%s\n' \
 			"${f#"$root"/}" "$hit" >&2

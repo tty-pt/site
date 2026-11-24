@@ -14,8 +14,11 @@ DEV ?= 0
 PROFILE ?= dev
 WASI_CC_DEFAULT != command -v clang-18 2>/dev/null || command -v clang 2>/dev/null || echo clang
 WASI_CC ?= $(WASI_CC_DEFAULT)
+export WASI_CC
 WASM_CFLAGS ?= --target=wasm32-wasi -fvisibility=hidden -D__wasm__
-SITE_WASM_OPT_FLAGS ?= -Os -DNDEBUG -DQSYS_UNIFIED_SITE
+SITE_WASM_OPT_DEV = -O1 -DNDEBUG -DQSYS_UNIFIED_SITE
+SITE_WASM_OPT_RELEASE = -Os -DNDEBUG -DQSYS_UNIFIED_SITE
+SITE_WASM_OPT_FLAGS ?= $(if $(filter release,$(PROFILE)),$(SITE_WASM_OPT_RELEASE),$(SITE_WASM_OPT_DEV))
 WASM_COMMON_CFLAGS ?= -Iexternal/libstele/include -Iexternal/libbud/include
 WASM_LDFLAGS ?= -mexec-model=reactor -Wl,--gc-sections -Wl,--no-entry -Wl,--strip-debug \
 	-Wl,--export=malloc -Wl,--export=free -Wl,--export=_initialize \
