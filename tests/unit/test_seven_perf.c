@@ -127,10 +127,10 @@ int main(void)
 		assert(p->total_ms > 0.0f);
 		assert(p->terrain_chunks > 0u);
 		assert(p->bb_flushes > 0u);
-		assert(p->flora_probes > 0u);
 		acc_add(&acc_stat, p);
 	}
 	print_row("High stationary", &acc_stat, 10);
+	assert(acc_stat.flora_probes / 10.0 <= 128.0);
 
 	/* Scenario B: High preset, panning orbit (12 frames, 30 deg yaw step) */
 	perf_acc_t acc_pan = {0};
@@ -166,6 +166,7 @@ int main(void)
 		acc_add(&acc_low, nd_seven_perf_last());
 	}
 	print_row("Low stationary", &acc_low, 10);
+	assert(acc_low.flora_probes / 10.0 <= 128.0);
 
 	/* 3. Disable profiler again: frame_count must freeze */
 	uint32_t frozen = nd_seven_perf_last()->frame_count;

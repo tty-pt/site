@@ -3,6 +3,21 @@
  */
 
 #include "nd_seven_gl_internal.h"
+#include "nd_seven_ground.h"
+
+#define CLOUD_PRECULL_SLOTS 256u
+typedef struct {
+	int32_t  ox, oy;
+	int32_t  span_w, span_h;
+	float    anim_time;
+	float    cur_dist;
+	uint32_t forget_seq;
+	uint8_t  sea_wet;
+	uint8_t  all_clear;
+	uint8_t  valid;
+} cloud_precull_slot_t;
+
+static cloud_precull_slot_t s_cloud_precull[CLOUD_PRECULL_SLOTS];
 
 bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
                                           int32_t span_w, int32_t span_h,
@@ -88,9 +103,26 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 	if (!ar_frustum_test_box(&s_gl.cur_frustum, bmin[0], bmin[1], bmin[2], bmax[0], bmax[1], bmax[2]))
 		return false;
 
-	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks up to 524,288 wu */
+	/* Gate 3: CPU Synoptic Clear-Sky Pre-Cull for regional/local chunks up to 524,288 wu
+	 * (cached 256-slot direct-mapped with 0.25s anim_time TTL) */
 	if (span_w <= 524288 && span_h <= 524288) {
-		float sea_wet = (s_gl.cur_sea_level > -900.0f) ? 1.0f : 0.0f;
+		uint8_t sea_wet_u8 = (s_gl.cur_sea_level > -900.0f) ? 1u : 0u;
+		uint32_t cur_fseq = nd_seven_ground_forget_seq();
+		uint32_t h = (uint32_t)ox * 0x9E3779B1u ^ (uint32_t)oy * 0x85EBCA77u
+		           ^ (uint32_t)span_w * 0xC2B2AE3Du ^ (uint32_t)span_h * 0x27D4EB2Fu;
+		cloud_precull_slot_t *cs = &s_cloud_precull[(h ^ (h >> 16u)) & (CLOUD_PRECULL_SLOTS - 1u)];
+		if (cs->valid &&
+		    cs->ox == ox && cs->oy == oy &&
+		    cs->span_w == span_w && cs->span_h == span_h &&
+		    cs->sea_wet == sea_wet_u8 &&
+		    cs->forget_seq == cur_fseq &&
+		    fabsf(s_gl.cur_anim_time - cs->anim_time) <= 0.25f &&
+		    fabsf(s_gl.cur_dist - cs->cur_dist) <= fmaxf(120.0f, cs->cur_dist * 0.15f)) {
+			if (cs->all_clear)
+				return false;
+			return true;
+		}
+		float sea_wet = sea_wet_u8 ? 1.0f : 0.0f;
 		float fw_est = fmaxf(0.18f, s_gl.cur_dist * 0.0014f);
 		float pad = fminf(4800.0f, fmaxf(1200.0f, s_gl.cur_dist * 0.25f));
 		float x0 = (float)ox - pad;
@@ -111,6 +143,16 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 				}
 			}
 		}
+		cs->ox = ox;
+		cs->oy = oy;
+		cs->span_w = span_w;
+		cs->span_h = span_h;
+		cs->anim_time = s_gl.cur_anim_time;
+		cs->cur_dist = s_gl.cur_dist;
+		cs->forget_seq = cur_fseq;
+		cs->sea_wet = sea_wet_u8;
+		cs->all_clear = all_clear ? 1u : 0u;
+		cs->valid = 1u;
 		if (all_clear)
 			return false;
 	}

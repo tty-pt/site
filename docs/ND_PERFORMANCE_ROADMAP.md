@@ -27,7 +27,7 @@ Cross-references:
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **P0** | Frame-Phase Profiler & Baseline Harness | Small (2–3h) | Low | **Complete** | Per-phase CPU/FFI/draw-call counters (`nd_seven_perf_t` + `webgl-cap.js`) and reproducible baseline recorded |
 | **P1** | Zero-Risk Hot-Path & Bridge Quick Wins | Small–Med (½–1d) | Low | **Complete** | Eliminated steady-state DOM queries (0/f), Hi-Z uniform leak (0/f), ~72% wide-zoom WebGL FFI calls (~82% terrain pass), 5× map re-ingest; enabled `-O3 -fno-math-errno -msimd128` (7,397 SIMD128 ops in `nd.wasm`) |
-| **P2** | CPU Frame-Time Killers (Data Layout & Caching) | Medium (1–2d) | Low–Med | Planned | Caches 10.5k-cell botanical lattices, removes 16k–40k `ar_probe_view`/frame, cuts `libareole` occluder/refinement overhead, fixes mesh sort + billboard flush churn |
+| **P2** | CPU Frame-Time Killers (Data Layout & Caching) | Medium (1–2d) | Low–Med | **Complete** | High stationary CPU `-92.7%` (`12.14 → 0.89 ms`, probes `14,397 → 57`), Low stationary `-85.8%` (`6.07 → 0.86 ms`), `libareole` query `-32.6%`, `glBufferData` steady-state `0/f` (`glBufferSubData`) |
 | **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | Planned | Sky-after-terrain Early-Z, pre-linearized GLSL constants (~135 `pow`/px saved), single-eval wind, opaque vs. alpha-tested `mesh3d`, instanced grass tufts, trimmed blits/bloom |
 | **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | Planned | WebGL command ring buffer + UBOs, GLSL build stripping, `libareole` single vertex buffer (-20+ MB RAM), non-destructive BCP updates, `axil-nd`/`nd-view`/`nd-world` DB/RAM fixes |
 
@@ -151,10 +151,27 @@ Cross-references:
 4. **Populate budget & coarse Nyquist culling**: Enable a frame populate budget (`max_populates_per_frame > 0` with parent-fallback rendering) and evaluate Nyquist octave clamping for coarse LODs (L3+) without introducing shoreline height seams.
 5. **Cloud pre-cull cache**: Cache per-chunk synoptic cloud coverage in `mods/nd/seven/nd_seven_gl_clouds.c` on a 0.25–0.5 s cadence (invalidated on wind/time jump).
 
+**Recorded P2 Results (`sh tests/unit/run-test-seven-perf.sh` GCC `-O1`, `sh tests/unit/run-test-seven-gl-ffi.sh`, `make -C external/libareole test`, 1280×720):**
+
+| Scenario | P1 (`-O1`) `tot_ms` | P2 (`-O1`) `tot_ms` | Delta vs P1 | `bot` | `sort` | `scen` | P1 `probes` | P2 `probes` | `t_chk` | `m3d_n` | `bb_n` |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| High stationary (10f avg) | 12.14 | **0.89** | **-92.7%** | 0.05 | 0.01 | 0.13 | 14,397 | **57** (-99.6%) | 22 | 1,516 | 1 |
+| High panning (12f avg) | 19.82 | **17.24** | **-13.0%** | 6.97 | 0.01 | 1.83 | 15,314 | **6,493** (-57.6%) | 28 | 1,722 | 1 |
+| High zooming (8f avg) | 105.14 | **82.11** | **-21.9%** | 4.61 | 0.01 | 3.65 | 7,184 | 7,650 | 104 | 822 | 412 |
+| Low stationary (10f avg) | 6.07 | **0.86** | **-85.8%** | 0.05 | 0.01 | 0.12 | 14,421 | **37** (-99.7%) | 22 | 1,521 | 1 |
+
+- **Exact scene-count parity:** `t_chk`, `m3d_n`, and `bb_n` match P1 identically across all 4 scenarios (`22/1516/1`, `28/1722/1`, `104/822/412`, `22/1521/1`).
+- **`libareole` query & occluder (`make -C external/libareole test`, `run-test-areole-chaff-occlusion.sh`):**
+  - 5,000-update benchmark: `19.19 → 12.93 us/update` (**-32.6%**, `77,312` updates/sec) via binary max-heap + O(1) free-slot stack in `ar_system_query_matrix()` and precomputed `occ_cell_min[16]` 4×4 occluder grid in `ar_node_t`.
+  - Height-only `ar_probe_val()` / `ar_probe_view_val()` verified bit-identical to `ar_probe_view()`; zero false negatives across all occlusion scenarios.
+- **Persistent VBOs (`glBufferSubData`, `run-test-seven-gl-ffi.sh`, `run-test-lamina-bridge.sh`):**
+  - Steady-state `glBufferData`: **`0`/frame** (down from repeated `1.84 MB` VBO reallocations); steady-state `glBufferSubData`: `4.0`/frame stationary, `6.0`/frame wide-zoom; `MID_STREAM_CHUNK` raised `2048 → 16384`.
+- **Invariance note (Deliverable 4):** `step_q16 = 0` and `max_populates_per_frame = 0` were deliberately retained to preserve exact `docs/SHORE.md` shoreline/LOD height invariance and single-frame quadtree refinement depth (a non-zero `max_populates_per_query` caps top-down refinement at uncached intermediate ancestors).
+
 **Exit Criteria:**
-- Stationary-camera CPU frame time drops by **≥ 60%** vs. P1 baseline; `flora_probes` drops from 16k–40k/frame to ~0 steady-state.
-- `make areole-lib && tests/unit/run-test-areole-chaff-occlusion.sh` exits `0`.
-- `make -C mods/nd && make site-wasm && make test-graphics && make test-mod MOD=nd` exits `0`.
+- Stationary-camera CPU frame time drops by **≥ 60%** vs. P1 baseline; `flora_probes` drops from 16k–40k/frame to ~0 steady-state. (Done — `-92.7%` High / `-85.8%` Low; `probes` `14,397 → 57`)
+- `make areole-lib && tests/unit/run-test-areole-chaff-occlusion.sh` exits `0`. (Done)
+- `make -C mods/nd && make site-wasm && make test-graphics && make test-mod MOD=nd` exits `0`. (Done)
 
 ---
 

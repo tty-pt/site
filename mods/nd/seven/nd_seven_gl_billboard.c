@@ -1109,14 +1109,63 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	                       (dx_c * dx_c + dy_c * dy_c < 650.0f * 650.0f);
 	bool need_terr_plane = want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
 	if (need_terr_plane && nd_seven_get_chunk_sys()) {
-		const float step = 16.0f;
-		float dz_e = shadow_corner_terrain_dz(bx + step, by, bz, step, 0.0f);
-		float dz_w = shadow_corner_terrain_dz(bx - step, by, bz, -step, 0.0f);
-		float dz_s = shadow_corner_terrain_dz(bx, by + step, bz, 0.0f, step);
-		float dz_n = shadow_corner_terrain_dz(bx, by - step, bz, 0.0f, -step);
-		gx = (dz_e - dz_w) * (0.5f / step);
-		gy = (dz_s - dz_n) * (0.5f / step);
-		curv = (dz_e + dz_w + dz_s + dz_n) * (0.25f / (step * step));
+		static struct {
+			int32_t  qx, qy, qz;
+			uint32_t key_epoch;
+			float    gx, gy, curv;
+		} s_terr_cache[2048][4];
+		static uint8_t s_terr_rr[2048];
+		int32_t qx = (int32_t)floorf(bx + 0.5f);
+		int32_t qy = (int32_t)floorf(by + 0.5f);
+		int32_t qz = (int32_t)floorf(bz * 16.0f + 0.5f);
+		uint32_t world_id = (uint32_t)nd_seven_get_world();
+		uint32_t lod_bkt = (uint32_t)(s_gl.cur_dist * 0.01f);
+		uint32_t epoch = ((nd_seven_ground_forget_seq() & 0xFFFFu) << 16) ^
+		                 ((world_id & 0xFFu) << 8) ^ (lod_bkt & 0xFFu);
+		if (epoch == 0u) epoch = 1u;
+		uint32_t h = ((uint32_t)qx * 2654435761u) ^ ((uint32_t)qy * 2246822519u) ^
+		             ((uint32_t)qz * 3266489917u) ^ (epoch * 668265263u);
+		uint32_t set = (h ^ (h >> 11)) & 2047u;
+		int hit = -1;
+		for (int w = 0; w < 4; w++) {
+			if (s_terr_cache[set][w].key_epoch == epoch &&
+			    s_terr_cache[set][w].qx == qx &&
+			    s_terr_cache[set][w].qy == qy &&
+			    s_terr_cache[set][w].qz == qz) {
+				hit = w;
+				break;
+			}
+		}
+		if (hit >= 0) {
+			gx = s_terr_cache[set][hit].gx;
+			gy = s_terr_cache[set][hit].gy;
+			curv = s_terr_cache[set][hit].curv;
+		} else {
+			const float step = 16.0f;
+			float dz_e = shadow_corner_terrain_dz(bx + step, by, bz, step, 0.0f);
+			float dz_w = shadow_corner_terrain_dz(bx - step, by, bz, -step, 0.0f);
+			float dz_s = shadow_corner_terrain_dz(bx, by + step, bz, 0.0f, step);
+			float dz_n = shadow_corner_terrain_dz(bx, by - step, bz, 0.0f, -step);
+			gx = (dz_e - dz_w) * (0.5f / step);
+			gy = (dz_s - dz_n) * (0.5f / step);
+			curv = (dz_e + dz_w + dz_s + dz_n) * (0.25f / (step * step));
+			int dst_w = -1;
+			for (int w = 0; w < 4; w++) {
+				if (s_terr_cache[set][w].key_epoch != epoch) {
+					dst_w = w;
+					break;
+				}
+			}
+			if (dst_w < 0)
+				dst_w = (int)(s_terr_rr[set]++ & 3u);
+			s_terr_cache[set][dst_w].qx = qx;
+			s_terr_cache[set][dst_w].qy = qy;
+			s_terr_cache[set][dst_w].qz = qz;
+			s_terr_cache[set][dst_w].key_epoch = epoch;
+			s_terr_cache[set][dst_w].gx = gx;
+			s_terr_cache[set][dst_w].gy = gy;
+			s_terr_cache[set][dst_w].curv = curv;
+		}
 	}
 	float sh_flags = (want_shadow ? 1.0f : 0.0f) + (want_lamb_shadow ? 2.0f : 0.0f);
 	float yaw01 = fminf(0.999f, fmaxf(0.001f, yaw_norm + 0.5f));
@@ -1215,7 +1264,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		glEnableVertexAttribArray(a);
 		glVertexAttribDivisor(a, 1);
 	}
-	glBufferData(GL_ARRAY_BUFFER, s_mesh3d_sorted, running * sizeof(nd_seven_gl_mesh3d_inst_t), GL_DYNAMIC_DRAW);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(nd_seven_gl_mesh3d_inst_t), s_mesh3d_sorted);
 
 	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
 	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops. */
@@ -1611,7 +1660,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			}
 			if (core_n > 0) {
 				s_gl.perf_bb_count += core_n;
-				glBufferData(GL_ARRAY_BUFFER, s_bb_instances, core_n * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
+				glBufferSubData(GL_ARRAY_BUFFER, 0, core_n * sizeof(nd_seven_gl_bb_inst_t), s_bb_instances);
 				/* pass 0: core */
 				glUniform1i(s_gl.bb_pipe.uPass, 0);
 				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1641,8 +1690,8 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				}
 			}
 			if (other_n > 0) {
-				glBufferData(GL_ARRAY_BUFFER, s_bb_other_instances,
-				             other_n * sizeof(nd_seven_gl_bb_inst_t), GL_DYNAMIC_DRAW);
+				glBufferSubData(GL_ARRAY_BUFFER, 0,
+				                other_n * sizeof(nd_seven_gl_bb_inst_t), s_bb_other_instances);
 				glUniform1i(s_gl.bb_pipe.uPass, 2);
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

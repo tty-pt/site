@@ -43,7 +43,11 @@ function makeGl(log) {
 			log.push(['drawArraysInstanced', activeProgram.n, ic]);
 		},
 		bindBuffer: (t, b) => log.push(['bindBuffer', t, b ? b.n : null]),
-		bufferData: () => {},
+		bufferData: (t, d, u) => log.push(['bufferData', t, typeof d === 'number' ? d : d.byteLength, u]),
+		bufferSubData: (t, off, view, srcOff, len) => {
+			const n = (len !== undefined) ? len : view.byteLength;
+			log.push(['bufferSubData', t, off, n]);
+		},
 		pixelStorei: (p, v) => { if (p === 0x0CF5) unpackAlignment = v; log.push(['pixelStorei', p, v]); },
 		deleteFramebuffer: (f) => log.push(['deleteFramebuffer', f.n]),
 		deleteRenderbuffer: (r) => log.push(['deleteRenderbuffer', r.n]),
@@ -291,19 +295,21 @@ imp.glGetUniformLocation(prog, uPtr, uLen);
 imp.glUniform1i(uLoc, 2);
 imp.glUniformMatrix4fv(uLoc, 1, 0, 256);
 imp.glBufferData(0x8892, 64, 16, 0x88E8);
+imp.glBufferSubData(0x8892, 4, 8, 64);
 imp.glDrawArraysInstanced(0x0005, 0, 4, 2);
 imp.glBlitFramebuffer(0, 0, 10, 10, 0, 0, 10, 10, 0x4000, 0x2600);
 const snap = bridge.perf.snapshot();
 assert.equal(snap.enabled, true, 'profiler reports enabled');
 assert.equal(snap.getUniformLocationCalls, 1, 'counts glGetUniformLocation calls');
 assert.equal(snap.uniformUploads, 2, 'counts uniform uploads (1i + Matrix4fv)');
-assert.equal(snap.bufferUploads, 1, 'counts buffer uploads');
+assert.equal(snap.bufferUploads, 2, 'counts buffer uploads (glBufferData + glBufferSubData)');
 assert.equal(snap.draws, 1, 'counts draw calls');
 assert.equal(snap.blits, 1, 'counts framebuffer blits');
-assert.ok(snap.getGlCalls >= 6, 'counts getGl calls');
+assert.ok(snap.getGlCalls >= 7, 'counts getGl calls');
 assert.equal(snap.domQueries, 0, 'steady-state getGl() performs 0 DOM queries');
 assert.ok(snap.uniformLocsLen >= 2, 'reports uniformLocs table length');
 assert.ok(log.some((e) => e[0] === 'uniformMatrix4fv' && e[3] === 16), 'glUniformMatrix4fv forwards 16 floats via cached view');
+assert.ok(log.some((e) => e[0] === 'bufferSubData' && e[1] === 0x8892 && e[2] === 4 && e[3] === 8), 'glBufferSubData forwards exact offset and byte length');
 // bridge.mount() forces a canvas re-check even if the old canvas remains connected.
 canvasA.isConnected = true;
 canvas = canvasA;

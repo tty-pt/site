@@ -15,6 +15,7 @@
 #define TILE_PX_H (NDW_TILE_H * SCALE)
 
 void nd_seven_ground_cache_forget(void);
+uint32_t nd_seven_ground_forget_seq(void);
 int nd_seven_pos_in_map(const int16_t pos[4], const nd_map_data_t *map);
 
 uint32_t water_color_at_depth(int depth, int r, int gg, int b);

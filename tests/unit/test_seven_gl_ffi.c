@@ -24,6 +24,7 @@ typedef struct {
 	uint64_t tex_image_2d;
 	uint64_t tex_sub_image_2d;
 	uint64_t buffer_data;
+	uint64_t buffer_sub_data;
 	uint64_t bind_buffer;
 	uint64_t draws;
 	uint64_t blits;
@@ -57,6 +58,7 @@ void lam_glUseProgram(GLuint p) { (void)p; g_gl.total_calls++; g_gl.use_program+
 GLuint lam_glCreateBuffer(void) { g_gl.total_calls++; return g_next_id++; }
 void lam_glBindBuffer(GLenum t, GLuint b) { (void)t; (void)b; g_gl.total_calls++; g_gl.bind_buffer++; }
 void lam_glBufferData(GLenum t, const void *d, size_t s, GLenum u) { (void)t; (void)d; (void)s; (void)u; g_gl.total_calls++; g_gl.buffer_data++; }
+void lam_glBufferSubData(GLenum t, size_t o, size_t s, const void *d) { (void)t; (void)o; (void)s; (void)d; g_gl.total_calls++; g_gl.buffer_sub_data++; }
 GLuint lam_glCreateTexture(void) { g_gl.total_calls++; return g_next_id++; }
 void lam_glDeleteTexture(GLuint t) { (void)t; g_gl.total_calls++; }
 void lam_glBindTexture(GLenum t, GLuint tex) { (void)t; (void)tex; g_gl.total_calls++; g_gl.bind_tex++; }
@@ -160,19 +162,23 @@ int main(void)
 		nd_seven_render(1280, 720, &s_st);
 		chunks_stat += nd_seven_perf_last()->terrain_chunks;
 	}
-	printf("FFI High stationary (10f avg): total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f chunks=%.1f\n",
+	printf("FFI High stationary (10f avg): total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f\n",
 	       g_gl.total_calls / 10.0, g_gl.uniform_calls / 10.0, g_gl.use_program / 10.0,
 	       g_gl.bind_tex / 10.0, g_gl.draws / 10.0,
 	       (unsigned long long)g_gl.get_uniform_loc,
 	       (unsigned long long)g_gl.get_program_param,
 	       (unsigned long long)g_gl.tex_image_2d,
 	       g_gl.tex_sub_image_2d / 10.0,
+	       (unsigned long long)g_gl.buffer_data,
+	       g_gl.buffer_sub_data / 10.0,
 	       chunks_stat / 10.0);
 
-	/* Hard P1 Exit Criteria invariants (stationary) */
+	/* Hard P1/P2 Exit Criteria invariants (stationary) */
 	assert(g_gl.get_uniform_loc == 0);   /* 0 Hi-Z / per-frame uniformLocs leak */
 	assert(g_gl.get_program_param == 0); /* Hi-Z link state cached */
 	assert(g_gl.tex_image_2d == 0);      /* steady-state: no full texture reallocations */
+	assert(g_gl.buffer_data == 0);       /* P2: no per-frame dynamic VBO reallocations */
+	assert(g_gl.buffer_sub_data > 0);    /* P2: dynamic billboard/mesh3d VBOs updated via glBufferSubData */
 
 	/* High wide-zoom steady-state (100+ terrain chunks cached, clouds visible) */
 	nd_seven_set_zoom(0.10f);
@@ -188,13 +194,15 @@ int main(void)
 	double total_wide = g_gl.total_calls / 5.0;
 	double unif_wide = g_gl.uniform_calls / 5.0;
 	double avg_chunks_wide = chunks_wide / 5.0;
-	printf("FFI High wide-zoom (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f chunks=%.1f clouds=%.1f (calls/chunk=%.1f)\n",
+	printf("FFI High wide-zoom (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f clouds=%.1f (calls/chunk=%.1f)\n",
 	       total_wide, unif_wide, g_gl.use_program / 5.0,
 	       g_gl.bind_tex / 5.0, g_gl.draws / 5.0,
 	       (unsigned long long)g_gl.get_uniform_loc,
 	       (unsigned long long)g_gl.get_program_param,
 	       (unsigned long long)g_gl.tex_image_2d,
 	       g_gl.tex_sub_image_2d / 5.0,
+	       (unsigned long long)g_gl.buffer_data,
+	       g_gl.buffer_sub_data / 5.0,
 	       avg_chunks_wide,
 	       clouds_wide / 5.0,
 	       avg_chunks_wide > 0 ? total_wide / avg_chunks_wide : 0.0);
@@ -202,6 +210,7 @@ int main(void)
 	assert(g_gl.get_uniform_loc == 0);
 	assert(g_gl.get_program_param == 0);
 	assert(g_gl.tex_image_2d == 0);
+	assert(g_gl.buffer_data == 0);
 	if (clouds_wide > 0)
 		assert(g_gl.tex_sub_image_2d >= 10); /* 2 clustered-light textures updated in-place/frame */
 	/* Pre-P1 terrain pass alone emitted ~45+ GL calls/chunk (~6,500+/frame at wide zoom).
@@ -209,6 +218,6 @@ int main(void)
 	assert(avg_chunks_wide >= 50.0);
 	assert(total_wide / avg_chunks_wide < 25.0);
 
-	printf("PASS: Seven P1 WebGL FFI hoisting & 0-leak invariants verified\n");
+	printf("PASS: Seven P1/P2 WebGL FFI hoisting & 0-leak invariants verified\n");
 	return 0;
 }

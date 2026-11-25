@@ -527,13 +527,21 @@ void nd_seven_cycle_quality_preset(void)
 		nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 }
 
+static uint32_t s_ground_forget_seq = 1u;
+
 void nd_seven_ground_cache_forget(void)
 {
+	s_ground_forget_seq++;
 	memset(s_border, 0, sizeof(s_border));
 	ar_system_t *cs = nd_seven_get_chunk_sys();
 	if (cs) {
 		ar_system_clear(cs);
 	}
+}
+
+uint32_t nd_seven_ground_forget_seq(void)
+{
+	return s_ground_forget_seq;
 }
 
 static int s_ground_perf_enabled = 0;
@@ -559,9 +567,9 @@ int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 	uint16_t world = (uint16_t)nd_seven_get_world();
 	ar_system_t *cs = nd_seven_get_chunk_sys();
 	if (cs) {
-		ar_sample_t s;
-		if (ar_probe_view(cs, 0, world, wx, wy, &s))
-			return s.val;
+		int16_t val = 0;
+		if (ar_probe_view_val(cs, 0, world, wx, wy, &val))
+			return val;
 	}
 
 	int32_t cx = morton_fdiv(wx, NDW_TILE_W);
