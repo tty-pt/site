@@ -823,6 +823,95 @@ static void test_webgl_redraw_in_click_preserves_blend(void)
 	bud_lamina_destroy(bl);
 }
 
+static int g_img_fetch_calls = 0;
+static char g_img_last_src[256];
+
+static void on_test_img_fetch(void *ctx, const char *src)
+{
+	(void)ctx;
+	g_img_fetch_calls++;
+	snprintf(g_img_last_src, sizeof(g_img_last_src), "%s", src ? src : "");
+}
+
+/* Valid 1x1 red RGBA PNG (68 bytes) */
+static const uint8_t k_tiny_png[] = {
+	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+	0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+	0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
+	0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00,
+	0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
+};
+
+static bud_node *render_img_test(void *ctx)
+{
+	(void)ctx;
+	bud_node *root = bud_element("div");
+	bud_set_attr(root, "id", "img-root");
+
+	bud_node *i1 = bud_element("img");
+	bud_set_attr(i1, "id", "img-data");
+	bud_set_attr(i1, "src",
+		"data:image/png;base64,"
+		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==");
+	bud_append(root, i1);
+
+	bud_node *i2 = bud_element("img");
+	bud_set_attr(i2, "id", "img-web");
+	bud_set_attr(i2, "src", "https://example.invalid/icon.png");
+	bud_append(root, i2);
+
+	bud_node *i3 = bud_element("img");
+	bud_set_attr(i3, "id", "img-rel");
+	bud_set_attr(i3, "src", "/nonexistent-logo-xyz.png");
+	bud_append(root, i3);
+
+	return root;
+}
+
+static void test_data_uri_and_web_img_fetch(void)
+{
+	g_img_fetch_calls = 0;
+	g_img_last_src[0] = '\0';
+
+	bud_lamina_t *bl = bud_lamina_create(640, 480);
+	assert(bl != NULL);
+	bud_lamina_set_img_fetch(bl, on_test_img_fetch, NULL);
+	bud_lamina_set_render(bl, render_img_test, NULL);
+	bud_lamina_load_css(bl,
+		"#img-root { width: 640px; height: 480px; display: flex; }"
+		"img { width: 64px; height: 64px; }",
+		92);
+
+	bud_lamina_sync(bl);
+	/* data: URI decoded immediately; https:// and missing relative triggered 2 fetches */
+	assert(g_img_fetch_calls == 2);
+	assert(strcmp(g_img_last_src, "/nonexistent-logo-xyz.png") == 0);
+
+	/* Re-syncing while pending does NOT spam duplicate fetches */
+	bud_lamina_mark_dirty(bl);
+	bud_lamina_sync(bl);
+	assert(g_img_fetch_calls == 2);
+
+	/* Deliver PNG bytes for web URL and relative asset -> decodes and marks dirty */
+	assert(bud_lamina_provide_img(bl, "https://example.invalid/icon.png",
+	                              k_tiny_png, sizeof(k_tiny_png), "image/png") == 1);
+	assert(bud_lamina_provide_img(bl, "/nonexistent-logo-xyz.png",
+	                              k_tiny_png, sizeof(k_tiny_png), "image/png") == 1);
+	assert(bud_lamina_is_dirty(bl) == 1);
+	bud_lamina_sync(bl);
+	bud_lamina_render(bl);
+	assert(g_img_fetch_calls == 2);
+
+	/* Corrupt bytes fail safely without aborting */
+	const uint8_t garbage[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+	assert(bud_lamina_provide_img(bl, "https://example.invalid/bad.png",
+	                              garbage, sizeof(garbage), "image/png") == 0);
+
+	bud_lamina_destroy(bl);
+	printf("  test_data_uri_and_web_img_fetch: PASS\n");
+}
+
 int main(void)
 {
 	printf("test_bud_lamina:\n");
@@ -833,6 +922,7 @@ int main(void)
 	test_mouse_hover_drag_w3c_and_popper();
 	test_modal_escape_term_wrap_and_dpi();
 	test_webgl_redraw_in_click_preserves_blend();
+	test_data_uri_and_web_img_fetch();
 
 	printf("test_bud_lamina: ALL TESTS PASSED\n");
 	return 0;

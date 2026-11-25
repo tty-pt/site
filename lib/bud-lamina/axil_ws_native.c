@@ -21,9 +21,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef AXIL_WS_TLS
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 typedef enum {
 	WS_ST_IDLE = 0,
 	WS_ST_TCP_CONNECTING,
+	WS_ST_TLS_HANDSHAKE,
 	WS_ST_HANDSHAKE,
 	WS_ST_OPEN,
 	WS_ST_CLOSING
@@ -32,6 +38,11 @@ typedef enum {
 typedef struct {
 	int        fd;
 	ws_state_t state;
+	int        use_tls;
+#ifdef AXIL_WS_TLS
+	SSL_CTX   *ssl_ctx;
+	SSL       *ssl;
+#endif
 
 	char     base_host[256];
 	uint16_t base_port;
@@ -115,12 +126,20 @@ static int buf_append(uint8_t **buf, size_t *len, size_t *cap,
 
 static void ws_reset_conn(int notify_close, int close_code)
 {
+#ifdef AXIL_WS_TLS
+	if (g_ws.ssl) {
+		SSL_shutdown(g_ws.ssl);
+		SSL_free(g_ws.ssl);
+		g_ws.ssl = NULL;
+	}
+#endif
 	if (g_ws.fd >= 0) {
 		close(g_ws.fd);
 		g_ws.fd = -1;
 	}
 	ws_state_t prev = g_ws.state;
 	g_ws.state = WS_ST_IDLE;
+	g_ws.use_tls = 0;
 	g_ws.tx_len = 0;
 	g_ws.rx_len = 0;
 	g_ws.frag_len = 0;
@@ -181,31 +200,38 @@ static void ws_send_handshake(void)
 	char key_b64[32];
 	base64_encode(nonce, sizeof(nonce), key_b64);
 
+	char host_hdr[300];
+	if ((g_ws.use_tls && g_ws.req_port == 443) ||
+	    (!g_ws.use_tls && g_ws.req_port == 80)) {
+		snprintf(host_hdr, sizeof(host_hdr), "%s", g_ws.req_host);
+	} else {
+		snprintf(host_hdr, sizeof(host_hdr), "%s:%u",
+		         g_ws.req_host, (unsigned)g_ws.req_port);
+	}
+
 	char req[1536];
 	int n;
 	if (g_ws.cookie[0]) {
 		n = snprintf(req, sizeof(req),
 			"GET %s HTTP/1.1\r\n"
-			"Host: %s:%u\r\n"
+			"Host: %s\r\n"
 			"Upgrade: websocket\r\n"
 			"Connection: Upgrade\r\n"
 			"Sec-WebSocket-Key: %s\r\n"
 			"Sec-WebSocket-Version: 13\r\n"
 			"Cookie: %s\r\n"
 			"\r\n",
-			g_ws.req_path, g_ws.req_host, (unsigned)g_ws.req_port,
-			key_b64, g_ws.cookie);
+			g_ws.req_path, host_hdr, key_b64, g_ws.cookie);
 	} else {
 		n = snprintf(req, sizeof(req),
 			"GET %s HTTP/1.1\r\n"
-			"Host: %s:%u\r\n"
+			"Host: %s\r\n"
 			"Upgrade: websocket\r\n"
 			"Connection: Upgrade\r\n"
 			"Sec-WebSocket-Key: %s\r\n"
 			"Sec-WebSocket-Version: 13\r\n"
 			"\r\n",
-			g_ws.req_path, g_ws.req_host, (unsigned)g_ws.req_port,
-			key_b64);
+			g_ws.req_path, host_hdr, key_b64);
 	}
 	if (n > 0) {
 		buf_append(&g_ws.tx_buf, &g_ws.tx_len, &g_ws.tx_cap, req, (size_t)n);
@@ -216,7 +242,25 @@ static void ws_send_handshake(void)
 static void ws_flush_tx(void)
 {
 	while (g_ws.fd >= 0 && g_ws.tx_len > 0) {
-		ssize_t w = send(g_ws.fd, g_ws.tx_buf, g_ws.tx_len, MSG_NOSIGNAL);
+		ssize_t w;
+#ifdef AXIL_WS_TLS
+		if (g_ws.use_tls) {
+			if (!g_ws.ssl) { ws_reset_conn(1, 1006); break; }
+			int r = SSL_write(g_ws.ssl, g_ws.tx_buf, (int)g_ws.tx_len);
+			if (r > 0) {
+				w = (ssize_t)r;
+			} else {
+				int err = SSL_get_error(g_ws.ssl, r);
+				if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+					break;
+				ws_reset_conn(1, 1006);
+				break;
+			}
+		} else
+#endif
+		{
+			w = send(g_ws.fd, g_ws.tx_buf, g_ws.tx_len, MSG_NOSIGNAL);
+		}
 		if (w > 0) {
 			size_t uw = (size_t)w;
 			if (uw < g_ws.tx_len)
@@ -427,6 +471,35 @@ void axil_ws_native_set_callbacks(const axil_ws_native_cbs_t *cbs)
 	else memset(&g_ws.cbs, 0, sizeof(g_ws.cbs));
 }
 
+static int ws_start_tls(void)
+{
+#ifdef AXIL_WS_TLS
+	if (!g_ws.ssl_ctx) {
+		g_ws.ssl_ctx = SSL_CTX_new(TLS_client_method());
+		if (!g_ws.ssl_ctx) return -1;
+		SSL_CTX_set_default_verify_paths(g_ws.ssl_ctx);
+	}
+	g_ws.ssl = SSL_new(g_ws.ssl_ctx);
+	if (!g_ws.ssl) return -1;
+	SSL_set_fd(g_ws.ssl, g_ws.fd);
+	SSL_set_tlsext_host_name(g_ws.ssl, g_ws.req_host);
+	SSL_set_connect_state(g_ws.ssl);
+	g_ws.state = WS_ST_TLS_HANDSHAKE;
+	int r = SSL_connect(g_ws.ssl);
+	if (r == 1) {
+		ws_send_handshake();
+		ws_flush_tx();
+		return 0;
+	}
+	int err = SSL_get_error(g_ws.ssl, r);
+	if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+		return 0;
+	return -1;
+#else
+	return -1;
+#endif
+}
+
 static void parse_ws_url(const char *url, size_t len)
 {
 	char tmp[768];
@@ -436,11 +509,15 @@ static void parse_ws_url(const char *url, size_t len)
 
 	snprintf(g_ws.req_host, sizeof(g_ws.req_host), "%s", g_ws.base_host);
 	g_ws.req_port = g_ws.base_port;
+	g_ws.use_tls = 0;
 	snprintf(g_ws.req_path, sizeof(g_ws.req_path), "/");
 
 	const char *p = tmp;
-	if (strncmp(p, "ws://", 5) == 0) {
-		p += 5;
+	int is_wss = (strncmp(p, "wss://", 6) == 0);
+	int is_ws  = (strncmp(p, "ws://", 5) == 0);
+	if (is_wss || is_ws) {
+		g_ws.use_tls = is_wss ? 1 : 0;
+		p += is_wss ? 6 : 5;
 		const char *slash = strchr(p, '/');
 		const char *host_end = slash ? slash : (p + strlen(p));
 		const char *colon = memchr(p, ':', (size_t)(host_end - p));
@@ -456,7 +533,7 @@ static void parse_ws_url(const char *url, size_t len)
 			if (hl >= sizeof(g_ws.req_host)) hl = sizeof(g_ws.req_host) - 1;
 			memcpy(g_ws.req_host, p, hl);
 			g_ws.req_host[hl] = '\0';
-			g_ws.req_port = 80;
+			g_ws.req_port = is_wss ? 443 : 80;
 		}
 		if (slash)
 			snprintf(g_ws.req_path, sizeof(g_ws.req_path), "%.511s", slash);
@@ -503,8 +580,13 @@ void ws_connect(const char *url, size_t len)
 
 	if (rc == 0) {
 		g_ws.fd = fd;
-		ws_send_handshake();
-		ws_flush_tx();
+		if (g_ws.use_tls) {
+			if (ws_start_tls() < 0)
+				ws_reset_conn(1, 1006);
+		} else {
+			ws_send_handshake();
+			ws_flush_tx();
+		}
 	} else if (err == EINPROGRESS) {
 		g_ws.fd = fd;
 		g_ws.state = WS_ST_TCP_CONNECTING;
@@ -540,6 +622,7 @@ int ws_status(void)
 {
 	switch (g_ws.state) {
 	case WS_ST_TCP_CONNECTING:
+	case WS_ST_TLS_HANDSHAKE:
 	case WS_ST_HANDSHAKE: return AXIL_WS_CONNECTING;
 	case WS_ST_OPEN:      return AXIL_WS_CONNECTED;
 	case WS_ST_CLOSING:   return AXIL_WS_CLOSING;
@@ -570,7 +653,7 @@ int axil_ws_native_poll(int timeout_ms)
 	struct pollfd pfd;
 	pfd.fd = g_ws.fd;
 	pfd.events = POLLIN;
-	if (g_ws.state == WS_ST_TCP_CONNECTING || g_ws.tx_len > 0)
+	if (g_ws.state == WS_ST_TCP_CONNECTING || g_ws.state == WS_ST_TLS_HANDSHAKE || g_ws.tx_len > 0)
 		pfd.events |= POLLOUT;
 	pfd.revents = 0;
 
@@ -595,11 +678,35 @@ int axil_ws_native_poll(int timeout_ms)
 				ws_reset_conn(1, 1006);
 				return -1;
 			}
-			ws_send_handshake();
-			ws_flush_tx();
+			if (g_ws.use_tls) {
+				if (ws_start_tls() < 0) {
+					ws_reset_conn(1, 1006);
+					return -1;
+				}
+			} else {
+				ws_send_handshake();
+				ws_flush_tx();
+			}
 		}
 		return 0;
 	}
+
+#ifdef AXIL_WS_TLS
+	if (g_ws.state == WS_ST_TLS_HANDSHAKE) {
+		if (!g_ws.ssl) { ws_reset_conn(1, 1006); return -1; }
+		int r = SSL_connect(g_ws.ssl);
+		if (r == 1) {
+			ws_send_handshake();
+			ws_flush_tx();
+			return 0;
+		}
+		int err = SSL_get_error(g_ws.ssl, r);
+		if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+			return 0;
+		ws_reset_conn(1, 1006);
+		return -1;
+	}
+#endif
 
 	if (pfd.revents & POLLOUT)
 		ws_flush_tx();
@@ -608,7 +715,29 @@ int axil_ws_native_poll(int timeout_ms)
 	if (g_ws.fd >= 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
 		uint8_t tmp[8192];
 		for (;;) {
-			ssize_t r = recv(g_ws.fd, tmp, sizeof(tmp), 0);
+			ssize_t r;
+#ifdef AXIL_WS_TLS
+			if (g_ws.use_tls) {
+				if (!g_ws.ssl) { ws_reset_conn(1, 1006); return -1; }
+				int sr = SSL_read(g_ws.ssl, tmp, (int)sizeof(tmp));
+				if (sr > 0) {
+					r = (ssize_t)sr;
+				} else {
+					int err = SSL_get_error(g_ws.ssl, sr);
+					if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+						break;
+					if (err == SSL_ERROR_ZERO_RETURN || sr == 0) {
+						r = 0;
+					} else {
+						ws_reset_conn(1, 1006);
+						return -1;
+					}
+				}
+			} else
+#endif
+			{
+				r = recv(g_ws.fd, tmp, sizeof(tmp), 0);
+			}
 			if (r > 0) {
 				if (buf_append(&g_ws.rx_buf, &g_ws.rx_len, &g_ws.rx_cap,
 				               tmp, (size_t)r) < 0) {

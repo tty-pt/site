@@ -83,7 +83,7 @@ LIB_DIRS = \
 
 LDFLAGS = $(foreach d,$(LIB_DIRS),-L$(d) -Wl,-rpath,$(d))
 LDLIBS = -llamina -lbud -lhyle-bud -lcorm -lstele -lxylem -lxxhash -lpng $(FT_LDLIBS) \
-	-lGL -lGLEW -lglfw -lEGL -lX11 -lm
+	-lssl -lcrypto -lGL -lGLEW -lglfw -lEGL -lX11 -lm
 
 BUD_LAMINA_LIB = $(REPO_ROOT)/lib/bud-lamina/libbud-lamina.a
 

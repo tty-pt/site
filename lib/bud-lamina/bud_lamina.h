@@ -15,6 +15,7 @@ typedef struct bud_lamina bud_lamina_t;
 
 typedef bud_node *(*bud_lamina_render_fn)(void *ctx);
 typedef void (*bud_lamina_term_input_fn)(void *ctx, const char *data, size_t len);
+typedef void (*bud_lamina_img_fetch_fn)(void *ctx, const char *src);
 
 /* Lifecycle */
 bud_lamina_t *bud_lamina_create(int vw, int vh);
@@ -23,10 +24,18 @@ void          bud_lamina_destroy(bud_lamina_t *bl);
 /* Configuration */
 int  bud_lamina_load_css_file(bud_lamina_t *bl, const char *path);
 int  bud_lamina_load_css(bud_lamina_t *bl, const char *css, size_t len);
+int  bud_lamina_set_css_var(bud_lamina_t *bl, const char *name, const char *val);
+void bud_lamina_set_video_tex(bud_lamina_t *bl, const char *id,
+                              uint32_t gl_tex, uint32_t w, uint32_t h);
 void bud_lamina_set_fonts(bud_lamina_t *bl,
                           uint32_t sans, uint32_t sans_bold,
                           uint32_t mono, uint32_t mono_bold);
 void bud_lamina_set_asset_root(bud_lamina_t *bl, const char *htdocs_dir);
+void bud_lamina_set_img_fetch(bud_lamina_t *bl, bud_lamina_img_fetch_fn fn, void *ctx);
+int  bud_lamina_provide_img(bud_lamina_t *bl, const char *src,
+                            const uint8_t *bytes, size_t len, const char *mime);
+int  bud_lamina_img_ready(const bud_lamina_t *bl, const char *src,
+                          uint32_t *w_out, uint32_t *h_out);
 void bud_lamina_set_render(bud_lamina_t *bl, bud_lamina_render_fn fn, void *ctx);
 void bud_lamina_set_term_input(bud_lamina_t *bl, bud_lamina_term_input_fn fn, void *ctx);
 void bud_lamina_set_dark_mode(bud_lamina_t *bl, int dark);

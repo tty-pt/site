@@ -6,6 +6,7 @@
 #endif
 
 #include "bud_lamina.h"
+#include "bl_img_decode.h"
 #include "term_ansi.h"
 
 #include <ttypt/lam-font.h>
@@ -63,18 +64,32 @@
 #define MOD_CTRL     2
 #define MOD_ALT      4
 
-#define BL_KEY_MAX   96
-#define BL_INPUT_MAX 256
+#define BL_KEY_MAX    96
+#define BL_INPUT_MAX  512
+#define BL_VIDEO_MAX  16
 
 typedef enum {
 	W_NONE = 0,
 	W_WEBGL_CANVAS,
 	W_SW_CANVAS,
 	W_IMG,
+	W_VIDEO,
 	W_INPUT_TEXT,
 	W_INPUT_RANGE,
+	W_INPUT_CHECKBOX,
+	W_INPUT_COLOR,
+	W_SWITCH_TRACK,
+	W_SELECT,
+	W_SVG,
 	W_TERM
 } bl_widget_kind_t;
+
+typedef struct {
+	char     id[BL_KEY_MAX];
+	uint32_t gl_tex;
+	uint32_t w;
+	uint32_t h;
+} bl_video_slot_t;
 
 typedef struct {
 	char     key[BL_KEY_MAX];
@@ -94,18 +109,37 @@ typedef struct {
 	bl_widget_kind_t kind;
 	uint32_t         img_tex;
 	int              img_valid;
+	int              is_password;
+	int              is_multiline;
+	int              is_checked;
 	double           range_min;
 	double           range_max;
 	double           range_step;
 	double           range_val;
+	uint32_t         color_val;
+	float            svg_vb_x;
+	float            svg_vb_y;
+	float            svg_vb_w;
+	float            svg_vb_h;
+	char             switch_cb_key[BL_KEY_MAX];
 	char             placeholder[96];
+	char             select_label[96];
 } bl_entry_t;
 
 typedef struct {
 	char    *src;
 	uint32_t tex;
-	int      ok;
+	uint32_t w;
+	uint32_t h;
+	int      state; /* 0 = failed, 1 = ready, 2 = pending */
 } bl_img_entry_t;
+
+typedef struct {
+	uint64_t hash;
+	uint32_t w;
+	uint32_t h;
+	uint32_t tex;
+} bl_svg_cache_t;
 
 struct bud_lamina {
 	int vw, vh;
@@ -120,6 +154,8 @@ struct bud_lamina {
 	void                    *render_ctx;
 	bud_lamina_term_input_fn term_input_fn;
 	void                    *term_input_ctx;
+	bud_lamina_img_fetch_fn  img_fetch_fn;
+	void                    *img_fetch_ctx;
 
 	bud_runtime  *rt;
 	lam_ui_div_t *ui_root;
@@ -135,6 +171,13 @@ struct bud_lamina {
 	bl_img_entry_t *imgs;
 	size_t          n_imgs;
 	size_t          cap_imgs;
+
+	bl_svg_cache_t *svgs;
+	size_t          n_svgs;
+	size_t          cap_svgs;
+
+	bl_video_slot_t videos[BL_VIDEO_MAX];
+	size_t          n_videos;
 
 	lam_ui_div_t        *webgl_div;
 	lam_webgl_surface_t *webgl_surf;
@@ -255,20 +298,177 @@ static bl_entry_t *entry_find_by_key(bud_lamina_t *bl, const char *key)
 	return NULL;
 }
 
-/* ── Image texture cache (local PNGs from htdocs) ───────────────────────── */
+/* ── Image texture cache (local files, data: URIs, and async web images) ─ */
 
-static int load_image_cached(bud_lamina_t *bl, const char *src, uint32_t *tex_out)
+static bl_img_entry_t *img_cache_find(bud_lamina_t *bl, const char *src)
+{
+	for (size_t i = 0; i < bl->n_imgs; i++) {
+		if (strcmp(bl->imgs[i].src, src) == 0)
+			return &bl->imgs[i];
+	}
+	return NULL;
+}
+
+static bl_img_entry_t *img_cache_upsert(bud_lamina_t *bl, const char *src,
+                                        uint32_t tex, uint32_t w, uint32_t h, int state)
+{
+	bl_img_entry_t *e = img_cache_find(bl, src);
+	if (e) {
+		e->tex = tex;
+		e->w = w;
+		e->h = h;
+		e->state = state;
+		return e;
+	}
+	if (bl->n_imgs >= bl->cap_imgs) {
+		size_t nc = bl->cap_imgs ? bl->cap_imgs * 2 : 16;
+		bl_img_entry_t *ni = realloc(bl->imgs, nc * sizeof(bl_img_entry_t));
+		if (!ni) return NULL;
+		bl->imgs = ni;
+		bl->cap_imgs = nc;
+	}
+	char *dup = strdup(src);
+	if (!dup) return NULL;
+	e = &bl->imgs[bl->n_imgs++];
+	e->src = dup;
+	e->tex = tex;
+	e->w = w;
+	e->h = h;
+	e->state = state;
+	return e;
+}
+
+static int b64_val(unsigned char c)
+{
+	if (c >= 'A' && c <= 'Z') return c - 'A';
+	if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+	if (c >= '0' && c <= '9') return c - '0' + 52;
+	if (c == '+' || c == '-') return 62;
+	if (c == '/' || c == '_') return 63;
+	return -1;
+}
+
+static uint8_t *decode_base64(const char *in, size_t *out_len)
+{
+	size_t slen = strlen(in);
+	size_t cap = (slen / 4u + 2u) * 3u;
+	uint8_t *out = malloc(cap);
+	if (!out) return NULL;
+	size_t n = 0;
+	uint32_t acc = 0;
+	int bits = 0;
+	for (size_t i = 0; i < slen; i++) {
+		unsigned char c = (unsigned char)in[i];
+		if (c == '=') break;
+		int v = b64_val(c);
+		if (v < 0) continue;
+		acc = (acc << 6) | (uint32_t)v;
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			out[n++] = (uint8_t)((acc >> bits) & 0xFFu);
+		}
+	}
+	if (out_len) *out_len = n;
+	return out;
+}
+
+int bud_lamina_provide_img(bud_lamina_t *bl, const char *src,
+                           const uint8_t *bytes, size_t len, const char *mime)
+{
+	(void)mime;
+	if (!bl || !src || !src[0]) return 0;
+	if (!bytes || len < 12) {
+		img_cache_upsert(bl, src, 0, 0, 0, 0);
+		return 0;
+	}
+	uint32_t w = 0, h = 0;
+	uint8_t *rgba = bl_img_decode_rgba(bytes, len, &w, &h);
+	if (!rgba) {
+		img_cache_upsert(bl, src, 0, 0, 0, 0);
+		return 0;
+	}
+	uint32_t tex = lam_tex_create_rgba(src, rgba, w, h);
+	free(rgba);
+	if (tex == UINT32_MAX) {
+		img_cache_upsert(bl, src, 0, 0, 0, 0);
+		return 0;
+	}
+	img_cache_upsert(bl, src, tex, w, h, 1);
+	bl->dirty = 1;
+	return 1;
+}
+
+int bud_lamina_img_ready(const bud_lamina_t *bl, const char *src,
+                         uint32_t *w_out, uint32_t *h_out)
 {
 	if (!bl || !src || !src[0]) return 0;
 	for (size_t i = 0; i < bl->n_imgs; i++) {
 		if (strcmp(bl->imgs[i].src, src) == 0) {
-			if (bl->imgs[i].ok && tex_out)
-				*tex_out = bl->imgs[i].tex;
-			return bl->imgs[i].ok;
+			if (bl->imgs[i].state == 1) {
+				if (w_out) *w_out = bl->imgs[i].w;
+				if (h_out) *h_out = bl->imgs[i].h;
+				return 1;
+			}
+			return 0;
 		}
 	}
+	return 0;
+}
 
-	/* Strip query string and leading '/' */
+static int load_image_cached(bud_lamina_t *bl, const char *src,
+                             uint32_t *tex_out, uint32_t *w_out, uint32_t *h_out)
+{
+	if (!bl || !src || !src[0]) return 0;
+	bl_img_entry_t *cached = img_cache_find(bl, src);
+	if (cached) {
+		if (cached->state == 1) {
+			if (tex_out) *tex_out = cached->tex;
+			if (w_out)   *w_out   = cached->w;
+			if (h_out)   *h_out   = cached->h;
+		}
+		return cached->state == 1;
+	}
+
+	/* Inline data:image/...;base64,... URIs */
+	if (strncmp(src, "data:", 5) == 0) {
+		const char *b64 = strstr(src, ";base64,");
+		if (!b64) {
+			img_cache_upsert(bl, src, 0, 0, 0, 0);
+			return 0;
+		}
+		size_t raw_len = 0;
+		uint8_t *raw = decode_base64(b64 + 8, &raw_len);
+		int ok = 0;
+		if (raw) {
+			ok = bud_lamina_provide_img(bl, src, raw, raw_len, NULL);
+			free(raw);
+		} else {
+			img_cache_upsert(bl, src, 0, 0, 0, 0);
+		}
+		if (ok) {
+			cached = img_cache_find(bl, src);
+			if (cached && cached->state == 1) {
+				if (tex_out) *tex_out = cached->tex;
+				if (w_out)   *w_out   = cached->w;
+				if (h_out)   *h_out   = cached->h;
+			}
+		}
+		return ok;
+	}
+
+	/* Remote http(s):// URLs via host async fetcher */
+	if (strncmp(src, "http://", 7) == 0 || strncmp(src, "https://", 8) == 0) {
+		if (bl->img_fetch_fn) {
+			img_cache_upsert(bl, src, 0, 0, 0, 2);
+			bl->img_fetch_fn(bl->img_fetch_ctx, src);
+		} else {
+			img_cache_upsert(bl, src, 0, 0, 0, 0);
+		}
+		return 0;
+	}
+
+	/* Local asset file relative to asset_root, with async web fetch fallback */
 	char rel[384];
 	const char *p = src;
 	while (*p == '/') p++;
@@ -279,39 +479,45 @@ static int load_image_cached(bud_lamina_t *bl, const char *src, uint32_t *tex_ou
 	}
 	rel[rlen] = '\0';
 
-	/* Attempt lam_tex_load for supported image files (.png, .jpg, .jpeg) on disk */
-	int ok = 0;
-	uint32_t tex = 0;
-	int supported = (rlen >= 4 && ci_eq(rel + rlen - 4, ".png")) ||
-	                (rlen >= 4 && ci_eq(rel + rlen - 4, ".jpg")) ||
-	                (rlen >= 5 && ci_eq(rel + rlen - 5, ".jpeg"));
-	if (supported) {
+	if (rlen > 0 && strstr(rel, "..") == NULL) {
 		char full[1024];
 		snprintf(full, sizeof(full), "%s/%s",
 		         bl->asset_root[0] ? bl->asset_root : "htdocs", rel);
 		FILE *f = fopen(full, "rb");
 		if (f) {
+			fseek(f, 0, SEEK_END);
+			long sz = ftell(f);
+			fseek(f, 0, SEEK_SET);
+			if (sz > 12 && sz <= 16L * 1024L * 1024L) {
+				uint8_t *buf = malloc((size_t)sz);
+				if (buf) {
+					size_t got = fread(buf, 1, (size_t)sz, f);
+					fclose(f);
+					int ok = bud_lamina_provide_img(bl, src, buf, got, NULL);
+					free(buf);
+					if (ok) {
+						cached = img_cache_find(bl, src);
+						if (cached && cached->state == 1) {
+							if (tex_out) *tex_out = cached->tex;
+							if (w_out)   *w_out   = cached->w;
+							if (h_out)   *h_out   = cached->h;
+						}
+					}
+					return ok;
+				}
+			}
 			fclose(f);
-			tex = lam_tex_load(full);
-			if (tex != UINT32_MAX)
-				ok = 1;
 		}
 	}
 
-	if (bl->n_imgs >= bl->cap_imgs) {
-		size_t nc = bl->cap_imgs ? bl->cap_imgs * 2 : 16;
-		bl_img_entry_t *ni = realloc(bl->imgs, nc * sizeof(bl_img_entry_t));
-		if (!ni) return ok;
-		bl->imgs = ni;
-		bl->cap_imgs = nc;
+	if (bl->img_fetch_fn) {
+		img_cache_upsert(bl, src, 0, 0, 0, 2);
+		bl->img_fetch_fn(bl->img_fetch_ctx, src);
+		return 0;
 	}
-	bl->imgs[bl->n_imgs].src = strdup(src);
-	bl->imgs[bl->n_imgs].tex = tex;
-	bl->imgs[bl->n_imgs].ok  = ok;
-	bl->n_imgs++;
 
-	if (ok && tex_out) *tex_out = tex;
-	return ok;
+	img_cache_upsert(bl, src, 0, 0, 0, 0);
+	return 0;
 }
 
 /* ── Custom widget draw callbacks ───────────────────────────────────────── */
@@ -420,6 +626,126 @@ static void draw_range_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 	                  (float)thumb_r, (float)thumb_r, (float)thumb_r, (float)thumb_r, 1.5f);
 }
 
+static void draw_video_widget(lam_ui_div_t *div, int32_t x, int32_t y,
+                              int32_t w, int32_t h, void *user)
+{
+	bud_lamina_t *bl = (bud_lamina_t *)user;
+	bl_entry_t *e = entry_find_by_div(bl, div);
+	if (!e || w <= 0 || h <= 0) return;
+
+	uint32_t tex = 0, tw = 0, th = 0;
+	for (size_t i = 0; i < bl->n_videos; i++) {
+		if (strcmp(bl->videos[i].id, e->key) == 0) {
+			tex = bl->videos[i].gl_tex;
+			tw = bl->videos[i].w;
+			th = bl->videos[i].h;
+			break;
+		}
+	}
+	lam_fill((uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h, LAM_RGB(0x0c, 0x0d, 0x10));
+	if (tex && tw > 0 && th > 0) {
+		double scale_x = (double)w / (double)tw;
+		double scale_y = (double)h / (double)th;
+		double scale = scale_x < scale_y ? scale_x : scale_y;
+		uint32_t dw = (uint32_t)(tw * scale);
+		uint32_t dh = (uint32_t)(th * scale);
+		int32_t dx = x + (w - (int32_t)dw) / 2;
+		int32_t dy = y + (h - (int32_t)dh) / 2;
+		lam_tex_draw_gl(tex, dx, dy, dw, dh, 0);
+	}
+}
+
+static void draw_checkbox_widget(lam_ui_div_t *div, int32_t x, int32_t y,
+                                 int32_t w, int32_t h, void *user)
+{
+	bud_lamina_t *bl = (bud_lamina_t *)user;
+	bl_entry_t *e = entry_find_by_div(bl, div);
+	if (!e || w <= 2 || h <= 2) return;
+	uint32_t bg = e->is_checked ? LAM_RGB(0xe2, 0xb6, 0x57) : LAM_RGBA(60, 62, 74, 220);
+	float r = (float)(h < w ? h : w) * 0.5f;
+	lam_border_radius(bg, LAM_RGBA(120, 120, 140, 160),
+	                  x, y, (uint32_t)w, (uint32_t)h, r, r, r, r, 1.0f);
+	int32_t knob = (h > 6) ? (h - 4) : h;
+	int32_t kx = e->is_checked ? (x + w - knob - 2) : (x + 2);
+	int32_t ky = y + (h - knob) / 2;
+	float kr = (float)knob * 0.5f;
+	lam_border_radius(LAM_RGB(0xf5, 0xf5, 0xf7), LAM_RGBA(0, 0, 0, 80),
+	                  kx, ky, (uint32_t)knob, (uint32_t)knob, kr, kr, kr, kr, 1.0f);
+}
+
+static void draw_color_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
+                                    int32_t w, int32_t h, void *user)
+{
+	bud_lamina_t *bl = (bud_lamina_t *)user;
+	bl_entry_t *e = entry_find_by_div(bl, div);
+	if (!e || w <= 2 || h <= 2) return;
+	uint32_t col = e->color_val ? e->color_val : LAM_RGB(0xe2, 0xb6, 0x57);
+	lam_border_radius(col, LAM_RGBA(255, 255, 255, 90),
+	                  x, y, (uint32_t)w, (uint32_t)h, 4, 4, 4, 4, 1.0f);
+}
+
+static void draw_switch_track_widget(lam_ui_div_t *div, int32_t x, int32_t y,
+                                     int32_t w, int32_t h, void *user)
+{
+	bud_lamina_t *bl = (bud_lamina_t *)user;
+	bl_entry_t *e = entry_find_by_div(bl, div);
+	if (!e || w <= 4 || h <= 4) return;
+	int checked = 0;
+	if (e->switch_cb_key[0]) {
+		bl_entry_t *cb = entry_find_by_key(bl, e->switch_cb_key);
+		if (cb) checked = cb->is_checked;
+	}
+	const lam_ui_style_t *st = lam_ui_get_style(div);
+	float r = (float)(h < w ? h : w) * 0.5f;
+	uint32_t track_bg = checked ? LAM_RGB(0xe2, 0xb6, 0x57)
+		: (st && st->background_color ? st->background_color : LAM_RGB(0x34, 0x20, 0x60));
+	uint32_t track_bd = checked ? LAM_RGB(0xe2, 0xb6, 0x57)
+		: (st && st->border_color ? st->border_color : LAM_RGB(0x6a, 0x4c, 0x96));
+	lam_border_radius(track_bg, track_bd,
+	                  x, y, (uint32_t)w, (uint32_t)h, r, r, r, r, 1.0f);
+	int32_t knob = (h > 6) ? (h - 6) : (h - 2);
+	if (knob < 4) knob = 4;
+	int32_t kx = checked ? (x + w - knob - 3) : (x + 3);
+	int32_t ky = y + (h - knob) / 2;
+	float kr = (float)knob * 0.5f;
+	uint32_t knob_col = checked ? LAM_RGB(0x0e, 0x07, 0x1f) : LAM_RGB(0xcb, 0xb8, 0xe0);
+	lam_border_radius(knob_col, 0,
+	                  kx, ky, (uint32_t)knob, (uint32_t)knob, kr, kr, kr, kr, 0.0f);
+}
+
+static void draw_select_widget(lam_ui_div_t *div, int32_t x, int32_t y,
+                               int32_t w, int32_t h, void *user)
+{
+	bud_lamina_t *bl = (bud_lamina_t *)user;
+	bl_entry_t *e = entry_find_by_div(bl, div);
+	if (!e || w <= 4 || h <= 4) return;
+	const lam_ui_style_t *st = lam_ui_get_style(div);
+	uint32_t bg = (st && st->background_color) ? st->background_color : LAM_RGBA(24, 26, 36, 220);
+	uint32_t bd = (st && st->border_color) ? st->border_color : LAM_RGBA(120, 120, 140, 160);
+	uint32_t fg = (st && st->color) ? st->color : LAM_RGB(0xf0, 0xf2, 0xf8);
+	float rad = (st && st->border_radius_top_left) ? (float)st->border_radius_top_left : 4.0f;
+	lam_border_radius(bg, bd, x, y, (uint32_t)w, (uint32_t)h, rad, rad, rad, rad, 1.0f);
+	uint32_t font = (bl->font_sans != UINT32_MAX) ? bl->font_sans : bl->font_mono;
+	if (font == UINT32_MAX) return;
+	uint32_t fpx = (st && st->font_size_is_px && st->font_size > 0) ? st->font_size : 13;
+	uint32_t lh = lam_font_line_height(font, fpx);
+	int ty = y + (h - (int)lh) / 2;
+	if (ty < y + 2) ty = y + 2;
+	const char *lbl = e->select_label[0] ? e->select_label : "Predefinido";
+	lam_tint(fg);
+	lam_font_draw_px(font, lbl, (uint32_t)(x + 8), (uint32_t)ty,
+	                 (uint32_t)(x + w - 18 > x + 8 ? x + w - 18 : x + w),
+	                 (uint32_t)(y + h), fpx,
+	                 LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
+	if (w > 22) {
+		lam_tint(LAM_RGBA(200, 185, 220, 180));
+		lam_font_draw_px(font, "v", (uint32_t)(x + w - 14), (uint32_t)ty,
+		                 (uint32_t)(x + w - 2), (uint32_t)(y + h), fpx > 2 ? fpx - 2 : fpx,
+		                 LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
+	}
+	lam_tint(0xFFFFFFFFu);
+}
+
 static void draw_text_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
                                    int32_t w, int32_t h, void *user)
 {
@@ -431,28 +757,46 @@ static void draw_text_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 	bl_state_t *st = state_find(bl, e->key, 0);
 	const char *txt = (st && st->has_text) ? st->text : "";
 
-	uint32_t border = focused ? LAM_RGB(0x95, 0x89, 0xc5) : LAM_RGBA(120, 120, 140, 160);
-	lam_border_radius(LAM_RGBA(24, 26, 36, 220), border,
-	                  x, y, (uint32_t)w, (uint32_t)h, 4, 4, 4, 4, 1.0f);
+	char masked[BL_INPUT_MAX];
+	const char *disp = txt;
+	if (e->is_password && txt[0]) {
+		size_t n = strlen(txt);
+		if (n >= sizeof(masked)) n = sizeof(masked) - 1;
+		memset(masked, '*', n);
+		masked[n] = '\0';
+		disp = masked;
+	}
+
+	const lam_ui_style_t *cs = lam_ui_get_style(div);
+	uint32_t bg = (cs && cs->background_color) ? cs->background_color : LAM_RGBA(24, 26, 36, 220);
+	uint32_t bd_default = (cs && cs->border_color) ? cs->border_color : LAM_RGBA(120, 120, 140, 160);
+	uint32_t border = focused ? LAM_RGB(0xe2, 0xb6, 0x57) : bd_default;
+	uint32_t fg = (cs && cs->color) ? cs->color : LAM_RGB(0xf0, 0xf2, 0xf8);
+	float rad = (cs && cs->border_radius_top_left) ? (float)cs->border_radius_top_left : 6.0f;
+	lam_border_radius(bg, border,
+	                  x, y, (uint32_t)w, (uint32_t)h, rad, rad, rad, rad, 1.0f);
 
 	uint32_t font = (bl->font_sans != UINT32_MAX) ? bl->font_sans : bl->font_mono;
 	if (font == UINT32_MAX) return;
-	uint32_t fpx = 14;
+	uint32_t fpx = (cs && cs->font_size_is_px && cs->font_size > 0) ? cs->font_size : 14;
 	uint32_t lh = lam_font_line_height(font, fpx);
-	int ty = y + (h - (int)lh) / 2;
+	int ty = (e->is_multiline && h > (int)lh + 16) ? (y + 8) : (y + (h - (int)lh) / 2);
 	if (ty < y + 2) ty = y + 2;
 
-	uint32_t x0 = (uint32_t)(x + 6 > 0 ? x + 6 : 0);
+	int pad_l = (cs && cs->padding_left > 0) ? (int)cs->padding_left : 8;
+	if (pad_l > w / 3) pad_l = 6;
+	uint32_t x0 = (uint32_t)(x + pad_l > 0 ? x + pad_l : 0);
 	uint32_t y0 = (uint32_t)(ty > 0 ? ty : 0);
 	uint32_t x1 = (uint32_t)(x + w - 4 > (int)x0 ? x + w - 4 : (int)x0);
 	uint32_t y1 = (uint32_t)(y + h > (int)y0 ? y + h : (int)y0);
 
-	if (txt[0]) {
-		lam_tint(LAM_RGB(0xf0, 0xf2, 0xf8));
-		lam_font_draw_px(font, txt, x0, y0, x1, y1, fpx,
-		                 LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
+	if (disp[0]) {
+		lam_tint(fg);
+		lam_font_draw_px(font, disp, x0, y0, x1, y1, fpx,
+		                 e->is_multiline ? LAM_UI_WS_PRE_WRAP : LAM_UI_WS_NOWRAP,
+		                 LAM_UI_WB_NORMAL);
 	} else if (e->placeholder[0]) {
-		lam_tint(LAM_RGBA(156, 163, 175, 180));
+		lam_tint(LAM_RGBA(141, 116, 168, 220));
 		lam_font_draw_px(font, e->placeholder, x0, y0, x1, y1, fpx,
 		                 LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
 	}
@@ -472,8 +816,508 @@ static void draw_text_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 			lam_font_measure_px(&pw, &ph, font, pre, 0, 0, 100000, 1000, fpx,
 			                    LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
 		}
-		lam_fill(x + 6 + (int)pw, ty, 2, (int)lh, LAM_RGB(0xc2, 0xb3, 0xff));
+		lam_fill(x + pad_l + (int)pw, ty, 2, (int)lh, LAM_RGB(0xe2, 0xb6, 0x57));
 	}
+	lam_tint(0xFFFFFFFFu);
+}
+
+/* ── Pure-C Anti-Aliased SVG Icon Rasterizer (W_SVG) ────────────────────── */
+
+#define SVG_MAX_SEGS 2048
+
+typedef struct {
+	float x0, y0, x1, y1;
+} svg_seg_t;
+
+typedef struct {
+	svg_seg_t segs[SVG_MAX_SEGS];
+	int       n;
+} svg_seglist_t;
+
+static void svg_push_seg(svg_seglist_t *sl, float x0, float y0, float x1, float y1)
+{
+	if (sl->n >= SVG_MAX_SEGS) return;
+	if (fabsf(x1 - x0) < 1e-5f && fabsf(y1 - y0) < 1e-5f) return;
+	sl->segs[sl->n].x0 = x0;
+	sl->segs[sl->n].y0 = y0;
+	sl->segs[sl->n].x1 = x1;
+	sl->segs[sl->n].y1 = y1;
+	sl->n++;
+}
+
+static void svg_skip_sep(const char **pp)
+{
+	const char *p = *pp;
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ',')
+		p++;
+	*pp = p;
+}
+
+static int svg_has_num(const char *p)
+{
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ',')
+		p++;
+	return (*p == '-' || *p == '+' || *p == '.' || (*p >= '0' && *p <= '9'));
+}
+
+static int svg_read_num(const char **pp, float *out)
+{
+	svg_skip_sep(pp);
+	const char *p = *pp;
+	if (!(*p == '-' || *p == '+' || *p == '.' || (*p >= '0' && *p <= '9')))
+		return 0;
+	char *ep = NULL;
+	float v = strtof(p, &ep);
+	if (ep == p) return 0;
+	*out = v;
+	*pp = ep;
+	return 1;
+}
+
+static int svg_read_flag(const char **pp, int *out)
+{
+	svg_skip_sep(pp);
+	const char *p = *pp;
+	if (*p == '0' || *p == '1') {
+		*out = (*p == '1') ? 1 : 0;
+		*pp = p + 1;
+		return 1;
+	}
+	return 0;
+}
+
+/* W3C SVG 1.1 F.6.5 endpoint-to-center arc subdivision */
+static void svg_emit_arc(svg_seglist_t *sl,
+                         float x1, float y1, float rx, float ry,
+                         float phi_deg, int large_arc, int sweep,
+                         float x2, float y2)
+{
+	if (fabsf(x1 - x2) < 1e-5f && fabsf(y1 - y2) < 1e-5f) return;
+	rx = fabsf(rx);
+	ry = fabsf(ry);
+	if (rx < 1e-5f || ry < 1e-5f) {
+		svg_push_seg(sl, x1, y1, x2, y2);
+		return;
+	}
+	float phi = phi_deg * (3.14159265358979323846f / 180.0f);
+	float cp = cosf(phi), sp = sinf(phi);
+	float dx2 = (x1 - x2) * 0.5f;
+	float dy2 = (y1 - y2) * 0.5f;
+	float x1p =  cp * dx2 + sp * dy2;
+	float y1p = -sp * dx2 + cp * dy2;
+
+	float rx2 = rx * rx, ry2 = ry * ry;
+	float x1p2 = x1p * x1p, y1p2 = y1p * y1p;
+	float lam = x1p2 / rx2 + y1p2 / ry2;
+	if (lam > 1.0f) {
+		float sc = sqrtf(lam);
+		rx *= sc; ry *= sc;
+		rx2 = rx * rx; ry2 = ry * ry;
+	}
+
+	float num = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
+	float den = rx2 * y1p2 + ry2 * x1p2;
+	float coef = (den > 1e-9f && num > 0.0f) ? sqrtf(num / den) : 0.0f;
+	if (large_arc == sweep) coef = -coef;
+
+	float cxp =  coef * (rx * y1p / ry);
+	float cyp = -coef * (ry * x1p / rx);
+	float cx = cp * cxp - sp * cyp + (x1 + x2) * 0.5f;
+	float cy = sp * cxp + cp * cyp + (y1 + y2) * 0.5f;
+
+	float ux = (x1p - cxp) / rx, uy = (y1p - cyp) / ry;
+	float vx = (-x1p - cxp) / rx, vy = (-y1p - cyp) / ry;
+
+	float t1 = atan2f(uy, ux);
+	float dot = ux * vx + uy * vy;
+	float det = ux * vy - uy * vx;
+	float dt = atan2f(det, dot);
+	if (!sweep && dt > 0.0f) dt -= 2.0f * 3.14159265358979323846f;
+	if ( sweep && dt < 0.0f) dt += 2.0f * 3.14159265358979323846f;
+
+	int steps = (int)ceilf(fabsf(dt) / (3.14159265358979323846f / 10.0f));
+	if (steps < 4) steps = 4;
+	if (steps > 36) steps = 36;
+
+	float px = x1, py = y1;
+	for (int i = 1; i <= steps; i++) {
+		float a = t1 + dt * ((float)i / (float)steps);
+		float ca = cosf(a), sa = sinf(a);
+		float nx = cp * (rx * ca) - sp * (ry * sa) + cx;
+		float ny = sp * (rx * ca) + cp * (ry * sa) + cy;
+		svg_push_seg(sl, px, py, nx, ny);
+		px = nx; py = ny;
+	}
+}
+
+static void svg_parse_path(svg_seglist_t *sl, const char *d)
+{
+	if (!d) return;
+	const char *p = d;
+	float cx = 0, cy = 0, sx = 0, sy = 0;
+	char cmd = 0;
+	while (*p) {
+		svg_skip_sep(&p);
+		if (!*p) break;
+		if (isalpha((unsigned char)*p)) {
+			cmd = *p++;
+		} else if (!cmd) {
+			break;
+		}
+		switch (cmd) {
+		case 'M': case 'm': {
+			float x, y;
+			if (!svg_read_num(&p, &x) || !svg_read_num(&p, &y)) return;
+			if (cmd == 'm') { cx += x; cy += y; } else { cx = x; cy = y; }
+			sx = cx; sy = cy;
+			cmd = (cmd == 'm') ? 'l' : 'L';
+			break;
+		}
+		case 'L': case 'l': {
+			float x, y;
+			if (!svg_read_num(&p, &x) || !svg_read_num(&p, &y)) return;
+			float nx = (cmd == 'l') ? cx + x : x;
+			float ny = (cmd == 'l') ? cy + y : y;
+			svg_push_seg(sl, cx, cy, nx, ny);
+			cx = nx; cy = ny;
+			break;
+		}
+		case 'H': case 'h': {
+			float x;
+			if (!svg_read_num(&p, &x)) return;
+			float nx = (cmd == 'h') ? cx + x : x;
+			svg_push_seg(sl, cx, cy, nx, cy);
+			cx = nx;
+			break;
+		}
+		case 'V': case 'v': {
+			float y;
+			if (!svg_read_num(&p, &y)) return;
+			float ny = (cmd == 'v') ? cy + y : y;
+			svg_push_seg(sl, cx, cy, cx, ny);
+			cy = ny;
+			break;
+		}
+		case 'C': case 'c': {
+			float x1, y1, x2, y2, x, y;
+			if (!svg_read_num(&p, &x1) || !svg_read_num(&p, &y1) ||
+			    !svg_read_num(&p, &x2) || !svg_read_num(&p, &y2) ||
+			    !svg_read_num(&p, &x)  || !svg_read_num(&p, &y)) return;
+			if (cmd == 'c') {
+				x1 += cx; y1 += cy; x2 += cx; y2 += cy; x += cx; y += cy;
+			}
+			float px = cx, py = cy;
+			for (int i = 1; i <= 10; i++) {
+				float t = (float)i / 10.0f, it = 1.0f - t;
+				float nx = it*it*it*cx + 3*it*it*t*x1 + 3*it*t*t*x2 + t*t*t*x;
+				float ny = it*it*it*cy + 3*it*it*t*y1 + 3*it*t*t*y2 + t*t*t*y;
+				svg_push_seg(sl, px, py, nx, ny);
+				px = nx; py = ny;
+			}
+			cx = x; cy = y;
+			break;
+		}
+		case 'Q': case 'q': {
+			float x1, y1, x, y;
+			if (!svg_read_num(&p, &x1) || !svg_read_num(&p, &y1) ||
+			    !svg_read_num(&p, &x)  || !svg_read_num(&p, &y)) return;
+			if (cmd == 'q') { x1 += cx; y1 += cy; x += cx; y += cy; }
+			float px = cx, py = cy;
+			for (int i = 1; i <= 8; i++) {
+				float t = (float)i / 8.0f, it = 1.0f - t;
+				float nx = it*it*cx + 2*it*t*x1 + t*t*x;
+				float ny = it*it*cy + 2*it*t*y1 + t*t*y;
+				svg_push_seg(sl, px, py, nx, ny);
+				px = nx; py = ny;
+			}
+			cx = x; cy = y;
+			break;
+		}
+		case 'A': case 'a': {
+			float rx, ry, rot, x, y;
+			int large = 0, sweep = 0;
+			if (!svg_read_num(&p, &rx) || !svg_read_num(&p, &ry) ||
+			    !svg_read_num(&p, &rot) || !svg_read_flag(&p, &large) ||
+			    !svg_read_flag(&p, &sweep) || !svg_read_num(&p, &x) ||
+			    !svg_read_num(&p, &y)) return;
+			float nx = (cmd == 'a') ? cx + x : x;
+			float ny = (cmd == 'a') ? cy + y : y;
+			svg_emit_arc(sl, cx, cy, rx, ry, rot, large, sweep, nx, ny);
+			cx = nx; cy = ny;
+			break;
+		}
+		case 'Z': case 'z':
+			svg_push_seg(sl, cx, cy, sx, sy);
+			cx = sx; cy = sy;
+			cmd = 0;
+			break;
+		default:
+			if (!svg_has_num(p)) cmd = 0;
+			else return;
+			break;
+		}
+	}
+}
+
+static void svg_emit_rect(svg_seglist_t *sl, float x, float y, float w, float h, float rx)
+{
+	if (w <= 0.0f || h <= 0.0f) return;
+	if (rx < 0.0f) rx = 0.0f;
+	if (rx > w * 0.5f) rx = w * 0.5f;
+	if (rx > h * 0.5f) rx = h * 0.5f;
+	if (rx < 1e-4f) {
+		svg_push_seg(sl, x, y, x + w, y);
+		svg_push_seg(sl, x + w, y, x + w, y + h);
+		svg_push_seg(sl, x + w, y + h, x, y + h);
+		svg_push_seg(sl, x, y + h, x, y);
+		return;
+	}
+	svg_push_seg(sl, x + rx, y, x + w - rx, y);
+	svg_emit_arc(sl, x + w - rx, y, rx, rx, 0, 0, 1, x + w, y + rx);
+	svg_push_seg(sl, x + w, y + rx, x + w, y + h - rx);
+	svg_emit_arc(sl, x + w, y + h - rx, rx, rx, 0, 0, 1, x + w - rx, y + h);
+	svg_push_seg(sl, x + w - rx, y + h, x + rx, y + h);
+	svg_emit_arc(sl, x + rx, y + h, rx, rx, 0, 0, 1, x, y + h - rx);
+	svg_push_seg(sl, x, y + h - rx, x, y + rx);
+	svg_emit_arc(sl, x, y + rx, rx, rx, 0, 0, 1, x + rx, y);
+}
+
+static uint64_t fnv1a_mix(uint64_t h, const void *data, size_t n)
+{
+	const uint8_t *b = (const uint8_t *)data;
+	for (size_t i = 0; i < n; i++) {
+		h ^= (uint64_t)b[i];
+		h *= 1099511628211ULL;
+	}
+	return h;
+}
+
+static float point_seg_dist(float px, float py, float x0, float y0, float x1, float y1)
+{
+	float dx = x1 - x0, dy = y1 - y0;
+	float l2 = dx * dx + dy * dy;
+	float t = (l2 > 1e-9f) ? (((px - x0) * dx + (py - y0) * dy) / l2) : 0.0f;
+	if (t < 0.0f) t = 0.0f;
+	if (t > 1.0f) t = 1.0f;
+	float qx = x0 + t * dx - px;
+	float qy = y0 + t * dy - py;
+	return sqrtf(qx * qx + qy * qy);
+}
+
+static void draw_svg_widget(lam_ui_div_t *div, int32_t x, int32_t y,
+                            int32_t w, int32_t h, void *user)
+{
+	bud_lamina_t *bl = (bud_lamina_t *)user;
+	bl_entry_t *e = entry_find_by_div(bl, div);
+	if (!e || w <= 1 || h <= 1) return;
+
+	const lam_ui_style_t *st = lam_ui_get_style(div);
+	uint8_t do_fill   = st ? st->svg_fill : 1;
+	uint8_t do_stroke = st ? st->svg_stroke : 0;
+	float   stroke_w  = (st && st->svg_stroke_width > 0.0f) ? st->svg_stroke_width : 1.5f;
+	if (!do_fill && !do_stroke) return;
+
+	float vb_x = e->svg_vb_x;
+	float vb_y = e->svg_vb_y;
+	float vb_w = e->svg_vb_w > 0.0f ? e->svg_vb_w : 24.0f;
+	float vb_h = e->svg_vb_h > 0.0f ? e->svg_vb_h : 24.0f;
+
+	/* Build hash of visible children & raster parameters */
+	uint64_t hash = 14695981039346656037ULL;
+	hash = fnv1a_mix(hash, &vb_x, sizeof(vb_x));
+	hash = fnv1a_mix(hash, &vb_y, sizeof(vb_y));
+	hash = fnv1a_mix(hash, &vb_w, sizeof(vb_w));
+	hash = fnv1a_mix(hash, &vb_h, sizeof(vb_h));
+	hash = fnv1a_mix(hash, &do_fill, sizeof(do_fill));
+	hash = fnv1a_mix(hash, &do_stroke, sizeof(do_stroke));
+	hash = fnv1a_mix(hash, &stroke_w, sizeof(stroke_w));
+
+	for (lam_ui_div_t *ch = lam_ui_first_child(div); ch; ch = lam_ui_next_sibling(ch)) {
+		const lam_ui_style_t *cst = lam_ui_get_style(ch);
+		if (cst && cst->display == LAM_UI_DISPLAY_NONE) continue;
+		const char *ctag = lam_ui_get_tag(ch);
+		if (!ctag) continue;
+		hash = fnv1a_mix(hash, ctag, strlen(ctag) + 1);
+		if (ci_eq(ctag, "path")) {
+			const char *d = lam_ui_get_attr(ch, "d");
+			if (d) hash = fnv1a_mix(hash, d, strlen(d) + 1);
+		} else if (ci_eq(ctag, "rect")) {
+			const char *a;
+			if ((a = lam_ui_get_attr(ch, "x")))      hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "y")))      hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "width")))  hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "height"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "rx")))     hash = fnv1a_mix(hash, a, strlen(a) + 1);
+		} else if (ci_eq(ctag, "circle")) {
+			const char *a;
+			if ((a = lam_ui_get_attr(ch, "cx"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "cy"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "r")))  hash = fnv1a_mix(hash, a, strlen(a) + 1);
+		} else if (ci_eq(ctag, "line")) {
+			const char *a;
+			if ((a = lam_ui_get_attr(ch, "x1"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "y1"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "x2"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+			if ((a = lam_ui_get_attr(ch, "y2"))) hash = fnv1a_mix(hash, a, strlen(a) + 1);
+		}
+	}
+
+	uint32_t rw = (uint32_t)w;
+	uint32_t rh = (uint32_t)h;
+	if (rw > 128) rw = 128;
+	if (rh > 128) rh = 128;
+
+	uint32_t tex = UINT32_MAX;
+	for (size_t i = 0; i < bl->n_svgs; i++) {
+		if (bl->svgs[i].hash == hash && bl->svgs[i].w == rw && bl->svgs[i].h == rh) {
+			tex = bl->svgs[i].tex;
+			break;
+		}
+	}
+
+	if (tex == UINT32_MAX) {
+		svg_seglist_t sl;
+		sl.n = 0;
+		for (lam_ui_div_t *ch = lam_ui_first_child(div); ch; ch = lam_ui_next_sibling(ch)) {
+			const lam_ui_style_t *cst = lam_ui_get_style(ch);
+			if (cst && cst->display == LAM_UI_DISPLAY_NONE) continue;
+			const char *ctag = lam_ui_get_tag(ch);
+			if (!ctag) continue;
+			if (ci_eq(ctag, "path")) {
+				svg_parse_path(&sl, lam_ui_get_attr(ch, "d"));
+			} else if (ci_eq(ctag, "rect")) {
+				const char *ax = lam_ui_get_attr(ch, "x");
+				const char *ay = lam_ui_get_attr(ch, "y");
+				const char *aw = lam_ui_get_attr(ch, "width");
+				const char *ah = lam_ui_get_attr(ch, "height");
+				const char *ar = lam_ui_get_attr(ch, "rx");
+				svg_emit_rect(&sl,
+				              ax ? strtof(ax, NULL) : 0.0f,
+				              ay ? strtof(ay, NULL) : 0.0f,
+				              aw ? strtof(aw, NULL) : 0.0f,
+				              ah ? strtof(ah, NULL) : 0.0f,
+				              ar ? strtof(ar, NULL) : 0.0f);
+			} else if (ci_eq(ctag, "circle")) {
+				const char *acx = lam_ui_get_attr(ch, "cx");
+				const char *acy = lam_ui_get_attr(ch, "cy");
+				const char *ar  = lam_ui_get_attr(ch, "r");
+				float cx0 = acx ? strtof(acx, NULL) : 0.0f;
+				float cy0 = acy ? strtof(acy, NULL) : 0.0f;
+				float rr  = ar  ? strtof(ar,  NULL) : 0.0f;
+				if (rr > 0.0f) {
+					svg_emit_arc(&sl, cx0 - rr, cy0, rr, rr, 0, 1, 1, cx0 + rr, cy0);
+					svg_emit_arc(&sl, cx0 + rr, cy0, rr, rr, 0, 1, 1, cx0 - rr, cy0);
+				}
+			} else if (ci_eq(ctag, "line")) {
+				const char *a1 = lam_ui_get_attr(ch, "x1");
+				const char *b1 = lam_ui_get_attr(ch, "y1");
+				const char *a2 = lam_ui_get_attr(ch, "x2");
+				const char *b2 = lam_ui_get_attr(ch, "y2");
+				svg_push_seg(&sl,
+				             a1 ? strtof(a1, NULL) : 0.0f,
+				             b1 ? strtof(b1, NULL) : 0.0f,
+				             a2 ? strtof(a2, NULL) : 0.0f,
+				             b2 ? strtof(b2, NULL) : 0.0f);
+			}
+		}
+
+		/* Map viewBox coords -> pixel coords preserving aspect */
+		float sx = (float)rw / vb_w;
+		float sy = (float)rh / vb_h;
+		float sc = sx < sy ? sx : sy;
+		float ox = ((float)rw - vb_w * sc) * 0.5f - vb_x * sc;
+		float oy = ((float)rh - vb_h * sc) * 0.5f - vb_y * sc;
+		for (int i = 0; i < sl.n; i++) {
+			sl.segs[i].x0 = sl.segs[i].x0 * sc + ox;
+			sl.segs[i].y0 = sl.segs[i].y0 * sc + oy;
+			sl.segs[i].x1 = sl.segs[i].x1 * sc + ox;
+			sl.segs[i].y1 = sl.segs[i].y1 * sc + oy;
+		}
+
+		uint8_t *rgba = calloc((size_t)rw * (size_t)rh, 4);
+		if (!rgba) return;
+		float half_sw = stroke_w * sc * 0.5f;
+		if (half_sw < 0.65f) half_sw = 0.65f;
+
+		for (uint32_t py = 0; py < rh; py++) {
+			for (uint32_t px = 0; px < rw; px++) {
+				float cov = 0.0f;
+				if (do_fill && sl.n > 0) {
+					int hits = 0;
+					for (int syi = 0; syi < 4; syi++) {
+						float fy = (float)py + ((float)syi + 0.5f) * 0.25f;
+						for (int sxi = 0; sxi < 4; sxi++) {
+							float fx = (float)px + ((float)sxi + 0.5f) * 0.25f;
+							int inside = 0;
+							for (int i = 0; i < sl.n; i++) {
+								float y0 = sl.segs[i].y0, y1 = sl.segs[i].y1;
+								if ((y0 > fy) != (y1 > fy)) {
+									float xint = sl.segs[i].x0 +
+										(fy - y0) * (sl.segs[i].x1 - sl.segs[i].x0) / (y1 - y0);
+									if (fx < xint) inside = !inside;
+								}
+							}
+							if (inside) hits++;
+						}
+					}
+					cov = (float)hits / 16.0f;
+				}
+				if (do_stroke && sl.n > 0) {
+					float cxp = (float)px + 0.5f;
+					float cyp = (float)py + 0.5f;
+					float mind = 1e9f;
+					for (int i = 0; i < sl.n; i++) {
+						float dd = point_seg_dist(cxp, cyp,
+							sl.segs[i].x0, sl.segs[i].y0,
+							sl.segs[i].x1, sl.segs[i].y1);
+						if (dd < mind) mind = dd;
+					}
+					float scov = half_sw + 0.6f - mind;
+					if (scov < 0.0f) scov = 0.0f;
+					if (scov > 1.0f) scov = 1.0f;
+					if (scov > cov) cov = scov;
+				}
+				if (cov > 0.003f) {
+					size_t idx = ((size_t)py * (size_t)rw + (size_t)px) * 4;
+					rgba[idx + 0] = 255;
+					rgba[idx + 1] = 255;
+					rgba[idx + 2] = 255;
+					rgba[idx + 3] = (uint8_t)lroundf(cov * 255.0f);
+				}
+			}
+		}
+
+		char keybuf[64];
+		snprintf(keybuf, sizeof(keybuf), "bl_svg:%016llx:%ux%u",
+		         (unsigned long long)hash, rw, rh);
+		tex = lam_tex_create_rgba(keybuf, rgba, rw, rh);
+		free(rgba);
+		if (tex == UINT32_MAX) return;
+
+		if (bl->n_svgs >= bl->cap_svgs) {
+			size_t nc = bl->cap_svgs ? bl->cap_svgs * 2 : 32;
+			bl_svg_cache_t *na = realloc(bl->svgs, nc * sizeof(*na));
+			if (na) {
+				bl->svgs = na;
+				bl->cap_svgs = nc;
+			}
+		}
+		if (bl->n_svgs < bl->cap_svgs) {
+			bl->svgs[bl->n_svgs].hash = hash;
+			bl->svgs[bl->n_svgs].w = rw;
+			bl->svgs[bl->n_svgs].h = rh;
+			bl->svgs[bl->n_svgs].tex = tex;
+			bl->n_svgs++;
+		}
+	}
+
+	uint32_t col = (st && st->color) ? st->color : 0xFFFFFFFFu;
+	float op = st ? st->opacity : 1.0f;
+	uint32_t a = (uint32_t)lroundf((float)LAM_COLOR_A(col) * op);
+	if (a > 255) a = 255;
+	uint32_t tint = (col & 0x00FFFFFFu) | (a << 24);
+	lam_tint(tint);
+	lam_tex_draw(tex, x, y, (uint32_t)w, (uint32_t)h);
 	lam_tint(0xFFFFFFFFu);
 }
 
@@ -629,6 +1473,8 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 	const char *max_attr = NULL;
 	const char *step_attr = NULL;
 	const char *ph_attr = NULL;
+	const char *w_attr = NULL;
+	const char *h_attr = NULL;
 	int is_webgl = 0;
 	int is_sw_canvas = 0;
 	int is_term = 0;
@@ -669,6 +1515,10 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 				step_attr = v;
 			else if (strcmp(an, "placeholder") == 0)
 				ph_attr = v;
+			else if (strcmp(an, "width") == 0)
+				w_attr = v;
+			else if (strcmp(an, "height") == 0)
+				h_attr = v;
 			else if (strcmp(an, "data-bud-webgl") == 0 && v[0] && strcmp(v, "0") != 0)
 				is_webgl = 1;
 			else if (strcmp(an, "data-bud-canvas") == 0 && v[0] && strcmp(v, "0") != 0)
@@ -702,14 +1552,142 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 		} else if (ci_eq(tag, "canvas") && is_sw_canvas) {
 			ent->kind = W_SW_CANVAS;
 			lam_ui_set_custom_draw(div, draw_sw_canvas, bl);
+		} else if (ci_eq(tag, "svg")) {
+			ent->kind = W_SVG;
+			ent->svg_vb_x = 0.0f;
+			ent->svg_vb_y = 0.0f;
+			ent->svg_vb_w = 24.0f;
+			ent->svg_vb_h = 24.0f;
+			const char *vb = bud_get_attr(bnode, "viewBox");
+			if (!vb) vb = bud_get_attr(bnode, "viewbox");
+			if (vb) {
+				float vx = 0, vy = 0, vw = 24, vh = 24;
+				if (sscanf(vb, "%f %f %f %f", &vx, &vy, &vw, &vh) == 4 &&
+				    vw > 0.0f && vh > 0.0f) {
+					ent->svg_vb_x = vx;
+					ent->svg_vb_y = vy;
+					ent->svg_vb_w = vw;
+					ent->svg_vb_h = vh;
+				}
+			}
+			lam_ui_set_intrinsic_size(div, 20, 20);
+			lam_ui_set_custom_draw(div, draw_svg_widget, bl);
+		} else if (ci_eq(tag, "i")) {
+			const char *ptag = lam_ui_get_tag(parent_div);
+			if (ptag && ci_eq(ptag, "label")) {
+				for (lam_ui_div_t *sib = lam_ui_first_child(parent_div);
+				     sib; sib = lam_ui_next_sibling(sib)) {
+					bl_entry_t *se = entry_find_by_div(bl, sib);
+					if (se && se->kind == W_INPUT_CHECKBOX) {
+						ent->kind = W_SWITCH_TRACK;
+						snprintf(ent->switch_cb_key, sizeof(ent->switch_cb_key),
+						         "%s", se->key);
+						lam_ui_set_intrinsic_size(div, 34, 18);
+						lam_ui_set_custom_draw(div, draw_switch_track_widget, bl);
+						break;
+					}
+				}
+			}
 		} else if (ci_eq(tag, "img")) {
 			ent->kind = W_IMG;
-			if (src_val && load_image_cached(bl, src_val, &ent->img_tex))
+			uint32_t iw = 0, ih = 0;
+			if (src_val && load_image_cached(bl, src_val, &ent->img_tex, &iw, &ih))
 				ent->img_valid = 1;
+			if (iw == 0 && ih == 0 && w_attr && h_attr) {
+				int pw = atoi(w_attr);
+				int ph = atoi(h_attr);
+				if (pw > 0 && ph > 0) {
+					iw = (uint32_t)pw;
+					ih = (uint32_t)ph;
+				}
+			}
+			if (iw > 0 && ih > 0)
+				lam_ui_set_intrinsic_size(div, iw, ih);
 			lam_ui_set_custom_draw(div, draw_img_widget, bl);
+		} else if (ci_eq(tag, "video")) {
+			ent->kind = W_VIDEO;
+			lam_ui_set_custom_draw(div, draw_video_widget, bl);
+		} else if (ci_eq(tag, "textarea")) {
+			ent->kind = W_INPUT_TEXT;
+			ent->is_multiline = 1;
+			if (ph_attr)
+				snprintf(ent->placeholder, sizeof(ent->placeholder), "%s", ph_attr);
+			bl_state_t *ist = state_find(bl, key, 1);
+			if (ist && !ist->has_text) {
+				if (val_attr) {
+					snprintf(ist->text, sizeof(ist->text), "%s", val_attr);
+					ist->cursor = (int)strlen(ist->text);
+					ist->has_text = 1;
+				} else if (bud_node_child_count(bnode) > 0) {
+					const bud_node *ch0 = bud_node_child(bnode, 0);
+					const char *ct = bud_node_text(ch0);
+					if (ct && ct[0]) {
+						snprintf(ist->text, sizeof(ist->text), "%s", ct);
+						ist->cursor = (int)strlen(ist->text);
+						ist->has_text = 1;
+					}
+				}
+			}
+			lam_ui_set_intrinsic_size(div, 180, 42);
+			lam_ui_set_custom_draw(div, draw_text_input_widget, bl);
+			return;
+		} else if (ci_eq(tag, "select")) {
+			ent->kind = W_SELECT;
+			if (val_attr && val_attr[0])
+				snprintf(ent->select_label, sizeof(ent->select_label), "%s", val_attr);
+			/* Extract selected <option> label text (or first <option>) */
+			size_t onc = bud_node_child_count(bnode);
+			const char *first_lbl = NULL;
+			const char *sel_lbl = NULL;
+			for (size_t oi = 0; oi < onc; oi++) {
+				const bud_node *opt = bud_node_child(bnode, oi);
+				if (bud_node_kind_of(opt) != BUD_NODE_ELEMENT) continue;
+				const char *ot = bud_node_tag(opt);
+				if (!ot || !ci_eq(ot, "option")) continue;
+				const char *olbl = NULL;
+				if (bud_node_child_count(opt) > 0)
+					olbl = bud_node_text(bud_node_child(opt, 0));
+				if (!olbl || !olbl[0]) olbl = bud_get_attr(opt, "value");
+				if (!olbl || !olbl[0]) continue;
+				if (!first_lbl) first_lbl = olbl;
+				if (bud_get_attr(opt, "selected") != NULL) {
+					sel_lbl = olbl;
+					break;
+				}
+				if (val_attr && val_attr[0]) {
+					const char *ov = bud_get_attr(opt, "value");
+					if (ov && strcmp(ov, val_attr) == 0)
+						sel_lbl = olbl;
+				}
+			}
+			if (sel_lbl)
+				snprintf(ent->select_label, sizeof(ent->select_label), "%s", sel_lbl);
+			else if (!ent->select_label[0] && first_lbl)
+				snprintf(ent->select_label, sizeof(ent->select_label), "%s", first_lbl);
+			lam_ui_set_intrinsic_size(div, 150, 30);
+			lam_ui_set_custom_draw(div, draw_select_widget, bl);
+			return;
 		} else if (ci_eq(tag, "input")) {
 			if (type_val && ci_eq(type_val, "hidden")) {
 				lam_ui_set_inline_style(div, "display:none;");
+			} else if (type_val && ci_eq(type_val, "checkbox")) {
+				ent->kind = W_INPUT_CHECKBOX;
+				ent->is_checked = (pseudo & LAM_PSEUDO_CHECKED) != 0;
+				lam_ui_set_intrinsic_size(div, 34, 18);
+				lam_ui_set_custom_draw(div, draw_checkbox_widget, bl);
+			} else if (type_val && ci_eq(type_val, "color")) {
+				ent->kind = W_INPUT_COLOR;
+				ent->color_val = LAM_RGB(0xe2, 0xb6, 0x57);
+				if (val_attr && val_attr[0] == '#' && strlen(val_attr) >= 7) {
+					unsigned int hex = 0;
+					if (sscanf(val_attr + 1, "%6x", &hex) == 1) {
+						ent->color_val = LAM_RGB((hex >> 16) & 0xFF,
+						                         (hex >> 8) & 0xFF,
+						                         hex & 0xFF);
+					}
+				}
+				lam_ui_set_intrinsic_size(div, 32, 24);
+				lam_ui_set_custom_draw(div, draw_color_input_widget, bl);
 			} else if (type_val && ci_eq(type_val, "range")) {
 				ent->kind = W_INPUT_RANGE;
 				ent->range_min  = min_attr ? atof(min_attr) : 0.0;
@@ -722,10 +1700,12 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 				    strcmp(bl->drag_slider_key, key) == 0) {
 					ent->range_val = pst->range_val;
 				}
+				lam_ui_set_intrinsic_size(div, 120, 18);
 				lam_ui_set_custom_draw(div, draw_range_widget, bl);
 			} else if (!type_val || ci_eq(type_val, "text") ||
 			           ci_eq(type_val, "search") || ci_eq(type_val, "password")) {
 				ent->kind = W_INPUT_TEXT;
+				ent->is_password = (type_val && ci_eq(type_val, "password")) ? 1 : 0;
 				if (ph_attr)
 					snprintf(ent->placeholder, sizeof(ent->placeholder), "%s", ph_attr);
 				bl_state_t *ist = state_find(bl, key, 1);
@@ -734,6 +1714,7 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 					ist->cursor = (int)strlen(ist->text);
 					ist->has_text = 1;
 				}
+				lam_ui_set_intrinsic_size(div, 160, 30);
 				lam_ui_set_custom_draw(div, draw_text_input_widget, bl);
 			}
 		}
@@ -795,6 +1776,39 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 	}
 }
 
+static void reconcile_body_root(bud_lamina_t *bl, const bud_node *bnode,
+                                lam_ui_div_t *body)
+{
+	bl_entry_t *ent = entry_add(bl);
+	if (ent) {
+		ent->div = body;
+		ent->bud = (bud_node *)bnode;
+		snprintf(ent->key, sizeof(ent->key), "body");
+	}
+	lam_ui_set_user_data(body, (void *)bnode);
+
+	size_t na = bud_node_attr_count(bnode);
+	for (size_t i = 0; i < na; i++) {
+		const char *an = bud_node_attr_name(bnode, i);
+		const char *av = bud_node_attr_value(bnode, i);
+		if (!an) continue;
+		const char *v = av ? av : "";
+		if (strcmp(an, "id") == 0)
+			lam_ui_set_id(body, v);
+		else if (strcmp(an, "class") == 0)
+			lam_ui_class(body, v);
+		else if (strcmp(an, "style") == 0)
+			lam_ui_set_inline_style(body, v);
+		else
+			lam_ui_set_attr(body, an, v);
+	}
+
+	size_t nc = bud_node_child_count(bnode);
+	for (size_t i = 0; i < nc; i++) {
+		reconcile_node(bl, bud_node_child(bnode, i), body, "body", i);
+	}
+}
+
 /* ── Public Lifecycle & Configuration ───────────────────────────────────── */
 
 bud_lamina_t *bud_lamina_create(int vw, int vh)
@@ -843,6 +1857,7 @@ void bud_lamina_destroy(bud_lamina_t *bl)
 	for (size_t i = 0; i < bl->n_imgs; i++)
 		free(bl->imgs[i].src);
 	free(bl->imgs);
+	free(bl->svgs);
 	free(bl->entries);
 	free(bl->states);
 	lam_css_sheet_free(bl->ss);
@@ -863,6 +1878,34 @@ int bud_lamina_load_css(bud_lamina_t *bl, const char *css, size_t len)
 	return lam_css_parse(bl->ss, css, len);
 }
 
+int bud_lamina_set_css_var(bud_lamina_t *bl, const char *name, const char *val)
+{
+	if (!bl || !name) return -1;
+	bl->dirty = 1;
+	return lam_css_set_var(bl->ss, name, val);
+}
+
+void bud_lamina_set_video_tex(bud_lamina_t *bl, const char *id,
+                              uint32_t gl_tex, uint32_t w, uint32_t h)
+{
+	if (!bl || !id || !id[0]) return;
+	for (size_t i = 0; i < bl->n_videos; i++) {
+		if (strcmp(bl->videos[i].id, id) == 0) {
+			bl->videos[i].gl_tex = gl_tex;
+			bl->videos[i].w = w;
+			bl->videos[i].h = h;
+			return;
+		}
+	}
+	if (bl->n_videos < BL_VIDEO_MAX) {
+		bl_video_slot_t *s = &bl->videos[bl->n_videos++];
+		snprintf(s->id, sizeof(s->id), "%s", id);
+		s->gl_tex = gl_tex;
+		s->w = w;
+		s->h = h;
+	}
+}
+
 void bud_lamina_set_fonts(bud_lamina_t *bl,
                           uint32_t sans, uint32_t sans_bold,
                           uint32_t mono, uint32_t mono_bold)
@@ -881,6 +1924,13 @@ void bud_lamina_set_asset_root(bud_lamina_t *bl, const char *htdocs_dir)
 	if (!bl || !htdocs_dir) return;
 	snprintf(bl->asset_root, sizeof(bl->asset_root), "%s", htdocs_dir);
 	lam_ui_set_asset_root(bl->asset_root);
+}
+
+void bud_lamina_set_img_fetch(bud_lamina_t *bl, bud_lamina_img_fetch_fn fn, void *ctx)
+{
+	if (!bl) return;
+	bl->img_fetch_fn = fn;
+	bl->img_fetch_ctx = ctx;
 }
 
 void bud_lamina_set_render(bud_lamina_t *bl, bud_lamina_render_fn fn, void *ctx)
@@ -972,13 +2022,19 @@ int bud_lamina_sync(bud_lamina_t *bl)
 	bl->webgl_div = NULL;
 	bl->rt = new_rt;
 
-	/* Synthetic <body> container sized to viewport */
+	/* Synthetic <body> container sized to viewport.
+	 * If Bud root is already <body>, reconcile its attrs & children directly
+	 * onto `body` instead of nesting <body> inside <body>. */
 	lam_ui_div_t *body = lam_ui_new(NULL, NULL);
 	lam_ui_set_tag(body, "body");
 	lam_ui_set_size(body, bl->vw, bl->vh);
 	bl->ui_root = body;
 
-	reconcile_node(bl, new_bud, body, "body", 0);
+	if (bud_node_kind_of(new_bud) == BUD_NODE_ELEMENT &&
+	    bud_node_tag(new_bud) && ci_eq(bud_node_tag(new_bud), "body"))
+		reconcile_body_root(bl, new_bud, body);
+	else
+		reconcile_node(bl, new_bud, body, "body", 0);
 
 	/* Restore :active ancestor chain by key before initial cascade */
 	if (bl->active_key[0]) {
@@ -1595,6 +2651,31 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 						}
 						idiv = lam_ui_parent(idiv);
 					}
+					if (pe && pe == he && pe->kind == W_INPUT_CHECKBOX) {
+						pe->is_checked = !pe->is_checked;
+						bl_dispatch_bud(bl, click_bud, "change",
+						                (void *)(pe->is_checked ? "1" : "0"));
+					} else {
+						/* Clicking a <label> (or child like .switch <i>) toggles its nested checkbox */
+						lam_ui_div_t *ldiv = cd;
+						while (ldiv) {
+							const char *ltag = lam_ui_get_tag(ldiv);
+							if (ltag && ci_eq(ltag, "label")) {
+								for (lam_ui_div_t *lc = lam_ui_first_child(ldiv);
+								     lc; lc = lam_ui_next_sibling(lc)) {
+									bl_entry_t *cbe = entry_find_by_div(bl, lc);
+									if (cbe && cbe->kind == W_INPUT_CHECKBOX && cbe->bud) {
+										cbe->is_checked = !cbe->is_checked;
+										bl_dispatch_bud(bl, cbe->bud, "change",
+										                (void *)(cbe->is_checked ? "1" : "0"));
+										break;
+									}
+								}
+								break;
+							}
+							ldiv = lam_ui_parent(ldiv);
+						}
+					}
 					bl_dispatch_bud(bl, click_bud, "click", (void *)click_payload);
 
 					uint64_t tnow = now_ms();
@@ -1688,14 +2769,35 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 			bl_entry_t *fe = entry_find_by_key(bl, bl->focus_key);
 			if (fe && fe->kind == W_INPUT_TEXT) {
 				bl_state_t *st = state_find(bl, fe->key, 1);
-				if (st && ev->code >= 0x20 && ev->code < 0x7F &&
-				    (int)strlen(st->text) + 2 < BL_INPUT_MAX) {
+				uint32_t cp = ev->code;
+				char utf8[4];
+				int ulen = 0;
+				if (cp >= 0x20 && cp < 0x80) {
+					utf8[0] = (char)cp; ulen = 1;
+				} else if (cp >= 0x80 && cp < 0x800) {
+					utf8[0] = (char)(0xC0 | (cp >> 6));
+					utf8[1] = (char)(0x80 | (cp & 0x3F));
+					ulen = 2;
+				} else if (cp >= 0x800 && cp < 0x10000) {
+					utf8[0] = (char)(0xE0 | (cp >> 12));
+					utf8[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+					utf8[2] = (char)(0x80 | (cp & 0x3F));
+					ulen = 3;
+				} else if (cp >= 0x10000 && cp <= 0x10FFFF) {
+					utf8[0] = (char)(0xF0 | (cp >> 18));
+					utf8[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+					utf8[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+					utf8[3] = (char)(0x80 | (cp & 0x3F));
+					ulen = 4;
+				}
+				if (st && ulen > 0 && (int)strlen(st->text) + ulen + 1 < BL_INPUT_MAX) {
 					int len = (int)strlen(st->text);
 					if (st->cursor > len) st->cursor = len;
-					memmove(st->text + st->cursor + 1,
+					memmove(st->text + st->cursor + ulen,
 					        st->text + st->cursor,
 					        (size_t)(len - st->cursor + 1));
-					st->text[st->cursor++] = (char)ev->code;
+					memcpy(st->text + st->cursor, utf8, (size_t)ulen);
+					st->cursor += ulen;
 					st->has_text = 1;
 					if (bl->rt && fe->bud)
 						bl_dispatch_bud(bl, fe->bud, "input", st->text);
@@ -1743,11 +2845,52 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 					bl_state_t *st = state_find(bl, fe->key, 1);
 					if (st) {
 						int len = (int)strlen(st->text);
-						if (ev->code == K_BACKSPACE && st->cursor > 0) {
-							memmove(st->text + st->cursor - 1,
+						if ((ev->mods & MOD_CTRL) && ev->code == 'V') {
+							const char *clip = lam_clipboard_get_text();
+							if (clip && clip[0]) {
+								int clen = (int)strlen(clip);
+								int avail = BL_INPUT_MAX - 1 - len;
+								if (clen > avail) clen = avail;
+								if (clen > 0) {
+									int inserted = 0;
+									char tmp[BL_INPUT_MAX];
+									for (int ci = 0; ci < clen; ci++) {
+										unsigned char ch = (unsigned char)clip[ci];
+										if (!fe->is_multiline && (ch == '\r' || ch == '\n'))
+											continue;
+										if (ch == '\r') continue;
+										tmp[inserted++] = (char)ch;
+									}
+									if (inserted > 0) {
+										memmove(st->text + st->cursor + inserted,
+										        st->text + st->cursor,
+										        (size_t)(len - st->cursor + 1));
+										memcpy(st->text + st->cursor, tmp, (size_t)inserted);
+										st->cursor += inserted;
+										st->has_text = 1;
+										if (bl->rt && fe->bud)
+											bl_dispatch_bud(bl, fe->bud, "input", st->text);
+									}
+								}
+							}
+						} else if ((ev->mods & MOD_CTRL) && ev->code == 'C') {
+							if (st->text[0])
+								lam_clipboard_set_text(st->text);
+						} else if ((ev->mods & MOD_CTRL) && ev->code == 'U') {
+							st->text[0] = '\0';
+							st->cursor = 0;
+							st->has_text = 1;
+							if (bl->rt && fe->bud)
+								bl_dispatch_bud(bl, fe->bud, "input", st->text);
+						} else if (ev->code == K_BACKSPACE && st->cursor > 0) {
+							int del = 1;
+							while (st->cursor - del > 0 &&
+							       (((unsigned char)st->text[st->cursor - del]) & 0xC0) == 0x80)
+								del++;
+							memmove(st->text + st->cursor - del,
 							        st->text + st->cursor,
 							        (size_t)(len - st->cursor + 1));
-							st->cursor--;
+							st->cursor -= del;
 							st->has_text = 1;
 							if (bl->rt && fe->bud)
 								bl_dispatch_bud(bl, fe->bud, "input", st->text);
@@ -1755,9 +2898,25 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 							st->cursor--;
 						} else if (ev->code == K_RIGHT && st->cursor < len) {
 							st->cursor++;
+						} else if (ev->code == K_HOME) {
+							st->cursor = 0;
+						} else if (ev->code == K_END) {
+							st->cursor = len;
 						} else if (ev->code == K_ENTER || ev->code == K_KP_ENTER) {
-							if (bl->rt && fe->bud)
+							if (fe->is_multiline && (ev->mods & MOD_SHIFT)) {
+								if (len + 2 < BL_INPUT_MAX) {
+									memmove(st->text + st->cursor + 1,
+									        st->text + st->cursor,
+									        (size_t)(len - st->cursor + 1));
+									st->text[st->cursor++] = '\n';
+									st->has_text = 1;
+									if (bl->rt && fe->bud)
+										bl_dispatch_bud(bl, fe->bud, "input", st->text);
+								}
+							} else if (bl->rt && fe->bud) {
 								bl_dispatch_bud(bl, fe->bud, "change", st->text);
+								bl_dispatch_bud(bl, fe->bud, "submit", st->text);
+							}
 						}
 					}
 				}
@@ -1774,6 +2933,12 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 			else if (up)
 				dispatch_window_event(bl, "keyup@window", (void *)w3c);
 		}
+		break;
+	}
+
+	case LAM_EV_FILE_DROP: {
+		if (ev->text && ev->text[0])
+			dispatch_window_event(bl, "drop@window", (void *)ev->text);
 		break;
 	}
 	}
