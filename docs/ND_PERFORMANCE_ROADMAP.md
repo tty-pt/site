@@ -30,6 +30,7 @@ Cross-references:
 | **P2** | CPU Frame-Time Killers (Data Layout & Caching) | Medium (1–2d) | Low–Med | **Complete** | High stationary CPU `-92.7%` (`12.14 → 0.89 ms`, probes `14,397 → 57`), Low stationary `-85.8%` (`6.07 → 0.86 ms`), `libareole` query `-32.6%`, `glBufferData` steady-state `0/f` (`glBufferSubData`) |
 | **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | **Complete** | Sky-after-terrain Early-Z (`z=1.0`, `GL_LEQUAL`), 236 constant `nd_to_lin` `pow()` removed, single-eval wind, zero-`discard` `mesh3d_opaque` Pass C1, CPU pre-culled grass tuft VBO cache + 3-blade LOD (`bindTex` `152→112`, Low grass tris `-61%`), shared MSAA depth resolve (`blits=2.0/f`), dead CSM history blit removed, Bloom gated off on Low (`draws 186→183`) |
 | **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | **Complete** | `htdocs/nd.wasm` `-100.7 KB` (`1,172,744 → 1,072,053 B`), `libareole` `-20.52 MB` RAM, `NdFrameUBO` + `glCmdFlush` ring (`FFI -68.5%` stationary / `-82.8%` wide-zoom `3.4 calls/chunk`, live `ulLen=147`), BCP dirty-masking, incremental atlas bake, `0 corm_get` per `nd_write`, `libnd-mcp.so` BSS `655 MB → 264 B`, active-session TOD, graphical ANSI skip + plant cache |
+| **P5** | Zero-Spill Integrated GPU & Hitch-Free Zoom | Medium (1–2d) | Med | **Complete** | 3 cloud + 7 terrain zero-visual-diff shader variants + deferred Stage 8 water pass (`CLOUD_WIDE_CSM` `5.24×` fewer cycles / `31.5×` fewer fills; `TERRAIN` `24.86ms` + `WATER` `9.71ms` on Intel ADL GT2, `21/21` `glslangValidator -l` pass), startup `gl_prewarm_pipelines()` + `glTexSubImage2D` chunk reuse (`zoom_sweep max_ms` `4507 → 182.66ms`, `wide_zoom_steady` `24.4 fps` / `35.51ms` GPU) |
 
 ---
 
@@ -282,6 +283,54 @@ Cross-references:
 
 ---
 
+## Phase 5 — Zero-Spill Integrated GPU & Hitch-Free Zoom
+
+**Problem (verified on real Intel ADL GT2 / Mesa OpenGL ES 3.2 via `INTEL_DEBUG=fs` and `scripts/bench-nd-browser.mjs`):**
+1. **Heavy Gen12 register spilling in monolithic terrain & cloud fragment shaders**:
+   - `TERRAIN_FULL`: `22,027` SIMD8 instructions, `1,081,161` cycles, **`112:237` spills:fills** — every wet near/mid chunk paid the full 112-spill monolithic shader (~60–72 ms on Intel ADL GT2).
+   - `CLOUD_FULL`: `14,064` SIMD8 instructions, `386,147` cycles, **`81:189` spills:fills** — wide-zoom cloud shells spent nearly half as much GPU time as terrain (`CLOUDS/TERRAIN = 0.488`).
+2. **Multi-second mid-zoom & first-draw hitches**:
+   - Mesa Iris defers NIR → GEN12 machine-code compilation until the first draw per `(program, FBO format)` pair, causing multi-second stalls (`1,406 ms` in `stationary_1x`, `4,507 ms` in `zoom_sweep`) the first time LOD/zoom crosses into a new terrain or cloud variant.
+   - Evicted `gl_chunk_tex_t` cache slots re-called `glTexImage2D` on `height_tex` and every `substrate_tex` mip level (~70 chunks × 8 levels during zoom sweeps), churning GPU texture storage.
+
+**Data Layout & Invariants:**
+- **3 Zero-Visual-Diff Cloud Shader Variants (`nd_cloud_var_t`)**: `FULL`, `WIDE`, `WIDE_CSM` (compile-time macro specialization stripping unused near-field/analytic-shadow branches without altering rendered pixels).
+- **7 Zero-Visual-Diff Terrain Shader Variants (`nd_terr_var_t`)**: `FULL`, `DRY_NEAR`, `DRY_CSM`, `SEABED_NEAR`, `SEABED_MID`, `MACRO`, `MACRO_FAR`. Close/mid wet chunks (`cur_dist <= 2000.0f`, `!water_occluded`, room in `water_queue`) render seabed only (`SEABED_NEAR` / `SEABED_MID`), hoist Stage 7 benthic shading ahead of Stage 6 to shorten live ranges, and encode a 3-state scene alpha contract (`> 0.75` dry/grass/sky/shaded, `0.25..0.75` seabed awaiting Stage 8 ocean optics, `< 0.25` submerged sprite/mesh). Pass B 3D mesh ground shadows mask alpha writes (`glColorMask(T, T, T, F)`) to preserve the contract.
+- **Deferred Stage 8 Ocean Optics in `s_parts_fs_water`**: Lifts shoreline vertices smoothly up to `+2.2 wu` (`vSurfRaise`) and projects back along the view ray (`surfXY = vWorldPos - viewHoriz * raisePath`, `trueSurfDist = vDistance + raisePath`) with dynamic-resolution-safe `uSceneUvScale` NDC reconstruction (`nd_scene_dist(sUV)` on `GL_DEPTH32F_STENCIL8`), preserving `docs/SHORE.md` parity while immediately discarding dry pixels on line 1.
+- **Hitch-Free Startup & Reuse**:
+  - `gl_prewarm_pipelines()` executes once on the first ready frame right before the first `glClear()` using a `1×1` viewport into exact `scene_fbo` (`RGBA16F` MSAA) and `cloud_fbo` (`RGBA16F` 1×) states for all 7 terrain variants, `water_pipe`, and all 3 cloud variants.
+  - `gl_chunk_tex_t` tracks `alloc_w`, `alloc_h`, and `alloc_mips`, switching steady-state cache slot reuse to `glTexSubImage2D` across `height_tex` and the full `substrate_tex` mip chain.
+
+**Recorded Mesa `INTEL_DEBUG=fs` Shader Compilation Metrics (Intel ADL GT2, SIMD8):**
+
+| Program | Insts | Loops | Cycles | Spills:Fills | Delta vs Monolithic |
+| :--- | ---: | ---: | ---: | ---: | :--- |
+| `CLOUD_FULL` (baseline) | 14,064 | — | 386,147 | 81:189 | baseline |
+| **`CLOUD_WIDE_CSM`** | **7,124** | — | **73,719** | **3:6** | **5.24× fewer cycles, 31.5× fewer fills** |
+| `TERRAIN_FULL` (fallback) | 22,027 | 9 | 1,081,161 | 112:237 | baseline |
+| **`TERRAIN_DRY_NEAR`** | **6,602** | 2 | **88,190** | **0:0** | **zero spills, 3.3× fewer insts** |
+| **`TERRAIN_DRY_CSM`** | **9,089** | 7 | 997,932 | **15:11** | **21.5× fewer fills** |
+| **`TERRAIN_SEABED_NEAR`** | **7,460** | 2 | **123,146** | **16:20** | **11.8× fewer fills, 3.0× fewer insts** |
+| **`TERRAIN_SEABED_MID`** | **10,044** | 7 | 1,028,877 | **29:47** | **5.0× fewer fills, 2.2× fewer insts** |
+| **`TERRAIN_MACRO`** | **7,448** | 7 | 772,578 | **0:0** | **zero spills** |
+| **`TERRAIN_MACRO_FAR`** | **10,872** | 7 | 773,557 | **0:0** | **zero spills** |
+| **`WATER` (Stage 8 + sprites)** | 12,609 | 3 | **66,808** | 16:53 | dry pixels discarded immediately on alpha `> 0.75` |
+
+**Recorded Real-GPU Headless Chrome Benchmark (`node scripts/bench-nd-browser.mjs --frames 30`, Intel ADL GT2, 1280×656, `EXT_disjoint_timer_query_webgl2`, 0 page errors):**
+
+| Phase | FPS | `avg_ms` | `p50_ms` | `p95_ms` | `max_ms` | GPU Sum | Key GPU Passes (`avg / max ms`) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| **`stationary_1x`** | **19.7** | **50.75** | **40.78** | 103.59 | **104.49** | **47.49 ms** | `TERRAIN 24.86/27.86`, `WATER 9.71/11.28`, `GRASS 4.29`, `MESH3D_ALPHA 4.03`, `TREE_SHADOW 2.53`, `POST 0.89` |
+| **`panning_1x`** | **19.7** | **50.69** | **35.03** | 118.97 | **122.27** | **47.29 ms** | `TERRAIN 24.27/26.40`, `WATER 11.10/13.16`, `GRASS 3.94`, `MESH3D_ALPHA 3.36`, `TREE_SHADOW 2.50`, `POST 0.89` |
+| **`zoom_sweep`** | **17.6** | **56.94** | **57.00** | 114.72 | **182.66** | **61.69 ms** | `TERRAIN 23.79/47.14`, `WATER 10.28/13.12`, `MESH3D_ALPHA 10.22`, `CLOUDS 5.55/9.89`, `TREE_SHADOW 4.75`, `GRASS 4.48` |
+| **`wide_zoom_steady`** | **24.4** | **40.97** | **40.67** | 80.43 | **82.55** | **35.51 ms** | `TERRAIN 26.68/28.41`, `CLOUDS 7.76/8.23` (`CLOUDS/TERRAIN = 0.291`), `POST 0.46`, `SKY 0.40` |
+
+*Pre-warm impact (`Step 5.2` without pre-warm vs `Step 5.3` with `gl_prewarm_pipelines()` + `glTexSubImage2D` chunk reuse): `stationary_1x max_ms` dropped **1,406.15 → 104.49 ms** (**13.5×**), `zoom_sweep max_ms` dropped **4,507.15 → 182.66 ms** (**24.7×**), and `zoom_sweep TERRAIN max` dropped **277.04 → 47.14 ms** (**5.9×**).*
+
+**Status: Complete** (`21/21` GLSL ES 3.00 shader programs verified via `glslangValidator -l` in `test_seven_render.c`, `test_seven_gl_ffi.c` green with `blits=3.0(d=2.0,c=2.0)` / `texImg2D=0` / `bufData=0`, `wasm-audit: PASS`, zero JS changes).
+
+---
+
 ## Recommended Execution Sequence
 
 ```text
@@ -290,4 +339,5 @@ Cross-references:
 3. P2 (Flora Cache, Probes, Areole)  → verify: ≥60% CPU drop stationary, Tier-0 + test-graphics green
 4. P3 (Sky Early-Z, Shaders, Grass)  → verify: ≥40% GPU/high-res drop, Tier-0 + test-graphics green
 5. P4 (UBO/Ring, RAM, Server/DB)     → verify: WASM/RAM/server targets met, make test-fast green
+6. P5 (Zero-Spill iGPU & Prewarm)    → verify: INTEL_DEBUG=fs spills slashed, 21/21 GLSL pass, hitch-free real-GPU bench
 ```

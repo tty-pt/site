@@ -191,6 +191,7 @@ typedef struct {
 	GLint uSceneColor;
 	GLint uSceneDepth;
 	GLint uViewport;
+	GLint uSceneUvScale;
 	GLint uNearFar;
 	GLint uProjScale;
 } gl_water_pipe_t;
@@ -399,11 +400,22 @@ typedef struct {
 } gl_post_pipe_t;
 
 typedef enum {
-	ND_TERR_VAR_FULL     = 0,
-	ND_TERR_VAR_DRY_NEAR = 1,
-	ND_TERR_VAR_MACRO    = 2,
-	ND_TERR_VAR_COUNT    = 3
+	ND_TERR_VAR_FULL        = 0,
+	ND_TERR_VAR_DRY_NEAR    = 1,
+	ND_TERR_VAR_DRY_CSM     = 2,
+	ND_TERR_VAR_SEABED_NEAR = 3,
+	ND_TERR_VAR_SEABED_MID  = 4,
+	ND_TERR_VAR_MACRO       = 5,
+	ND_TERR_VAR_MACRO_FAR   = 6,
+	ND_TERR_VAR_COUNT       = 7
 } nd_terr_var_t;
+
+typedef enum {
+	ND_CLOUD_VAR_FULL     = 0,
+	ND_CLOUD_VAR_WIDE     = 1,
+	ND_CLOUD_VAR_WIDE_CSM = 2,
+	ND_CLOUD_VAR_COUNT    = 3
+} nd_cloud_var_t;
 
 typedef struct {
 	uint16_t world;
@@ -413,6 +425,8 @@ typedef struct {
 	int32_t ox, oy;
 	int32_t span_w, span_h;
 	uint32_t tex_w, tex_h;
+	uint32_t alloc_w, alloc_h;
+	int alloc_mips;
 	uint32_t last_touch;
 	int16_t min_h_q12_4;
 	int16_t max_h_q12_4;
@@ -437,6 +451,7 @@ typedef struct {
 typedef struct {
 	bool initialized;
 	bool pipelines_ready;
+	bool pipelines_prewarmed;
 	gl_terrain_pipe_t terrain_pipes[ND_TERR_VAR_COUNT];
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
@@ -444,7 +459,7 @@ typedef struct {
 	gl_mesh3d_pipe_t mesh3d_opaque_pipe;
 	gl_grass_pipe_t grass_pipe;
 	gl_sky_pipe_t sky_pipe;
-	gl_cloud_pipe_t cloud_pipe;
+	gl_cloud_pipe_t cloud_pipes[ND_CLOUD_VAR_COUNT];
 	gl_cloud_comp_pipe_t cloud_comp_pipe;
 	gl_csm_pipe_t csm_pipe;
 	gl_ssao_pipe_t ssao_pipe;
@@ -516,6 +531,7 @@ typedef struct {
 	bool res_depth_valid;
 	bool res_color_valid;
 	bool sprites_in_water;
+	bool terrain_split_water_pending;
 
 	GLuint grid_vbo_macro;
 	GLuint grid_ibo_macro;

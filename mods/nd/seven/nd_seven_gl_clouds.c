@@ -253,6 +253,12 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 	out_depth_params[2] = log_scale;
 	out_depth_params[3] = log_bias;
 
+	if (s_gl.cur_dist >= 6000.0f && s_gl.cluster_ssbo_valid) {
+		s_gl.active_light_count = 2;
+		s_gl.active_cluster_count = ND_CLUSTER_TOTAL;
+		return;
+	}
+
 	uint32_t count = 0;
 
 	/* Light 0: Primary directional Sun */
@@ -508,7 +514,7 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 
 void nd_seven_gl_flush_clouds(void)
 {
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.cloud_pipe.prog || s_gl.cloud_count == 0 ||
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.cloud_pipes[ND_CLOUD_VAR_FULL].prog || s_gl.cloud_count == 0 ||
 	    s_gl.cur_dist <= 480.0f) {
 		s_gl.cloud_count = 0;
 		return;
@@ -557,54 +563,37 @@ void nd_seven_gl_flush_clouds(void)
 
 	gl_end_terrain_pass();
 	glTimerBegin(ND_GPU_PASS_CLOUDS);
-	glUseProgram(s_gl.cloud_pipe.prog);
-	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap);
 
-	/* Bind Clustered Cloud Lighting textures and uniforms */
-	{
-		uint32_t vp_w = half_res ? crw : rw;
-		uint32_t vp_h = half_res ? crh : rh;
-		glUniform2f(s_gl.cloud_pipe.uViewport, (float)vp_w, (float)vp_h);
-		if (s_gl.cloud_pipe.uCloudResScale >= 0) {
-			float res_sc = (s_gl.stage_w > 0u) ? ((float)vp_w / (float)s_gl.stage_w) : 1.0f;
-			glUniform1f(s_gl.cloud_pipe.uCloudResScale, res_sc);
-		}
-		glUniform3f(s_gl.cloud_pipe.uClusterGridDim,
-		            (float)ND_CLUSTER_GRID_X, (float)ND_CLUSTER_GRID_Y, (float)ND_CLUSTER_GRID_Z);
-		glUniform4f(s_gl.cloud_pipe.uClusterDepthParams,
-		            cluster_depth_params[0], cluster_depth_params[1],
-		            cluster_depth_params[2], cluster_depth_params[3]);
-		glUniform1i(s_gl.cloud_pipe.uClusterLightCount, (GLint)s_gl.active_light_count);
-
+	/* Bind shared textures once before command-ring chunk dispatch (sampler units bound at link time) */
+	gl_bind_csm(-1);
+	if (s_gl.cur_dist < 6000.0f) {
 		glActiveTexture(GL_TEXTURE0 + 9);
 		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_light_tex);
-		glUniform1i(s_gl.cloud_pipe.uClusterLightData, 9);
-
 		glActiveTexture(GL_TEXTURE0 + 10);
 		glBindTexture(GL_TEXTURE_2D, s_gl.cluster_list_tex);
-		glUniform1i(s_gl.cloud_pipe.uClusterLightListsTex, 10);
 		glActiveTexture(GL_TEXTURE0);
 	}
 
-	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
-	glUniform3fv(s_gl.cloud_pipe.uPlanetCenter, 1, zero_center);
-	glUniform2f(s_gl.cloud_pipe.uTorusRadii, s_gl.cur_pdef.major_r, s_gl.cur_pdef.minor_r);
-	{
-		/* Place proxy shell at the exact vertical midpoint of [zBase, zTopProj] (1,620 wu + 0.5 * eff_orbit_lift)
-		 * so sMidSlab = 0.5 * (sEnter + sExit) is identically 0 and entryWorldPos == vWorldPos! */
-		int cq = nd_seven_get_cloud_quality();
-		float max_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f : 4.0f);
-		float deck_base = 420.0f;
-		float deck_span = 2400.0f;
-		float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
-		float target_shell_z = 1620.0f + eff_orbit_lift * 0.50f;
-		float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
-		float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
-		glUniform4f(s_gl.cloud_pipe.uCloudDeck, deck_base, deck_span, max_steps, eff_shell_z);
-	}
-	glUniform1f(s_gl.cloud_pipe.uSeaLevel, s_gl.cur_base_sea_level);
-	glUniform1i(s_gl.cloud_pipe.uSubstrateTex, 0);
-	glUniform1i(s_gl.cloud_pipe.uHeightTex, 1);
+	uint32_t vp_w = half_res ? crw : rw;
+	uint32_t vp_h = half_res ? crh : rh;
+	float res_sc = (s_gl.stage_w > 0u) ? ((float)vp_w / (float)s_gl.stage_w) : 1.0f;
+
+	/* Place proxy shell at the exact vertical midpoint of [zBase, zTopProj] (1,620 wu + 0.5 * eff_orbit_lift)
+	 * so sMidSlab = 0.5 * (sEnter + sExit) is identically 0 and entryWorldPos == vWorldPos! */
+	int cq = nd_seven_get_cloud_quality();
+	float max_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f : 4.0f);
+	float deck_base = 420.0f;
+	float deck_span = 2400.0f;
+	float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
+	float target_shell_z = 1620.0f + eff_orbit_lift * 0.50f;
+	float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
+	float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
+
+	bool is_wide = (s_gl.cur_dist >= 6000.0f);
+	bool can_csm_only = (is_wide && s_gl.cur_dist < 35000.0f && s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].prog != 0);
+	float csm_sun_margin = fminf(24000.0f, fmaxf(90.0f, s_gl.cur_dist * 0.025f)) + 4800.0f;
+	int cur_var = -1;
+	bool var_inited[ND_CLOUD_VAR_COUNT] = { false, false, false };
 
 	/* Use smooth 48x48 torus-curved shell for high-level / orbital chunks to eliminate chord sagitta clipping
 	 * and faceted cloud horizons; keep lightweight 16x16 macro grid at mid-zoom. */
@@ -613,6 +602,56 @@ void nd_seven_gl_flush_clouds(void)
 
 	for (uint32_t i = 0; i < s_gl.cloud_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.cloud_queue[i];
+
+		int want_var = ND_CLOUD_VAR_FULL;
+		if (is_wide) {
+			bool csm_safe = false;
+			if (can_csm_only) {
+				if (!s_gl.csm_valid) {
+					csm_safe = s_gl.csm_clear_sky;
+				} else {
+					float rx = fmaxf(fabsf((float)chk->ox - s_gl.csm_win.cx),
+					                 fabsf((float)(chk->ox + chk->span_w) - s_gl.csm_win.cx)) + csm_sun_margin;
+					float ry = fmaxf(fabsf((float)chk->oy - s_gl.csm_win.cy),
+					                 fabsf((float)(chk->oy + chk->span_h) - s_gl.csm_win.cy)) + csm_sun_margin;
+					csm_safe = (rx <= 0.94f * s_gl.csm_win.half &&
+					            ry <= 0.94f * s_gl.csm_win.half);
+				}
+			}
+			if (csm_safe)
+				want_var = ND_CLOUD_VAR_WIDE_CSM;
+			else if (s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].prog)
+				want_var = ND_CLOUD_VAR_WIDE;
+		}
+
+		const gl_cloud_pipe_t *cp = &s_gl.cloud_pipes[want_var];
+		if (want_var != cur_var) {
+			lam_gl_cmd_use_program(&s_gl.cmd_buf, cp->prog);
+			if (!var_inited[want_var]) {
+				if (cp->uViewport >= 0)
+					lam_gl_cmd_uniform2f(&s_gl.cmd_buf, cp->uViewport, (float)vp_w, (float)vp_h);
+				if (cp->uCloudResScale >= 0)
+					lam_gl_cmd_uniform1f(&s_gl.cmd_buf, cp->uCloudResScale, res_sc);
+				if (cp->uCloudDeck >= 0)
+					lam_gl_cmd_uniform4f(&s_gl.cmd_buf, cp->uCloudDeck, deck_base, deck_span, max_steps, eff_shell_z);
+				if (cp->uSeaLevel >= 0)
+					lam_gl_cmd_uniform1f(&s_gl.cmd_buf, cp->uSeaLevel, s_gl.cur_base_sea_level);
+				if (want_var == ND_CLOUD_VAR_FULL) {
+					if (cp->uClusterGridDim >= 0)
+						lam_gl_cmd_uniform3f(&s_gl.cmd_buf, cp->uClusterGridDim,
+						                     (float)ND_CLUSTER_GRID_X, (float)ND_CLUSTER_GRID_Y, (float)ND_CLUSTER_GRID_Z);
+					if (cp->uClusterDepthParams >= 0)
+						lam_gl_cmd_uniform4f(&s_gl.cmd_buf, cp->uClusterDepthParams,
+						                     cluster_depth_params[0], cluster_depth_params[1],
+						                     cluster_depth_params[2], cluster_depth_params[3]);
+					if (cp->uClusterLightCount >= 0)
+						lam_gl_cmd_uniform1i(&s_gl.cmd_buf, cp->uClusterLightCount, (GLint)s_gl.active_light_count);
+				}
+				var_inited[want_var] = true;
+			}
+			cur_var = want_var;
+		}
+
 		int want_hi = (chk->level >= 9u || s_gl.cur_dist >= 200000.0f) ? 1 : 0;
 		if (want_hi != bound_hi) {
 			lam_gl_cmd_bind_buffer(&s_gl.cmd_buf, GL_ARRAY_BUFFER, want_hi ? s_gl.grid_vbo_hi : s_gl.grid_vbo_macro);
@@ -628,15 +667,17 @@ void nd_seven_gl_flush_clouds(void)
 		lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE1);
 		lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, chk->height_tex);
 
-		lam_gl_cmd_uniform3f(&s_gl.cmd_buf, s_gl.cloud_pipe.uPlanetCenter,
+		lam_gl_cmd_uniform3f(&s_gl.cmd_buf, cp->uPlanetCenter,
 		                     chk->rel_center[0], chk->rel_center[1], chk->rel_center[2]);
-		lam_gl_cmd_uniform_mat4(&s_gl.cmd_buf, s_gl.cloud_pipe.uBodyRot, GL_FALSE, chk->rot_mat4);
-		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.cloud_pipe.uTorusRadii, chk->major_r, chk->minor_r);
-		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.cloud_pipe.uChunkOrigin, (float)chk->ox, (float)chk->oy);
-		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.cloud_pipe.uChunkRelOrigin,
-		                     (float)((double)chk->ox - (double)s_gl.cur_tx),
-		                     (float)((double)chk->oy - (double)s_gl.cur_ty));
-		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.cloud_pipe.uChunkSpan, (float)chk->span_w, (float)chk->span_h);
+		lam_gl_cmd_uniform_mat4(&s_gl.cmd_buf, cp->uBodyRot, GL_FALSE, chk->rot_mat4);
+		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, cp->uTorusRadii, chk->major_r, chk->minor_r);
+		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, cp->uChunkOrigin, (float)chk->ox, (float)chk->oy);
+		if (cp->uChunkRelOrigin >= 0) {
+			lam_gl_cmd_uniform2f(&s_gl.cmd_buf, cp->uChunkRelOrigin,
+			                     (float)((double)chk->ox - (double)s_gl.cur_tx),
+			                     (float)((double)chk->oy - (double)s_gl.cur_ty));
+		}
+		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, cp->uChunkSpan, (float)chk->span_w, (float)chk->span_h);
 
 		lam_gl_cmd_draw_elements(&s_gl.cmd_buf, GL_TRIANGLES, c_indices, GL_UNSIGNED_SHORT, 0);
 		if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {

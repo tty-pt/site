@@ -2722,29 +2722,38 @@ int main(void)
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 13 WebGL2 shader programs (terrain, water, billboard, mesh3d, mesh3d_opaque, grass, cloud, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
+		/* 5. Verify all 21 WebGL2 shader programs (7 terrain variants, water, billboard, mesh3d, mesh3d_opaque, grass,
+		 * 3 cloud variants, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[13] = {
-				{ "terrain",        nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain()        },
-				{ "water",          nd_seven_gl_vs_water(),          nd_seven_gl_fs_water()          },
-				{ "billboard",      nd_seven_gl_vs_billboard(),      nd_seven_gl_fs_billboard()      },
-				{ "mesh3d",         nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d()         },
-				{ "mesh3d_opaque",  nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d_opaque()  },
-				{ "grass",          nd_seven_gl_vs_grass(),          nd_seven_gl_fs_grass()          },
-				{ "cloud",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()          },
-				{ "csm",            nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()            },
-				{ "sky",            nd_seven_gl_vs_sky(),            nd_seven_gl_fs_sky()            },
-				{ "ssao",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_ssao()           },
-				{ "bloom",          nd_seven_gl_vs_csm(),            nd_seven_gl_fs_bloom()          },
-				{ "post",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_post()           },
-				{ "terrain_shadow", nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow() }
+			} progs[] = {
+				{ "terrain",             nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain()             },
+				{ "terrain_dry_near",    nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain_dry_near()    },
+				{ "terrain_dry_csm",     nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain_dry_csm()     },
+				{ "terrain_seabed_near", nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain_seabed_near() },
+				{ "terrain_seabed_mid",  nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain_seabed_mid()  },
+				{ "terrain_macro",       nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain_macro()       },
+				{ "terrain_macro_far",   nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain_macro_far()   },
+				{ "water",               nd_seven_gl_vs_water(),          nd_seven_gl_fs_water()               },
+				{ "billboard",           nd_seven_gl_vs_billboard(),      nd_seven_gl_fs_billboard()           },
+				{ "mesh3d",              nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d()              },
+				{ "mesh3d_opaque",       nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d_opaque()       },
+				{ "grass",               nd_seven_gl_vs_grass(),          nd_seven_gl_fs_grass()               },
+				{ "cloud",               nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()               },
+				{ "cloud_wide",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide()          },
+				{ "cloud_wide_csm",      nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide_csm()      },
+				{ "csm",                 nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()                 },
+				{ "sky",                 nd_seven_gl_vs_sky(),            nd_seven_gl_fs_sky()                 },
+				{ "ssao",                nd_seven_gl_vs_csm(),            nd_seven_gl_fs_ssao()                },
+				{ "bloom",               nd_seven_gl_vs_csm(),            nd_seven_gl_fs_bloom()               },
+				{ "post",                nd_seven_gl_vs_csm(),            nd_seven_gl_fs_post()                },
+				{ "terrain_shadow",      nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow()      }
 			};
-			for (int p = 0; p < 13; p++) {
+			for (size_t p = 0; p < sizeof(progs) / sizeof(progs[0]); p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);

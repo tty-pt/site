@@ -695,15 +695,22 @@ static void init_pipelines(void)
 {
 	const char *vs_terr = nd_seven_gl_vs_terrain();
 	s_gl.sky_pipe.prog                                   = create_program_async(nd_seven_gl_vs_sky(), nd_seven_gl_fs_sky());
-	s_gl.terrain_pipes[ND_TERR_VAR_FULL].prog     = create_program_async(vs_terr, nd_seven_gl_fs_terrain());
-	s_gl.terrain_pipes[ND_TERR_VAR_DRY_NEAR].prog = create_program_async(vs_terr, nd_seven_gl_fs_terrain_dry_near());
-	s_gl.terrain_pipes[ND_TERR_VAR_MACRO].prog    = create_program_async(vs_terr, nd_seven_gl_fs_terrain_macro());
+	s_gl.terrain_pipes[ND_TERR_VAR_FULL].prog        = create_program_async(vs_terr, nd_seven_gl_fs_terrain());
+	s_gl.terrain_pipes[ND_TERR_VAR_DRY_NEAR].prog    = create_program_async(vs_terr, nd_seven_gl_fs_terrain_dry_near());
+	s_gl.terrain_pipes[ND_TERR_VAR_DRY_CSM].prog     = create_program_async(vs_terr, nd_seven_gl_fs_terrain_dry_csm());
+	s_gl.terrain_pipes[ND_TERR_VAR_SEABED_NEAR].prog = create_program_async(vs_terr, nd_seven_gl_fs_terrain_seabed_near());
+	s_gl.terrain_pipes[ND_TERR_VAR_SEABED_MID].prog  = create_program_async(vs_terr, nd_seven_gl_fs_terrain_seabed_mid());
+	s_gl.terrain_pipes[ND_TERR_VAR_MACRO].prog       = create_program_async(vs_terr, nd_seven_gl_fs_terrain_macro());
+	s_gl.terrain_pipes[ND_TERR_VAR_MACRO_FAR].prog   = create_program_async(vs_terr, nd_seven_gl_fs_terrain_macro_far());
 	s_gl.water_pipe.prog         = create_program_async(nd_seven_gl_vs_water(), nd_seven_gl_fs_water());
 	s_gl.bb_pipe.prog            = create_program_async(nd_seven_gl_vs_billboard(), nd_seven_gl_fs_billboard());
 	s_gl.mesh3d_pipe.prog        = create_program_async(nd_seven_gl_vs_mesh3d(), nd_seven_gl_fs_mesh3d());
 	s_gl.mesh3d_opaque_pipe.prog = create_program_async(nd_seven_gl_vs_mesh3d(), nd_seven_gl_fs_mesh3d_opaque());
 	s_gl.grass_pipe.prog         = create_program_async(nd_seven_gl_vs_grass(), nd_seven_gl_fs_grass());
-	s_gl.cloud_pipe.prog         = create_program_async(nd_seven_gl_vs_cloud(), nd_seven_gl_fs_cloud());
+	const char *vs_cloud = nd_seven_gl_vs_cloud();
+	s_gl.cloud_pipes[ND_CLOUD_VAR_FULL].prog     = create_program_async(vs_cloud, nd_seven_gl_fs_cloud());
+	s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].prog     = create_program_async(vs_cloud, nd_seven_gl_fs_cloud_wide());
+	s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].prog = create_program_async(vs_cloud, nd_seven_gl_fs_cloud_wide_csm());
 	s_gl.cloud_comp_pipe.prog    = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_cloud_comp());
 	s_gl.csm_pipe.prog           = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_csm());
 	s_gl.ssao_pipe.prog          = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_ssao());
@@ -713,6 +720,46 @@ static void init_pipelines(void)
 	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
+}
+
+static void gl_link_cloud_pipe(gl_cloud_pipe_t *cp)
+{
+	if (!cp->prog)
+		return;
+	if (!glGetProgramParameter(cp->prog, GL_LINK_STATUS)) {
+		glDeleteProgram(cp->prog);
+		cp->prog = 0;
+		return;
+	}
+	GLuint p = cp->prog;
+	gl_bind_frame_ubo_prog(p);
+	cp->uHeightTex            = glGetUniformLocation(p, "uHeightTex", 10);
+	cp->uSubstrateTex         = glGetUniformLocation(p, "uSubstrateTex", 13);
+	cp->uChunkOrigin          = glGetUniformLocation(p, "uChunkOrigin", 12);
+	cp->uChunkRelOrigin       = glGetUniformLocation(p, "uChunkRelOrigin", 15);
+	cp->uChunkSpan            = glGetUniformLocation(p, "uChunkSpan", 10);
+	cp->uSeaLevel             = glGetUniformLocation(p, "uSeaLevel", 9);
+	cp->uPlanetCenter         = glGetUniformLocation(p, "uPlanetCenter", 13);
+	cp->uBodyRot              = glGetUniformLocation(p, "uBodyRot", 8);
+	cp->uTorusRadii           = glGetUniformLocation(p, "uTorusRadii", 11);
+	cp->uCloudDeck            = glGetUniformLocation(p, "uCloudDeck", 10);
+	cp->uCloudShadowMap       = glGetUniformLocation(p, "uCloudShadowMap", 15);
+	cp->uViewport             = glGetUniformLocation(p, "uViewport", 9);
+	cp->uClusterGridDim       = glGetUniformLocation(p, "uClusterGridDim", 15);
+	cp->uClusterDepthParams   = glGetUniformLocation(p, "uClusterDepthParams", 19);
+	cp->uClusterLightCount    = glGetUniformLocation(p, "uClusterLightCount", 18);
+	cp->uClusterLightData     = glGetUniformLocation(p, "uClusterLightData", 17);
+	cp->uClusterLightListsTex = glGetUniformLocation(p, "uClusterLightListsTex", 21);
+	cp->uCloudResScale        = glGetUniformLocation(p, "uCloudResScale", 14);
+	cp->aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
+
+	/* Bind constant sampler texture units once at link time */
+	glUseProgram(p);
+	if (cp->uSubstrateTex >= 0)         glUniform1i(cp->uSubstrateTex, 0);
+	if (cp->uHeightTex >= 0)            glUniform1i(cp->uHeightTex, 1);
+	if (cp->uCloudShadowMap >= 0)       glUniform1i(cp->uCloudShadowMap, 7);
+	if (cp->uClusterLightData >= 0)     glUniform1i(cp->uClusterLightData, 9);
+	if (cp->uClusterLightListsTex >= 0) glUniform1i(cp->uClusterLightListsTex, 10);
 }
 
 static bool check_pipelines_ready(void)
@@ -739,8 +786,11 @@ static bool check_pipelines_ready(void)
 		return false;
 	if (s_gl.grass_pipe.prog && !glGetProgramParameter(s_gl.grass_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
-	if (s_gl.cloud_pipe.prog && !glGetProgramParameter(s_gl.cloud_pipe.prog, GL_COMPLETION_STATUS_KHR))
-		return false;
+	for (int v = 0; v < ND_CLOUD_VAR_COUNT; v++) {
+		if (s_gl.cloud_pipes[v].prog &&
+		    !glGetProgramParameter(s_gl.cloud_pipes[v].prog, GL_COMPLETION_STATUS_KHR))
+			return false;
+	}
 	if (s_gl.cloud_comp_pipe.prog && !glGetProgramParameter(s_gl.cloud_comp_pipe.prog, GL_COMPLETION_STATUS_KHR))
 		return false;
 	if (s_gl.csm_pipe.prog && !glGetProgramParameter(s_gl.csm_pipe.prog, GL_COMPLETION_STATUS_KHR))
@@ -775,7 +825,7 @@ static bool check_pipelines_ready(void)
 		}
 	}
 
-	/* Terrain pipelines (3 zero-visual-diff compiled variants: FULL + zero-spill DRY_NEAR & MACRO) */
+	/* Terrain pipelines (7 zero-visual-diff compiled variants: FULL, DRY_NEAR, DRY_CSM, SEABED_NEAR, SEABED_MID, MACRO, MACRO_FAR) */
 	for (int v = 0; v < ND_TERR_VAR_COUNT; v++)
 		gl_link_terrain_pipe(&s_gl.terrain_pipes[v]);
 
@@ -806,9 +856,16 @@ static bool check_pipelines_ready(void)
 			s_gl.water_pipe.uSceneColor     = glGetUniformLocation(p, "uSceneColor", 11);
 			s_gl.water_pipe.uSceneDepth     = glGetUniformLocation(p, "uSceneDepth", 11);
 			s_gl.water_pipe.uViewport       = glGetUniformLocation(p, "uViewport", 9);
+			s_gl.water_pipe.uSceneUvScale   = glGetUniformLocation(p, "uSceneUvScale", 13);
 			s_gl.water_pipe.uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
 			s_gl.water_pipe.uProjScale      = glGetUniformLocation(p, "uProjScale", 10);
 			s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
+			glUseProgram(p);
+			if (s_gl.water_pipe.uHeightTex >= 0)      glUniform1i(s_gl.water_pipe.uHeightTex, 0);
+			if (s_gl.water_pipe.uSubstrateTex >= 0)   glUniform1i(s_gl.water_pipe.uSubstrateTex, 1);
+			if (s_gl.water_pipe.uSceneColor >= 0)     glUniform1i(s_gl.water_pipe.uSceneColor, 4);
+			if (s_gl.water_pipe.uSceneDepth >= 0)     glUniform1i(s_gl.water_pipe.uSceneDepth, 5);
+			if (s_gl.water_pipe.uCloudShadowMap >= 0) glUniform1i(s_gl.water_pipe.uCloudShadowMap, 7);
 		}
 	}
 
@@ -879,35 +936,9 @@ static bool check_pipelines_ready(void)
 		}
 	}
 
-	/* Cloud pipeline */
-	if (s_gl.cloud_pipe.prog) {
-		if (!glGetProgramParameter(s_gl.cloud_pipe.prog, GL_LINK_STATUS)) {
-			glDeleteProgram(s_gl.cloud_pipe.prog);
-			s_gl.cloud_pipe.prog = 0;
-		} else {
-			GLuint p = s_gl.cloud_pipe.prog;
-			gl_bind_frame_ubo_prog(p);
-			s_gl.cloud_pipe.uHeightTex            = glGetUniformLocation(p, "uHeightTex", 10);
-			s_gl.cloud_pipe.uSubstrateTex         = glGetUniformLocation(p, "uSubstrateTex", 13);
-			s_gl.cloud_pipe.uChunkOrigin          = glGetUniformLocation(p, "uChunkOrigin", 12);
-			s_gl.cloud_pipe.uChunkRelOrigin       = glGetUniformLocation(p, "uChunkRelOrigin", 15);
-			s_gl.cloud_pipe.uChunkSpan            = glGetUniformLocation(p, "uChunkSpan", 10);
-			s_gl.cloud_pipe.uSeaLevel             = glGetUniformLocation(p, "uSeaLevel", 9);
-			s_gl.cloud_pipe.uPlanetCenter         = glGetUniformLocation(p, "uPlanetCenter", 13);
-			s_gl.cloud_pipe.uBodyRot              = glGetUniformLocation(p, "uBodyRot", 8);
-			s_gl.cloud_pipe.uTorusRadii           = glGetUniformLocation(p, "uTorusRadii", 11);
-			s_gl.cloud_pipe.uCloudDeck            = glGetUniformLocation(p, "uCloudDeck", 10);
-			s_gl.cloud_pipe.uCloudShadowMap       = glGetUniformLocation(p, "uCloudShadowMap", 15);
-			s_gl.cloud_pipe.uViewport             = glGetUniformLocation(p, "uViewport", 9);
-			s_gl.cloud_pipe.uClusterGridDim       = glGetUniformLocation(p, "uClusterGridDim", 15);
-			s_gl.cloud_pipe.uClusterDepthParams   = glGetUniformLocation(p, "uClusterDepthParams", 19);
-			s_gl.cloud_pipe.uClusterLightCount    = glGetUniformLocation(p, "uClusterLightCount", 18);
-			s_gl.cloud_pipe.uClusterLightData     = glGetUniformLocation(p, "uClusterLightData", 17);
-			s_gl.cloud_pipe.uClusterLightListsTex = glGetUniformLocation(p, "uClusterLightListsTex", 21);
-			s_gl.cloud_pipe.uCloudResScale        = glGetUniformLocation(p, "uCloudResScale", 14);
-			s_gl.cloud_pipe.aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
-		}
-	}
+	/* Cloud pipelines (3 zero-visual-diff variants: FULL, WIDE, WIDE_CSM) */
+	for (int v = 0; v < ND_CLOUD_VAR_COUNT; v++)
+		gl_link_cloud_pipe(&s_gl.cloud_pipes[v]);
 
 	/* Cloud half-res composite pipeline */
 	if (s_gl.cloud_comp_pipe.prog) {
@@ -991,6 +1022,126 @@ static bool check_pipelines_ready(void)
 
 	s_gl.pipelines_ready = true;
 	return true;
+}
+
+/* Force driver backend (Mesa/ANGLE GEN12) shader compilation once at startup into the exact
+ * RGBA16F scene_fbo / cloud_fbo formats with a 1x1 viewport right before the first glClear(),
+ * eliminating multi-hundred-ms first-draw hitches when zooming across LOD regimes. */
+static void gl_prewarm_pipelines(void)
+{
+	if (s_gl.pipelines_prewarmed || !s_gl.pipelines_ready || !s_gl.scene_ok || !s_gl.grid_vbo_macro)
+		return;
+	s_gl.pipelines_prewarmed = true;
+
+	int16_t dummy_h = 0;
+	uint8_t dummy_c[4] = { 128, 128, 128, 255 };
+	GLuint dummy_i16 = glCreateTexture();
+	GLuint dummy_rgba = glCreateTexture();
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, dummy_i16);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, 1, 1, 0, GL_RED_INTEGER, GL_SHORT, &dummy_h);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, dummy_c);
+
+	static const GLenum rgba_units[] = {
+		GL_TEXTURE0 + 7, GL_TEXTURE0 + 9, GL_TEXTURE0 + 10, GL_TEXTURE0 + 11, GL_TEXTURE0 + 12
+	};
+	for (size_t i = 0; i < sizeof(rgba_units) / sizeof(rgba_units[0]); i++) {
+		glActiveTexture(rgba_units[i]);
+		glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+	}
+	glActiveTexture(GL_TEXTURE0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_macro);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
+
+	glViewport(0, 0, 1, 1);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_STENCIL_TEST);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	/* 1. Prewarm all 7 terrain variants into scene_fbo (RGBA16F MSAA) */
+	for (int v = 0; v < ND_TERR_VAR_COUNT; v++) {
+		const gl_terrain_pipe_t *tp = &s_gl.terrain_pipes[v];
+		if (!tp->prog) continue;
+		glUseProgram(tp->prog);
+		glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+	}
+
+	/* 2. Prewarm water pipeline into scene_fbo (exact color-mask & depth-mask state) */
+	if (s_gl.water_pipe.prog) {
+		glUseProgram(s_gl.water_pipe.prog);
+		glActiveTexture(GL_TEXTURE0 + 4);
+		glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex ? s_gl.res_color_tex : dummy_rgba);
+		glActiveTexture(GL_TEXTURE0 + 5);
+		glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex ? s_gl.res_depth_tex : dummy_rgba);
+		glActiveTexture(GL_TEXTURE0);
+		if (s_gl.water_pipe.uViewport >= 0)     glUniform2f(s_gl.water_pipe.uViewport, 1.0f, 1.0f);
+		if (s_gl.water_pipe.uSceneUvScale >= 0) glUniform2f(s_gl.water_pipe.uSceneUvScale, 1.0f, 1.0f);
+		if (s_gl.water_pipe.uNearFar >= 0)      glUniform2f(s_gl.water_pipe.uNearFar, 2.0f, 10000.0f);
+		if (s_gl.water_pipe.uProjScale >= 0)    glUniform2f(s_gl.water_pipe.uProjScale, 1.0f, 1.0f);
+		glDepthMask(GL_FALSE);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+		glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+	}
+
+	/* 3. Prewarm all 3 cloud variants into cloud_fbo (RGBA16F 1x, premult alpha blend) */
+	if (s_gl.cloud_fbo)
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, dummy_i16);
+	glActiveTexture(GL_TEXTURE0);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	for (int v = 0; v < ND_CLOUD_VAR_COUNT; v++) {
+		const gl_cloud_pipe_t *cp = &s_gl.cloud_pipes[v];
+		if (!cp->prog) continue;
+		glUseProgram(cp->prog);
+		if (cp->uViewport >= 0)           glUniform2f(cp->uViewport, 1.0f, 1.0f);
+		if (cp->uCloudResScale >= 0)      glUniform1f(cp->uCloudResScale, 1.0f);
+		if (cp->uClusterGridDim >= 0)     glUniform3f(cp->uClusterGridDim, 16.0f, 16.0f, 24.0f);
+		if (cp->uClusterDepthParams >= 0) glUniform2f(cp->uClusterDepthParams, 2.0f, 10000.0f);
+		glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+	}
+
+	/* Restore clean GL state and rebind scene target before frame glClear */
+	glDisable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glDeleteTexture(dummy_i16);
+	glDeleteTexture(dummy_rgba);
+	gl_bind_scene_target();
 }
 
 bool nd_seven_gl_pipelines_ready(void)
@@ -1129,6 +1280,7 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	s_gl.cloud_count = 0;
 	s_gl.grass_q_count = 0;
 	s_gl.sprites_in_water = false;
+	s_gl.terrain_split_water_pending = false;
 	s_gl.sky_rendered = false;
 	s_gl.res_depth_valid = false;
 	s_gl.res_color_valid = false;
@@ -1296,6 +1448,10 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	s_gl.render_scales_set = false;
 
 	gl_bind_scene_target();
+	if (s_gl.pipelines_ready && s_gl.scene_ok && !s_gl.pipelines_prewarmed) {
+		gl_upload_frame_ubo();
+		gl_prewarm_pipelines();
+	}
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_TRUE);
@@ -1807,15 +1963,23 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 			slot->has_river = 1;
 		}
 
+		bool can_sub = (slot->alloc_w == chunk_w && slot->alloc_h == chunk_h &&
+		                height_i16 != NULL && color_rgba != NULL);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, slot->height_tex);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, chunk_w, chunk_h, 0, GL_RED_INTEGER, GL_SHORT, height_i16);
+		if (can_sub)
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, chunk_w, chunk_h, GL_RED_INTEGER, GL_SHORT, height_i16);
+		else
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, chunk_w, chunk_h, 0, GL_RED_INTEGER, GL_SHORT, height_i16);
 
 		glActiveTexture(GL_TEXTURE1);
 		glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, chunk_w, chunk_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, color_rgba);
+		if (can_sub)
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, chunk_w, chunk_h, GL_RGBA, GL_UNSIGNED_BYTE, color_rgba);
+		else
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, chunk_w, chunk_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, color_rgba);
 		{
 			/* Build full CPU mipmap chain (box 2x2 downsample) for smooth orbital/oblique filtering */
 			static uint8_t s_mip_a[128 * 128 * 4];
@@ -1847,13 +2011,21 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 						}
 					}
 					mip++;
-					glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, (GLsizei)nw, (GLsizei)nh, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst_px);
+					if (can_sub && mip <= slot->alloc_mips)
+						glTexSubImage2D(GL_TEXTURE_2D, mip, 0, 0, (GLsizei)nw, (GLsizei)nh, GL_RGBA, GL_UNSIGNED_BYTE, dst_px);
+					else
+						glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA8, (GLsizei)nw, (GLsizei)nh, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst_px);
 					src_px = dst_px;
 					mw = nw;
 					mh = nh;
 				}
 			}
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip);
+			if (!can_sub || mip != slot->alloc_mips) {
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip);
+				slot->alloc_w = chunk_w;
+				slot->alloc_h = chunk_h;
+				slot->alloc_mips = mip;
+			}
 		}
 	}
 	slot->last_touch = s_gl.frame_count;
@@ -1895,11 +2067,32 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		            ry <= 0.90f * s_gl.csm_win.half);
 	}
 
+	uint32_t max_water_q = (uint32_t)nd_seven_gl_max_water_queue();
+	bool water_eligible = (!is_dry && terrain_sea_lvl > -900.0f && s_gl.water_count < max_water_q);
+	bool water_occluded = false;
+	if (water_eligible && nd_seven_is_water_occluded_at(ox, oy, span_w, span_h, terrain_sea_lvl, eff_pdef)) {
+		water_occluded = true;
+		s_gl.water_culled_occ2d++;
+	}
+	bool can_split_water = (water_eligible && !water_occluded &&
+	                        s_gl.scene_ok && s_gl.water_pipe.prog && s_gl.cur_dist <= 2000.0f);
+
 	int want_var = ND_TERR_VAR_FULL;
 	if (is_dry && is_near && csm_safe && s_gl.terrain_pipes[ND_TERR_VAR_DRY_NEAR].prog)
 		want_var = ND_TERR_VAR_DRY_NEAR;
 	else if (is_macro && csm_safe && s_gl.terrain_pipes[ND_TERR_VAR_MACRO].prog)
 		want_var = ND_TERR_VAR_MACRO;
+	else if (is_macro && s_gl.terrain_pipes[ND_TERR_VAR_MACRO_FAR].prog)
+		want_var = ND_TERR_VAR_MACRO_FAR;
+	else if (is_dry && csm_safe && s_gl.terrain_pipes[ND_TERR_VAR_DRY_CSM].prog)
+		want_var = ND_TERR_VAR_DRY_CSM;
+	else if (can_split_water && is_near && csm_safe && s_gl.terrain_pipes[ND_TERR_VAR_SEABED_NEAR].prog) {
+		want_var = ND_TERR_VAR_SEABED_NEAR;
+		s_gl.terrain_split_water_pending = true;
+	} else if (can_split_water && csm_safe && s_gl.terrain_pipes[ND_TERR_VAR_SEABED_MID].prog) {
+		want_var = ND_TERR_VAR_SEABED_MID;
+		s_gl.terrain_split_water_pending = true;
+	}
 
 	const gl_terrain_pipe_t *tp = &s_gl.terrain_pipes[want_var];
 	if (want_var != s_gl.terrain_pass_variant) {
@@ -2101,12 +2294,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		cq->minor_r = eff_pdef->minor_r;
 	}
 
-	/* Queue the water surface of this chunk for the submerged-object pass */
-	if (terrain_sea_lvl > -900.0f && s_gl.water_count < (uint32_t)nd_seven_gl_max_water_queue()) {
-		if (nd_seven_is_water_occluded_at(ox, oy, span_w, span_h, terrain_sea_lvl, eff_pdef)) {
-			s_gl.water_culled_occ2d++;
-			return; /* Don't queue this water chunk */
-		}
+	/* Queue the water surface of this wet chunk for Stage 8 seabed optics & submerged-object pass */
+	if (water_eligible && !water_occluded) {
 		gl_water_chunk_t *wq = &s_gl.water_queue[s_gl.water_count++];
 		wq->ox = ox;
 		wq->oy = oy;
@@ -2225,12 +2414,15 @@ void nd_seven_gl_flush_grass(void)
 
 void nd_seven_gl_flush_water(void)
 {
-	/* The terrain pass already shades water over the seabed. This pass composites only what stands BELOW the surface on top
-	 * of that (sprites, marked in the stencil buffer): refraction of the resolved scene, true view-ray absorption from the
-	 * depth difference, then the same air-water surface layer as the terrain pass. Skipped when nothing is submerged. */
+	/* Composites Stage 8 ocean optics over SEABED_ONLY terrain chunks (alpha 0.5) and refracted
+	 * absorption over submerged sprites/meshes (alpha 0.0, stencil bit 0). Dry land / grass / sky
+	 * (alpha 1.0) are discarded immediately. Skipped when neither seabed split nor submerged sprites
+	 * are pending. */
 	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.water_pipe.prog || s_gl.water_count == 0 ||
-	    !s_gl.sprites_in_water || !s_gl.scene_ok || s_gl.cur_dist > 2000.0f) {
+	    (!s_gl.sprites_in_water && !s_gl.terrain_split_water_pending) ||
+	    !s_gl.scene_ok || s_gl.cur_dist > 2000.0f) {
 		s_gl.water_count = 0;
+		s_gl.terrain_split_water_pending = false;
 		return;
 	}
 
@@ -2250,7 +2442,14 @@ void nd_seven_gl_flush_water(void)
 	glActiveTexture(GL_TEXTURE0);
 	glUniform1i(s_gl.water_pipe.uHeightTex, 0);
 	glUniform1i(s_gl.water_pipe.uSubstrateTex, 1);
+	uint32_t rw = s_gl.render_w ? s_gl.render_w : s_gl.scene_w;
+	uint32_t rh = s_gl.render_h ? s_gl.render_h : s_gl.scene_h;
 	glUniform2f(s_gl.water_pipe.uViewport, (float)s_gl.scene_w, (float)s_gl.scene_h);
+	if (s_gl.water_pipe.uSceneUvScale >= 0) {
+		float sx = (s_gl.scene_w > 0) ? ((float)rw / (float)s_gl.scene_w) : 1.0f;
+		float sy = (s_gl.scene_h > 0) ? ((float)rh / (float)s_gl.scene_h) : 1.0f;
+		glUniform2f(s_gl.water_pipe.uSceneUvScale, sx, sy);
+	}
 	glUniform2f(s_gl.water_pipe.uNearFar, s_gl.cur_near, s_gl.cur_far);
 	glUniform2f(s_gl.water_pipe.uProjScale, s_gl.cur_tan_half * s_gl.cur_aspect, s_gl.cur_tan_half);
 
@@ -2259,10 +2458,14 @@ void nd_seven_gl_flush_water(void)
 	glDepthMask(GL_FALSE);
 	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-	glEnable(GL_STENCIL_TEST);
-	glStencilMask(0);
-	glStencilFunc(GL_EQUAL, 1, 0x01);
-	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+	if (s_gl.terrain_split_water_pending) {
+		glDisable(GL_STENCIL_TEST);
+	} else {
+		glEnable(GL_STENCIL_TEST);
+		glStencilMask(0);
+		glStencilFunc(GL_EQUAL, 1, 0x01);
+		glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+	}
 
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
 	glUniform1f(s_gl.water_pipe.uHeightScale, 1.0f);
@@ -2330,6 +2533,7 @@ void nd_seven_gl_flush_water(void)
 	/* Water pass writes color only (glDepthMask(GL_FALSE)), so res_depth_valid remains true */
 	s_gl.res_color_valid = false;
 	s_gl.water_count = 0;
+	s_gl.terrain_split_water_pending = false;
 }
 
 void gl_flush_terrain_shadows_to_fbo(void)

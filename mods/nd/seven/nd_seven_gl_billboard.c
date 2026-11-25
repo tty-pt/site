@@ -1390,6 +1390,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	 * fallback (uShadowPass = 1) only if the 3D directional depth shadow FBO is unavailable. */
 	bool run_planar_sun = any_sun_shadow && !s_gl.tree_shadow_ready;
 	if (run_planar_sun || any_lamb_shadow) {
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 		glDepthMask(GL_FALSE);
 		for (int sp = 1; sp <= 2; sp++) {
 			if (sp == 1 && !run_planar_sun) continue;
@@ -1416,6 +1417,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			}
 			gl_flush_cmd_ring();
 		}
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	}
 
 	/* Pass C: Main 3D mesh geometry pass — split into Pass C1 (opaque Early-Z, zero discard)
