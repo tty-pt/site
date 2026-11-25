@@ -93,7 +93,7 @@ Incomplete report = task not complete.
 7. **Multi-Agent Worktree & `pi-mm` Memory Coordination (`pi-quest` Deactivated).**
    - `pi-quest` is deactivated; do NOT invoke `quest_*` tools or write `.pi/quest/` files. Track multi-step session tasks with `todo` and persist cross-session engineering lore with `pi-mm` (`memory_recall`, `memory_record`, `memory_review`).
    - **Cross-Agent & Worktree Discovery**: Before starting non-trivial mutations or restarting host-wide daemons (`axil` on `:8080`, `jarvisd`, `axil-auren`), check active worktrees and live swarm attention leases via `sh scripts/worktree.sh status` or `memory_recall({ scope: "session", session: "parallel", query: "<topic>" })`.
-   - **Worktree Provisioning**: When creating or switching into a git worktree (`/worktree`, `subagent({ worktree: true })`, or `sh scripts/worktree.sh create <branch>`), always run `sh scripts/worktree.sh init` so all `external/*` submodules are linked zero-network from `.git/modules/*` and `node_modules/@tty-pt/*` headers are staged.
+   - **Worktree Provisioning**: When creating or switching into a git worktree (`/worktree`, `subagent({ worktree: true })`, or `sh scripts/worktree.sh create <branch>`), always run `sh scripts/worktree.sh init` (links core `external/*` submodules zero-network and stages `node_modules/@tty-pt/*` headers; pass `--all` to also link multi-GB optional sibling repos like `axil-auren` / `libjarvis`).
    - **Standing Operational Memory**: Persist newly discovered build/daemon/environment traps immediately with `memory_record({ ..., standing: true })` and resolve `[STALE_SUSPECT]` epistemic drift alerts with `memory_review`. See `.pi/skills/worktree-and-memory/SKILL.md`.
 
 8. **Targeted Verification Hierarchy & Quality Gates.**
@@ -104,7 +104,7 @@ Incomplete report = task not complete.
        - *Client-Side Isomorphic UX* (`mods/<M>/ux/*.c`): dual-compile with `make -C mods/<M>` (SSR) and `make site-wasm` (browser WASM), then verify with `sh scripts/check-module-boundaries.sh` and `sh scripts/check-wasm-imports.sh`.
        - *Client Scripts / WebGL Bridge* (`htdocs/*.js`, `external/liblamina/`): sync to `htdocs/`, then `sh scripts/check-no-site-specific-js.sh` and targeted unit check (e.g. `sh tests/unit/run-test-lamina-bridge.sh`).
        - *Core C Libraries* (`external/lib<L>/`): `make <L>-lib`, then `tests/unit/run-<L>-*.sh` or `make standalone-unit-tests`.
-       - *Harness / Tooling* (`.pi/extensions/pi-quest/`): `deno test --allow-all tests/` and `deno run --allow-all scripts/check-complexity.ts`.
+       - *Memory Extension* (`.pi/extensions/pi-mm/`): `npm --prefix .pi/extensions/pi-mm test`.
      - **Tier 1 (Fast Repo Suite)**: `make test-fast` (runs boundary check, C unit tests, and standalone unit tests in < 3 seconds without spawning background daemons or Deno E2E).
      - **Tier 2 (Integration Suite)**: `make test-integration` (runs pages tests, server daemon tests, and WASM package suites).
      - **Tier 3 (Monolithic Suite)**: `make test` (RESERVED ONLY for cross-cutting core architectural changes affecting the HTTP server daemon, TCP socket pipeline, or primary data engine storage).
@@ -159,6 +159,9 @@ Operational guides, build steps, and test instructions for sibling ports and aux
 | `axil-nd` MCP/BCP protocol architecture & modernization | `docs/AXIL_ND_MCP_BCP_IMPROVEMENT_SPEC.md` |
 | Multi-scale noise, client GPU acceleration & stratosphere architecture | `docs/MULTI_SCALE_NOISE_AND_GPU_ARCHITECTURE.md` |
 | 4D spatiotemporal noise & wind-coupled volumetric clouds | `docs/VOLUMETRIC_CLOUDS_AND_4D_NOISE.md` |
+| 3D planetary, ridge-line, cloud-shell & alt-planet occlusion | `docs/OCCLUSION.md` |
+| GPU instancing, draw-call collapse & async workqueue optimization | `docs/OPTIMIZATION.md` |
+| Planetary & atmospheric mathematics (`libcorolla`, orbits, 19 biomes) | `docs/WORLD_MATH.md` |
 | Next-generation NeverDark architecture (single-socket WS, BCP, hydration) | `docs/NEXT_GEN_ND_ARCHITECTURE.md` |
 | NeverDark full universe deployment, seeder & E2E harness | `docs/NEVERDARK_FULL_UNIVERSE_DEPLOYMENT.md` |
 | NeverDark pluggable viewports (ANSI TTY, 2D Lamina, 3D WebGL) | `docs/ND-VIEWPORTS.md` |

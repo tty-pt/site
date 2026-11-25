@@ -23,6 +23,12 @@ This directory houses completed historical design journals, point-in-time forens
 - `handoff-recursive-noise-water.md`: Working notes from procedural worldgen pass (Nov 6).
 - `water-realism-design.md`: Working design scratchpad for Seven water (Nov 6).
 
+### Archived Root Design & Asset Notes
+- **[`GAME_IDEA.md`](./GAME_IDEA.md)**: NeverDark universe & programmable world design notes.
+- **[`IMPROVE.md`](./IMPROVE.md)**: Historical terrain, geology, hydrology & biome vegetation specification draft.
+- **[`PROMPT.md`](./PROMPT.md)**: Botanical sprite & normal-map generation prompt specification.
+- **[`LINKEDIN_POST.txt`](./LINKEDIN_POST.txt)**: Historical social post draft.
+
 ### Extension Rebuild & Tooling History
 - **`pi-quest/`**: `HIGH_LEVEL.md`, `REBUILD_PLAN.md`, `THIS.md`, `FIX_ORDER.md`, and `issues/` (60 issue specs from early September).
 - **`pi-mm/`**: `mm-plan/` (12-phase planning files from September) and `RUNNING.md`.

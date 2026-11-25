@@ -40,9 +40,5 @@
     "{\"source\":\"npm:pi-free\",\"scope\":\"user\"}": "2.9.0",
     "{\"source\":\"npm:pi-subagents\",\"scope\":\"user\"}": "0.89.0"
   },
-  "useG1Credits": true,
-  "pi-quest": {
-    "enabled": false,
-    "disabled": true
-  }
+  "useG1Credits": true
 }

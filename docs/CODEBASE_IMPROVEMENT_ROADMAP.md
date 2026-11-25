@@ -12,8 +12,8 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 | **P1** | WASM Size, Incremental Caching & Unified Bundle Cutover | Small–Med (½d) | Low–Med | **Done** | 4–7× smaller `.wasm` payloads; 0.77s incremental `nd.wasm`; single cached `/site.wasm` on site pages |
 | **P2** | `libbud` Bump Arena (`bud_arena`) | Medium (1d) | Medium | **Done** | 100% fewer per-frame heap allocs (474,000 → 0 over 1,000 renders), 2.7–4.7× faster tree build, zero ASan/UBSan findings |
 | **P3** | Build & Unit-Test Deduplication | Small–Med (½d) | Low | **Done** | Shrinks `Makefile` (-142L) & 18 unit scripts (-512L raw / -271L net); 7.1× faster warm ND UX tests; 31/31 `standalone-unit-tests` green |
-| **P4** | Seven Engine Extraction & Shader Deduplication | Large (2–3d) | Medium | Planned | Cuts ~2,000L duplicate GLSL, splits 1,761L `nd_seven_render`, shrinks `mods/nd/ux/` from 31K → ~2.5K LOC |
-| **P5** | Server Module Slimming & Repo/Submodule Hygiene | Medium (1–2d) | Low–Med | Planned | Separates domain logic from HTTP handlers (`gig`, `chat`, `index`, `auth`); cleans root/docs/unused submodules |
+| **P4** | Seven Engine Extraction & Shader Deduplication | Large (2–3d) | Medium | **Done** | Cuts ~2,000L duplicate GLSL, splits 1,756L `nd_seven_render` → 68L, shrinks `mods/nd/ux/` 31K → 5K LOC |
+| **P5** | Repo & Submodule Hygiene (Phase 5-lite) | Small (1–2h) | Low | **Done** | Tiered `worktree.sh` (skips 5.4 GB optional siblings by default), retires `pi-quest`, cleans root (-3.9 MB PNGs, -8 stubs, +3 specs in `docs/`), fixes `libjarvis.so` tree RPATH (`make test-fast` green) |
 
 ---
 
@@ -109,17 +109,22 @@ Phased, dependency-ordered plan to make the codebase leaner, faster to build and
 
 ---
 
-## Phase 5 — Server Module Slimming & Repo / Submodule Hygiene
+## Phase 5 — Repo & Submodule Hygiene (Phase 5-lite) ✅ COMPLETED
 
 **Problem:**
-- Heavy server modules (`gig.c` 1,205L, `chat.c` 1,049L, `index.c` 917L, `auth.c` 795L) mix HTTP parsing, auth checks, and domain logic.
-- Repo root carries 20+ loose design/scratch notes and binary PNGs (~4 MB); `docs/` has 140 flat files; `.gitmodules` pulls 48 submodules (5.7 GB) including unrelated multi-GB services.
+- `scripts/worktree.sh` unconditionally linked all 47 submodules into every fresh worktree, including `external/axil-auren` (2.8 GB) and `external/libjarvis` (2.6 GB), and copied 14 MB of deactivated `.pi/extensions/pi-quest/`.
+- Repo root carried 8 obsolete redirect stubs, 4 loose scratch/design notes, 3 misplaced active specs, and 3.9 MB of unreferenced binary PNGs (`logos.png`, `stage-seven-screenshot.png`).
+- `external/libjarvis/Makefile` recorded a hardcoded source-tree RPATH (`${CURDIR}/../libstele/lib`), causing `scripts/check-no-tree-rpath.sh` and `make test-fast` to fail.
 
 **Deliverables:**
-1. Split heavy server modules (`gig`, `chat`, `auth`, `index`) into `<mod>_model.c` (unit-testable domain logic) + thin `<mod>.c` route glue matching `poem.c` / `software.c`.
-2. Archive loose root notes/screenshots into `docs/archive/`, remove obsolete root redirect stubs after updating links, and group `docs/` cleanly.
-3. Classify `.gitmodules` into core vs. optional sibling repos in `scripts/worktree.sh` so fresh worktrees don't hydrate multi-GB unused submodules; retire deactivated `.pi/extensions/pi-quest/` if no longer needed.
+1. **Tiered worktree submodule provisioning (`scripts/worktree.sh`)**: Classified `OPTIONAL_SUBMODULES` (`external/axil-auren`, `external/libjarvis`, `external/libhyle-react`, `external/libmm`, `external/pi-instruct`, ~5.4 GB combined). `worktree.sh init` / `create` now links only the 41 core submodules by default and accepts `--all` to opt into optional sibling repos.
+2. **Retired `.pi/extensions/pi-quest`**: Deinitialized and removed the deactivated `pi-quest` submodule from `.gitmodules` and `.pi/extensions/`, cleaned its stale stanza from `.pi/settings.json`, and updated `AGENTS.md`.
+3. **Repo root cleanup (zero `docs/` churn)**: Relocated active specs (`OCCLUSION.md`, `OPTIMIZATION.md`, `WORLD_MATH.md`) into `docs/` with updated links in `README.md`, `CHANGELOG.md`, and `AGENTS.md`; archived loose design notes (`GAME_IDEA.md`, `IMPROVE.md`, `PROMPT.md`, `LINKEDIN_POST.txt`) into `docs/archive/` (`docs/archive/README.md` updated); removed 8 obsolete redirect stubs (`25D.md`, `FIX.md`, `NO_WIZ.md`, `RECUR_NOISE.md`, `SAFE_SH.md`, `SHORE.md`, `ST.md`, `TERRAIN_ROADMAP.md`) and 3.9 MB of unreferenced root PNGs (`logos.png`, `stage-seven-screenshot.png`).
+4. **Build-tree RPATH fix (`external/libjarvis/Makefile`, `external/libjarvis/tests/Makefile`)**: Removed hardcoded `${CURDIR}/../libstele/lib` RPATHs from `libjarvis.so`, `bin/jarvis`, `bin/jarvisd`, and `mods/*/*.so` (retaining relative `$ORIGIN` / `@loader_path`) and passed `LD_LIBRARY_PATH` to in-tree CLI smoke tests.
+5. **Explicitly deferred (no speculative churn)**: Splitting stable 800–1,200L server modules (`gig.c`, `chat.c`, `index.c`, `auth.c`) and reorganizing `docs/` into nested subdirectories were intentionally deferred to avoid breaking cross-doc links and introducing cross-TU churn without an active bug or feature.
 
-**Exit Criteria:**
-- `make test-mod MOD=<M>` passes for every split module.
-- Root contains only standard project entrypoints; `sh scripts/worktree.sh init` succeeds cleanly.
+**Exit Criteria (Verified):**
+- `sh scripts/check-no-tree-rpath.sh` exits `0` (`check-no-tree-rpath: ok`; `libjarvis.so` `RPATH=[$ORIGIN]`).
+- `make test-fast` exits `0` (`Fast test suite passed!` across all boundary, C unit, and standalone unit suites).
+- Fresh worktree round-trip (`sh scripts/worktree.sh create test-p5-worktree` → verify 41 core linked, 5 optional skipped, `pi-quest` absent, clean `git status`, `make -C mods/poem` builds → `sh scripts/worktree.sh remove`) exits `0` in ~3s.
+- Repo root contains only standard project entrypoints (`AGENTS.md`, `CHANGELOG.md`, `LICENSE`, `Makefile`, `README.md`, `RELEASES.md`, `ROADMAP.md`, `build.mk`, `cleanup.sh`, `start.sh`, `test.sh`, configs).

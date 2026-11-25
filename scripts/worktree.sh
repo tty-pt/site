@@ -2,11 +2,22 @@
 # Standalone multi-agent worktree & swarm stigmergy helper (no pi-quest required).
 # Subcommands:
 #   sh scripts/worktree.sh status
-#   sh scripts/worktree.sh init [worktree_path]
-#   sh scripts/worktree.sh create <branch_name> [worktree_path]
+#   sh scripts/worktree.sh init [--all] [worktree_path]
+#   sh scripts/worktree.sh create [--all] <branch_name> [worktree_path]
 #   sh scripts/worktree.sh remove <branch_or_path>
 
 set -e
+
+# Optional heavy/sibling submodules skipped by default in new worktrees
+# (~5.4 GB combined); pass --all to link every submodule.
+OPTIONAL_SUBMODULES="external/axil-auren external/libjarvis external/libhyle-react external/libmm external/pi-instruct"
+
+is_optional_submodule() {
+	case " $OPTIONAL_SUBMODULES " in
+		*" $1 "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
 
 find_primary_root() {
 	curr="${1:-$(pwd)}"
@@ -95,6 +106,14 @@ cmd_status() {
 }
 
 cmd_init() {
+	INCLUDE_ALL=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--all) INCLUDE_ALL=1; shift ;;
+			*) break ;;
+		esac
+	done
+
 	WT_PATH="${1:-$(pwd)}"
 	WT_PATH=$(cd "$WT_PATH" && pwd)
 	if [ "$WT_PATH" = "$PRIMARY_ROOT" ]; then
@@ -103,11 +122,20 @@ cmd_init() {
 		return 0
 	fi
 
-	echo "[worktree] Initializing worktree at $WT_PATH from primary $PRIMARY_ROOT..."
-	git -C "$PRIMARY_ROOT" submodule status | while read -r line; do
+	tier_label="core"
+	[ "$INCLUDE_ALL" -eq 1 ] && tier_label="all"
+	echo "[worktree] Initializing worktree at $WT_PATH from primary $PRIMARY_ROOT (tier=$tier_label)..."
+	linked=0
+	skipped=0
+	while read -r line; do
 		raw_sha=$(echo "$line" | awk '{print $1}' | sed 's/^[+-U]//')
 		sub_path=$(echo "$line" | awk '{print $2}')
 		[ -z "$sub_path" ] && continue
+
+		if [ "$INCLUDE_ALL" -eq 0 ] && is_optional_submodule "$sub_path"; then
+			skipped=$((skipped + 1))
+			continue
+		fi
 
 		primary_sub="$PRIMARY_ROOT/$sub_path"
 		wt_sub="$WT_PATH/$sub_path"
@@ -115,10 +143,14 @@ cmd_init() {
 		if [ -e "$primary_sub/.git" ] && [ ! -e "$wt_sub/.git" ]; then
 			rm -rf "$wt_sub" 2>/dev/null || true
 			git -C "$primary_sub" worktree prune --expire=now >/dev/null 2>&1 || true
-			git -C "$primary_sub" -c protocol.allow=file worktree add --detach -f "$wt_sub" "$raw_sha" >/dev/null 2>&1 || \
-				git -C "$primary_sub" -c protocol.allow=file worktree add --detach -f "$wt_sub" HEAD >/dev/null 2>&1 || true
+			if git -C "$primary_sub" -c protocol.allow=file worktree add --detach -f "$wt_sub" "$raw_sha" >/dev/null 2>&1 || \
+				git -C "$primary_sub" -c protocol.allow=file worktree add --detach -f "$wt_sub" HEAD >/dev/null 2>&1; then
+				linked=$((linked + 1))
+			fi
 		fi
-	done
+	done <<EOF
+$(git -C "$PRIMARY_ROOT" submodule status)
+EOF
 
 	# Provision node_modules symlinks and exclude node_modules from git status in the worktree
 	if [ -d "$PRIMARY_ROOT/node_modules" ]; then
@@ -153,13 +185,21 @@ cmd_init() {
 		fi
 	fi
 
-	echo "[worktree] Ready: $WT_PATH (submodules linked zero-network, @tty-pt headers staged, .pi/mm unified)."
+	echo "[worktree] Ready: $WT_PATH (tier=$tier_label, linked=$linked submodules, skipped=$skipped optional; pass --all to include optional siblings)."
 }
 
 cmd_create() {
+	INCLUDE_ALL_FLAG=""
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--all) INCLUDE_ALL_FLAG="--all"; shift ;;
+			*) break ;;
+		esac
+	done
+
 	BRANCH="$1"
 	if [ -z "$BRANCH" ]; then
-		echo "Usage: sh scripts/worktree.sh create <branch_name> [worktree_path]" >&2
+		echo "Usage: sh scripts/worktree.sh create [--all] <branch_name> [worktree_path]" >&2
 		exit 1
 	fi
 	SAFE_NAME=$(echo "$BRANCH" | tr '/' '-')
@@ -173,7 +213,11 @@ cmd_create() {
 		git -C "$PRIMARY_ROOT" worktree add -f -b "$BRANCH" "$WT_PATH" HEAD
 	fi
 
-	cmd_init "$WT_PATH"
+	if [ -n "$INCLUDE_ALL_FLAG" ]; then
+		cmd_init "$INCLUDE_ALL_FLAG" "$WT_PATH"
+	else
+		cmd_init "$WT_PATH"
+	fi
 }
 
 cmd_remove() {
