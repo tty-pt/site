@@ -136,3 +136,6 @@
 [submodule "external/libjarvis"]
 	path = external/libjarvis
 	url = https://github.com/tty-pt/libjarvis
+[submodule "external/axil-scribe"]
+	path = external/axil-scribe
+	url = git@github.com:tty-pt/axil-scribe.git
