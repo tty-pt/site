@@ -74,3 +74,31 @@ make -C external/axil-resume-search test
 ```
 
 Full documentation and curl examples in `external/axil-resume-search/README.md`.
+
+---
+
+## axil-scribe (handwritten & archival document OCR + HITL workbench) — build, run & test
+
+Pure-C handwritten and archival document OCR, data-driven JSON template extraction (via `axil-auren` OpenAI-compatible `image_url` or deterministic `mock` backend), 2-pass conflict routing, immutable SHA-256 scan storage (`libcorm` + `liblemma`), No-JS SSR + isomorphic WASM (`htdocs/scribe_ux.wasm`) split-screen verification UI, and open CSV/JSON/transcript exports (`libscribe.so` + `libaxil-scribe.so`, running on port `8095` by default).
+
+```sh
+# Build native libraries, scribe-bench CLI, and isomorphic WASM UX:
+make -C external/axil-scribe
+
+# Instant offline browser test on http://127.0.0.1:8095/ (isolated /tmp demo dir + synthetic samples):
+./external/axil-scribe/scripts/scribe-server --demo
+
+# Turnkey production/offline launch (checks local axil-auren on :4242):
+./external/axil-scribe/scripts/scribe-server
+
+# Run C unit suites + live ephemeral axil No-JS E2E suite:
+make -C external/axil-scribe test
+
+# Run synthetic benchmark harness:
+make -C external/axil-scribe bench
+
+# Run colocated @tty-pt/scribe NPM client & WASM validation tests:
+npm --prefix external/axil-scribe/npm test
+```
+
+Full documentation, HTTP/curl API reference, custom template guide, and offline VLM hardware tiers in `external/axil-scribe/docs/USAGE.md`.
