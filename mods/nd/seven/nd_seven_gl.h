@@ -278,6 +278,8 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
                                      float sea_level,
                                      const nd_planet_def_t *pdef);
 
+void nd_seven_gl_flush_sky(void);
+
 void nd_seven_gl_flush_grass(void);
 
 void nd_seven_gl_flush_water(void);
@@ -302,6 +304,7 @@ const char *nd_seven_gl_vs_billboard(void);
 const char *nd_seven_gl_fs_billboard(void);
 const char *nd_seven_gl_vs_mesh3d(void);
 const char *nd_seven_gl_fs_mesh3d(void);
+const char *nd_seven_gl_fs_mesh3d_opaque(void);
 const char *nd_seven_gl_vs_grass(void);
 const char *nd_seven_gl_fs_grass(void);
 const char *nd_seven_gl_vs_csm(void);

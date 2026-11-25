@@ -586,32 +586,6 @@ void nd_seven_gl_flush_clouds(void)
 		glActiveTexture(GL_TEXTURE0);
 	}
 
-	/* Temporal CSM reprojection: bind history texture and set previous frame uniforms */
-	if (s_gl.csm_history_valid && s_gl.cloud_pipe.uCloudShadowMapHistory >= 0) {
-		glActiveTexture(GL_TEXTURE0 + 8);
-		glBindTexture(GL_TEXTURE_2D, s_gl.csm_history_tex);
-		glUniform1i(s_gl.cloud_pipe.uCloudShadowMapHistory, 8);
-		glActiveTexture(GL_TEXTURE0);
-		glUniform3f(s_gl.cloud_pipe.uPrevCsm,
-		            s_gl.csm_prev_win.cx, s_gl.csm_prev_win.cy, s_gl.csm_prev_win.half);
-		glUniform3fv(s_gl.cloud_pipe.uPrevSunDir, 1, s_gl.csm_prev_sun_dir);
-		/* Confidence based on camera motion and sun change */
-		float cam_motion = sqrtf((s_gl.cur_tx - s_gl.csm_prev_win.cx) * (s_gl.cur_tx - s_gl.csm_prev_win.cx) +
-		                         (s_gl.cur_ty - s_gl.csm_prev_win.cy) * (s_gl.cur_ty - s_gl.csm_prev_win.cy)) / fmaxf(1.0f, s_gl.cur_dist * 0.01f);
-		float sun_change = 1.0f - (s_gl.cur_sun_dir[0] * s_gl.csm_prev_sun_dir[0] +
-		                            s_gl.cur_sun_dir[1] * s_gl.csm_prev_sun_dir[1] +
-		                            s_gl.cur_sun_dir[2] * s_gl.csm_prev_sun_dir[2]);
-		float confidence = fmaxf(0.0f, 1.0f - cam_motion - sun_change * 2.0f);
-		glUniform1f(s_gl.cloud_pipe.uCsmConfidence, confidence);
-		/* Jitter delta for temporal reprojection */
-		float jitter_delta_x = s_gl.csm_jitter_x - s_gl.csm_prev_jitter_x;
-		float jitter_delta_y = s_gl.csm_jitter_y - s_gl.csm_prev_jitter_y;
-		glUniform2f(s_gl.cloud_pipe.uCsmJitterDelta, jitter_delta_x, jitter_delta_y);
-	} else {
-		glUniform1f(s_gl.cloud_pipe.uCsmConfidence, 0.0f);
-		glUniform2f(s_gl.cloud_pipe.uCsmJitterDelta, 0.0f, 0.0f);
-	}
-
 	float zero_center[3] = { 0.0f, 0.0f, 0.0f };
 	glUniformMatrix4fv(s_gl.cloud_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform4f(s_gl.cloud_pipe.uRefTrig,
@@ -751,5 +725,6 @@ void nd_seven_gl_flush_clouds(void)
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
 	glActiveTexture(GL_TEXTURE0);
+	s_gl.res_color_valid = false;
 	s_gl.cloud_count = 0;
 }

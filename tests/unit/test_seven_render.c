@@ -2722,18 +2722,19 @@ int main(void)
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 12 WebGL2 shader programs (terrain, water, billboard, mesh3d, grass, cloud, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
+		/* 5. Verify all 13 WebGL2 shader programs (terrain, water, billboard, mesh3d, mesh3d_opaque, grass, cloud, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
 		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
 				const char *vs;
 				const char *fs;
-			} progs[12] = {
+			} progs[13] = {
 				{ "terrain",        nd_seven_gl_vs_terrain(),        nd_seven_gl_fs_terrain()        },
 				{ "water",          nd_seven_gl_vs_water(),          nd_seven_gl_fs_water()          },
 				{ "billboard",      nd_seven_gl_vs_billboard(),      nd_seven_gl_fs_billboard()      },
 				{ "mesh3d",         nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d()         },
+				{ "mesh3d_opaque",  nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d_opaque()  },
 				{ "grass",          nd_seven_gl_vs_grass(),          nd_seven_gl_fs_grass()          },
 				{ "cloud",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()          },
 				{ "csm",            nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()            },
@@ -2743,7 +2744,7 @@ int main(void)
 				{ "post",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_post()           },
 				{ "terrain_shadow", nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow() }
 			};
-			for (int p = 0; p < 12; p++) {
+			for (int p = 0; p < 13; p++) {
 				char vpath[128], fpath[128], cmd[512];
 				snprintf(vpath, sizeof(vpath), "/tmp/test_seven_gl_%s.vert", progs[p].name);
 				snprintf(fpath, sizeof(fpath), "/tmp/test_seven_gl_%s.frag", progs[p].name);
@@ -2761,6 +2762,21 @@ int main(void)
 				remove(fpath);
 				assert(rc == 0);
 			}
+		}
+
+		/* 5b. Phase 3 GPU shader & Early-Z contract assertions */
+		{
+			assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "discard") == NULL);
+			assert(strstr(nd_seven_gl_fs_cloud(), "uSceneDepth") == NULL);
+			assert(strstr(nd_seven_gl_vs_sky(), "vec4(ndc, 1.0, 1.0)") != NULL);
+			assert(strstr(nd_seven_gl_vs_grass(), "a_tuft0") != NULL);
+			assert(strstr(nd_seven_gl_vs_grass(), "texelFetch") == NULL);
+			assert(strstr(nd_seven_gl_fs_terrain(), "uTerrFastDist") != NULL);
+			nd_seven_mesh3d_init();
+			assert(nd_seven_mesh3d_is_opaque(ND_MESH3D_STONE_BASE) == true);
+			assert(nd_seven_mesh3d_is_opaque(ND_MESH3D_GEOBREAK_BASE) == true);
+			assert(nd_seven_mesh3d_is_opaque(ND_MESH3D_PLANT_BASE) == false);
+			assert(nd_seven_mesh3d_is_opaque(ND_MESH3D_MEADOW_BASE) == false);
 		}
 
 		/* 6. Verify 4x4 Catmull-Rom bicubic C1 gradient continuity across texel boundaries:

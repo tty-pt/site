@@ -1315,6 +1315,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 
+	/* Sky-after-terrain Early-Z pass: draws only uncovered sky pixels at depth == 1.0 (GL_LEQUAL). */
+	nd_seven_gl_flush_sky();
+
 	/* The water queue is flushed after the sprites (nd_seven_render): the water pass composites what stands below the surface */
 }
 

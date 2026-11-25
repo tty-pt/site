@@ -372,11 +372,7 @@ bool gl_build_hiz_pyramid(void)
 	/* Resolve active terrain depth sub-rect into s_gl.res_depth_tex (level 0) */
 	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
 	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.res_fbo);
-	glBlitFramebuffer(0, 0, (GLint)rw, (GLint)rh,
-	                  0, 0, (GLint)rw, (GLint)rh,
-	                  GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
 
 	s_gl.terrain_pass_active = false;
 	glUseProgram(prog);
@@ -680,22 +676,32 @@ void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActiv
 	glActiveTexture(GL_TEXTURE0);
 }
 
-/* Resolve the multisampled scene active sub-rect into the sampleable colour (and depth) textures. */
+/* Resolve the multisampled scene active sub-rect into the sampleable colour (and depth) textures,
+ * skipping any attachment whose resolved copy is still valid since the last write. */
 void gl_resolve_scene(GLbitfield mask)
 {
 	if (!s_gl.scene_ok) return;
+	GLbitfield eff = mask;
+	if (s_gl.res_depth_valid) eff &= ~(GLbitfield)GL_DEPTH_BUFFER_BIT;
+	if (s_gl.res_color_valid) eff &= ~(GLbitfield)GL_COLOR_BUFFER_BIT;
+	if (!eff) return;
 	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
 	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.scene_fbo);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.res_fbo);
 	glBlitFramebuffer(0, 0, (GLint)rw, (GLint)rh,
-	                  0, 0, (GLint)rw, (GLint)rh, mask, GL_NEAREST);
+	                  0, 0, (GLint)rw, (GLint)rh, eff, GL_NEAREST);
+	if (eff & GL_DEPTH_BUFFER_BIT) s_gl.res_depth_valid = true;
+	if (eff & GL_COLOR_BUFFER_BIT) s_gl.res_color_valid = true;
 	gl_bind_scene_target();
 }
 
 void nd_seven_gl_end_frame(void)
 {
 	if (!s_gl.frame_open) return;
+	/* Standalone test / non-macro fallback: ensure sky renders before final resolve if not yet flushed */
+	if (!s_gl.sky_rendered && s_gl.pipelines_ready)
+		nd_seven_gl_flush_sky();
 	s_gl.frame_open = false;
 	if (s_gl.tree_shadow_ready) {
 		if (s_gl.tree_shadow_write_draws) {
@@ -718,7 +724,11 @@ void nd_seven_gl_end_frame(void)
 	float post_uv_y = (s_gl.post_half_h > 0) ? ((float)prh / (float)s_gl.post_half_h) : 1.0f;
 
 	bool run_post = (s_gl.pipelines_ready && s_gl.post_pipe.prog && s_gl.post_targets_ok);
-	gl_resolve_scene(run_post ? (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT) : GL_COLOR_BUFFER_BIT);
+	float ssao_fade = (run_post && s_gl.ssao_pipe.prog && s_gl.ssao_fbo && s_gl.ssao_tex && s_gl.cur_dist <= 2200.0f)
+		? fminf(1.0f, fmaxf(0.0f, (2200.0f - s_gl.cur_dist) / 1000.0f))
+		: 0.0f;
+	GLbitfield end_resolve_mask = GL_COLOR_BUFFER_BIT | ((ssao_fade > 0.001f) ? (GLbitfield)GL_DEPTH_BUFFER_BIT : 0u);
+	gl_resolve_scene(end_resolve_mask);
 	if (run_post) {
 		s_gl.terrain_pass_active = false;
 		glDisableVertexAttribArray(0);
@@ -731,9 +741,6 @@ void nd_seven_gl_end_frame(void)
 		glDisable(GL_BLEND);
 		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-		float ssao_fade = (s_gl.ssao_pipe.prog && s_gl.ssao_fbo && s_gl.ssao_tex && s_gl.cur_dist <= 2200.0f)
-			? fminf(1.0f, fmaxf(0.0f, (2200.0f - s_gl.cur_dist) / 1000.0f))
-			: 0.0f;
 		if (ssao_fade > 0.001f) {
 			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.ssao_fbo);
 			glViewport(0, 0, (GLsizei)prw, (GLsizei)prh);
@@ -750,7 +757,8 @@ void nd_seven_gl_end_frame(void)
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 		}
 
-		bool do_bloom = (s_gl.bloom_pipe.prog && s_gl.bloom_fbo[0] && s_gl.bloom_fbo[1] &&
+		bool do_bloom = (nd_seven_get_quality_preset() != ND_QUALITY_LOW &&
+		                 s_gl.bloom_pipe.prog && s_gl.bloom_fbo[0] && s_gl.bloom_fbo[1] &&
 		                 s_gl.bloom_tex[0] && s_gl.bloom_tex[1]);
 		if (do_bloom) {
 			glViewport(0, 0, (GLsizei)prw, (GLsizei)prh);
@@ -1059,47 +1067,6 @@ void gl_render_cloud_shadow_map(void)
 	if (!s_gl.csm_pipe.prog || s_gl.cur_dist > 180000.0f)
 		return;
 
-	/* Temporal CSM history invalidation */
-	if (s_gl.csm_history_valid) {
-		bool invalidate = false;
-		
-		// Camera teleport / large motion
-		float cam_motion = sqrtf((s_gl.cur_tx - s_gl.csm_prev_win.cx) * (s_gl.cur_tx - s_gl.csm_prev_win.cx) +
-		                         (s_gl.cur_ty - s_gl.csm_prev_win.cy) * (s_gl.cur_ty - s_gl.csm_prev_win.cy));
-		if (cam_motion > 500.0f) {
-			invalidate = true;  // Teleport/cut
-		} else if (s_gl.csm_prev_win.half > 0.0f && cam_motion > 0.1f * s_gl.csm_prev_win.half) {
-			invalidate = true;  // Large motion relative to CSM window
-		}
-		
-		// Quality change
-		if (cq != s_gl.csm_prev_quality) invalidate = true;
-		
-		// MSAA change
-		if (nd_seven_get_msaa() != s_gl.csm_prev_msaa) invalidate = true;
-		
-		// Render scale change
-		float res_scale = nd_seven_get_res_scale();
-		if (fabsf(res_scale - s_gl.csm_prev_res_scale) > 0.01f) invalidate = true;
-		
-		// Sun direction change > 15 degrees
-		float sun_dot = s_gl.cur_sun_dir[0] * s_gl.csm_prev_sun_dir[0] +
-		                s_gl.cur_sun_dir[1] * s_gl.csm_prev_sun_dir[1] +
-		                s_gl.cur_sun_dir[2] * s_gl.csm_prev_sun_dir[2];
-		if (sun_dot < 0.9659258f) {  // cos(15°) = 0.9659258
-			invalidate = true;
-		}
-		
-		if (invalidate) {
-			s_gl.csm_history_valid = false;
-		}
-	}
-	
-	// Store current settings for next frame invalidation check
-	s_gl.csm_prev_quality = cq;
-	s_gl.csm_prev_msaa = nd_seven_get_msaa();
-	s_gl.csm_prev_res_scale = nd_seven_get_res_scale();
-
 	float sun_xy_len = sqrtf(s_gl.cur_sun_dir[0] * s_gl.cur_sun_dir[0] + s_gl.cur_sun_dir[1] * s_gl.cur_sun_dir[1]);
 	float sun_px = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[0] / sun_xy_len) : -0.70710678f;
 	float sun_py = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[1] / sun_xy_len) : -0.70710678f;
@@ -1142,38 +1109,6 @@ void gl_render_cloud_shadow_map(void)
 		return;
 	}
 
-	/* --- TEMPORAL REPROJECTION SETUP --- */
-	// Create history texture/FBO on first use
-	if (!s_gl.csm_history_tex) {
-		glActiveTexture(GL_TEXTURE0);
-		s_gl.csm_history_tex = glCreateTexture();
-		glBindTexture(GL_TEXTURE_2D, s_gl.csm_history_tex);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, ND_CSM_RES, ND_CSM_RES, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-		
-		s_gl.csm_history_fbo = glCreateFramebuffer();
-		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_history_fbo);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.csm_history_tex, 0);
-		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
-			glViewport(0, 0, ND_CSM_RES, ND_CSM_RES);
-			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-			glClear(GL_COLOR_BUFFER_BIT);
-		}
-		glBindTexture(GL_TEXTURE_2D, 0);
-		
-		// Create reprojection shader program
-		s_gl.csm_reproj_prog = create_program_async(nd_seven_gl_vs_csm_reproj(), nd_seven_gl_fs_csm_reproj());
-	}
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	
-	// Compute previous frame's CSM MVP for reprojection
-	// We store the previous frame's CSM window and sun direction
-	// The reprojection maps from prev CSM UV to current CSM UV
-	
 	/* --- RENDER CURRENT CSM --- */
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
 	glViewport(0, 0, ND_CSM_RES, ND_CSM_RES);
@@ -1186,29 +1121,7 @@ void gl_render_cloud_shadow_map(void)
 	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.csm_pipe.uSeaWet, sea_wet);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
-	
-	/* --- TEMPORAL REPROJECTION PASS --- */
-	if (s_gl.csm_history_valid && s_gl.csm_reproj_prog) {
-		// Bind history texture and render reprojection to a temp texture
-		// For now, we'll blend directly by sampling history in the cloud shader
-		// This is a simplified approach - full reprojection would need a separate pass
-	}
-	
-	/* --- COPY CURRENT TO HISTORY FOR NEXT FRAME --- */
-	// Blit current CSM to history texture
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.csm_fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_gl.csm_history_fbo);
-	glBlitFramebuffer(0, 0, ND_CSM_RES, ND_CSM_RES,
-	                  0, 0, ND_CSM_RES, ND_CSM_RES, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	
-	/* --- UPDATE HISTORY STATE --- */
-	s_gl.csm_history_valid = true;
-	memcpy(s_gl.csm_prev_sun_dir, s_gl.cur_sun_dir, sizeof(s_gl.cur_sun_dir));
-	s_gl.csm_prev_win = s_gl.csm_win;
-	s_gl.csm_prev_anim_time = s_gl.cur_anim_time;
-	memcpy(s_gl.csm_prev_mvp, s_gl.cur_mvp, sizeof(s_gl.cur_mvp));  // Approximate
-	
+
 	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
 	s_gl.csm_rendered_win = s_gl.csm_win;

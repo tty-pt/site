@@ -141,6 +141,7 @@ typedef struct {
 	GLint uTreeShadowActive;
 	GLint uTerrDetailTex;
 	GLint uTerrNormTex;
+	GLint uTerrFastDist;
 	GLint aGridUV;
 } gl_terrain_pipe_t;
 
@@ -286,24 +287,44 @@ typedef struct {
 } gl_mesh3d_pipe_t;
 
 #define MAX_GRASS_CHUNKS 32
+#define MAX_GRASS_VBO_CACHE 32
+#define MAX_GRASS_TUFTS_PER_CHUNK (68 * 68)
+
+/* 40-byte compact per-instance grass tuft descriptor (pre-culled on CPU per chunk) */
+typedef struct {
+	float tuft0[4];         /* loc 2: uv.x, uv.y, wz, rYaw */
+	float tuft1[4];         /* loc 3: tuftW_base, tuftH_base, staticEnv, rHue */
+	uint8_t sub_rgba[4];    /* loc 4 (GL_UNSIGNED_BYTE norm): substrate.rgb, 255 */
+	uint8_t nterr_rgba[4];  /* loc 5 (GL_UNSIGNED_BYTE norm): nTerr.xyz * 0.5 + 0.5, 255 */
+} gl_grass_tuft_t;
+
+typedef struct {
+	uint16_t world;
+	uint8_t level;
+	uint8_t active;
+	uint32_t rev;
+	int32_t ox, oy;
+	int32_t span_w, span_h;
+	int32_t grid_n;
+	int32_t sea_level_q;    /* (int32_t)floorf(sea_level * 16.0f + 0.5f) */
+	uint32_t last_touch;
+	uint32_t tuft_count;
+	GLuint vbo;
+	bool vbo_allocated;
+} gl_grass_vbo_slot_t;
 
 typedef struct {
 	GLuint prog;
 	GLint uMVP;
-	GLint uHeightTex;
-	GLint uSubstrateTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
 	GLint uRefTrig;
-	GLint uHeightScale;
-	GLint uSeaLevel;
 	GLint uCameraPos;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
 	GLint uTorusRadii;
 	GLint uWorldDim;
-	GLint uGridN;
 	GLint uFogStart;
 	GLint uFogEnd;
 	GLint uAnimTime;
@@ -311,6 +332,7 @@ typedef struct {
 	GLint uAtmoIntensity;
 	GLint uLambLight;
 	GLint uSunDir;
+	GLint uSeaLevel;
 	GLint uCloudShadowMap;
 	GLint uCsm;
 	GLint uTreeShadowTex;
@@ -320,12 +342,14 @@ typedef struct {
 } gl_grass_pipe_t;
 
 typedef struct {
-	GLuint height_tex;
-	GLuint substrate_tex;
+	GLuint tuft_vbo;
+	uint32_t tuft_count;
 	int32_t ox, oy;
 	int32_t span_w, span_h;
 	uint8_t level;
 	float sea_level;
+	float center_x;
+	float center_y;
 	float rel_center[3];
 	float rot_mat4[16];
 	float major_r;
@@ -356,12 +380,7 @@ typedef struct {
 	GLint uCloudDeck;
 	GLint uSunDir;
 	GLint uCloudShadowMap;
-	GLint uCloudShadowMapHistory;
 	GLint uCsm;
-	GLint uPrevCsm;
-	GLint uPrevSunDir;
-	GLint uCsmConfidence;
-	GLint uCsmJitterDelta;
 	GLint aGridUV;
 	GLint uMoonDir;
 	GLint uViewport;
@@ -461,6 +480,7 @@ typedef struct {
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_mesh3d_pipe_t mesh3d_pipe;
+	gl_mesh3d_pipe_t mesh3d_opaque_pipe;
 	gl_grass_pipe_t grass_pipe;
 	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipe;
@@ -480,11 +500,6 @@ typedef struct {
 	float csm_rendered_time;
 	float csm_rendered_wet;
 
-	/* Temporal Cloud Shadow Map Reprojection */
-	GLuint csm_history_tex;
-	GLuint csm_history_fbo;
-	GLuint csm_reproj_prog;
-
 	/* Clustered Lighting Buffers & Textures */
 	GLuint cluster_light_tex;
 	GLuint cluster_list_tex;
@@ -497,20 +512,6 @@ typedef struct {
 	uint32_t active_cluster_count;
 	uint8_t cluster_light_tex_data[ND_MAX_TOTAL_LIGHTS * 4 * 4];
 	uint8_t cluster_list_tex_data[ND_CLUSTER_TOTAL * (ND_MAX_LIGHTS_PER_CLUSTER + 1)];
-	float csm_prev_mvp[16];
-	nd_seven_gl_csm_window_t csm_prev_win;
-	float csm_prev_anim_time;
-	float csm_prev_sun_dir[3];
-	bool csm_history_valid;
-	int csm_reproj_mode;
-	/* Temporal AA jitter compensation */
-	float csm_jitter_x;
-	float csm_jitter_y;
-	float csm_prev_jitter_x;
-	float csm_prev_jitter_y;
-	int csm_prev_quality;
-	int csm_prev_msaa;
-	float csm_prev_res_scale;
 	uint32_t stage_w;
 	uint32_t stage_h;
 
@@ -549,6 +550,10 @@ typedef struct {
 	bool scene_ok;
 	bool scene_failed;
 	bool frame_open;
+	bool sky_rendered;
+	float cur_space_t;
+	bool res_depth_valid;
+	bool res_color_valid;
 	bool sprites_in_water;
 
 	GLuint grid_vbo_macro;
@@ -590,6 +595,10 @@ typedef struct {
 	GLuint                   grass_vbo;
 	GLuint                   grass_ibo;
 	GLsizei                  grass_idx_count;
+	GLuint                   grass_vbo_lod;
+	GLuint                   grass_ibo_lod;
+	GLsizei                  grass_idx_count_lod;
+	gl_grass_vbo_slot_t      grass_cache[MAX_GRASS_VBO_CACHE];
 	gl_grass_chunk_t         grass_q[MAX_GRASS_CHUNKS];
 	uint32_t                 grass_q_count;
 	GLuint atlas_tex;
@@ -717,8 +726,6 @@ extern float s_shadow_sun_dir[3];
 extern float s_lamb_shadow_light[4];
 
 /* Internal shader accessors (public ones are in nd_seven_gl.h; all defined in nd_seven_gl_shaders.c) */
-const char *nd_seven_gl_vs_csm_reproj(void);
-const char *nd_seven_gl_fs_csm_reproj(void);
 const char *nd_seven_gl_fs_cloud_comp(void);
 const char *nd_seven_gl_fs_hiz_downsample(void);
 
@@ -842,6 +849,28 @@ static inline float gl_smoothstep01(float e0, float e1, float x)
 	float t = (x - e0) / (e1 - e0);
 	t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
 	return t * t * (3.0f - 2.0f * t);
+}
+
+static inline float gl_eval_trail_weight(float px, float py, float slope_mag)
+{
+	if (slope_mag >= 0.40f)
+		return 0.0f;
+	float u1 = px * 0.0042f + py * 0.0029f
+	         + 0.85f * sinf(py * 0.0061f - px * 0.0033f)
+	         + 0.40f * cosf(px * 0.0117f + py * 0.0089f);
+	float u2 = px * -0.0031f + py * 0.0046f
+	         + 0.80f * sinf(px * 0.0057f + py * 0.0037f)
+	         + 0.38f * cosf(py * 0.0109f - px * 0.0083f);
+	float d1 = fabsf(sinf(u1));
+	float d2 = fabsf(sinf(u2));
+	float g1 = gl_smoothstep01(0.15f, 0.55f, sinf(px * 0.0011f - py * 0.0014f + 0.6f));
+	float g2 = gl_smoothstep01(0.20f, 0.60f, cosf(px * 0.0013f + py * 0.0009f - 0.4f));
+	float t1 = (1.0f - gl_smoothstep01(0.038f, 0.095f, d1)) * g1;
+	float t2 = (1.0f - gl_smoothstep01(0.035f, 0.088f, d2)) * g2;
+	float t = t1 > t2 ? t1 : t2;
+	if (t < 0.0f) t = 0.0f;
+	if (t > 1.0f) t = 1.0f;
+	return t * (1.0f - gl_smoothstep01(0.20f, 0.40f, slope_mag));
 }
 
 static inline void gl_eval_recursive_wind(float wx, float wy, float anim_time,

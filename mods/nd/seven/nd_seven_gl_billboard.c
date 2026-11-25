@@ -1175,6 +1175,100 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	out->terr[3] = flip * (sh_flags + yaw01);
 }
 
+static uint8_t s_mesh3d_has_fade[ND_SEVEN_MESH3D_TOTAL];
+
+static void gl_bind_mesh3d_pipe_uniforms(const gl_mesh3d_pipe_t *pipe,
+                                         float bb_sea_level, float space_t,
+                                         bool bind_textures)
+{
+	glUseProgram(pipe->prog);
+	gl_bind_csm(pipe->uCloudShadowMap, pipe->uCsm);
+	if (s_gl.fol_atlas_tex && pipe->uBranchletTex >= 0) {
+		if (bind_textures) {
+			glActiveTexture(GL_TEXTURE0 + 3);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
+		}
+		glUniform1i(pipe->uBranchletTex, 3);
+		if (s_gl.fol_atlas_norm_tex && pipe->uBranchletNorm >= 0) {
+			if (bind_textures) {
+				glActiveTexture(GL_TEXTURE0 + 4);
+				glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_norm_tex);
+			}
+			glUniform1i(pipe->uBranchletNorm, 4);
+		}
+	}
+	if (s_gl.fol_grass_tex && pipe->uGrassTex >= 0) {
+		if (bind_textures) {
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_tex);
+		}
+		glUniform1i(pipe->uGrassTex, 5);
+		if (s_gl.fol_grass_norm_tex && pipe->uGrassNorm >= 0) {
+			if (bind_textures) {
+				glActiveTexture(GL_TEXTURE0 + 6);
+				glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_norm_tex);
+			}
+			glUniform1i(pipe->uGrassNorm, 6);
+		}
+	}
+	if (s_gl.fol_bark_tex && pipe->uBarkTex >= 0) {
+		if (bind_textures) {
+			glActiveTexture(GL_TEXTURE0 + 8);
+			glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_tex);
+		}
+		glUniform1i(pipe->uBarkTex, 8);
+		if (s_gl.fol_bark_norm_tex && pipe->uBarkNorm >= 0) {
+			if (bind_textures) {
+				glActiveTexture(GL_TEXTURE0 + 9);
+				glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_norm_tex);
+			}
+			glUniform1i(pipe->uBarkNorm, 9);
+		}
+	}
+	if (bind_textures)
+		glActiveTexture(GL_TEXTURE0);
+	glUniformMatrix4fv(pipe->uMVP, 1, GL_FALSE, s_gl.cur_mvp);
+	glUniform1f(pipe->uSeaLevel, bb_sea_level);
+	glUniform1f(pipe->uAnimTime, s_gl.cur_anim_time);
+	glUniform3fv(pipe->uCameraPos, 1, s_gl.cur_eye);
+	glUniform1f(pipe->uFogStart, s_gl.cur_dist * 1.5f);
+	glUniform1f(pipe->uFogEnd, s_gl.cur_dist * 4.0f);
+	glUniform3f(pipe->uSkyColor,
+	            0.55f * (1.0f - space_t) + 0.002f * space_t,
+	            0.70f * (1.0f - space_t) + 0.003f * space_t,
+	            0.85f * (1.0f - space_t) + 0.006f * space_t);
+	glUniform1f(pipe->uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
+	glUniform4f(pipe->uLambLight,
+	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
+	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
+	glUniform3fv(pipe->uSunDir, 1, s_gl.cur_sun_dir);
+}
+
+static void gl_draw_mesh3d_bucket(uint32_t m)
+{
+	uint32_t icnt = s_mesh3d_counts[m];
+	if (icnt == 0) return;
+	const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
+	if (!sl || sl->idx_count == 0) return;
+
+	size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
+	for (GLuint a = 0; a < 7; a++) {
+		glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
+		                      sizeof(nd_seven_gl_mesh3d_inst_t),
+		                      inst_base_bytes + (size_t)(a * 16));
+	}
+	glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+	                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
+	if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+		nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+		cmd->count = sl->idx_count;
+		cmd->instance_count = icnt;
+		cmd->first_index = sl->first_idx;
+		cmd->base_vertex = 0;
+		cmd->base_instance = s_mesh3d_offsets[m];
+	}
+}
+
 static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float space_t,
                                  bool any_sun_shadow, bool any_lamb_shadow)
 {
@@ -1182,16 +1276,29 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		return;
 
 	memset(s_mesh3d_counts, 0, sizeof(s_mesh3d_counts));
+	memset(s_mesh3d_has_fade, 0, sizeof(s_mesh3d_has_fade));
 	for (uint32_t i = 0; i < mesh3d_n; i++) {
 		uint8_t mid = s_mesh3d_staging_ids[i];
-		if (mid > 0 && mid < ND_SEVEN_MESH3D_TOTAL)
+		if (mid > 0 && mid < ND_SEVEN_MESH3D_TOTAL) {
 			s_mesh3d_counts[mid]++;
+			if (s_mesh3d_staging[i].tint[3] < 0.995f)
+				s_mesh3d_has_fade[mid] = 1u;
+		}
 	}
 	uint32_t running = 0;
+	bool any_opaque_c1 = false;
+	bool any_alpha_c2 = false;
+	bool has_opaque_prog = (s_gl.mesh3d_opaque_pipe.prog != 0);
 	for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
 		s_mesh3d_offsets[m] = running;
 		s_mesh3d_cursors[m] = running;
 		running += s_mesh3d_counts[m];
+		if (s_mesh3d_counts[m] > 0) {
+			if (has_opaque_prog && nd_seven_mesh3d_is_opaque((uint8_t)m) && !s_mesh3d_has_fade[m])
+				any_opaque_c1 = true;
+			else
+				any_alpha_c2 = true;
+		}
 	}
 	if (running == 0) return;
 
@@ -1202,54 +1309,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	}
 
 	s_gl.terrain_pass_active = false;
-	glUseProgram(s_gl.mesh3d_pipe.prog);
-	gl_bind_csm(s_gl.mesh3d_pipe.uCloudShadowMap, s_gl.mesh3d_pipe.uCsm);
-	if (s_gl.fol_atlas_tex && s_gl.mesh3d_pipe.uBranchletTex >= 0) {
-		glActiveTexture(GL_TEXTURE0 + 3);
-		glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
-		glUniform1i(s_gl.mesh3d_pipe.uBranchletTex, 3);
-		if (s_gl.fol_atlas_norm_tex && s_gl.mesh3d_pipe.uBranchletNorm >= 0) {
-			glActiveTexture(GL_TEXTURE0 + 4);
-			glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_norm_tex);
-			glUniform1i(s_gl.mesh3d_pipe.uBranchletNorm, 4);
-		}
-	}
-	if (s_gl.fol_grass_tex && s_gl.mesh3d_pipe.uGrassTex >= 0) {
-		glActiveTexture(GL_TEXTURE0 + 5);
-		glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_tex);
-		glUniform1i(s_gl.mesh3d_pipe.uGrassTex, 5);
-		if (s_gl.fol_grass_norm_tex && s_gl.mesh3d_pipe.uGrassNorm >= 0) {
-			glActiveTexture(GL_TEXTURE0 + 6);
-			glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_norm_tex);
-			glUniform1i(s_gl.mesh3d_pipe.uGrassNorm, 6);
-		}
-	}
-	if (s_gl.fol_bark_tex && s_gl.mesh3d_pipe.uBarkTex >= 0) {
-		glActiveTexture(GL_TEXTURE0 + 8);
-		glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_tex);
-		glUniform1i(s_gl.mesh3d_pipe.uBarkTex, 8);
-		if (s_gl.fol_bark_norm_tex && s_gl.mesh3d_pipe.uBarkNorm >= 0) {
-			glActiveTexture(GL_TEXTURE0 + 9);
-			glBindTexture(GL_TEXTURE_2D, s_gl.fol_bark_norm_tex);
-			glUniform1i(s_gl.mesh3d_pipe.uBarkNorm, 9);
-		}
-	}
-	glActiveTexture(GL_TEXTURE0);
-	glUniformMatrix4fv(s_gl.mesh3d_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
-	glUniform1f(s_gl.mesh3d_pipe.uSeaLevel, bb_sea_level);
-	glUniform1f(s_gl.mesh3d_pipe.uAnimTime, s_gl.cur_anim_time);
-	glUniform3fv(s_gl.mesh3d_pipe.uCameraPos, 1, s_gl.cur_eye);
-	glUniform1f(s_gl.mesh3d_pipe.uFogStart, s_gl.cur_dist * 1.5f);
-	glUniform1f(s_gl.mesh3d_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
-	glUniform3f(s_gl.mesh3d_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.002f * space_t,
-	            0.70f * (1.0f - space_t) + 0.003f * space_t,
-	            0.85f * (1.0f - space_t) + 0.006f * space_t);
-	glUniform1f(s_gl.mesh3d_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
-	glUniform4f(s_gl.mesh3d_pipe.uLambLight,
-	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
-	glUniform3fv(s_gl.mesh3d_pipe.uSunDir, 1, s_gl.cur_sun_dir);
+	gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_pipe, bb_sea_level, space_t, true);
 
 	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO */
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
@@ -1372,36 +1432,44 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		}
 	}
 
-	/* Pass C: Main 3D mesh geometry pass */
-	glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 0);
+	/* Pass C: Main 3D mesh geometry pass — split into Pass C1 (opaque Early-Z, zero discard)
+	 * and Pass C2 (alpha-tested foliage / LOD-fading meshes). */
 	glDepthMask(GL_TRUE);
 	glStencilMask(0x01);
 	glStencilFunc(GL_ALWAYS, 1, 0x01);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
-	for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
-		uint32_t icnt = s_mesh3d_counts[m];
-		if (icnt == 0) continue;
-		const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
-		if (!sl || sl->idx_count == 0) continue;
-
-		size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
-		for (GLuint a = 0; a < 7; a++) {
-			glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
-			                      sizeof(nd_seven_gl_mesh3d_inst_t),
-			                      inst_base_bytes + (size_t)(a * 16));
-		}
-		glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
-		                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
-		if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
-			nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
-			cmd->count = sl->idx_count;
-			cmd->instance_count = icnt;
-			cmd->first_index = sl->first_idx;
-			cmd->base_vertex = 0;
-			cmd->base_instance = s_mesh3d_offsets[m];
+	if (any_opaque_c1) {
+		glDisable(GL_BLEND);
+		gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_opaque_pipe, bb_sea_level, space_t, false);
+		gl_bind_tree_shadow_read(s_gl.mesh3d_opaque_pipe.uTreeShadowTex,
+		                         s_gl.mesh3d_opaque_pipe.uTreeShadowOrigin,
+		                         s_gl.mesh3d_opaque_pipe.uTreeShadowVP,
+		                         s_gl.mesh3d_opaque_pipe.uTreeShadowActive);
+		if (s_gl.mesh3d_opaque_pipe.uShadowPass >= 0)
+			glUniform1i(s_gl.mesh3d_opaque_pipe.uShadowPass, 0);
+		for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
+			if (s_mesh3d_counts[m] == 0) continue;
+			if (nd_seven_mesh3d_is_opaque((uint8_t)m) && !s_mesh3d_has_fade[m])
+				gl_draw_mesh3d_bucket(m);
 		}
 	}
+
+	if (any_alpha_c2) {
+		if (any_opaque_c1) {
+			glUseProgram(s_gl.mesh3d_pipe.prog);
+			glEnable(GL_BLEND);
+		}
+		glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 0);
+		for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
+			if (s_mesh3d_counts[m] == 0) continue;
+			if (!has_opaque_prog || !nd_seven_mesh3d_is_opaque((uint8_t)m) || s_mesh3d_has_fade[m])
+				gl_draw_mesh3d_bucket(m);
+		}
+	}
+
+	s_gl.res_depth_valid = false;
+	s_gl.res_color_valid = false;
 
 	glStencilMask(0xFF);
 	glDisable(GL_STENCIL_TEST);
@@ -1680,6 +1748,8 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDepthMask(GL_FALSE);
 				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
+				s_gl.res_depth_valid = false;
+				s_gl.res_color_valid = false;
 				if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
 					nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
 					cmd->count = 4u;
@@ -1697,6 +1767,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDepthMask(GL_FALSE);
 				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)other_n);
+				s_gl.res_color_valid = false;
 				if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
 					nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
 					cmd->count = 4u;

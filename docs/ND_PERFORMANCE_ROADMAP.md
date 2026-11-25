@@ -28,7 +28,7 @@ Cross-references:
 | **P0** | Frame-Phase Profiler & Baseline Harness | Small (2–3h) | Low | **Complete** | Per-phase CPU/FFI/draw-call counters (`nd_seven_perf_t` + `webgl-cap.js`) and reproducible baseline recorded |
 | **P1** | Zero-Risk Hot-Path & Bridge Quick Wins | Small–Med (½–1d) | Low | **Complete** | Eliminated steady-state DOM queries (0/f), Hi-Z uniform leak (0/f), ~72% wide-zoom WebGL FFI calls (~82% terrain pass), 5× map re-ingest; enabled `-O3 -fno-math-errno -msimd128` (7,397 SIMD128 ops in `nd.wasm`) |
 | **P2** | CPU Frame-Time Killers (Data Layout & Caching) | Medium (1–2d) | Low–Med | **Complete** | High stationary CPU `-92.7%` (`12.14 → 0.89 ms`, probes `14,397 → 57`), Low stationary `-85.8%` (`6.07 → 0.86 ms`), `libareole` query `-32.6%`, `glBufferData` steady-state `0/f` (`glBufferSubData`) |
-| **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | Planned | Sky-after-terrain Early-Z, pre-linearized GLSL constants (~135 `pow`/px saved), single-eval wind, opaque vs. alpha-tested `mesh3d`, instanced grass tufts, trimmed blits/bloom |
+| **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | **Complete** | Sky-after-terrain Early-Z (`z=1.0`, `GL_LEQUAL`), 236 constant `nd_to_lin` `pow()` removed, single-eval wind, zero-`discard` `mesh3d_opaque` Pass C1, CPU pre-culled grass tuft VBO cache + 3-blade LOD (`bindTex` `152→112`, Low grass tris `-61%`), shared MSAA depth resolve (`blits=2.0/f`), dead CSM history blit removed, Bloom gated off on Low (`draws 186→183`) |
 | **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | Planned | WebGL command ring buffer + UBOs, GLSL build stripping, `libareole` single vertex buffer (-20+ MB RAM), non-destructive BCP updates, `axil-nd`/`nd-view`/`nd-world` DB/RAM fixes |
 
 ---
@@ -209,6 +209,15 @@ Cross-references:
 - Integrated-GPU / high-resolution frame time drops by **≥ 40%** vs. P2 baseline with zero shader compile/link errors in `make test-graphics` (`glslangValidator` ES 3.00).
 - Visual parity verified at High quality; Low/Medium presets measurably faster.
 - `make -C mods/nd && make site-wasm && make test-graphics && make test-mod MOD=nd` exits `0`.
+
+**Status: Complete** (verified via `make -C mods/nd`, `make site-wasm`, `make test-graphics`, `make test-mod MOD=nd`, `sh tests/unit/run-test-seven-gl-ffi.sh`, `sh tests/unit/run-test-seven-perf.sh`, and boundary/sync scripts):
+- **Sky-after-terrain Early-Z**: `s_vs_sky` emits `gl_Position = vec4(ndc, 1.0, 1.0)`; `nd_seven_gl_flush_sky()` runs at the end of `seven_dispatch_macro_backdrop()` (with fallback in `nd_seven_gl_end_frame()`) using `GL_DEPTH_TEST` + `GL_LEQUAL` + `glDepthMask(GL_FALSE)`.
+- **Pure-waste fragment ALU**: Pre-linearized all **236** compile-time constant `nd_to_lin(vec3(...))` calls across `nd_seven_gl_shaders.c` (only 16 dynamic runtime calls remain); forwarded single-eval `wind` into `eval_zoom_water_waves_core` and `eval_shore_wave_swell_core` (1× `eval_recursive_wind` per terrain/water FS); guarded ice noise in `s_parts_fs_water` behind `if (freezeFactor > 0.001)`.
+- **Opaque vs. alpha-tested `mesh3d`**: Added `nd_seven_gl_fs_mesh3d_opaque()` (zero `discard` statements, validated by `glslangValidator -l` and `test_seven_render.c`) and `nd_seven_mesh3d_is_opaque()` table; Pass C split into C1 (opaque solids, `GL_BLEND` disabled) and C2 (alpha-tested/fading foliage).
+- **Blit & post-process trimming**: Removed dead `uSceneDepth` from `s_parts_fs_cloud`; deleted dead CSM history texture/FBO/shader/blit (`csm_reproj`); added `res_depth_valid`/`res_color_valid` tracking in `gl_resolve_scene()` (`blits=2.0/f` in stationary, `end_frame` skips redundant depth blit in wide-zoom); gated 3-pass Bloom off on `ND_QUALITY_LOW` (`draws` `186.0 → 183.0`).
+- **Terrain & water texture-fetch tiering**: Added `uTerrFastDist` (Low=750, Med=1500, High=2600 wu) + coarse-chunk (`uChunkSpan.x > 10240.0`) 4-tap quintic-Hermite fast path in `sampleHeightSmooth`; cached `h00/h10/h01/h11` inside the 4×4 bicubic loops in `s_parts_vs_water` & `s_parts_fs_water` (dropping 4 redundant `getH` fetches/pixel).
+- **Per-chunk instanced grass tuft VBO + 3-blade LOD**: Added 32-slot LRU `gl_grass_vbo_slot_t` cache of 40-byte pre-culled `gl_grass_tuft_t` records (`glBufferData` once + `glBufferSubData` on miss, `bufData=0` steady-state) and 3-blade LOD mesh (15 verts / 9 tris / 27 indices, 0 clover) beyond `300 wu` or on `ND_QUALITY_LOW`. High stationary `bindTex` dropped **152.0 → 112.0** (`-26.3%`), `unif` **520.0 → 500.0**, and Low stationary instanced triangles dropped **-60.8%** (`1,443,119 → 565,027`).
+- **13/13 WebGL2 GLSL ES 3.00 programs** pass `glslangValidator -l` compile+link in `make test-graphics` (exit `0`).
 
 ---
 

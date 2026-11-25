@@ -28,6 +28,9 @@ typedef struct {
 	uint64_t bind_buffer;
 	uint64_t draws;
 	uint64_t blits;
+	uint64_t blits_depth;
+	uint64_t blits_color;
+	uint64_t instanced_tris;
 } gl_ffi_counts_t;
 
 static gl_ffi_counts_t g_gl;
@@ -80,7 +83,7 @@ void lam_glVertexAttribPointer(GLuint i, GLint s, GLenum t, GLboolean n, GLsizei
 void lam_glDrawArrays(GLenum m, GLint f, GLsizei c) { (void)m; (void)f; (void)c; g_gl.total_calls++; g_gl.draws++; }
 void lam_glDrawElements(GLenum m, GLsizei c, GLenum t, size_t o) { (void)m; (void)c; (void)t; (void)o; g_gl.total_calls++; g_gl.draws++; }
 void lam_glDrawElementsInstanced(GLenum m, GLsizei c, GLenum t, size_t o, GLsizei ic)
-{ (void)m; (void)c; (void)t; (void)o; (void)ic; g_gl.total_calls++; g_gl.draws++; }
+{ (void)m; (void)t; (void)o; g_gl.total_calls++; g_gl.draws++; g_gl.instanced_tris += (uint64_t)(c / 3) * (uint64_t)ic; }
 void lam_glDrawArraysInstanced(GLenum m, GLint f, GLsizei c, GLsizei ic)
 { (void)m; (void)f; (void)c; (void)ic; g_gl.total_calls++; g_gl.draws++; }
 void lam_glVertexAttribDivisor(GLuint i, GLuint d) { (void)i; (void)d; g_gl.total_calls++; }
@@ -117,7 +120,13 @@ void lam_glStencilOp(GLenum sf, GLenum df, GLenum dp) { (void)sf; (void)df; (voi
 void lam_glStencilMask(GLuint m) { (void)m; g_gl.total_calls++; }
 void lam_glClearStencil(GLint s) { (void)s; g_gl.total_calls++; }
 void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield m, GLenum f)
-{ (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)dx0; (void)dy0; (void)dx1; (void)dy1; (void)m; (void)f; g_gl.total_calls++; g_gl.blits++; }
+{
+	(void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)dx0; (void)dy0; (void)dx1; (void)dy1; (void)f;
+	g_gl.total_calls++;
+	g_gl.blits++;
+	if (m & GL_DEPTH_BUFFER_BIT) g_gl.blits_depth++;
+	if (m & GL_COLOR_BUFFER_BIT) g_gl.blits_color++;
+}
 
 static nd_client_state_t s_st;
 
@@ -151,7 +160,7 @@ int main(void)
 	nd_seven_set_zoom(1.0f);
 	nd_seven_perf_set_enabled(1);
 
-	/* Warm up shaders, FBOs, chunk cache, and Hi-Z cached uniform locations */
+	/* Warm up shaders, FBOs, chunk cache, grass tuft VBOs, and Hi-Z cached uniform locations */
 	for (int i = 0; i < 4; i++)
 		nd_seven_render(1280, 720, &s_st);
 
@@ -162,9 +171,12 @@ int main(void)
 		nd_seven_render(1280, 720, &s_st);
 		chunks_stat += nd_seven_perf_last()->terrain_chunks;
 	}
-	printf("FFI High stationary (10f avg): total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f\n",
+	double high_draws = g_gl.draws / 10.0;
+	printf("FFI High stationary (10f avg): total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) instTris=%.0f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f\n",
 	       g_gl.total_calls / 10.0, g_gl.uniform_calls / 10.0, g_gl.use_program / 10.0,
-	       g_gl.bind_tex / 10.0, g_gl.draws / 10.0,
+	       g_gl.bind_tex / 10.0, high_draws,
+	       g_gl.blits / 10.0, g_gl.blits_depth / 10.0, g_gl.blits_color / 10.0,
+	       g_gl.instanced_tris / 10.0,
 	       (unsigned long long)g_gl.get_uniform_loc,
 	       (unsigned long long)g_gl.get_program_param,
 	       (unsigned long long)g_gl.tex_image_2d,
@@ -173,14 +185,33 @@ int main(void)
 	       g_gl.buffer_sub_data / 10.0,
 	       chunks_stat / 10.0);
 
-	/* Hard P1/P2 Exit Criteria invariants (stationary) */
+	/* Hard P1/P2/P3 Exit Criteria invariants (stationary) */
 	assert(g_gl.get_uniform_loc == 0);   /* 0 Hi-Z / per-frame uniformLocs leak */
 	assert(g_gl.get_program_param == 0); /* Hi-Z link state cached */
 	assert(g_gl.tex_image_2d == 0);      /* steady-state: no full texture reallocations */
-	assert(g_gl.buffer_data == 0);       /* P2: no per-frame dynamic VBO reallocations */
+	assert(g_gl.buffer_data == 0);       /* P2/P3: no per-frame dynamic or grass VBO reallocations */
 	assert(g_gl.buffer_sub_data > 0);    /* P2: dynamic billboard/mesh3d VBOs updated via glBufferSubData */
+	assert(g_gl.blits_depth <= 20);      /* P3: at most 2 MSAA depth resolves/frame (Hi-Z + post/water) */
+
+	/* Steady-state Low stationary (5 frames) — verifies 3-pass Bloom is gated off & LOD grass active */
+	nd_seven_apply_quality_preset(ND_QUALITY_LOW);
+	for (int i = 0; i < 3; i++)
+		nd_seven_render(1280, 720, &s_st);
+	gl_counts_reset();
+	for (int i = 0; i < 5; i++)
+		nd_seven_render(1280, 720, &s_st);
+	double low_draws = g_gl.draws / 5.0;
+	printf("FFI Low stationary  (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) instTris=%.0f bufData=%llu\n",
+	       g_gl.total_calls / 5.0, g_gl.uniform_calls / 5.0, g_gl.use_program / 5.0,
+	       g_gl.bind_tex / 5.0, low_draws,
+	       g_gl.blits / 5.0, g_gl.blits_depth / 5.0, g_gl.blits_color / 5.0,
+	       g_gl.instanced_tris / 5.0,
+	       (unsigned long long)g_gl.buffer_data);
+	assert(g_gl.buffer_data == 0);
+	assert(low_draws < high_draws);      /* P3: Low skips 3-pass Bloom (and/or SSAO/shadow work) */
 
 	/* High wide-zoom steady-state (100+ terrain chunks cached, clouds visible) */
+	nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 	nd_seven_set_zoom(0.10f);
 	for (int i = 0; i < 3; i++)
 		nd_seven_render(1280, 720, &s_st);
@@ -194,9 +225,10 @@ int main(void)
 	double total_wide = g_gl.total_calls / 5.0;
 	double unif_wide = g_gl.uniform_calls / 5.0;
 	double avg_chunks_wide = chunks_wide / 5.0;
-	printf("FFI High wide-zoom (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f clouds=%.1f (calls/chunk=%.1f)\n",
+	printf("FFI High wide-zoom (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f clouds=%.1f (calls/chunk=%.1f)\n",
 	       total_wide, unif_wide, g_gl.use_program / 5.0,
 	       g_gl.bind_tex / 5.0, g_gl.draws / 5.0,
+	       g_gl.blits / 5.0, g_gl.blits_depth / 5.0, g_gl.blits_color / 5.0,
 	       (unsigned long long)g_gl.get_uniform_loc,
 	       (unsigned long long)g_gl.get_program_param,
 	       (unsigned long long)g_gl.tex_image_2d,
@@ -218,6 +250,6 @@ int main(void)
 	assert(avg_chunks_wide >= 50.0);
 	assert(total_wide / avg_chunks_wide < 25.0);
 
-	printf("PASS: Seven P1/P2 WebGL FFI hoisting & 0-leak invariants verified\n");
+	printf("PASS: Seven P1/P2/P3 WebGL FFI hoisting, blits & 0-leak invariants verified\n");
 	return 0;
 }

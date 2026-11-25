@@ -264,6 +264,7 @@ static uint32_t s_norm_scratch[384 * 384];
 static nd_mesh3d_vert_t  s_mesh3d_verts[ND_MESH3D_MAX_VERTS];
 static uint32_t          s_mesh3d_indices[ND_MESH3D_MAX_INDICES];
 static nd_mesh3d_slice_t s_mesh3d_slices[ND_SEVEN_MESH3D_TOTAL];
+static uint8_t s_mesh3d_opaque[ND_SEVEN_MESH3D_TOTAL];
 static uint32_t          s_mesh3d_vert_count = 0;
 static uint32_t          s_mesh3d_idx_count  = 0;
 static uint8_t           s_mesh3d_ready      = 0;
@@ -394,7 +395,38 @@ void nd_seven_mesh3d_init(void)
 
 	s_mesh3d_vert_count = b.vert_count;
 	s_mesh3d_idx_count  = b.idx_count;
+
+	/* Classify meshes with zero alpha-tested/procedural-pore foliage (mat in [0.195, 0.425])
+	 * so Pass C can route them through the hardware Early-Z opaque shader (zero discard). */
+	memset(s_mesh3d_opaque, 0, sizeof(s_mesh3d_opaque));
+	for (unsigned mid = 1u; mid < (unsigned)ND_SEVEN_MESH3D_TOTAL; mid++) {
+		const nd_mesh3d_slice_t *sl = &s_mesh3d_slices[mid];
+		if (sl->vert_count == 0u || sl->idx_count == 0u)
+			continue;
+		uint32_t v0 = sl->first_vert;
+		uint32_t v1 = v0 + sl->vert_count;
+		if (v1 > s_mesh3d_vert_count)
+			v1 = s_mesh3d_vert_count;
+		bool all_opaque = true;
+		for (uint32_t vi = v0; vi < v1; vi++) {
+			float mat = s_mesh3d_verts[vi].col[3];
+			if (mat >= 0.195f && mat <= 0.425f) {
+				all_opaque = false;
+				break;
+			}
+		}
+		s_mesh3d_opaque[mid] = all_opaque ? 1u : 0u;
+	}
 	s_mesh3d_ready      = 1;
+}
+
+bool nd_seven_mesh3d_is_opaque(uint8_t mesh_id)
+{
+	if (!s_mesh3d_ready)
+		nd_seven_mesh3d_init();
+	if (mesh_id == 0u || mesh_id >= ND_SEVEN_MESH3D_TOTAL)
+		return false;
+	return s_mesh3d_opaque[mesh_id] != 0u;
 }
 
 uint8_t nd_seven_geobreak_mesh3d_id(unsigned biome, uint32_t hash)

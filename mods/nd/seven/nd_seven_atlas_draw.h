@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <nd/seven-world.h>
 #include "nd_seven_atlas.h"
 
@@ -56,6 +57,7 @@ void nd_seven_mesh3d_init(void);
 const nd_mesh3d_vert_t *nd_seven_mesh3d_verts(uint32_t *out_count);
 const uint32_t *nd_seven_mesh3d_indices(uint32_t *out_count);
 const nd_mesh3d_slice_t *nd_seven_mesh3d_slice(uint8_t mesh_id);
+bool nd_seven_mesh3d_is_opaque(uint8_t mesh_id);
 uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id);
 uint8_t nd_seven_stone_mesh3d_id(const ndw_obj_t *o);
 uint8_t nd_seven_obj_mesh3d_id(const ndw_obj_t *o);
