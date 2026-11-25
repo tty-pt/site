@@ -411,15 +411,42 @@ view_build_flags(unsigned loc_ref) {
 	return flags;
 }
 
+#define PLANT_SPEC_CACHE_CAP 256u
+typedef struct {
+	unsigned skel_id;
+	int16_t  spec_idx;
+	uint8_t  valid;
+} plant_spec_cache_entry_t;
+
+static plant_spec_cache_entry_t s_plant_spec_cache[PLANT_SPEC_CACHE_CAP];
+
+static inline int
+view_lookup_plant_spec(unsigned skel_id)
+{
+	uint32_t slot = (skel_id * 2654435761u) & (PLANT_SPEC_CACHE_CAP - 1u);
+	plant_spec_cache_entry_t *e = &s_plant_spec_cache[slot];
+	if (e->valid && e->skel_id == skel_id)
+		return e->spec_idx;
+	int spec_idx = -1;
+	SKEL skel;
+	if (nd_get(HD_SKEL, &skel, &skel_id) == 0)
+		spec_idx = nd_plant_find_spec(skel.name);
+	e->skel_id = skel_id;
+	e->spec_idx = (int16_t)spec_idx;
+	e->valid = 1;
+	return spec_idx;
+}
+
 static void
 view_build_tile(struct bio *n, unsigned loc_ref,
                 unsigned e_ref, unsigned n_ref, unsigned w_ref, unsigned s_ref,
-                view_tile_t *t)
+                view_tile_t *t, uint8_t *room_flags_out)
 {
+	uint8_t rflags = 0;
 	t->room = loc_ref;
 	if (loc_ref != NOTHING) {
 		OBJ loc;
-		nd_get(HD_OBJ, &(loc), &loc_ref);
+		int has_loc = (nd_get(HD_OBJ, &(loc), &loc_ref) == 0);
 		ROO *rloc = (ROO *) &loc.data;
 		view_build_exit(t, rloc, E_EAST);
 		view_build_exit(t, rloc, E_NORTH);
@@ -429,6 +456,12 @@ view_build_tile(struct bio *n, unsigned loc_ref,
 		view_build_exit_z(t, rloc, E_DOWN);
 		t->flags = view_build_flags(loc_ref);
 		t->bio_idx = (rloc->floor > BIOME_VOLCANIC) ? BIOME_VOLCANIC : rloc->floor;
+		if (has_loc && loc_ref != 0) {
+			if (!(rloc->flags & RF_TEMP))
+				rflags |= ND_MAP_FLAG_ROOM;
+			if ((rloc->flags & RF_WATER) || !strcmp(loc.name, "water"))
+				rflags |= ND_MAP_FLAG_WATER;
+		}
 	} else {
 		view_build_exit_s_ref(t, e_ref, E_EAST);
 		view_build_exit_s_ref(t, n_ref, E_NORTH);
@@ -436,6 +469,8 @@ view_build_tile(struct bio *n, unsigned loc_ref,
 		view_build_exit_s_ref(t, s_ref, E_SOUTH);
 		t->bio_idx = n->bio_idx;
 	}
+	if (room_flags_out)
+		*room_flags_out = rflags;
 
 	t->elevation = n->elevation;
 	t->water_level = n->water_level;
@@ -458,6 +493,7 @@ eng_view(unsigned player_ref)
 	nd_get(HD_OBJ, &(player), &player_ref);
 	map_where(opos, player.location);
 	view_t view;
+	uint8_t tile_room_flags[VIEW_M];
 	unsigned o_pad[VIEW_PAD_M];
 	uint64_t position = map_mwhere(player.location);
 	biome_map = biome_map_get(position);
@@ -479,11 +515,10 @@ eng_view(unsigned player_ref)
 			unsigned n_ref   = o_pad[(prow - 1) * VIEW_PAD_SIZE + pcol];
 			unsigned w_ref   = o_pad[prow * VIEW_PAD_SIZE + (pcol - 1)];
 			unsigned s_ref   = o_pad[(prow + 1) * VIEW_PAD_SIZE + pcol];
-			view_build_tile(&bd[i], loc_ref, e_ref, n_ref, w_ref, s_ref, &view[i]);
+			view_build_tile(&bd[i], loc_ref, e_ref, n_ref, w_ref, s_ref,
+			                &view[i], &tile_room_flags[i]);
 		}
 	}
-
-	char *view_buf = view_draw(view);
 
 	nd_map_data_t map_data;
 	memset(&map_data, 0, sizeof(map_data));
@@ -509,17 +544,7 @@ eng_view(unsigned player_ref)
 		mt->bg = nd_color_to_ansi(biome_bg_color(vt->bio_idx));
 		mt->wall_fg = wall_paint_ansi(vt->bio_idx);
 
-		uint8_t flags = 0;
-		if (vt->room != NOTHING && vt->room != 0) {
-			OBJ r_obj;
-			if (nd_get(HD_OBJ, &r_obj, (unsigned *)&vt->room) == 0) {
-				ROO *r = (ROO *)&r_obj.data;
-				if (!(r->flags & RF_TEMP))
-					flags |= ND_MAP_FLAG_ROOM;
-				if ((r->flags & RF_WATER) || !strcmp(r_obj.name, "water"))
-					flags |= ND_MAP_FLAG_WATER;
-			}
-		}
+		uint8_t flags = tile_room_flags[i];
 
 		/* Compute 2D projected water coverage: >50% surface area submerged.
 		 * Fast path: when the tile center elevation in vt is clearly above or
@@ -608,10 +633,7 @@ eng_view(unsigned player_ref)
 					continue;
 				if (!ND_PLANT_N(pd.n, side))
 					continue;
-				int spec_idx = -1;
-				SKEL skel;
-				if (nd_get(HD_SKEL, &skel, &pd.id[side]) == 0)
-					spec_idx = nd_plant_find_spec(skel.name);
+				int spec_idx = view_lookup_plant_spec(pd.id[side]);
 				nd_plant_slot_meta(&pd, side, rx, ry, spec_idx,
 				                   &mt->plant_id[side], &mt->col_mask[side]);
 			}
@@ -622,13 +644,24 @@ eng_view(unsigned player_ref)
 	char map_drv[16] = {0};
 	uint8_t layout = 0;
 	uint8_t flags = 0;
-	if (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
-	                                   map_drv, sizeof(map_drv), &layout, &flags) == 0) {
+	int has_pres = (st_player_resolve_presentation(player_ref, stage, sizeof(stage),
+	                                               map_drv, sizeof(map_drv), &layout, &flags) == 0);
+	if (has_pres)
 		fbcp_region(player_ref, stage, map_drv, layout, flags);
-	}
 
 	fbcp_view(player_ref, &map_data);
-	fbcp_view_buf(player_ref, view_buf);
+
+	int graphical_map = has_pres &&
+	                    (strcmp(stage, "lamina-seven") == 0 ||
+	                     layout == ND_LAYOUT_GAME_2D ||
+	                     (map_drv[0] &&
+	                      strcmp(map_drv, "none") != 0 &&
+	                      strcmp(map_drv, "ascii") != 0 &&
+	                      strcmp(map_drv, "ascii-bud") != 0));
+	if (!graphical_map || !nd_player_is_ws(player_ref)) {
+		char *view_buf = view_draw(view);
+		fbcp_view_buf(player_ref, view_buf);
+	}
 }
 
 void

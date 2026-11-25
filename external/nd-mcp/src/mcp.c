@@ -12,7 +12,7 @@
 #include <nd/regions.h>
 #include <ttypt/xy.h>
 
-#define SUPERBIGSIZ 80000 * 8192
+#define ND_MCP_OBS_BUFSIZ 8192
 
 enum bcp_type {
 	BCP_ITEM,
@@ -316,7 +316,7 @@ fbcp_observers(unsigned loc_ref, unsigned thing_ref, unsigned dynflags)
 
 	const void *kp, *vp;
 	while (corm_next(&kp, &vp, c)) {
-		static char bcp_buf[SUPERBIGSIZ];
+		char bcp_buf[ND_MCP_OBS_BUFSIZ];
 		OBJ tmp;
 		size_t len;
 

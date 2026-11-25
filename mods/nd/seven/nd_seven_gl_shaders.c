@@ -60,12 +60,36 @@ static const char s_glsl_cloud_shadow_fn[] =
 	"    return clamp(smoothstep(0.05, 0.66, synCloud.x * sliceFade), 0.0, 0.95);\n"
 	"}\n";
 
+/* Shared WebGL2 std140 Frame-Global Uniform Block (binding 0, exact 272-byte layout matching nd_frame_ubo_t).
+ * Stored once in .rodata and assembled into all 8 scene shader programs. */
+static const char s_glsl_frame_ubo[] =
+	"layout(std140) uniform NdFrameUBO {\n"
+	"    mat4 uMVP;\n"
+	"    mat4 uTreeShadowVP;\n"
+	"    vec4 uRefTrig;\n"
+	"    vec4 uLambLight;\n"
+	"    vec3 uCameraPos;\n"
+	"    float uAnimTime;\n"
+	"    vec3 uSkyColor;\n"
+	"    float uAtmoIntensity;\n"
+	"    vec3 uSunDir;\n"
+	"    float uFogStart;\n"
+	"    vec3 uMoonDir;\n"
+	"    float uFogEnd;\n"
+	"    vec3 uCsm;\n"
+	"    float uBaseSeaLevel;\n"
+	"    vec3 uTreeShadowOrigin;\n"
+	"    float uTreeShadowActive;\n"
+	"    vec2 uWorldDim;\n"
+	"    float uCamDist;\n"
+	"    float uTerrFastDist;\n"
+	"};\n";
+
 /* Cloud-shadow map (R8, one frame-wide evaluation of the synoptic field on the Sun-Pyramid cloud slice zk = 920):
  * Indexed by world/projected slice position, so terrain, water, sprites, and volumetric cloud sun-shadow probes each do ONE texture fetch.
  * uCsm = (window centre x, window centre y, window half-extent); half < 0 means Sun-Pyramid is 100% clear sky; half == 0 means no map bound. */
 static const char s_glsl_csm_lookup_fn[] =
 	"uniform sampler2D uCloudShadowMap;\n"
-	"uniform vec3 uCsm;\n"
 	"float nd_csm_density(vec2 sliceXY) {\n"
 	"    if (uCsm.z <= 0.0) return 0.0;\n"
 	"    vec2 uv = (sliceXY - uCsm.xy) / (2.0 * uCsm.z) + 0.5;\n"
@@ -109,9 +133,6 @@ static const char s_glsl_cloud_shadow_entry_fn[] =
  * never crawl on camera motion and cast true 3D botanical silhouettes onto uneven terrain and lower tree crowns. */
 static const char s_glsl_tree_shadow_fn[] =
 	"uniform sampler2D uTreeShadowTex;\n"
-	"uniform vec3 uTreeShadowOrigin;\n"
-	"uniform mat4 uTreeShadowVP;\n"
-	"uniform float uTreeShadowActive;\n"
 	"float nd_eval_tree_shadow(vec3 worldGridPos, float biasWu) {\n"
 	"    if (uTreeShadowActive <= 0.001) return 1.0;\n"
 	"    vec3 sc = (uTreeShadowVP * vec4(worldGridPos - uTreeShadowOrigin, 1.0)).xyz;\n"
@@ -853,15 +874,11 @@ static const char *const s_parts_fs_sky[] = {
 	"uniform vec3 uEast;\n"
 	"uniform vec3 uSouth;\n"
 	"uniform vec3 uZenith;\n"
-	"uniform vec3 uSunDir;\n"
-	"uniform vec3 uMoonDir;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uCamDist;\n"
-	"uniform float uAnimTime;\n"
 	"uniform vec3 uTorusEye;\n"
 	"uniform vec2 uTorusRadii;\n"
 	"uniform float uAtmoHaloVis;\n"
 	"out vec4 FragColor;\n",
+	s_glsl_frame_ubo,
 	s_glsl_srgb_fn,
 	"float sky_hash21(vec2 p) {\n"
 	"    vec3 p3 = fract(vec3(p.xyx) * 0.1031);\n"
@@ -1023,19 +1040,15 @@ static const char *const s_parts_vs_terrain[] = {
 	"precision highp isampler2D;\n"
 	"precision highp sampler2D;\n"
 	"layout (location = 0) in vec2 a_grid_uv;\n"
-	"uniform mat4 uMVP;\n"
 	"uniform isampler2D uHeightTex;\n"
 	"uniform vec2 uChunkOrigin;\n"
 	"uniform vec2 uChunkRelOrigin;\n"
 	"uniform vec2 uChunkSpan;\n"
-	"uniform vec4 uRefTrig;\n"
 	"uniform float uHeightScale;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform mat4 uBodyRot;\n"
 	"uniform vec2 uTorusRadii;\n"
-	"uniform vec2 uWorldDim;\n"
 	"out vec2 vUV;\n"
 	"out float vZ;\n"
 	"out float vLighting;\n"
@@ -1047,6 +1060,7 @@ static const char *const s_parts_vs_terrain[] = {
 	"out vec3 vTorusNormal;\n"
 	"out vec3 vTangentU;\n"
 	"out vec3 vTangentV;\n",
+	s_glsl_frame_ubo,
 	s_glsl_get_h_fn,
 	s_glsl_catmull_rom_fn,
 	s_glsl_chaff_hash,
@@ -1168,15 +1182,6 @@ static const char *const s_parts_fs_terrain[] = {
 	"uniform vec2 uChunkSpan;\n"
 	"uniform float uHeightScale;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform float uFogStart;\n"
-	"uniform float uFogEnd;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uAtmoIntensity;\n"
-	"uniform vec4 uLambLight;\n"
-	"uniform float uBaseSeaLevel;\n"
-	"uniform vec3 uSunDir;\n"
-	"uniform vec3 uMoonDir;\n"
 	"uniform vec4 uLambWakeHead;\n"
 	"uniform mat4 uLambWakeXYT0;\n"
 	"uniform mat4 uLambWakeXYT1;\n"
@@ -1184,11 +1189,10 @@ static const char *const s_parts_fs_terrain[] = {
 	"uniform mat4 uLambWakeVel1;\n"
 	"uniform int uWorldId;\n"
 	"uniform int uSeaOffsetQ12_4;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform vec2 uTorusRadii;\n"
-	"uniform float uTerrFastDist;\n"
 	"out vec4 FragColor;\n",
+	s_glsl_frame_ubo,
 	s_glsl_get_h_fn,
 	s_glsl_catmull_rom_fn,
 		"/* 4x4 Catmull-Rom bicubic spline: smooth non-stair-stepped C1 height field, exact analytic gradients & Laplacian curvature;\n"
@@ -2274,20 +2278,16 @@ static const char *const s_parts_vs_water[] = {
 	"precision highp isampler2D;\n"
 	"precision highp sampler2D;\n"
 	"layout (location = 0) in vec2 a_grid_uv;\n"
-	"uniform mat4 uMVP;\n"
 	"uniform isampler2D uHeightTex;\n"
 	"uniform sampler2D uSubstrateTex;\n"
 	"uniform vec2 uChunkOrigin;\n"
 	"uniform vec2 uChunkRelOrigin;\n"
 	"uniform vec2 uChunkSpan;\n"
-	"uniform vec4 uRefTrig;\n"
 	"uniform float uHeightScale;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform mat4 uBodyRot;\n"
 	"uniform vec2 uTorusRadii;\n"
-	"uniform vec2 uWorldDim;\n"
 	"out vec2 vUV;\n"
 	"out float vWaterDepth;\n"
 	"out float vDistance;\n"
@@ -2296,6 +2296,7 @@ static const char *const s_parts_vs_water[] = {
 	"out vec3 vTorusNormal;\n"
 	"out vec3 vTangentU;\n"
 	"out vec3 vTangentV;\n",
+	s_glsl_frame_ubo,
 	s_glsl_get_h_fn,
 	s_glsl_catmull_rom_fn,
 	"float sampleHeightSmooth(vec2 uv, out float minNeighborH) {\n"
@@ -2423,15 +2424,6 @@ static const char *const s_parts_fs_water[] = {
 	"uniform vec2 uChunkSpan;\n"
 	"uniform float uHeightScale;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform float uBaseSeaLevel;\n"
-	"uniform float uFogStart;\n"
-	"uniform float uFogEnd;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uAtmoIntensity;\n"
-	"uniform vec4 uLambLight;\n"
-	"uniform vec3 uSunDir;\n"
-	"uniform vec3 uMoonDir;\n"
 	"uniform vec4 uLambWakeHead;\n"
 	"uniform mat4 uLambWakeXYT0;\n"
 	"uniform mat4 uLambWakeXYT1;\n"
@@ -2442,10 +2434,10 @@ static const char *const s_parts_fs_water[] = {
 	"uniform vec2 uViewport;\n"
 	"uniform vec2 uNearFar;\n"
 	"uniform vec2 uProjScale;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform vec2 uTorusRadii;\n"
 	"out vec4 FragColor;\n",
+	s_glsl_frame_ubo,
 	s_glsl_srgb_fn,
 	s_glsl_get_h_fn,
 	s_glsl_catmull_rom_fn,
@@ -2820,7 +2812,7 @@ static const char *const s_parts_fs_water[] = {
 };
 static nd_glsl_prog_src_t s_prog_fs_water = { s_parts_fs_water, NULL };
 
-static const char s_vs_billboard[] =
+static const char *const s_parts_vs_billboard[] = {
 	"#version 300 es\n"
 	"precision highp float;\n"
 	"precision highp sampler2D;\n"
@@ -2831,8 +2823,6 @@ static const char s_vs_billboard[] =
 	"layout (location = 4) in vec4 a_uv;\n"
 	"layout (location = 5) in vec4 a_tint;\n"
 	"layout (location = 6) in vec4 a_param;\n"
-	"uniform mat4 uMVP;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec4 uCamAngles;\n"
 	"uniform sampler2D uHiZTex;\n"
 	"uniform float uHiZActive;\n"
@@ -2841,7 +2831,8 @@ static const char s_vs_billboard[] =
 	"out vec3 vWorldPos;\n"
 	"out vec3 vLocalPos;\n"
 	"out vec4 vQuadUV;\n"
-	"out vec4 vSpriteBounds;\n"
+	"out vec4 vSpriteBounds;\n",
+	s_glsl_frame_ubo,
 	"void main() {\n"
 	"    int vid = gl_VertexID & 3;\n"
 	"    vec4 p = (vid == 0) ? a_pos0 : ((vid == 1) ? a_pos1 : ((vid == 2) ? a_pos2 : a_pos3));\n"
@@ -2905,7 +2896,10 @@ static const char s_vs_billboard[] =
 	"    vec3 dirToCam = (dCam > 0.001) ? (toCam / dCam) : vec3(0.0, 0.0, 1.0);\n"
 	"    float bias = (a_quad_uv.w < -0.5) ? 0.55 : min(24.0, dCam * 0.08);\n"
 	"    gl_Position = uMVP * vec4(p.xyz + dirToCam * bias, 1.0);\n"
-	"}\n";
+	"}\n",
+	NULL
+};
+static nd_glsl_prog_src_t s_prog_vs_billboard = { s_parts_vs_billboard, NULL };
 
 static const char *const s_parts_fs_billboard[] = {
 	"#version 300 es\n"
@@ -2921,17 +2915,10 @@ static const char *const s_parts_fs_billboard[] = {
 	"uniform sampler2D uAtlasTex;\n"
 	"uniform sampler2D uAtlasNormTex;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uCameraPos;\n"
-	"uniform float uFogStart;\n"
-	"uniform float uFogEnd;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uAtmoIntensity;\n"
-	"uniform vec4 uLambLight;\n"
 	"uniform int uPass;\n"
-	"uniform vec3 uSunDir;\n"
 	"uniform vec4 uCamAngles;\n"
 	"out vec4 FragColor;\n",
+	s_glsl_frame_ubo,
 	s_glsl_scene_light,
 	s_glsl_srgb_fn,
 	s_glsl_csm_lookup_fn,
@@ -3421,7 +3408,7 @@ static nd_glsl_prog_src_t s_prog_fs_billboard = { s_parts_fs_billboard, NULL };
 
 
 /* Live 3D Instanced Botanical & Geological Mesh Shaders (nd_seven_mesh3d.h) */
-static const char s_vs_mesh3d[] =
+static const char *const s_parts_vs_mesh3d[] = {
 	"#version 300 es\n"
 	"precision highp float;\n"
 	"precision highp int;\n"
@@ -3437,11 +3424,6 @@ static const char s_vs_mesh3d[] =
 	"layout (location = 7) in vec4 a_itint;  /* rgba: instance tint & distance fade alpha */\n"
 	"layout (location = 8) in vec4 a_iparam; /* xyz: world (wx, wy, ground_wz), w: style + 16.0 if inWaterTile */\n"
 	"layout (location = 9) in vec4 a_iterr;  /* xyz: terrain slope (gx, gy) & curvature, w: signed (shFlags + yaw01) */\n"
-	"uniform mat4 uMVP;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uCameraPos;\n"
-	"uniform vec3 uSunDir;\n"
-	"uniform vec4 uLambLight;\n"
 	"uniform int uShadowPass;\n"
 	"uniform vec3 uTreeShadowWriteOrigin;\n"
 	"uniform mat4 uTreeShadowWriteVP;\n"
@@ -3459,7 +3441,8 @@ static const char s_vs_mesh3d[] =
 	"out vec3 vSunLocal;\n"
 	"out vec3 vViewLocal;\n"
 	"out float vFlip;\n"
-	"out vec2 vTerrGrad;\n"
+	"out vec2 vTerrGrad;\n",
+	s_glsl_frame_ubo,
 	"void main() {\n"
 	"    vViewLocal = vec3(0.0, 0.0, 1.0);\n"
 	"    vTerrGrad = a_iterr.xy;\n"
@@ -3621,7 +3604,10 @@ static const char s_vs_mesh3d[] =
 	"    vAO = a_vnorm.w;\n"
 	"    vHeightAboveGround = lz;\n"
 	"    gl_Position = uMVP * vec4(p, 1.0);\n"
-	"}\n";
+	"}\n",
+	NULL
+};
+static nd_glsl_prog_src_t s_prog_vs_mesh3d = { s_parts_vs_mesh3d, NULL };
 
 static const char s_m3d_fs_head[] =
 	"#version 300 es\n"
@@ -3644,14 +3630,6 @@ static const char s_m3d_fs_head[] =
 	"in float vFlip;\n"
 	"in vec2 vTerrGrad;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uCameraPos;\n"
-	"uniform float uFogStart;\n"
-	"uniform float uFogEnd;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uAtmoIntensity;\n"
-	"uniform vec4 uLambLight;\n"
-	"uniform vec3 uSunDir;\n"
 	"uniform int uShadowPass;\n"
 	"uniform sampler2D uBranchletTex;\n"
 	"uniform sampler2D uBranchletNorm;\n"
@@ -4135,6 +4113,7 @@ static const char s_m3d_fs_tail[] =
 
 static const char *const s_parts_fs_mesh3d[] = {
 	s_m3d_fs_head,
+	s_glsl_frame_ubo,
 	s_glsl_scene_light,
 	s_glsl_srgb_fn,
 	s_glsl_csm_lookup_fn,
@@ -4158,6 +4137,7 @@ static nd_glsl_prog_src_t s_prog_fs_mesh3d = { s_parts_fs_mesh3d, NULL };
  * Used for Pass C opaque solids (stones, geobreaks, trunks/logs) with full opacity. */
 static const char *const s_parts_fs_mesh3d_opaque[] = {
 	s_m3d_fs_head,
+	s_glsl_frame_ubo,
 	s_glsl_scene_light,
 	s_glsl_srgb_fn,
 	s_glsl_csm_lookup_fn,
@@ -4234,19 +4214,12 @@ static const char *const s_parts_vs_grass[] = {
 	"layout (location = 3) in vec4 a_tuft1;\n"
 	"layout (location = 4) in vec4 a_tuft_sub;\n"
 	"layout (location = 5) in vec4 a_tuft_nt;\n"
-	"uniform mat4 uMVP;\n"
 	"uniform vec2 uChunkOrigin;\n"
 	"uniform vec2 uChunkRelOrigin;\n"
 	"uniform vec2 uChunkSpan;\n"
-	"uniform vec4 uRefTrig;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform mat4 uBodyRot;\n"
 	"uniform vec2 uTorusRadii;\n"
-	"uniform vec2 uWorldDim;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec4 uLambLight;\n"
-	"uniform vec3 uSunDir;\n"
 	"out vec3 vLocalNormal;\n"
 	"out vec3 vTerrNormal;\n"
 	"out vec3 vWorldGridPos;\n"
@@ -4255,6 +4228,7 @@ static const char *const s_parts_vs_grass[] = {
 	"out vec3 vTorusN;\n"
 	"out vec3 vSubCol;\n"
 	"out vec4 vBladeParam;\n",
+	s_glsl_frame_ubo,
 	s_glsl_chaff_hash,
 	s_glsl_chaff_grad_noise,
 	s_glsl_chaff_flow,
@@ -4368,14 +4342,8 @@ static const char *const s_parts_fs_grass[] = {
 	"in vec3 vSubCol;\n"
 	"in vec4 vBladeParam;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform float uFogStart;\n"
-	"uniform float uFogEnd;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uAtmoIntensity;\n"
-	"uniform vec4 uLambLight;\n"
-	"uniform vec3 uSunDir;\n"
 	"out vec4 FragColor;\n",
+	s_glsl_frame_ubo,
 	s_glsl_scene_light,
 	s_glsl_srgb_fn,
 	s_glsl_chaff_hash,
@@ -4517,24 +4485,19 @@ static nd_glsl_prog_src_t s_prog_fs_csm = { s_parts_fs_csm, NULL };
 
 
 
-static const char s_vs_cloud[] =
+static const char *const s_parts_vs_cloud[] = {
 	"#version 300 es\n"
 	"precision highp float;\n"
 	"precision highp int;\n"
 	"precision highp sampler2D;\n"
 	"layout (location = 0) in vec2 a_grid_uv;\n"
-	"uniform mat4 uMVP;\n"
 	"uniform sampler2D uSubstrateTex;\n"
 	"uniform vec2 uChunkOrigin;\n"
 	"uniform vec2 uChunkRelOrigin;\n"
 	"uniform vec2 uChunkSpan;\n"
-	"uniform vec4 uRefTrig;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform mat4 uBodyRot;\n"
 	"uniform vec2 uTorusRadii;\n"
-	"uniform vec2 uWorldDim;\n"
-	"uniform float uAnimTime;\n"
 	"uniform vec4 uCloudDeck;\n"
 	"out vec2 vUV;\n"
 	"out vec2 vWorldPos;\n"
@@ -4544,7 +4507,8 @@ static const char s_vs_cloud[] =
 	"out vec3 vViewDir;\n"
 	"out vec3 vTorusNormal;\n"
 	"out vec3 vTangentU;\n"
-	"out vec3 vTangentV;\n"
+	"out vec3 vTangentV;\n",
+	s_glsl_frame_ubo,
 	"void main() {\n"
 	"    vUV = a_grid_uv;\n"
 	"    vec2 worldXY = vec2(uChunkOrigin.x + a_grid_uv.x * uChunkSpan.x, uChunkOrigin.y + a_grid_uv.y * uChunkSpan.y);\n"
@@ -4584,7 +4548,10 @@ static const char s_vs_cloud[] =
 	"    vDistance = length(worldPos - uCameraPos);\n"
 	"    vViewDir = uCameraPos - worldPos;\n"
 	"    gl_Position = uMVP * vec4(worldPos, 1.0);\n"
-	"}\n";
+	"}\n",
+	NULL
+};
+static nd_glsl_prog_src_t s_prog_vs_cloud = { s_parts_vs_cloud, NULL };
 
 static const char *const s_parts_fs_cloud[] = {
 	"#version 300 es\n"
@@ -4607,17 +4574,8 @@ static const char *const s_parts_fs_cloud[] = {
 	"uniform vec2 uChunkSpan;\n"
 	"uniform vec2 uTorusRadii;\n"
 	"uniform float uSeaLevel;\n"
-	"uniform float uFogStart;\n"
-	"uniform float uFogEnd;\n"
-	"uniform float uAnimTime;\n"
-	"uniform vec3 uSkyColor;\n"
-	"uniform float uAtmoIntensity;\n"
-	"uniform float uCamDist;\n"
 	"uniform float uCloudResScale;\n"
 	"uniform vec4 uCloudDeck;\n"
-	"uniform vec3 uSunDir;\n"
-	"uniform vec3 uMoonDir;\n"
-	"uniform vec3 uCameraPos;\n"
 	"uniform vec3 uPlanetCenter;\n"
 	"uniform vec3 uClusterGridDim;\n"
 	"uniform vec4 uClusterDepthParams;\n"
@@ -4625,6 +4583,7 @@ static const char *const s_parts_fs_cloud[] = {
 	"uniform sampler2D uClusterLightData;\n"
 	"uniform sampler2D uClusterLightListsTex;\n"
 	"out vec4 FragColor;\n",
+	s_glsl_frame_ubo,
 	s_glsl_srgb_fn,
 	"/* Clustered Cloud Lighting (16x16x24 Frustum Grid):\n"
 	" * Fetches cluster light list for the fragment's screen tile and logarithmic depth slice,\n"
@@ -5427,9 +5386,9 @@ const char *nd_seven_gl_vs_terrain(void) { return nd_glsl_assemble(&s_prog_vs_te
 const char *nd_seven_gl_fs_terrain(void) { return nd_glsl_assemble(&s_prog_fs_terrain); }
 const char *nd_seven_gl_vs_water(void) { return nd_glsl_assemble(&s_prog_vs_water); }
 const char *nd_seven_gl_fs_water(void) { return nd_glsl_assemble(&s_prog_fs_water); }
-const char *nd_seven_gl_vs_billboard(void) { return s_vs_billboard; }
+const char *nd_seven_gl_vs_billboard(void) { return nd_glsl_assemble(&s_prog_vs_billboard); }
 const char *nd_seven_gl_fs_billboard(void) { return nd_glsl_assemble(&s_prog_fs_billboard); }
-const char *nd_seven_gl_vs_mesh3d(void) { return s_vs_mesh3d; }
+const char *nd_seven_gl_vs_mesh3d(void) { return nd_glsl_assemble(&s_prog_vs_mesh3d); }
 const char *nd_seven_gl_fs_mesh3d(void) { return nd_glsl_assemble(&s_prog_fs_mesh3d); }
 const char *nd_seven_gl_fs_mesh3d_opaque(void) { return nd_glsl_assemble(&s_prog_fs_mesh3d_opaque); }
 const char *nd_seven_gl_vs_terrain_shadow(void) { return s_vs_terrain_shadow; }
@@ -5438,7 +5397,7 @@ const char *nd_seven_gl_vs_grass(void) { return nd_glsl_assemble(&s_prog_vs_gras
 const char *nd_seven_gl_fs_grass(void) { return nd_glsl_assemble(&s_prog_fs_grass); }
 const char *nd_seven_gl_vs_csm(void) { return s_vs_csm; }
 const char *nd_seven_gl_fs_csm(void) { return nd_glsl_assemble(&s_prog_fs_csm); }
-const char *nd_seven_gl_vs_cloud(void) { return s_vs_cloud; }
+const char *nd_seven_gl_vs_cloud(void) { return nd_glsl_assemble(&s_prog_vs_cloud); }
 const char *nd_seven_gl_fs_cloud(void) { return nd_glsl_assemble(&s_prog_fs_cloud); }
 const char *nd_seven_gl_fs_cloud_comp(void) { return s_fs_cloud_comp; }
 const char *nd_seven_gl_fs_hiz_downsample(void) { return s_fs_hiz_downsample; }

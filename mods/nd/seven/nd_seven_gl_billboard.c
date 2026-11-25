@@ -1181,8 +1181,9 @@ static void gl_bind_mesh3d_pipe_uniforms(const gl_mesh3d_pipe_t *pipe,
                                          float bb_sea_level, float space_t,
                                          bool bind_textures)
 {
+	(void)space_t;
 	glUseProgram(pipe->prog);
-	gl_bind_csm(pipe->uCloudShadowMap, pipe->uCsm);
+	gl_bind_csm(pipe->uCloudShadowMap);
 	if (s_gl.fol_atlas_tex && pipe->uBranchletTex >= 0) {
 		if (bind_textures) {
 			glActiveTexture(GL_TEXTURE0 + 3);
@@ -1227,21 +1228,7 @@ static void gl_bind_mesh3d_pipe_uniforms(const gl_mesh3d_pipe_t *pipe,
 	}
 	if (bind_textures)
 		glActiveTexture(GL_TEXTURE0);
-	glUniformMatrix4fv(pipe->uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	glUniform1f(pipe->uSeaLevel, bb_sea_level);
-	glUniform1f(pipe->uAnimTime, s_gl.cur_anim_time);
-	glUniform3fv(pipe->uCameraPos, 1, s_gl.cur_eye);
-	glUniform1f(pipe->uFogStart, s_gl.cur_dist * 1.5f);
-	glUniform1f(pipe->uFogEnd, s_gl.cur_dist * 4.0f);
-	glUniform3f(pipe->uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.002f * space_t,
-	            0.70f * (1.0f - space_t) + 0.003f * space_t,
-	            0.85f * (1.0f - space_t) + 0.006f * space_t);
-	glUniform1f(pipe->uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
-	glUniform4f(pipe->uLambLight,
-	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
-	glUniform3fv(pipe->uSunDir, 1, s_gl.cur_sun_dir);
 }
 
 static void gl_draw_mesh3d_bucket(uint32_t m)
@@ -1253,12 +1240,12 @@ static void gl_draw_mesh3d_bucket(uint32_t m)
 
 	size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
 	for (GLuint a = 0; a < 7; a++) {
-		glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
-		                      sizeof(nd_seven_gl_mesh3d_inst_t),
-		                      inst_base_bytes + (size_t)(a * 16));
+		lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
+		                             sizeof(nd_seven_gl_mesh3d_inst_t),
+		                             inst_base_bytes + (size_t)(a * 16));
 	}
-	glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
-	                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
+	lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+	                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
 	if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
 		nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
 		cmd->count = sl->idx_count;
@@ -1308,7 +1295,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			s_mesh3d_sorted[s_mesh3d_cursors[mid]++] = s_mesh3d_staging[i];
 	}
 
-	s_gl.terrain_pass_active = false;
+	gl_end_terrain_pass();
 	gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_pipe, bb_sea_level, space_t, true);
 
 	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO */
@@ -1362,8 +1349,6 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
 		}
-		if (s_gl.mesh3d_pipe.uTreeShadowActive >= 0)
-			glUniform1f(s_gl.mesh3d_pipe.uTreeShadowActive, 0.0f);
 		if (s_gl.mesh3d_pipe.uTreeShadowWriteOrigin >= 0)
 			glUniform3fv(s_gl.mesh3d_pipe.uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
 		if (s_gl.mesh3d_pipe.uTreeShadowWriteVP >= 0)
@@ -1379,22 +1364,20 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 			size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
 			for (GLuint a = 0; a < 7; a++) {
-				glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
-				                      sizeof(nd_seven_gl_mesh3d_inst_t),
-				                      inst_base_bytes + (size_t)(a * 16));
+				lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
+				                             sizeof(nd_seven_gl_mesh3d_inst_t),
+				                             inst_base_bytes + (size_t)(a * 16));
 			}
-			glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
-			                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
+			lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+			                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
 		}
+		gl_flush_cmd_ring();
 		s_gl.tree_shadow_write_draws = true;
 		gl_bind_scene_target();
 	}
 
 	/* Bind read-side 3D directional shadow map for main 3D tree self-shadowing */
-	gl_bind_tree_shadow_read(s_gl.mesh3d_pipe.uTreeShadowTex,
-	                         s_gl.mesh3d_pipe.uTreeShadowOrigin,
-	                         s_gl.mesh3d_pipe.uTreeShadowVP,
-	                         s_gl.mesh3d_pipe.uTreeShadowActive);
+	gl_bind_tree_shadow_read(s_gl.mesh3d_pipe.uTreeShadowTex);
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glEnable(GL_BLEND);
@@ -1422,13 +1405,14 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
 				for (GLuint a = 0; a < 7; a++) {
-					glVertexAttribPointer(3 + a, 4, GL_FLOAT, GL_FALSE,
-					                      sizeof(nd_seven_gl_mesh3d_inst_t),
-					                      inst_base_bytes + (size_t)(a * 16));
+					lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
+					                             sizeof(nd_seven_gl_mesh3d_inst_t),
+					                             inst_base_bytes + (size_t)(a * 16));
 				}
-				glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
-				                        (int)(sl->first_idx * sizeof(uint32_t)), (GLsizei)icnt);
+				lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+				                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
 			}
+			gl_flush_cmd_ring();
 		}
 	}
 
@@ -1442,10 +1426,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	if (any_opaque_c1) {
 		glDisable(GL_BLEND);
 		gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_opaque_pipe, bb_sea_level, space_t, false);
-		gl_bind_tree_shadow_read(s_gl.mesh3d_opaque_pipe.uTreeShadowTex,
-		                         s_gl.mesh3d_opaque_pipe.uTreeShadowOrigin,
-		                         s_gl.mesh3d_opaque_pipe.uTreeShadowVP,
-		                         s_gl.mesh3d_opaque_pipe.uTreeShadowActive);
+		gl_bind_tree_shadow_read(s_gl.mesh3d_opaque_pipe.uTreeShadowTex);
 		if (s_gl.mesh3d_opaque_pipe.uShadowPass >= 0)
 			glUniform1i(s_gl.mesh3d_opaque_pipe.uShadowPass, 0);
 		for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
@@ -1453,6 +1434,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			if (nd_seven_mesh3d_is_opaque((uint8_t)m) && !s_mesh3d_has_fade[m])
 				gl_draw_mesh3d_bucket(m);
 		}
+		gl_flush_cmd_ring();
 	}
 
 	if (any_alpha_c2) {
@@ -1466,6 +1448,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			if (!has_opaque_prog || !nd_seven_mesh3d_is_opaque((uint8_t)m) || s_mesh3d_has_fade[m])
 				gl_draw_mesh3d_bucket(m);
 		}
+		gl_flush_cmd_ring();
 	}
 
 	s_gl.res_depth_valid = false;
@@ -1571,7 +1554,7 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		sin_p = sinf(pitch_rad);
 	}
 
-	s_gl.terrain_pass_active = false;
+	gl_end_terrain_pass();
 	glUseProgram(s_gl.bb_pipe.prog);
 	glUniform4f(s_gl.bb_pipe.uCamAngles, cos_y, sin_y, cos_p, sin_p);
 	glEnable(GL_DEPTH_TEST);
@@ -1593,30 +1576,12 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		glUniform1f(s_gl.bb_pipe.uHiZActive, (s_gl.gpu_hiz_built && hiz_tex != 0) ? 1.0f : 0.0f);
 		glActiveTexture(GL_TEXTURE0);
 	}
-	gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap, s_gl.bb_pipe.uCsm);
-	gl_bind_tree_shadow_read(s_gl.bb_pipe.uTreeShadowTex,
-	                         s_gl.bb_pipe.uTreeShadowOrigin,
-	                         s_gl.bb_pipe.uTreeShadowVP,
-	                         s_gl.bb_pipe.uTreeShadowActive);
+	gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap);
+	gl_bind_tree_shadow_read(s_gl.bb_pipe.uTreeShadowTex);
 
-	glUniformMatrix4fv(s_gl.bb_pipe.uMVP, 1, GL_FALSE, s_gl.cur_mvp);
 	float bb_sea_level = (s_gl.focal_sea_level > -900.0f) ? s_gl.focal_sea_level : s_gl.cur_sea_level;
 	glUniform1f(s_gl.bb_pipe.uSeaLevel, bb_sea_level);
-	glUniform1f(s_gl.bb_pipe.uAnimTime, s_gl.cur_anim_time);
-	glUniform3fv(s_gl.bb_pipe.uCameraPos, 1, s_gl.cur_eye);
-	glUniform1f(s_gl.bb_pipe.uFogStart, s_gl.cur_dist * 1.5f);
-	glUniform1f(s_gl.bb_pipe.uFogEnd, s_gl.cur_dist * 4.0f);
-
 	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
-	glUniform3f(s_gl.bb_pipe.uSkyColor,
-	            0.55f * (1.0f - space_t) + 0.002f * space_t,
-	            0.70f * (1.0f - space_t) + 0.003f * space_t,
-	            0.85f * (1.0f - space_t) + 0.006f * space_t);
-	glUniform1f(s_gl.bb_pipe.uAtmoIntensity, fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f)));
-	glUniform4f(s_gl.bb_pipe.uLambLight,
-	            s_gl.cur_lamb_light[0], s_gl.cur_lamb_light[1],
-	            s_gl.cur_lamb_light[2], s_gl.cur_lamb_light[3]);
-	glUniform3fv(s_gl.bb_pipe.uSunDir, 1, s_gl.cur_sun_dir);
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
 

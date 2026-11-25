@@ -35,13 +35,29 @@ function makeGl(log) {
 		},
 		getUniformLocation: (p, name) => linked.has(p) ? { prog: p.n, name } : null,
 		uniform1i: (loc, v) => log.push(['uniform1i', loc ? loc.prog : 0, loc ? loc.name : '', v]),
+		uniform1f: (loc, v) => log.push(['uniform1f', loc ? loc.name : '', v]),
+		uniform2f: (loc, x, y) => log.push(['uniform2f', loc ? loc.name : '', x, y]),
+		uniform3f: (loc, x, y, z) => log.push(['uniform3f', loc ? loc.name : '', x, y, z]),
+		uniform4f: (loc, x, y, z, w) => log.push(['uniform4f', loc ? loc.name : '', x, y, z, w]),
 		uniform2fv: (loc, arr) => log.push(['uniform2fv', loc ? loc.name : '', arr.length]),
 		uniform3fv: (loc, arr) => log.push(['uniform3fv', loc ? loc.name : '', arr.length]),
-		uniformMatrix4fv: (loc, trans, arr) => log.push(['uniformMatrix4fv', loc ? loc.name : '', !!trans, arr.length]),
+		uniformMatrix4fv: (loc, trans, arr) => log.push(['uniformMatrix4fv', loc ? loc.name : '', !!trans, arr.length, arr[0]]),
+		getUniformBlockIndex: (p, name) => linked.has(p) && name === 'NdFrameUBO' ? 0 : 0xFFFFFFFF,
+		uniformBlockBinding: (p, bidx, bind) => log.push(['uniformBlockBinding', p ? p.n : 0, bidx, bind]),
+		bindBufferBase: (t, idx, b) => log.push(['bindBufferBase', t, idx, b ? b.n : null]),
+		drawArrays: (m, f, c) => log.push(['drawArrays', m, f, c]),
+		drawElements: (m, c, t, o) => log.push(['drawElements', m, c, t, o]),
+		drawElementsInstanced: (m, c, t, o, ic) => log.push(['drawElementsInstanced', m, c, t, o, ic]),
 		drawArraysInstanced: (m, f, c, ic) => {
 			if (!activeProgram || !linked.has(activeProgram)) throw new Error('drawArraysInstanced: current program is not linked');
 			log.push(['drawArraysInstanced', activeProgram.n, ic]);
 		},
+		enableVertexAttribArray: (i) => log.push(['enableVAA', i]),
+		disableVertexAttribArray: (i) => log.push(['disableVAA', i]),
+		vertexAttribPointer: (i, s, t, n, st, o) => log.push(['vap', i, s, t, !!n, st, o]),
+		vertexAttribDivisor: (i, d) => log.push(['vad', i, d]),
+		enable: (cap) => log.push(['enable', cap]),
+		blendFunc: (sf, df) => log.push(['blendFunc', sf, df]),
 		bindBuffer: (t, b) => log.push(['bindBuffer', t, b ? b.n : null]),
 		bufferData: (t, d, u) => log.push(['bufferData', t, typeof d === 'number' ? d : d.byteLength, u]),
 		bufferSubData: (t, off, view, srcOff, len) => {
@@ -78,7 +94,7 @@ function makeGl(log) {
 		stencilFunc: (...a) => log.push(['stencilFunc', ...a]), stencilOp: (...a) => log.push(['stencilOp', ...a]),
 		stencilMask: (...a) => log.push(['stencilMask', ...a]), clearStencil: (...a) => log.push(['clearStencil', ...a]),
 		viewport: (...a) => log.push(['viewport', ...a]),
-		disable: () => {}, colorMask: () => {}, depthMask: () => {},
+		disable: (cap) => log.push(['disable', cap]), colorMask: () => {}, depthMask: (f) => log.push(['depthMask', !!f]),
 		clearColor: () => {}, clearDepth: () => {},
 		clear: (mask) => log.push(['clear', mask]),
 		getExtension: () => null,
@@ -317,3 +333,59 @@ bridge.mount();
 assert.equal(bridge.perf.snapshot().domQueries, 1, 'mount() triggers exactly 1 DOM query to detect canvas replacement');
 bridge.perf.enable(false);
 console.log('PASS: WebGL bridge fast-path getGl() (0 DOM queries steady-state) & profiler counters verified');
+
+// Phase 4C.1: WebGL2 UBO binding (glBindBufferBase / glGetUniformBlockIndex / glUniformBlockBinding) + context-swap restore.
+const GL_UNIFORM_BUFFER = 0x8A11;
+const uboBuf = imp.glCreateBuffer();
+assert.ok(uboBuf > 0);
+imp.glBindBuffer(GL_UNIFORM_BUFFER, uboBuf);
+imp.glBufferData(GL_UNIFORM_BUFFER, 0, 256, 0x88E8);
+imp.glBindBufferBase(GL_UNIFORM_BUFFER, 0, uboBuf);
+imp.glBufferSubData(GL_UNIFORM_BUFFER, 0, 64, 128);
+const uboNameBytes = new TextEncoder().encode('NdFrameUBO');
+new Uint8Array(memory.buffer, 512, uboNameBytes.length).set(uboNameBytes);
+const bidx = imp.glGetUniformBlockIndex(prog, 512, uboNameBytes.length);
+assert.equal(bidx, 0, 'glGetUniformBlockIndex resolves NdFrameUBO to index 0');
+imp.glUniformBlockBinding(prog, bidx, 0);
+assert.ok(log.some((e) => e[0] === 'bindBufferBase' && e[1] === GL_UNIFORM_BUFFER && e[2] === 0 && e[3] !== null), 'glBindBufferBase forwarded');
+assert.ok(log.some((e) => e[0] === 'uniformBlockBinding' && e[2] === 0 && e[3] === 0), 'glUniformBlockBinding forwarded');
+assert.ok(log.some((e) => e[0] === 'bufferSubData' && e[1] === GL_UNIFORM_BUFFER && e[2] === 0 && e[3] === 64), 'glBufferSubData on GL_UNIFORM_BUFFER forwarded');
+// Context swap must restore UBO buffer base and program block binding.
+log.length = 0;
+swapCanvas(canvasB);
+imp.glActiveTexture(0x84C0);
+assert.ok(log.some((e) => e[0] === 'bindBufferBase' && e[1] === GL_UNIFORM_BUFFER && e[2] === 0 && e[3] !== null), 'UBO base binding restored across context swap');
+assert.ok(log.some((e) => e[0] === 'uniformBlockBinding' && e[2] === 0 && e[3] === 0), 'UBO program block binding restored across context swap');
+console.log('PASS: WebGL2 UBO binding and context-swap restoration verified');
+
+// Phase 4C.2: Flat uint32 command ring buffer (glCmdFlush) decoding, float/mat4 bit accuracy, and perf counters.
+bridge.perf.enable(true);
+bridge.perf.reset();
+log.length = 0;
+const cmdBase = 2048;
+const u32 = new Uint32Array(memory.buffer, cmdBase, 128);
+const f32 = new Float32Array(memory.buffer, cmdBase, 128);
+let w = 0;
+u32[w++] = 1; u32[w++] = prog;                         // USE_PROGRAM
+u32[w++] = 2; u32[w++] = 0x84C0;                       // ACTIVE_TEXTURE TEXTURE0
+u32[w++] = 3; u32[w++] = 0x0DE1; u32[w++] = tex;       // BIND_TEXTURE
+u32[w++] = 10; u32[w++] = uLoc; f32[w++] = 3.25;       // UNIFORM1F
+u32[w++] = 13; u32[w++] = uLoc; f32[w++] = 1.0; f32[w++] = 2.0; f32[w++] = 3.0; f32[w++] = 4.0; // UNIFORM4F
+u32[w++] = 14; u32[w++] = uLoc; u32[w++] = 0;          // UNIFORM_MAT4
+for (let k = 0; k < 16; k++) f32[w++] = (k === 0) ? 7.5 : 0.0;
+u32[w++] = 16; u32[w++] = 0x0004; u32[w++] = 600; u32[w++] = 0x1403; u32[w++] = 0; // DRAW_ELEMENTS
+u32[w++] = 17; u32[w++] = 0x0004; u32[w++] = 36; u32[w++] = 0x1403; u32[w++] = 0; u32[w++] = 128; // DRAW_ELEMENTS_INSTANCED
+imp.glCmdFlush(cmdBase, w);
+const csnap = bridge.perf.snapshot();
+assert.equal(csnap.cmdFlushes, 1, 'exactly 1 FFI flush recorded');
+assert.equal(csnap.cmdOps, 8, '8 batched ops decoded in a single flush');
+assert.equal(csnap.getGlCalls, 1, 'single getGl() per command flush');
+assert.equal(csnap.uniformUploads, 3, '3 uniform ops decoded');
+assert.equal(csnap.draws, 2, '2 draw calls decoded');
+assert.ok(log.some((e) => e[0] === 'uniform1f' && e[2] === 3.25), 'float bit-packing preserved');
+assert.ok(log.some((e) => e[0] === 'uniform4f' && e[2] === 1 && e[5] === 4), 'vec4 bit-packing preserved');
+assert.ok(log.some((e) => e[0] === 'uniformMatrix4fv' && e[3] === 16 && e[4] === 7.5), 'mat4 bit-packing preserved');
+assert.ok(log.some((e) => e[0] === 'drawElements' && e[2] === 600), 'drawElements decoded');
+assert.ok(log.some((e) => e[0] === 'drawElementsInstanced' && e[5] === 128), 'drawElementsInstanced decoded');
+bridge.perf.enable(false);
+console.log('PASS: flat uint32 glCmdFlush command ring decoding & single-FFI batching verified');

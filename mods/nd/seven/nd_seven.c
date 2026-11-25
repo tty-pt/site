@@ -222,6 +222,8 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.period_y = (int32_t)ND_SEVEN_WORLD_DIM_H;
 		cfg.max_populates_per_frame = 0;
 		cfg.wq = NULL;
+		cfg.samples_pool_capacity = 64;
+		cfg.samples_max_level = 2;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 	}
 	return s_seven_chunk_sys;

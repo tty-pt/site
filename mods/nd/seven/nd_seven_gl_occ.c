@@ -374,7 +374,7 @@ bool gl_build_hiz_pyramid(void)
 	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
 	gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
 
-	s_gl.terrain_pass_active = false;
+	gl_end_terrain_pass();
 	glUseProgram(prog);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
@@ -500,6 +500,7 @@ int nd_seven_occ2d_test_water_chunk(int32_t ox, int32_t oy, int32_t span_w, int3
 /* Bind the frame's render target (scene FBO, or the canvas if offscreen targets are unavailable) and active sub-rect viewport. */
 void gl_bind_scene_target(void)
 {
+	gl_flush_cmd_ring();
 	if (s_gl.scene_ok) {
 		uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
 		uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
@@ -659,20 +660,13 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	gl_bind_scene_target();
 }
 
-void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActive)
+void gl_bind_tree_shadow_read(GLint uTex)
 {
 	GLuint dummy = gl_ensure_tree_shadow_dummy();
 	bool active = (s_gl.tree_shadow_ready && s_gl.tree_shadow_read_valid && s_gl.tree_shadow_active > 0.001f);
 	glActiveTexture(GL_TEXTURE0 + 12);
 	glBindTexture(GL_TEXTURE_2D, active ? s_gl.tree_shadow_tex[s_gl.tree_shadow_read_idx] : dummy);
 	if (uTex >= 0) glUniform1i(uTex, 12);
-	if (active) {
-		if (uOrigin >= 0) glUniform3fv(uOrigin, 1, s_gl.tree_shadow_read_origin);
-		if (uVP >= 0) glUniformMatrix4fv(uVP, 1, GL_FALSE, s_gl.tree_shadow_read_vp);
-		if (uActive >= 0) glUniform1f(uActive, s_gl.tree_shadow_active);
-	} else {
-		if (uActive >= 0) glUniform1f(uActive, 0.0f);
-	}
 	glActiveTexture(GL_TEXTURE0);
 }
 
@@ -680,6 +674,7 @@ void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActiv
  * skipping any attachment whose resolved copy is still valid since the last write. */
 void gl_resolve_scene(GLbitfield mask)
 {
+	gl_flush_cmd_ring();
 	if (!s_gl.scene_ok) return;
 	GLbitfield eff = mask;
 	if (s_gl.res_depth_valid) eff &= ~(GLbitfield)GL_DEPTH_BUFFER_BIT;
@@ -699,6 +694,7 @@ void gl_resolve_scene(GLbitfield mask)
 void nd_seven_gl_end_frame(void)
 {
 	if (!s_gl.frame_open) return;
+	gl_flush_cmd_ring();
 	/* Standalone test / non-macro fallback: ensure sky renders before final resolve if not yet flushed */
 	if (!s_gl.sky_rendered && s_gl.pipelines_ready)
 		nd_seven_gl_flush_sky();
@@ -730,7 +726,7 @@ void nd_seven_gl_end_frame(void)
 	GLbitfield end_resolve_mask = GL_COLOR_BUFFER_BIT | ((ssao_fade > 0.001f) ? (GLbitfield)GL_DEPTH_BUFFER_BIT : 0u);
 	gl_resolve_scene(end_resolve_mask);
 	if (run_post) {
-		s_gl.terrain_pass_active = false;
+		gl_end_terrain_pass();
 		glDisableVertexAttribArray(0);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -1115,7 +1111,7 @@ void gl_render_cloud_shadow_map(void)
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	s_gl.terrain_pass_active = false;
+	gl_end_terrain_pass();
 	glUseProgram(s_gl.csm_pipe.prog);
 	glUniform3f(s_gl.csm_pipe.uCsm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
 	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);
@@ -1131,20 +1127,12 @@ void gl_render_cloud_shadow_map(void)
 	s_gl.csm_valid = true;
 }
 
-/* Bind the cloud-shadow map (texture unit 7) and window to a program; half < 0 means Sun-Pyramid is clear sky; half = 0 means no map is available. */
-void gl_bind_csm(GLint loc_tex, GLint loc_csm)
+/* Bind the cloud-shadow map (texture unit 7); uCsm window/clear-sky flag lives in NdFrameUBO. */
+void gl_bind_csm(GLint loc_tex)
 {
 	glActiveTexture(GL_TEXTURE0 + 7);
 	glBindTexture(GL_TEXTURE_2D, s_gl.csm_valid ? s_gl.csm_tex : 0);
 	glUniform1i(loc_tex, 7);
-	if (s_gl.csm_valid)
-		glUniform3f(loc_csm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
-	else if (nd_seven_get_cloud_quality() <= ND_CLOUD_QUALITY_LOW)
-		glUniform3f(loc_csm, 0.0f, 0.0f, -2.0f);
-	else if (s_gl.csm_clear_sky)
-		glUniform3f(loc_csm, 0.0f, 0.0f, -1.0f);
-	else
-		glUniform3f(loc_csm, 0.0f, 0.0f, 0.0f);
 	glActiveTexture(GL_TEXTURE0);
 }
 

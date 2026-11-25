@@ -311,20 +311,25 @@ st_update(double dt)
 	} else
 		return;
 
-	unsigned c = corm_iter(obj_hd, NULL, 0);
-	OBJ iobj;
-	unsigned iobj_ref;
+	unsigned fds_hd = nd_table_handle(HD_FD);
+	if (!fds_hd)
+		return;
+
+	unsigned refs[1024];
+	size_t nrefs = 0;
+	unsigned c = corm_iter(fds_hd, NULL, 0);
 	const void *kp, *vp;
 
 	while (corm_next(&kp, &vp, c)) {
-		iobj_ref = *(const unsigned *)kp;
-		iobj = *(const OBJ *)vp;
+		if (nrefs < sizeof(refs) / sizeof(refs[0]))
+			refs[nrefs++] = *(const unsigned *)kp;
+	}
 
-		if (iobj.type == TYPE_ENTITY) {
-			view(iobj_ref);
-			mcp_tod(iobj_ref, day_n);
-			nd_writef(iobj_ref, msg);
-		}
+	for (size_t i = 0; i < nrefs; i++) {
+		unsigned iobj_ref = refs[i];
+		view(iobj_ref);
+		mcp_tod(iobj_ref, day_n);
+		nd_writef(iobj_ref, msg);
 	}
 }
 

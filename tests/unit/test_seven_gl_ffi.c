@@ -31,6 +31,8 @@ typedef struct {
 	uint64_t blits_depth;
 	uint64_t blits_color;
 	uint64_t instanced_tris;
+	uint64_t cmd_flushes;
+	uint64_t cmd_ops;
 } gl_ffi_counts_t;
 
 static gl_ffi_counts_t g_gl;
@@ -127,6 +129,52 @@ void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0
 	if (m & GL_DEPTH_BUFFER_BIT) g_gl.blits_depth++;
 	if (m & GL_COLOR_BUFFER_BIT) g_gl.blits_color++;
 }
+void lam_glBindBufferBase(GLenum t, GLuint idx, GLuint b) { (void)t; (void)idx; (void)b; g_gl.total_calls++; g_gl.bind_buffer++; }
+GLuint lam_glGetUniformBlockIndex(GLuint p, const char *n, size_t l) { (void)p; (void)n; (void)l; g_gl.total_calls++; return 0u; }
+void lam_glUniformBlockBinding(GLuint p, GLuint bi, GLuint bb) { (void)p; (void)bi; (void)bb; g_gl.total_calls++; }
+void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count)
+{
+	g_gl.total_calls++;
+	g_gl.cmd_flushes++;
+	uint32_t i = 0u;
+	while (i < word_count) {
+		uint32_t op = buf[i++];
+		g_gl.cmd_ops++;
+		switch (op) {
+		case LAM_GL_CMD_NOP: break;
+		case LAM_GL_CMD_USE_PROGRAM: g_gl.use_program++; i += 1u; break;
+		case LAM_GL_CMD_ACTIVE_TEXTURE: g_gl.active_tex++; i += 1u; break;
+		case LAM_GL_CMD_BIND_TEXTURE: g_gl.bind_tex++; i += 2u; break;
+		case LAM_GL_CMD_BIND_BUFFER: g_gl.bind_buffer++; i += 2u; break;
+		case LAM_GL_CMD_ENABLE: i += 1u; break;
+		case LAM_GL_CMD_DISABLE: i += 1u; break;
+		case LAM_GL_CMD_DEPTH_MASK: i += 1u; break;
+		case LAM_GL_CMD_BLEND_FUNC: i += 2u; break;
+		case LAM_GL_CMD_UNIFORM1I: g_gl.uniform_calls++; i += 2u; break;
+		case LAM_GL_CMD_UNIFORM1F: g_gl.uniform_calls++; i += 2u; break;
+		case LAM_GL_CMD_UNIFORM2F: g_gl.uniform_calls++; i += 3u; break;
+		case LAM_GL_CMD_UNIFORM3F: g_gl.uniform_calls++; i += 4u; break;
+		case LAM_GL_CMD_UNIFORM4F: g_gl.uniform_calls++; i += 5u; break;
+		case LAM_GL_CMD_UNIFORM_MAT4: g_gl.uniform_calls++; i += 18u; break;
+		case LAM_GL_CMD_VERTEX_ATTRIB_PTR: i += 6u; break;
+		case LAM_GL_CMD_DRAW_ELEMENTS: g_gl.draws++; i += 4u; break;
+		case LAM_GL_CMD_DRAW_ELEMENTS_INSTANCED: {
+			uint32_t c = buf[i + 1u];
+			uint32_t ic = buf[i + 4u];
+			g_gl.draws++;
+			g_gl.instanced_tris += (uint64_t)(c / 3u) * (uint64_t)ic;
+			i += 5u;
+			break;
+		}
+		case LAM_GL_CMD_DRAW_ARRAYS: g_gl.draws++; i += 3u; break;
+		case LAM_GL_CMD_ENABLE_VAA: i += 1u; break;
+		case LAM_GL_CMD_DISABLE_VAA: i += 1u; break;
+		case LAM_GL_CMD_VERTEX_ATTRIB_DIVISOR: i += 2u; break;
+		default: assert(0 && "unknown lam_gl_cmd_op"); return;
+		}
+	}
+	assert(i == word_count);
+}
 
 static nd_client_state_t s_st;
 
@@ -172,11 +220,12 @@ int main(void)
 		chunks_stat += nd_seven_perf_last()->terrain_chunks;
 	}
 	double high_draws = g_gl.draws / 10.0;
-	printf("FFI High stationary (10f avg): total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) instTris=%.0f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f\n",
+	printf("FFI High stationary (10f avg): total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) instTris=%.0f cmdFlushes=%.1f cmdOps=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f\n",
 	       g_gl.total_calls / 10.0, g_gl.uniform_calls / 10.0, g_gl.use_program / 10.0,
 	       g_gl.bind_tex / 10.0, high_draws,
 	       g_gl.blits / 10.0, g_gl.blits_depth / 10.0, g_gl.blits_color / 10.0,
 	       g_gl.instanced_tris / 10.0,
+	       g_gl.cmd_flushes / 10.0, g_gl.cmd_ops / 10.0,
 	       (unsigned long long)g_gl.get_uniform_loc,
 	       (unsigned long long)g_gl.get_program_param,
 	       (unsigned long long)g_gl.tex_image_2d,
@@ -201,11 +250,12 @@ int main(void)
 	for (int i = 0; i < 5; i++)
 		nd_seven_render(1280, 720, &s_st);
 	double low_draws = g_gl.draws / 5.0;
-	printf("FFI Low stationary  (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) instTris=%.0f bufData=%llu\n",
+	printf("FFI Low stationary  (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) instTris=%.0f cmdFlushes=%.1f cmdOps=%.1f bufData=%llu\n",
 	       g_gl.total_calls / 5.0, g_gl.uniform_calls / 5.0, g_gl.use_program / 5.0,
 	       g_gl.bind_tex / 5.0, low_draws,
 	       g_gl.blits / 5.0, g_gl.blits_depth / 5.0, g_gl.blits_color / 5.0,
 	       g_gl.instanced_tris / 5.0,
+	       g_gl.cmd_flushes / 5.0, g_gl.cmd_ops / 5.0,
 	       (unsigned long long)g_gl.buffer_data);
 	assert(g_gl.buffer_data == 0);
 	assert(low_draws < high_draws);      /* P3: Low skips 3-pass Bloom (and/or SSAO/shadow work) */
@@ -225,10 +275,11 @@ int main(void)
 	double total_wide = g_gl.total_calls / 5.0;
 	double unif_wide = g_gl.uniform_calls / 5.0;
 	double avg_chunks_wide = chunks_wide / 5.0;
-	printf("FFI High wide-zoom (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f clouds=%.1f (calls/chunk=%.1f)\n",
+	printf("FFI High wide-zoom (5f avg):  total=%.1f unif=%.1f useProg=%.1f bindTex=%.1f draws=%.1f blits=%.1f(d=%.1f,c=%.1f) cmdFlushes=%.1f cmdOps=%.1f getUnifLoc=%llu getProgParam=%llu texImg2D=%llu texSub2D=%.1f bufData=%llu bufSub=%.1f chunks=%.1f clouds=%.1f (calls/chunk=%.1f)\n",
 	       total_wide, unif_wide, g_gl.use_program / 5.0,
 	       g_gl.bind_tex / 5.0, g_gl.draws / 5.0,
 	       g_gl.blits / 5.0, g_gl.blits_depth / 5.0, g_gl.blits_color / 5.0,
+	       g_gl.cmd_flushes / 5.0, g_gl.cmd_ops / 5.0,
 	       (unsigned long long)g_gl.get_uniform_loc,
 	       (unsigned long long)g_gl.get_program_param,
 	       (unsigned long long)g_gl.tex_image_2d,
@@ -246,10 +297,12 @@ int main(void)
 	if (clouds_wide > 0)
 		assert(g_gl.tex_sub_image_2d >= 10); /* 2 clustered-light textures updated in-place/frame */
 	/* Pre-P1 terrain pass alone emitted ~45+ GL calls/chunk (~6,500+/frame at wide zoom).
-	 * With P1 pass hoisting, total frame calls/chunk must stay well under 25. */
+	 * With P1 pass hoisting + P4 UBO & command ring batching, total frame calls/chunk stays < 6.0. */
+	assert(g_gl.cmd_flushes > 0);
+	assert(g_gl.cmd_ops / 5.0 >= 1000.0);
 	assert(avg_chunks_wide >= 50.0);
-	assert(total_wide / avg_chunks_wide < 25.0);
+	assert(total_wide / avg_chunks_wide < 6.0);
 
-	printf("PASS: Seven P1/P2/P3 WebGL FFI hoisting, blits & 0-leak invariants verified\n");
+	printf("PASS: Seven P1/P2/P3/P4 WebGL FFI hoisting, UBO, cmd-ring, blits & 0-leak invariants verified\n");
 	return 0;
 }

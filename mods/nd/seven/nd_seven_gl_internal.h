@@ -101,33 +101,45 @@ typedef struct {
 	float v_max;
 } billboard_basis_t;
 
+/* WebGL2 std140 Frame-Global Uniform Buffer (binding 0, shared by 8 scene programs).
+ * Exact 16-byte vec4 alignment: 17 * 16 = 272 bytes, zero wasted padding. */
+typedef struct {
+	float uMVP[16];              /*   0 (64 B): mat4 uMVP */
+	float uTreeShadowVP[16];     /*  64 (64 B): mat4 uTreeShadowVP */
+	float uRefTrig[4];           /* 128 (16 B): vec4 uRefTrig */
+	float uLambLight[4];         /* 144 (16 B): vec4 uLambLight */
+	float uCameraPos[3];         /* 160 (12 B): vec3 uCameraPos */
+	float uAnimTime;             /* 172 ( 4 B): float uAnimTime */
+	float uSkyColor[3];          /* 176 (12 B): vec3 uSkyColor */
+	float uAtmoIntensity;        /* 188 ( 4 B): float uAtmoIntensity */
+	float uSunDir[3];            /* 192 (12 B): vec3 uSunDir */
+	float uFogStart;             /* 204 ( 4 B): float uFogStart */
+	float uMoonDir[3];           /* 208 (12 B): vec3 uMoonDir */
+	float uFogEnd;               /* 220 ( 4 B): float uFogEnd */
+	float uCsm[3];               /* 224 (12 B): vec3 uCsm */
+	float uBaseSeaLevel;         /* 236 ( 4 B): float uBaseSeaLevel */
+	float uTreeShadowOrigin[3];  /* 240 (12 B): vec3 uTreeShadowOrigin */
+	float uTreeShadowActive;     /* 252 ( 4 B): float uTreeShadowActive */
+	float uWorldDim[2];          /* 256 ( 8 B): vec2 uWorldDim */
+	float uCamDist;              /* 264 ( 4 B): float uCamDist */
+	float uTerrFastDist;         /* 268 ( 4 B): float uTerrFastDist */
+} nd_frame_ubo_t;
+
+_Static_assert(sizeof(nd_frame_ubo_t) == 272, "nd_frame_ubo_t must match std140 layout (272 bytes)");
+
 typedef struct {
 	GLuint prog;
-	GLint uMVP;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
-	GLint uRefTrig;
 	GLint uHeightScale;
 	GLint uSeaLevel;
-	GLint uCameraPos;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
 	GLint uTorusRadii;
-	GLint uWorldDim;
-	GLint uFogStart;
-	GLint uFogEnd;
-	GLint uAnimTime;
-	GLint uSkyColor;
-	GLint uAtmoIntensity;
-	GLint uLambLight;
 	GLint uCloudShadowMap;
-	GLint uCsm;
-	GLint uBaseSeaLevel;
-	GLint uSunDir;
-	GLint uMoonDir;
 	GLint uLambWakeHead;
 	GLint uLambWakeXYT0;
 	GLint uLambWakeXYT1;
@@ -136,42 +148,24 @@ typedef struct {
 	GLint uWorldId;
 	GLint uSeaOffsetQ12_4;
 	GLint uTreeShadowTex;
-	GLint uTreeShadowOrigin;
-	GLint uTreeShadowVP;
-	GLint uTreeShadowActive;
 	GLint uTerrDetailTex;
 	GLint uTerrNormTex;
-	GLint uTerrFastDist;
 	GLint aGridUV;
 } gl_terrain_pipe_t;
 
 typedef struct {
 	GLuint prog;
-	GLint uMVP;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
-	GLint uRefTrig;
 	GLint uHeightScale;
 	GLint uSeaLevel;
-	GLint uCameraPos;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
 	GLint uTorusRadii;
-	GLint uWorldDim;
-	GLint uFogStart;
-	GLint uFogEnd;
-	GLint uAnimTime;
-	GLint uSkyColor;
-	GLint uAtmoIntensity;
-	GLint uLambLight;
 	GLint uCloudShadowMap;
-	GLint uCsm;
-	GLint uBaseSeaLevel;
-	GLint uSunDir;
-	GLint uMoonDir;
 	GLint uLambWakeHead;
 	GLint uLambWakeXYT0;
 	GLint uLambWakeXYT1;
@@ -187,28 +181,15 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
-	GLint uMVP;
 	GLint uAtlasTex;
 	GLint uAtlasNormTex;
 	GLint uSeaLevel;
-	GLint uAnimTime;
-	GLint uCameraPos;
-	GLint uFogStart;
-	GLint uFogEnd;
-	GLint uSkyColor;
-	GLint uAtmoIntensity;
-	GLint uLambLight;
-	GLint uSunDir;
 	GLint uCloudShadowMap;
-	GLint uCsm;
 	GLint uPass;
 	GLint uCamAngles;
 	GLint uHiZTex;
 	GLint uHiZActive;
 	GLint uTreeShadowTex;
-	GLint uTreeShadowOrigin;
-	GLint uTreeShadowVP;
-	GLint uTreeShadowActive;
 	GLint aPos;
 	GLint aUV;
 	GLint aTint;
@@ -247,11 +228,6 @@ typedef struct {
 	GLint uEast;
 	GLint uSouth;
 	GLint uZenith;
-	GLint uSunDir;
-	GLint uMoonDir;
-	GLint uSkyColor;
-	GLint uCamDist;
-	GLint uAnimTime;
 	GLint uTorusEye;
 	GLint uTorusRadii;
 	GLint uAtmoHaloVis;
@@ -259,18 +235,8 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
-	GLint uMVP;
 	GLint uSeaLevel;
-	GLint uAnimTime;
-	GLint uCameraPos;
-	GLint uFogStart;
-	GLint uFogEnd;
-	GLint uSkyColor;
-	GLint uAtmoIntensity;
-	GLint uLambLight;
-	GLint uSunDir;
 	GLint uCloudShadowMap;
-	GLint uCsm;
 	GLint uShadowPass;
 	GLint uBranchletTex;
 	GLint uBranchletNorm;
@@ -279,9 +245,6 @@ typedef struct {
 	GLint uBarkTex;
 	GLint uBarkNorm;
 	GLint uTreeShadowTex;
-	GLint uTreeShadowOrigin;
-	GLint uTreeShadowVP;
-	GLint uTreeShadowActive;
 	GLint uTreeShadowWriteOrigin;
 	GLint uTreeShadowWriteVP;
 } gl_mesh3d_pipe_t;
@@ -315,30 +278,15 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
-	GLint uMVP;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
-	GLint uRefTrig;
-	GLint uCameraPos;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
 	GLint uTorusRadii;
-	GLint uWorldDim;
-	GLint uFogStart;
-	GLint uFogEnd;
-	GLint uAnimTime;
-	GLint uSkyColor;
-	GLint uAtmoIntensity;
-	GLint uLambLight;
-	GLint uSunDir;
 	GLint uSeaLevel;
 	GLint uCloudShadowMap;
-	GLint uCsm;
 	GLint uTreeShadowTex;
-	GLint uTreeShadowOrigin;
-	GLint uTreeShadowVP;
-	GLint uTreeShadowActive;
 } gl_grass_pipe_t;
 
 typedef struct {
@@ -358,31 +306,18 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
-	GLint uMVP;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
-	GLint uRefTrig;
 	GLint uSeaLevel;
-	GLint uCameraPos;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
 	GLint uTorusRadii;
-	GLint uWorldDim;
-	GLint uFogStart;
-	GLint uFogEnd;
-	GLint uAnimTime;
-	GLint uSkyColor;
-	GLint uAtmoIntensity;
-	GLint uCamDist;
 	GLint uCloudDeck;
-	GLint uSunDir;
 	GLint uCloudShadowMap;
-	GLint uCsm;
 	GLint aGridUV;
-	GLint uMoonDir;
 	GLint uViewport;
 	GLint uClusterGridDim;
 	GLint uClusterDepthParams;
@@ -575,6 +510,7 @@ typedef struct {
 	GLuint fol_bark_norm_tex;
 	GLuint terr_detail_tex;
 	GLuint terr_norm_tex;
+	uint8_t atlas_bake_stage;
 	GLuint tree_shadow_fbo[2];
 	GLuint tree_shadow_tex[2];
 	GLuint tree_shadow_dummy_tex;
@@ -701,6 +637,11 @@ typedef struct {
 	/* GPU Indirect Draw Command Buffer & Stats */
 	nd_gpu_draw_elements_indirect_cmd_t indirect_cmds[ND_GPU_INDIRECT_MAX];
 	uint32_t indirect_cmd_count;
+
+	/* WebGL2 Frame-Global UBO (binding 0) & Flat uint32 Command Ring Buffer */
+	GLuint frame_ubo;
+	lam_gl_cmd_buf_t cmd_buf;
+	uint32_t cmd_words[4096];
 } nd_seven_gl_state_t;
 
 /* Shared module state */
@@ -746,12 +687,23 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
                                   const float E[3], const float S[3], const float N[3]);
 void gl_flush_terrain_shadows_to_fbo(void);
 GLuint gl_ensure_tree_shadow_dummy(void);
-void gl_bind_tree_shadow_read(GLint uTex, GLint uOrigin, GLint uVP, GLint uActive);
+void gl_bind_tree_shadow_read(GLint uTex);
 void gl_render_cloud_shadow_map(void);
-void gl_bind_csm(GLint loc_tex, GLint loc_csm);
+void gl_bind_csm(GLint loc_tex);
 bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,
                                        float sea_wet, float fw,
                                        bool want_cirrus, float margin);
+
+static inline void gl_flush_cmd_ring(void)
+{
+	lam_gl_cmd_flush(&s_gl.cmd_buf);
+}
+
+static inline void gl_end_terrain_pass(void)
+{
+	gl_flush_cmd_ring();
+	s_gl.terrain_pass_active = false;
+}
 
 int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius);
 int nd_seven_is_water_ridge_occluded(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,

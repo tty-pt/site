@@ -29,7 +29,7 @@ Cross-references:
 | **P1** | Zero-Risk Hot-Path & Bridge Quick Wins | Small–Med (½–1d) | Low | **Complete** | Eliminated steady-state DOM queries (0/f), Hi-Z uniform leak (0/f), ~72% wide-zoom WebGL FFI calls (~82% terrain pass), 5× map re-ingest; enabled `-O3 -fno-math-errno -msimd128` (7,397 SIMD128 ops in `nd.wasm`) |
 | **P2** | CPU Frame-Time Killers (Data Layout & Caching) | Medium (1–2d) | Low–Med | **Complete** | High stationary CPU `-92.7%` (`12.14 → 0.89 ms`, probes `14,397 → 57`), Low stationary `-85.8%` (`6.07 → 0.86 ms`), `libareole` query `-32.6%`, `glBufferData` steady-state `0/f` (`glBufferSubData`) |
 | **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | **Complete** | Sky-after-terrain Early-Z (`z=1.0`, `GL_LEQUAL`), 236 constant `nd_to_lin` `pow()` removed, single-eval wind, zero-`discard` `mesh3d_opaque` Pass C1, CPU pre-culled grass tuft VBO cache + 3-blade LOD (`bindTex` `152→112`, Low grass tris `-61%`), shared MSAA depth resolve (`blits=2.0/f`), dead CSM history blit removed, Bloom gated off on Low (`draws 186→183`) |
-| **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | Planned | WebGL command ring buffer + UBOs, GLSL build stripping, `libareole` single vertex buffer (-20+ MB RAM), non-destructive BCP updates, `axil-nd`/`nd-view`/`nd-world` DB/RAM fixes |
+| **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | **Complete** | `htdocs/nd.wasm` `-100.7 KB` (`1,172,744 → 1,072,053 B`), `libareole` `-20.52 MB` RAM, `NdFrameUBO` + `glCmdFlush` ring (`FFI -68.5%` stationary / `-82.8%` wide-zoom `3.4 calls/chunk`, live `ulLen=147`), BCP dirty-masking, incremental atlas bake, `0 corm_get` per `nd_write`, `libnd-mcp.so` BSS `655 MB → 264 B`, active-session TOD, graphical ANSI skip + plant cache |
 
 ---
 
@@ -256,9 +256,29 @@ Cross-references:
    - Replace 655 MB `static char bcp_buf[SUPERBIGSIZ]` in `external/nd-mcp/src/mcp.c` with a right-sized/growable buffer.
 
 **Exit Criteria:**
-- `htdocs/nd.wasm` shrinks by **≥ 100 KB** from GLSL stripping + dead-data cleanup; steady-state WASM heap/RAM drops by **≥ 20 MB**.
-- Zero `corm_get` calls per `nd_write`; zero full-DB `corm_iter` on TOD transitions; `nd-mcp` BSS drops by ~655 MB.
-- All submodule builds/tests (`areole`, `lamina`, `nd-world`, `nd-view`, `nd-mcp`, `axil-nd`), `make test-graphics`, `make test-mod MOD=nd`, and `make test-fast` exit `0`.
+- `htdocs/nd.wasm` shrinks by **≥ 100 KB** from GLSL stripping + dead-data cleanup; steady-state WASM heap/RAM drops by **≥ 20 MB**. (Done — `nd.wasm` `-100,691 B` (`1,172,744 → 1,072,053 B`); `libareole` arena `-20.52 MB`)
+- Zero `corm_get` calls per `nd_write`; zero full-DB `corm_iter` on TOD transitions; `nd-mcp` BSS drops by ~655 MB. (Done — `0 corm_get`, active `HD_FD` TOD iteration, `libnd-mcp.so` BSS `264 B`)
+- All submodule builds/tests (`areole`, `lamina`, `nd-world`, `nd-view`, `nd-mcp`, `axil-nd`), `make test-graphics`, `make test-mod MOD=nd`, and `make test-fast` exit `0`. (Done — note pre-existing `scripts/check-no-tree-rpath.sh` failure on unrelated `external/libjarvis/lib/libjarvis.so`; all unit/standalone/graphics/module/bridge/boundary/WASM suites exit `0`)
+
+**Status: Complete** (verified across native C, WebGL2 FFI harness, submodule suites, boundary checks, and live headless Chrome ANGLE/WebGL2):
+- **Client packet dirty-masking** (`mods/nd/ux/nd_state_io.c`): Added `nd_bcp_opcode_dirty_mask()` (`ND_DIRTY_SPATIAL | ND_DIRTY_SCENE | ND_DIRTY_MINIMAP | ND_DIRTY_UI`), returning `0` for `ND_BCP_TOD`, `ND_BCP_SPARSITY`, and `ND_BCP_MACRO_VIEW` so lightweight telemetry frames never tear down `nd_spatial_resolver`, `g_scene`, or the minimap.
+- **WASM & RAM slimming**:
+  - Build-time GLSL comment/whitespace minifier (`scripts/minify-glsl-c.py`, invoked via `python3 -B` in `mods/nd/Makefile`) shrinks `nd_seven_gl_shaders.gen.c` by `-99,888 B` (`341,848 → 241,960 B`); combined with compact `noinline` command ring helpers, `htdocs/nd.wasm` drops **`-100,691 B` (`-100.7 KB`, `1,172,744 → 1,072,053 B`)**, `WebAssembly.validate === true`, `wasm-audit: PASS`, `8,129` SIMD128 ops.
+  - Moved `static nd_field_room_memo_t s_memo[4096]` (114 KB/TU) out of `external/nd-world/include/nd/field.h` into single TU `g_nd_field_room_memo[4096]` under `-DND_FIELD_MEMO_EXTERN`.
+  - Bounded `libareole` `ar_sample_t` sub-pool (`samples_pool_capacity = 64`, `samples_max_level = 2`, `ar_stats_t.arena_bytes`) cuts 512-node arena RAM from **`32,112,264 → 10,598,752 B` (`-20.52 MB`)**, verified in `make -C external/libareole test`.
+  - Incremental 3-stage CPU procedural atlas baking (`gl_advance_atlas_bake()`, `atlas_bake_stage` `0→1→2→3` across startup frames) in `mods/nd/seven/nd_seven_gl.c`.
+- **WebGL2 `NdFrameUBO` + Flat `uint32` Command Ring (`glCmdFlush`)**:
+  - Packed shared per-frame uniforms into `std140` `NdFrameUBO` (binding 0) across all 13 `glslangValidator -l` ES 3.00 programs; added `glBindBufferBase`, `glGetUniformBlockIndex`, `glUniformBlockBinding`, `glCmdFlush`, and `lam_gl_cmd_buf_t` in `external/liblamina` (JS + native stub + allowlist) and batched terrain, grass, water, shadow, billboard/mesh3d, and cloud draws in `mods/nd/seven/`.
+  - **WebGL FFI (`sh tests/unit/run-test-seven-gl-ffi.sh`):**
+    - High stationary (10f avg): **`717.0` total FFI calls/f** (down from `2,279.0` in P3, **`-68.5%`**), `unif=382.0`, `draws=186.0`, `blits=2.0`, `cmdFlushes=9.0`, `cmdOps=1,455.0`, `getUnifLoc=0`, `texImg2D=0`, `bufData=0`, `bufSub=5.0`.
+    - Low stationary (5f avg): **`693.0` total FFI calls/f**, `draws=183.0`, `instTris=565,027`, `cmdFlushes=9.0`, `cmdOps=1,451.0`, `bufData=0`.
+    - High wide-zoom (5f avg, 159 chunks): **`537.0` total FFI calls/f** (down from `3,115.0` in P1, **`-82.8%`**), **`3.4` calls/chunk** (down from `19.6`), `cmdFlushes=4.0`, `cmdOps=2,331.0`, `getUnifLoc=0`, `texImg2D=0`, `bufData=0`.
+  - **Live Headless Chrome ANGLE/WebGL2 (Default/High & Low):** `0` console/page/WebGL errors, `15/15` compiled programs, `74` textures, `domQ=0`, `getUL=+0`, `ulLen=147` (flat steady-state, **`-41.2%`** vs P3's `250`), `+346` draws / `+3` blits / `+12` `cmdFlushes` batching `+2,844` `cmdOps` per steady-state frame.
+- **Server hot-path & RAM cleanup** (`sh tests/unit/run-test-nd-phase4a.sh`):
+  - `external/axil-nd/src/law_io.c`: Open-addressed `pfd_map[2048]` with backward-shift deletion + `nd_player_is_ws()` → **`0` `corm_get` per `nd_write`** across 200 sessions + collision chains + detach.
+  - `external/nd-mcp/src/mcp.c`: Replaced 655 MB `static char bcp_buf[SUPERBIGSIZ]` BSS with 8 KB stack `ND_MCP_OBS_BUFSIZ` → **`libnd-mcp.so` BSS = `264 B`**.
+  - `external/nd-world/src/spacetime.c`: `st_update()` iterates active `HD_FD` sessions instead of full `obj_hd` `corm_iter`.
+  - `external/nd-view/src/view.c`: Added 256-slot `s_plant_spec_cache`, merged duplicate `HD_OBJ` tile lookup, and skipped 64 KB ANSI `view_draw()`/`fbcp_view_buf()` for graphical WebSocket clients.
 
 ---
 

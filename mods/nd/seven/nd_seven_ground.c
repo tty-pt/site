@@ -6,6 +6,10 @@
 #include <math.h>
 #include <string.h>
 
+#ifdef ND_FIELD_MEMO_EXTERN
+nd_field_room_memo_t g_nd_field_room_memo[4096];
+#endif
+
 __attribute__((weak)) ar_system_t *nd_seven_get_chunk_sys(void) { return NULL; }
 __attribute__((weak)) void ar_system_clear(ar_system_t *cs) { (void)cs; }
 __attribute__((weak)) bool ar_system_probe_view(ar_system_t *cs, uint8_t view_id, uint16_t world, int32_t wx, int32_t wy, ar_sample_t *out)

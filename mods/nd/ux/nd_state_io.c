@@ -382,6 +382,41 @@ ISO_EXPORT(void, wasm_ws_on_close, int code)
 	(void)code;
 }
 
+enum {
+	ND_DIRTY_SPATIAL = 1u << 0,
+	ND_DIRTY_SCENE   = 1u << 1,
+	ND_DIRTY_MINIMAP = 1u << 2,
+	ND_DIRTY_UI      = 1u << 3,
+};
+
+static unsigned
+nd_bcp_opcode_dirty_mask(uint8_t opcode, const nd_client_state_t *st)
+{
+	switch (opcode) {
+	case ND_BCP_TOD:
+	case ND_BCP_SPARSITY:
+	case ND_BCP_MACRO_VIEW:
+		return 0u;
+	case ND_BCP_VIEW:
+		return ND_DIRTY_SPATIAL | ND_DIRTY_SCENE | ND_DIRTY_MINIMAP |
+		       (nd_map_canvas_enabled(st) ? 0u : ND_DIRTY_UI);
+	case ND_BCP_VIEW_BUFFER:
+		return ND_DIRTY_MINIMAP |
+		       (nd_map_canvas_enabled(st) ? 0u : ND_DIRTY_UI);
+	case ND_BCP_ROOM:
+	case ND_BCP_ITEM:
+	case ND_BCP_ENTITY:
+	case ND_BCP_OUT:
+		return ND_DIRTY_SPATIAL | ND_DIRTY_SCENE | ND_DIRTY_MINIMAP | ND_DIRTY_UI;
+	case ND_BCP_AUTH_SUCCESS:
+	case ND_BCP_REGION:
+		return ND_DIRTY_SCENE | ND_DIRTY_MINIMAP | ND_DIRTY_UI;
+	default:
+		/* Action bar, auth failure, gauges (HP/MP/target), stats, spells, equip */
+		return ND_DIRTY_UI;
+	}
+}
+
 ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t len)
 {
 	if (!buf || len == 0)
@@ -402,16 +437,15 @@ ISO_EXPORT(void, wasm_ws_on_channel, uint8_t channel, const uint8_t *buf, size_t
 				       sizeof(client_state.preferred_driver));
 				client_state.layout_mode = prev_layout;
 			}
-			nd_spatial_resolver_invalidate();
-			nd_scene_sync(&g_scene, &client_state);
-			g_map_dirty = 1;
-			if (opcode != ND_BCP_TOD &&
-			    opcode != ND_BCP_SPARSITY &&
-			    opcode != ND_BCP_MACRO_VIEW &&
-			    !((opcode == ND_BCP_VIEW || opcode == ND_BCP_VIEW_BUFFER) &&
-			      nd_map_canvas_enabled(&client_state))) {
+			unsigned dirty = nd_bcp_opcode_dirty_mask(opcode, &client_state);
+			if (dirty & ND_DIRTY_SPATIAL)
+				nd_spatial_resolver_invalidate();
+			if (dirty & ND_DIRTY_SCENE)
+				nd_scene_sync(&g_scene, &client_state);
+			if (dirty & ND_DIRTY_MINIMAP)
+				g_map_dirty = 1;
+			if (dirty & ND_DIRTY_UI)
 				bud_app_set_state();
-			}
 		}
 		return;
 	}
