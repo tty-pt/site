@@ -514,12 +514,16 @@ static void gl_update_clustered_cloud_lighting(float out_depth_params[4])
 
 void nd_seven_gl_flush_clouds(void)
 {
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.cloud_pipes[ND_CLOUD_VAR_FULL].prog || s_gl.cloud_count == 0 ||
-	    s_gl.cur_dist <= 480.0f) {
+	if (!s_gl.initialized || !s_gl.pipelines_ready || s_gl.cloud_count == 0 ||
+	    s_gl.cur_dist <= 480.0f ||
+	    (!s_gl.cloud_pipes[ND_CLOUD_VAR_FULL].prog &&
+	     !s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].prog &&
+	     !s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].prog)) {
 		s_gl.cloud_count = 0;
 		return;
 	}
 
+	gl_end_terrain_pass();
 	float cluster_depth_params[4] = { 16.0f, 32000.0f, 1.0f, 0.0f };
 	gl_update_clustered_cloud_lighting(cluster_depth_params);
 
@@ -558,10 +562,10 @@ void nd_seven_gl_flush_clouds(void)
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_FALSE);
+	glDisable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
-	gl_end_terrain_pass();
 	glTimerBegin(ND_GPU_PASS_CLOUDS);
 
 	/* Bind shared textures once before command-ring chunk dispatch (sampler units bound at link time) */
@@ -589,7 +593,7 @@ void nd_seven_gl_flush_clouds(void)
 	float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
 	float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
 
-	bool is_wide = (s_gl.cur_dist >= 6000.0f);
+	bool is_wide = (s_gl.cur_dist >= 6000.0f || s_gl.active_light_count <= 2);
 	bool can_csm_only = (is_wide && s_gl.cur_dist < 35000.0f && s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].prog != 0);
 	float csm_sun_margin = fminf(24000.0f, fmaxf(90.0f, s_gl.cur_dist * 0.025f)) + 4800.0f;
 	int cur_var = -1;
@@ -622,6 +626,16 @@ void nd_seven_gl_flush_clouds(void)
 				want_var = ND_CLOUD_VAR_WIDE_CSM;
 			else if (s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].prog)
 				want_var = ND_CLOUD_VAR_WIDE;
+		}
+		if (!s_gl.cloud_pipes[want_var].prog) {
+			if (s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].prog)
+				want_var = ND_CLOUD_VAR_WIDE;
+			else if (s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].prog)
+				want_var = ND_CLOUD_VAR_WIDE_CSM;
+			else if (s_gl.cloud_pipes[ND_CLOUD_VAR_FULL].prog)
+				want_var = ND_CLOUD_VAR_FULL;
+			else
+				continue;
 		}
 
 		const gl_cloud_pipe_t *cp = &s_gl.cloud_pipes[want_var];

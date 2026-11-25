@@ -2717,14 +2717,15 @@ int main(void)
 			assert(ND_CSM_RES == 128);
 			assert(strstr(nd_seven_gl_fs_csm(), "eval_synoptic_carrier") != NULL);
 			assert(strstr(nd_seven_gl_fs_terrain(), "uCsm.z < 0.0") != NULL);
-			assert(strstr(nd_seven_gl_fs_water(), "uCsm.z < 0.0") != NULL);
+			assert(strstr(nd_seven_gl_fs_water(), "nd_cloud_shadow_map") != NULL &&
+			       strstr(nd_seven_gl_fs_water(), "uCsm.z <= 0.0") != NULL);
 			assert(strstr(nd_seven_gl_fs_cloud(), "uCsm.z < 0.0") != NULL);
 			printf("PASS: cloud-shadow map window (half=%.0f at 400, %.0f at 14000), texel snapping and density->shadow mirror verified\n", 4096.0f, 65536.0f);
 		}
 
-		/* 5. Verify all 21 WebGL2 shader programs (7 terrain variants, water, billboard, mesh3d, mesh3d_opaque, grass,
-		 * 3 cloud variants, csm, sky, ssao, bloom, post, terrain_shadow) compile and link cleanly
-		 * under glslangValidator -l (GLSL ES 3.00) so no syntax, swizzle, or vector-type error can slip through */
+		/* 5. Verify all 23 WebGL2 shader programs (7 terrain variants, water, billboard, mesh3d, mesh3d_opaque,
+		 * mesh3d_shadow_alpha, mesh3d_shadow_opaque, grass, 3 cloud variants, csm, sky, ssao, bloom, post,
+		 * terrain_shadow) compile and link cleanly under glslangValidator -l (GLSL ES 3.00) */
 		if (system("command -v glslangValidator >/dev/null 2>&1") == 0) {
 			struct {
 				const char *name;
@@ -2742,6 +2743,8 @@ int main(void)
 				{ "billboard",           nd_seven_gl_vs_billboard(),      nd_seven_gl_fs_billboard()           },
 				{ "mesh3d",              nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d()              },
 				{ "mesh3d_opaque",       nd_seven_gl_vs_mesh3d(),         nd_seven_gl_fs_mesh3d_opaque()       },
+				{ "mesh3d_shadow_alpha", nd_seven_gl_vs_mesh3d_shadow(),  nd_seven_gl_fs_mesh3d_shadow_alpha() },
+				{ "mesh3d_shadow_opaque",nd_seven_gl_vs_mesh3d_shadow(),  nd_seven_gl_fs_mesh3d_shadow_opaque()},
 				{ "grass",               nd_seven_gl_vs_grass(),          nd_seven_gl_fs_grass()               },
 				{ "cloud",               nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()               },
 				{ "cloud_wide",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide()          },
@@ -2773,9 +2776,12 @@ int main(void)
 			}
 		}
 
-		/* 5b. Phase 3 GPU shader & Early-Z contract assertions */
+		/* 5b. Phase 3 & 6A GPU shader & Early-Z contract assertions */
 		{
 			assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "discard") == NULL);
+			assert(strstr(nd_seven_gl_fs_mesh3d_shadow_opaque(), "discard") == NULL);
+			assert(strstr(nd_seven_gl_fs_water(), "eval_water_waves_lo") != NULL);
+			assert(strstr(nd_seven_gl_fs_water(), "eval_synoptic_macro_cloud") == NULL);
 			assert(strstr(nd_seven_gl_fs_cloud(), "uSceneDepth") == NULL);
 			assert(strstr(nd_seven_gl_vs_sky(), "vec4(ndc, 1.0, 1.0)") != NULL);
 			assert(strstr(nd_seven_gl_vs_grass(), "a_tuft0") != NULL);
@@ -3369,7 +3375,8 @@ int main(void)
 		assert(strstr(fs_t, "cloudShadow") != NULL);
 		assert(strstr(fs_t, "sunTrans") != NULL);
 		assert(strstr(fs_t, "worldBioHumidity") != NULL);
-		assert(strstr(fs_w, "eval_planetary_cloud_shadow") != NULL);
+		assert(strstr(fs_w, "nd_cloud_shadow_map") != NULL);
+		assert(strstr(fs_w, "eval_planetary_cloud_shadow") == NULL); /* water is CSM-only (cur_dist <= 2000 wu) */
 		assert(strstr(fs_w, "reflCloudXY") == NULL); /* reflection reuses the column cloud density */
 		assert(strstr(fs_w, "const float zk = 920.0") != NULL);
 		assert(strstr(fs_t, "const float zk = 920.0") != NULL);
@@ -4757,13 +4764,15 @@ int main(void)
 				assert(strstr(nd_seven_gl_fs_terrain(), "farCanopyBand") != NULL);
 				assert(strstr(nd_seven_gl_vs_mesh3d(), "mod(a_iparam.w, 32.0)") != NULL);
 				assert(strstr(nd_seven_gl_vs_mesh3d(), "cardU < 0.05") != NULL);
+				const char *vs_m3d = nd_seven_gl_vs_mesh3d();
 				const char *fs_m3d = nd_seven_gl_fs_mesh3d();
 				assert(strstr(fs_m3d, "uGrassTex") != NULL);
 				assert(strstr(fs_m3d, "uGrassNorm") != NULL);
 				assert(strstr(fs_m3d, "uBarkTex") != NULL);
 				assert(strstr(fs_m3d, "uBarkNorm") != NULL);
-				assert(strstr(fs_m3d, "nd_glsl_biome_rgb") != NULL);
-				assert(strstr(fs_m3d, "bioId") != NULL);
+				assert(strstr(vs_m3d, "a_isub") != NULL);
+				assert(strstr(vs_m3d, "flat out vec3 vSubCol") != NULL);
+				assert(strstr(fs_m3d, "flat in vec3 vSubCol") != NULL);
 				assert(strstr(fs_m3d, "style > 4.5 && style < 5.5") != NULL);
 				assert(strstr(fs_m3d, "isFolGrass") != NULL);
 				assert(strstr(fs_m3d, "barkSample") != NULL);
@@ -4933,8 +4942,8 @@ int main(void)
 				assert(strstr(fs_terr, "bankGrassKeep") != NULL);
 				assert(strstr(vs_m3d,  "isGrassMesh ? -1.8 : -1.5") != NULL);
 				assert(strstr(fs_m3d,  "rootFeather") != NULL);
-				assert(strstr(fs_m3d,  "bankCol") != NULL);
-				assert(strstr(fs_m3d,  "nd_eval_grove_ecology_weight") != NULL);
+				assert(strstr(vs_m3d,  "a_isub") != NULL);
+				assert(strstr(vs_m3d,  "nd_eval_grove_ecology_weight") == NULL);
 				assert(strstr(fs_m3d,  "0.30 + rootT * 0.60") != NULL);
 
 				/* Pass 3 */
@@ -5052,7 +5061,9 @@ int main(void)
 
 					/* Passes 1-3: shader pipeline guards */
 					assert(strstr(fs_bb,  "nd_eval_tree_shadow") != NULL);
-					assert(strstr(fs_m3d, "nd_eval_ground_substrate") != NULL);
+					assert(strstr(nd_seven_gl_vs_mesh3d(), "vSubCol = a_isub.rgb") != NULL);
+					assert(strstr(nd_seven_gl_vs_mesh3d(), "nd_eval_ground_substrate") == NULL);
+					assert(strstr(fs_m3d, "nd_eval_ground_substrate") == NULL);
 					assert(strstr(fs_m3d, "vTerrGrad") != NULL);
 					assert(strstr(vs_m3d, "vTerrGrad = a_iterr.xy") != NULL);
 					assert(strstr(nd_seven_gl_vs_terrain_shadow(), "uTreeShadowWriteVP") != NULL);

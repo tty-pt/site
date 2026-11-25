@@ -117,6 +117,15 @@ typedef struct {
 	float v_max;
 } billboard_basis_t;
 
+/* Internal 128-byte (2-cache-line) mesh3d GPU instance layout: wraps the 112-byte
+ * nd_seven_gl_mesh3d_inst_t ABI with a CPU-evaluated linear RGB ground substrate vec4
+ * (attrib location 10), eliminating per-vertex procedural noise across ~2M instanced vertices. */
+typedef struct {
+	nd_seven_gl_mesh3d_inst_t base; /* 112 bytes: locations 3..9 */
+	float sub_col[4];               /*  16 bytes: location 10 (rgb: linear substrate, a: unused) */
+} gl_mesh3d_inst_t;
+_Static_assert(sizeof(gl_mesh3d_inst_t) == 128, "gl_mesh3d_inst_t must be 128 bytes");
+
 /* WebGL2 std140 Frame-Global Uniform Buffer (binding 0, shared by 8 scene programs).
  * Exact 16-byte vec4 alignment: 17 * 16 = 272 bytes, zero wasted padding. */
 typedef struct {
@@ -145,6 +154,7 @@ _Static_assert(sizeof(nd_frame_ubo_t) == 272, "nd_frame_ubo_t must match std140 
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uChunkOrigin;
@@ -262,9 +272,16 @@ typedef struct {
 	GLint uBarkTex;
 	GLint uBarkNorm;
 	GLint uTreeShadowTex;
+} gl_mesh3d_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLint uSeaLevel;
 	GLint uTreeShadowWriteOrigin;
 	GLint uTreeShadowWriteVP;
-} gl_mesh3d_pipe_t;
+	GLint uBranchletTex;
+	GLint uGrassTex;
+} gl_mesh3d_shadow_pipe_t;
 
 #define MAX_GRASS_CHUNKS 32
 #define MAX_GRASS_VBO_CACHE 32
@@ -323,6 +340,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uChunkOrigin;
@@ -358,6 +376,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uCloudTex;
 	GLint uCloudUvScale;
 	GLint uSceneUvScale;
@@ -368,6 +387,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uDepthTex;
 	GLint uNearFar;
 	GLint uProjScale;
@@ -378,6 +398,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uSrcTex;
 	GLint uTexelSize;
 	GLint uPassDir;
@@ -452,7 +473,10 @@ typedef struct {
 	bool initialized;
 	bool pipelines_ready;
 	bool pipelines_prewarmed;
-	uint8_t prewarm_step;
+	bool tier_b_queued;
+	bool tier_b_done;
+	bool prewarm_frame0_seen;
+	uint32_t prewarmed_mask;
 	GLuint prewarm_dummy_i16;
 	GLuint prewarm_dummy_rgba;
 	gl_terrain_pipe_t terrain_pipes[ND_TERR_VAR_COUNT];
@@ -460,6 +484,8 @@ typedef struct {
 	gl_billboard_pipe_t bb_pipe;
 	gl_mesh3d_pipe_t mesh3d_pipe;
 	gl_mesh3d_pipe_t mesh3d_opaque_pipe;
+	gl_mesh3d_shadow_pipe_t mesh3d_shadow_alpha_pipe;
+	gl_mesh3d_shadow_pipe_t mesh3d_shadow_opaque_pipe;
 	gl_grass_pipe_t grass_pipe;
 	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipes[ND_CLOUD_VAR_COUNT];
@@ -598,6 +624,7 @@ typedef struct {
 	bool terrain_pass_active;
 	bool terrain_pass_has_body;
 	int terrain_pass_variant;
+	int terrain_pass_seabed_stencil;
 	bool terrain_var_body_valid[ND_TERR_VAR_COUNT];
 	bool terrain_var_sea_valid[ND_TERR_VAR_COUNT];
 	float terrain_var_sea_level[ND_TERR_VAR_COUNT];
@@ -756,8 +783,12 @@ static inline void gl_end_terrain_pass(void)
 {
 	gl_flush_cmd_ring();
 	if (s_gl.terrain_pass_active) {
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_STENCIL_TEST);
+		glStencilMask(0xFF);
 		glTimerEnd(ND_GPU_PASS_TERRAIN);
 		s_gl.terrain_pass_active = false;
+		s_gl.terrain_pass_seabed_stencil = -1;
 	}
 }
 

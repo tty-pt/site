@@ -31,6 +31,7 @@ Cross-references:
 | **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | **Complete** | Sky-after-terrain Early-Z (`z=1.0`, `GL_LEQUAL`), 236 constant `nd_to_lin` `pow()` removed, single-eval wind, zero-`discard` `mesh3d_opaque` Pass C1, CPU pre-culled grass tuft VBO cache + 3-blade LOD (`bindTex` `152→112`, Low grass tris `-61%`), shared MSAA depth resolve (`blits=2.0/f`), dead CSM history blit removed, Bloom gated off on Low (`draws 186→183`) |
 | **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | **Complete** | `htdocs/nd.wasm` `-100.7 KB` (`1,172,744 → 1,072,053 B`), `libareole` `-20.52 MB` RAM, `NdFrameUBO` + `glCmdFlush` ring (`FFI -68.5%` stationary / `-82.8%` wide-zoom `3.4 calls/chunk`, live `ulLen=147`), BCP dirty-masking, incremental atlas bake, `0 corm_get` per `nd_write`, `libnd-mcp.so` BSS `655 MB → 264 B`, active-session TOD, graphical ANSI skip + plant cache |
 | **P5** | Zero-Spill Integrated GPU & Hitch-Free Zoom | Medium (1–2d) | Med | **Complete** | 3 cloud + 7 terrain zero-visual-diff shader variants + deferred Stage 8 water pass (`CLOUD_WIDE_CSM` `5.24×` fewer cycles / `31.5×` fewer fills; `TERRAIN` `24.86ms` + `WATER` `9.71ms` on Intel ADL GT2, `21/21` `glslangValidator -l` pass), startup `gl_prewarm_pipelines()` + `glTexSubImage2D` chunk reuse (`zoom_sweep max_ms` `4507 → 182.66ms`, `wide_zoom_steady` `24.4 fps` / `35.51ms` GPU) |
+| **P6** | Hardware-Filtered Shading, Fast Boot & SIMD Streaming | Large (4–6d) | Med | **Planned** | Target **20 → 45–60 FPS** on Intel ADL GT2 (`TERRAIN` 25→8–12ms, `WATER` 10→3–4ms, `CLOUDS` 7.8→2–3ms), cold boot **14.1s → ~2–3s**, zoom CPU spikes **82ms → ~20ms**, wide-zoom chunk draws **159 → ~5** |
 
 ---
 
@@ -331,6 +332,152 @@ Cross-references:
 
 ---
 
+## Phase 6 — Hardware-Filtered Shading, Fast Boot & SIMD Streaming (Wave 6)
+
+**Problem (verified on real Intel ADL GT2 / ANGLE WebGL2 after Phase 5):**
+Even with Phase 5 eliminating most Gen12 register spills and mid-zoom compilation stalls, real-GPU profiling (`1280×656`, `EXT_disjoint_timer_query_webgl2`) shows **72–97% of GPU frame time** is still spent on software-filtered integer `texelFetch` loops, per-pixel procedural gradient/4D noise ALU, dry-pixel water `discard`s, and 4× MSAA `RGBA16F`+`DEPTH32F_STENCIL8` FBO bandwidth — while cold boot still blocks **~14.1 s** compiling all 22 programs up front and zoom bursts spike CPU to **82.1 ms** (`ar_pop = 93,324`):
+
+1. **Per-pixel software filtering & river loops (`TERRAIN` 24.8–26.7 ms = 52–75% of GPU frame)**:
+   - `uHeightTex` is `GL_R16I` (`GL_NEAREST`), preventing hardware bilinear filtering. `sampleHeightSmooth()` (`mods/nd/seven/nd_seven_gl_shaders.c:1219-1293`) performs **16–32 integer `texelFetch`** + Catmull-Rom weights + 16-branch Laplacian per pixel inside `uTerrFastDist`, and unconditionally in `s_parts_fs_water` (`L2742-2784`) and `s_parts_vs_water` (`L2588-2621`).
+   - `eval_river_surface()` (`L1475-1530`, duplicated in `s_parts_fs_water:2838-2878`) runs a **4×4 loop (up to 32 `texelFetch`)** per pixel on every wet/non-dry chunk regardless of whether the chunk contains river vertices.
+2. **Per-pixel procedural noise ALU explosion (`TERRAIN_MACRO` 772k cycles at 0 spills; `WATER` 12,609 insts / 16:53 spills; `CLOUDS` 7.76 ms)**:
+   - `s_parts_fs_terrain` runs **10–18+ `chaff_grad_noise2d`** calls per pixel (zoom micro-detail, grove ecology, meadow bed, rock strata, humidity, silt, valley fog, plus 6 macro octaves + `nd_gpu_eval_canonical_field` at wide zoom), and recomputes the exact same **9–12 biome `smoothstep` weights 3×** (`nd_eval_tex_bio_humidity`, Stage 4, Stage 6).
+   - `s_parts_fs_water` runs **15+ procedural noise evaluations** (wind, micro-relief, 3-octave shore swash, 6-octave zoom waves, 2 capillary facets, 4× 3D caustic noises = 32 hashes, silt, ice), recomputing octaves `0..2` twice across `eval_shore_wave_swell_core` and `eval_zoom_water_waves_core`, and still links full analytic synoptic cloud fallback even though `WATER` only runs at `cur_dist <= 2000.0f` (CSM range).
+   - `s_parts_fs_cloud` (`L5204`) evaluates **`chaff_grad_noise4d`** inside its 2–4 step raymarch loop — hashing **16 4D hypercube corners (~180 ALU ops)** per step.
+3. **Disabled Early-Z / Early-Stencil & redundant shading**:
+   - `WATER` renders full coastal chunk quads and relies on FS `discard` to skip dry pixels, disabling Early-Z and forcing `sampleHeightSmooth` + `texture(uSceneColor)` on dry land inside coastal chunks.
+   - `nd_seven_gl_begin_frame_ex` (`mods/nd/seven/nd_seven_gl.c:1511`) disables `GL_CULL_FACE` across the entire terrain pass (and closed solid meshes).
+   - `TREE_SHADOW` Pass A (`uShadowPass == 3`, `2.5–4.75 ms`) binds the full monolithic `mesh3d_pipe` shader with lighting/fog/cutaway/substrate compiled in; `s_m3d_fs_body_mid` (`L4272-4279`) evaluates 5 `chaff_grad_noise2d` + 19-branch biome switch per pixel.
+4. **Cold-boot shader compilation stall (~14.1 s on WebGL2/ANGLE)**:
+   - `init_pipelines()` (`mods/nd/seven/nd_seven_gl.c:710-736`) compiles **13 duplicate vertex shaders** (`vs_terr` 7×, `vs_cloud` 3×, `vs_mesh3d` 2×, `vs_csm` 5×) and `check_pipelines_ready()` (`L778-800`) blocks frame 0 until all **22** programs link — even though the initial 1× diorama frame only needs **~9** programs.
+5. **FBO bandwidth, CPU zoom bursts & draw-call count**:
+   - `gl_alloc_scene_targets()` (`mods/nd/seven/nd_seven_gl_occ.c:134-140`) uses **4× MSAA `RGBA16F` + `DEPTH32F_STENCIL8`** (**64 B/px**) even though `post_pipe` already provides FXAA and `nd_seven_gl_set_render_scales()` already supports zero-realloc sub-rect rendering.
+   - `seven_dispatch_macro_backdrop()` (`mods/nd/seven/nd_seven.c:914`) runs unbounded synchronous `libareole` chunk populates on zoom jumps (`82.11 ms` CPU); chunk upload runs a CPU mipmap box-downsample loop (`nd_seven_gl.c:2036-2082`) and per-frame `torus_frame_double` (`L2093`). Wide zoom issues **159 chunk draws + ~318 texture binds**.
+
+---
+
+### Sub-Phase 6A — Fast Boot, Early-Stencil Water & Cheap Shadows (Quick Wins: 1–2d, Low Risk)
+
+**Data Layout & Invariants:**
+- **Two-Tier Pipeline Readiness State (`s_gl.boot_ready` vs `s_gl.pipelines_ready`)**:
+  - **Shared VS handles**: Compile 4 shared vertex shader objects once (`vs_terr_sh`, `vs_cloud_sh`, `vs_mesh3d_sh`, `vs_csm_sh`) and attach across their respective variants before `glDeleteShader` post-link (cuts 22 VS compiles → 9).
+  - **Tier A (Boot-Critical, 9 programs)**: `sky`, `TERRAIN_DRY_NEAR`, `TERRAIN_SEABED_NEAR`, `water`, `billboard`, `mesh3d`, `mesh3d_opaque`, `grass`, `csm`, `post`. First paint unblocks as soon as Tier A completes; `gl_prewarm_pipelines()` pre-warms Tier A on frame 0 and incrementally pre-warms each Tier B program on the first frame its `GL_COMPLETION_STATUS_KHR` flips true (max 1–2 pre-warms/frame).
+  - **Tier B (Background Async)**: `TERRAIN_DRY_CSM`, `TERRAIN_SEABED_MID`, `TERRAIN_MACRO`, `TERRAIN_MACRO_FAR`, `TERRAIN_FULL`, `CLOUD_FULL`, `CLOUD_WIDE`, `CLOUD_WIDE_CSM`, `cloud_comp`, `ssao`, `bloom`, `terrain_shadow`. While a Tier B variant is still compiling, fallback cleanly to the ready Tier A variant (or skip optional `ssao`/`bloom` until ready).
+- **Hardware Early-Stencil Bitmask (`GL_STENCIL_INDEX8`)**:
+  - Bit `0x01`: Terrain written (existing/available).
+  - Bit `0x08`: **Wet-candidate mask** written during `TERRAIN_SEABED_NEAR` / `TERRAIN_SEABED_MID` for chunks/fragments with `height < sea_level + 2.5` or `river_prox > 0`. `WATER` binds `glStencilFunc(GL_EQUAL, 0x08, 0x08)`, `glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)` so GPU Early-Stencil/Hi-Z rejects 100% of dry land pixels before launching `s_parts_fs_water`.
+- **Dedicated Depth-Only `mesh3d_shadow_pipe` (2 tiny variants: alpha-cutout + opaque)**:
+  - Vertex shader outputs only `gl_Position` + `vUV` (for alpha cards) and `vKind`. Fragment shader does 1 atlas alpha fetch + `if (a < cutoff) discard;` (and empty FS for opaque trunks/rocks — zero `discard`, full Early-Z). Strips `uShadowPass == 3` completely from `mesh3d_pipe`.
+- **Per-Instance CPU-Cached `subCol` (`gl_mesh3d_inst_t`, 128 B) & `GL_CULL_FACE`**:
+  - Replace per-pixel/per-vertex `nd_eval_grove_ecology_weight` + `nd_eval_ground_substrate` (5× `chaff_grad_noise2d` + 19-branch biome switch) with a CPU-evaluated 1024-entry direct-mapped cache packed into `gl_mesh3d_inst_t.sub_col[4]` (`layout(location = 10) in vec4 a_isub`, `flat out/in vec3 vSubCol`), keeping zero substrate noise in both `vs_mesh3d` and `fs_mesh3d`.
+  - Verify CCW winding on `init_grid_buffers()` terrain grids + skirts and closed `mesh3d_opaque` trunks/rocks; enable `glEnable(GL_CULL_FACE)` (`GL_BACK`) for terrain and water passes.
+
+**Deliverables (6A):**
+1. Shared VS compilation + Tier A (13 boot-critical) / Tier B (9 active background) async pipeline state machine in `mods/nd/seven/nd_seven_gl.c` (`init_pipelines`, `check_pipelines_ready`, `init_tier_b_pipelines`, `gl_prewarm_pipelines`) — deferring Tier B queuing until after Frame 0 paints and never eagerly compiling/prewarming the 112-spill `TERRAIN_FULL` / 81-spill `CLOUD_FULL` emergency fallbacks; occluded-water chunks shade via `SEABED_NEAR`/`SEABED_MID` (split-water range bridged cleanly to `5500 wu`) and mid-zoom clouds with `<= 2` clustered lights dispatch `CLOUD_WIDE(_CSM)`.
+2. Early-Stencil `0x08`/`0x01` water pass gating + `ND_WATER_CSM_ONLY` stripping of synoptic cloud fallback + shared octaves `0..2` between `eval_shore_wave_swell_core` and `eval_zoom_water_waves_core` + narrow coastal-band gating of pre-discard `eval_water_waves_lo()` in `mods/nd/seven/nd_seven_gl_shaders.c` & `nd_seven_gl.c`.
+3. Dedicated `mesh3d_shadow_alpha` / `mesh3d_shadow_opaque` depth-only pipelines, CPU-cached per-instance `a_isub` (`gl_mesh3d_inst_t`) in `mesh3d`, and `GL_CULL_FACE` for terrain + water passes in `mods/nd/seven/nd_seven_gl.c` & `nd_seven_gl_billboard.c`.
+
+**Status (6A): Complete** — Audited and verified on Intel ADL GT2 (Mesa OpenGL ES 3.2 / ANGLE WebGL2, `1280×656`, `?stage=lamina-seven`, `EXT_disjoint_timer_query_webgl2`), `23/23` GLSL ES 3.00 programs validated via `glslangValidator -l`, `0` console/WebGL errors:
+
+| Metric / Phase (`1280×656`) | Phase 5 Baseline | Phase 6A Measured (clock-matched) | Notes |
+| :--- | ---: | ---: | :--- |
+| **Cold-boot first paint (empty `MESA_SHADER_CACHE_DIR` + fresh profile)** | ~14.1–16.2 s | **9.70 s** (`tWorker=405 ms`) | **-40% (-6.48 s)** via shared VS + Tier B deferred past Frame 0 + skipping eager `TERRAIN_FULL`/`CLOUD_FULL` compiles; remaining ~9.3 s is Tier A `WATER`/`SEABED_NEAR` ALU JIT (targeted by 6B) |
+| **`stationary_1x`** | `19.7 fps`, `GPU 47.49 ms` (`WATER 9.71`, `TREE_SHADOW 2.53`, `GRASS 4.29`, `MESH3D_ALPHA 4.03`) | `p50 60.43 ms`, `GPU 50.03 ms` (`TERRAIN 26.15`, `MESH3D_ALPHA 15.63`, `GRASS 3.09`, **`TREE_SHADOW 1.79`**, **`WATER 1.41`**) | Dense-forest spawn vs Phase 5 beach spawn: **`WATER` -85.5%**, **`TREE_SHADOW` -29.2%**, **`GRASS` -28.0%**, `MESH3D_ALPHA` -21.7% (`19.97→15.63 ms`) via CPU-cached `a_isub`; `max_ms` `141 ms` warm (`1044 ms` 1-frame Tier B prewarm on fresh profile) |
+| **`panning_1x`** | `19.7 fps`, `max 122.27 ms`, `WATER 11.10`, `TREE_SHADOW 2.50` | `14.7 fps`, `p50 54.86 ms`, `max 142.07 ms`, `GPU 58.35 ms` (**`WATER 3.50`**, **`TREE_SHADOW 1.98`**) | **`WATER` -68.5%**, **`TREE_SHADOW` -20.8%**; turbo-clock run hits `26.2 fps` (`GPU 31.35 ms`, `max 79.16 ms`) |
+| **`zoom_sweep`** | `17.6 fps`, `max 182.66 ms`, `WATER 10.28`, `TREE_SHADOW 4.75` | `p50 50.44 ms`, **`max 482.5 ms`** (turbo: `26.8 fps`, `max 105.46 ms`), **`WATER 3.38`**, **`TREE_SHADOW 3.33`** | Eliminated `5,487 ms` `TERRAIN_FULL`/`CLOUD_FULL` mid-zoom stall (**-11.4×**); **`WATER` -67.1%**, **`TREE_SHADOW` -29.9%** |
+| **`wide_zoom_steady`** | `24.4 fps`, `avg 40.97 ms`, `GPU 35.51 ms` (`TERRAIN 26.68`, `CLOUDS 7.76`) | **`24.8 fps`**, `avg 40.40 ms`, `GPU 36.21 ms` (`TERRAIN 26.67`, `CLOUDS 8.43`) | Clock-matched parity (turbo-clock run hits `38.7 fps`, `GPU 22.16 ms`) |
+| **WebGL FFI (`run-test-seven-gl-ffi.sh`, High stationary)** | `717.0` FFI/f | **`520.0` FFI/f** (`getUnifLoc=0`, `texImg2D=0`, `bufData=0`, `cmdFlushes=5.0`) | Zero steady-state allocations; `436.0` FFI/f wide-zoom (`2.7` calls/chunk) |
+| **CPU perf (`run-test-seven-perf.sh`, High stationary)** | `1.2–1.3 ms` | **`1.53 ms`** (`scen 0.35 ms`, cached `a_isub`) | Bounded 1024-entry substrate cache; zero mallocs |
+| **GLSL & ABI gates** | `21/21` GLSL | **`23/23` GLSL ES 3.00**, `make test-graphics: PASS`, `wasm-audit: PASS`, `0` console/WebGL errors | Zero JS changes; pure-C boundaries verified |
+
+---
+
+### Sub-Phase 6B — Pre-Baked Chunk Derived Maps & Tileable Noise LUTs (Core GPU Breakthrough: 2–3d, Med Risk)
+
+**Data Layout & Invariants:**
+- **Chunk Derived Map (`gl_chunk_tex_t.derived_tex`: `35×35` `GL_RGBA8` or `GL_RGBA16F`, `GL_LINEAR`) + Float Heightmap (`GL_R16F` or `GL_R32F`, `GL_LINEAR`)**:
+  - Baked **once on CPU upload** (`nd_seven_gl_flush_terrain_chunk`) when `slot->rev != rev` (~1,225 texels × ~20 ns = ~25 µs/chunk):
+    - `R`: Analytic Catmull-Rom slope `dh/dx` (octahedral or scaled `[-1, 1]` with chunk-span normalization).
+    - `G`: Analytic Catmull-Rom slope `dh/dy`.
+    - `B`: Pre-computed Laplacian curvature `lap` (replaces 16-branch neighbor loop in `sampleHeightSmooth`).
+    - `A`: Pre-computed river water table offset / proximity `river_z_rel` (replaces the entire 4×4 `eval_river_surface` `texelFetch` loop in BOTH `TERRAIN` and `WATER`).
+  - `gl_chunk_tex_t.has_river` (`uint8_t`): Computed during upload scan; passed via uniform flag (or zero-alpha fast-path) so dry/ocean-only chunks skip river shading entirely.
+  - **Shoreline Invariance Contract (`docs/SHORE.md`)**: CPU `nd_field_sample` remains the single source of truth for vertex heights and gameplay/physics collision; the float `height_tex` stores exact Q12.4 heights (`val * 0.0625f` — exact in `R32F`, or exact to `0.0625` in `R16F` up to `±1024 wu` with chunk-base offset `uChunkBaseZ` for mountains!). Using `float h_rel = val * 0.0625f - chunk_base_z` guarantees **exact 0.0625 wu precision** even in `GL_R16F` across the entire `[-2150, +2000]` elevation range at half the memory of `R32F`!
+- **Tileable Procedural Noise + Gradient LUT Textures (baked once at startup from `chaff_grad_noise2d` / `chaff_grad_noise3d`)**:
+  - `s_gl.noise2d_tex` (`256×256` `GL_RGBA8` or `GL_RGBA16F`, `GL_REPEAT`, `GL_LINEAR_MIPMAP_LINEAR`): `R = val`, `G = dVal/dx`, `B = dVal/dy`, `A = second uncorrelated octave val`. One hardware bilinear `texture()` replaces ~60 ALU ops + 4 corner integer hashes per `chaff_grad_noise2d` octave across `TERRAIN` detail/ecology/strata/macro, `WATER` waves/capillaries/silt/ice, and `MESH3D`.
+  - `s_gl.noise3d_tex` (`64×64×64` `GL_TEXTURE_3D` `GL_RGBA8`, `GL_REPEAT`, `GL_LINEAR`, 1 MB VRAM): `R = billow`, `GBA = 3D analytic gradient`. Replaces `chaff_grad_noise4d` (16 hypercube corner hashes per raymarch step) in `s_parts_fs_cloud` (scrolling `(u, v, z + wBoil)` or blending 2 phase-shifted trilinear taps) AND replaces 4× 3D caustic noises (32 hashes) in `nd_caustic_web()`.
+  - **Parity Guardrail**: Keep deterministic analytic `chaff` ONLY for CPU-coupled shoreline swash/tide phase (`eval_astronomical_tide`, focal water-entry probe) where exact CPU↔GPU sync matters; use LUT textures for all pure visual surface detail, macro textures, ripples, caustics, and cloud billow sculpting.
+- **Single-Pass Biome Weight Deduplication + VS Low-Freq Hoisting**:
+  - Compute the 9–12 biome `smoothstep` weights **once** in `s_parts_fs_terrain` into a `struct NdBiomeW` and reuse across humidity, Stage 4, and Stage 6 (eliminating 2 redundant full evaluations).
+  - Hoist low-frequency static fields (`groveMacro` 520 wu wavelength, `meadowBed` 176 wu, `worldClimate` 22,000 wu) into `s_parts_vs_terrain` varyings.
+
+**Deliverables (6B):**
+1. `gl_chunk_tex_t` `R16F` (chunk-base-offset) heightmap + `RGBA8` derived `(nx, ny, lap, river)` map baked on upload; replace `sampleHeightSmooth` and `eval_river_surface` 16–32 `texelFetch` loops in `TERRAIN` and `WATER`.
+2. Startup bake & upload of `noise2d_tex` (256×256) and `noise3d_tex` (64³ `GL_TEXTURE_3D`), plus `nd_noise2d_lut()` / `nd_noise3d_lut()` GLSL helpers replacing hot-path `chaff_grad_noise2d` / `chaff_grad_noise4d` in `TERRAIN`, `WATER`, and `CLOUDS`.
+3. Biome weight deduplication (`struct NdBiomeW`) and VS hoisting of low-frequency ecology/climate fields in `s_parts_vs_terrain` / `s_parts_fs_terrain`.
+
+---
+
+### Sub-Phase 6C — Cloud Reprojection, FBO Bandwidth & Adaptive Scaling (Polish & Scaling: 1–2d, Low–Med Risk)
+
+**Data Layout & Invariants:**
+- **Half-Res / 2×2 Temporal Checkerboard Clouds (`cloud_tex_prev`, `cloud_tex_curr`)**:
+  - `gl_cloud_alloc_dims()` (`nd_seven_gl_occ.c:62`): Default High clouds to `0.50×–0.67×` paired with the **existing depth-aware bilateral upsampler** in `cloud_comp_pipe` (`nd_seven_gl_clouds.c:720`), OR enable 2×2 interleaved temporal reprojection (`gl_FragCoord` sub-pixel phase `frame_idx & 3`, reprojecting prior cloud pixels via `prev_vp * inv_curr_vp` with depth/disocclusion clamp).
+  - Hoist per-body uniforms (`uPlanetCenter`, `uBodyRot`, `uTorusRadii`) outside the per-chunk loop in `nd_seven_gl_flush_clouds` (`L670-680`).
+- **FBO Bandwidth Reduction (`gl_alloc_scene_targets`, `nd_seven_gl_occ.c:134-140`)**:
+  - **Configurable MSAA (`0× + FXAA`, `2×`, `4×`)**: Default integrated-GPU/Medium/Low profiles to `0×` (relying on existing `post_pipe` FXAA) or `2×` MSAA, keeping `4×` as an explicit High/Ultra option — cuts ROP + resolve bandwidth **2×–4×** and eliminates `glBlitFramebuffer` MSAA resolve cost entirely at `0×`.
+  - **HDR `GL_R11F_G11F_B10F` (4 B/px vs 8 B/px `RGBA16F`)**: Once the 3-state seabed/sprite alpha contract moves to **2 stencil bits** (`0x08` seabed, `0x10` submerged sprite), scene HDR color no longer needs an alpha channel, halving color attachment memory & resolve bandwidth!
+  - **Dynamic `far_z` & `GL_DEPTH24_STENCIL8` option**: Tighten near-field `far_z` from fixed `80,000,000` at `d = 300` to dynamic horizon distance `max(d * 60.0f, 45000.0f)` (expanding smoothly to `8e7` above `d > 2000`), dramatically improving near/mid depth precision and enabling `GL_DEPTH24_STENCIL8` (4 B/px vs 8 B/px `DEPTH32F_STENCIL8`) when in surface/mid regimes.
+- **Closed-Loop Dynamic Resolution Scaling (DRS)**:
+  - Feed rolling GPU frame time (or `rAF` frame delta when timer queries unavailable) into a damped hysteresis controller driving existing `nd_seven_gl_set_render_scales(eff_res_scale, eff_cloud_scale)` (`nd_seven_gl.c:1216`) between `0.75–1.00` during active camera motion/zoom, snapping smoothly back to `1.00` within ~200 ms once settled. Zero FBO reallocation.
+
+**Deliverables (6C):**
+1. Half-res / temporal checkerboard cloud mode + hoisted body uniforms in `nd_seven_gl_clouds.c` & `nd_seven_gl_occ.c`.
+2. Stencil-backed water/sprite state contract allowing `GL_R11F_G11F_B10F` scene color + selectable `0×/2×/4×` MSAA + dynamic horizon `far_z` in `nd_seven_gl_occ.c` & `nd_seven_gl.c`.
+3. Closed-loop DRS controller wired into `nd_seven_eval_alt_profile()` (opt-in / Auto quality preset).
+
+---
+
+### Sub-Phase 6D — 4-Wide SIMD Chunk Populate & `sampler2DArray` Instanced Terrain (CPU & Draw-Call Collapse: 2d, Med Risk)
+
+**Data Layout & Invariants:**
+- **4-Wide SIMD Batch Terrain Populate (`external/libareole` + `external/nd-world`)**:
+  - New batched callback `ar_eval_row4_fn(const int32_t x[4], int32_t y, float out_h[4], uint32_t out_rgba[4], void *ctx)` implemented using `<wasm_simd128.h>` (`v128_t`) on WASM (`-msimd128` already enabled in P1) and `<emmintrin.h>` (SSE2) on x86-64.
+  - Vectorizes `chaff_grad_noise2d` + octave accumulation across 4 adjacent grid columns simultaneously, guaranteeing **bit-exact** IEEE-754 parity with scalar `nd_field_sample` (verified by standalone unit test diffing 4-wide vs scalar over 10,000 random world coordinates).
+  - Replace CPU mipmap box-downsample loop in `nd_seven_gl_flush_terrain_chunk` (`L2036-2082`) with `glGenerateMipmap(GL_TEXTURE_2D)` and cache per-chunk torus center `cpos[3]` on `gl_chunk_tex_t` (eliminating per-frame `torus_frame_double` at `L2093`).
+- **`GL_TEXTURE_2D_ARRAY` Terrain Pool + Instanced Chunk Draw + VAOs**:
+  - Allocate fixed `GL_TEXTURE_2D_ARRAY` pools (`256` layers × `35×35` each): `height_array` (`R16F`, ~627 KB), `derived_array` (`RGBA8`, ~1.25 MB), `substrate_array` (`RGBA8` mipmapped, ~1.7 MB) — total **< 3.6 MB VRAM**.
+  - `gl_chunk_inst_t` (48 B/chunk, 3× `vec4` instance attributes): `(ox, oy, span, base_z)`, `(rel_ox, rel_oy, sea_level, flags_and_layer)`, `(p_center_or_misc)` uploaded once per frame via a single `glBufferSubData`.
+  - Group visible chunks by `(nd_terr_var_t, grid_lod)` and issue **1 `glDrawElementsInstanced` per group** → collapses **159 wide-zoom chunk draws + 318 texture binds** to **~3–5 draws + 3 binds**.
+  - Expose WebGL2 **VAOs (`glCreateVertexArray` / `glBindVertexArray` / `glDeleteVertexArray`)** in `external/liblamina/htdocs/webgl-cap.js` + `lam_gl` to eliminate per-bucket 7-attribute `glVertexAttribPointer` / `glVertexAttribDivisor` churn in `gl_draw_mesh3d_bucket` and per-pass state setup.
+
+**Deliverables (6D):**
+1. Standalone 4-wide SIMD `chaff_grad_noise2d_4x` + `nd_field_sample_4x` with bit-exact scalar equivalence unit test in `external/libchaff` / `external/nd-world` / `external/libareole`.
+2. `glGenerateMipmap` + cached `gl_chunk_tex_t.cpos[3]` in `mods/nd/seven/nd_seven_gl.c`.
+3. VAO support in `external/liblamina` (`webgl-cap.js` + native stub + bridge test) and `GL_TEXTURE_2D_ARRAY` instanced terrain batching in `mods/nd/seven/`.
+
+---
+
+**Phase 6 Target Exit Criteria (Intel ADL GT2 `1280×656`, `scripts/bench-nd-browser.mjs --frames 30`):**
+
+| Metric | Phase 5 Baseline | Phase 6 Target | Primary Driver |
+| :--- | ---: | ---: | :--- |
+| **`stationary_1x` FPS / GPU ms** | 19.7 FPS / 47.49 ms | **45–60 FPS / 15–22 ms** | 6B derived maps + noise LUT, 6A Early-Stencil water, 6C FBO/MSAA |
+| **`wide_zoom_steady` FPS / GPU ms** | 24.4 FPS / 35.51 ms | **50–60 FPS / 12–18 ms** | 6B macro noise LUT + 6C half-res/temporal clouds + 6D instanced chunks |
+| **`TERRAIN` pass (`1x` / `wide`)** | 24.86 / 26.68 ms | **8–12 / 7–10 ms** | 6B `R16F`+derived map + 2D noise LUT + biome dedup + `GL_CULL_FACE` |
+| **`WATER` pass (`1x`)** | 9.71–11.10 ms | **3–4 ms** | 6A Early-Stencil + `CSM_ONLY` + shared octaves + 6B noise/caustic LUT |
+| **`CLOUDS` pass (`wide`)** | 7.76 ms | **2–3 ms** | 6B 3D volume noise LUT + 6C half-res/checkerboard reprojection |
+| **`TREE_SHADOW` + `MESH3D_ALPHA`** | 6.56–14.97 ms | **2.5–5 ms** | 6A depth-only `mesh3d_shadow` + VS `subCol` + static VBO skip |
+| **Cold-boot first paint (WebGL2/ANGLE)** | ~14.1 s | **~2.5–3.5 s** | 6A shared VS handles + Tier A/B lazy pipeline compile |
+| **`INTEL_DEBUG=fs` spills:fills** | `SEABED_MID` 29:47, `WATER` 16:53 | **0:0 across all active variants** | 6B elimination of 16–32 `texelFetch` & procedural noise chains |
+| **Zoom CPU burst (`test_seven_perf`)** | 82.11 ms (`ar_pop 93k`) | **≤ 25 ms** | 6D 4-wide SIMD `libareole` chunk populate |
+| **Wide-zoom terrain draws / FFI** | 159 draws / 537 FFI | **≤ 8 draws / ≤ 120 FFI** | 6D `GL_TEXTURE_2D_ARRAY` instanced terrain + VAOs |
+| **Visual & Contract Gates** | `21/21` GLSL, 0 errors | **All GLSL ES 3.00 pass**, `docs/SHORE.md` parity, 0 console/WebGL errors, `make test-graphics` & `make test-fast` exit `0` | Per-sub-phase golden-frame & unit verification |
+
+**Status: In Progress (Sub-Phase 6A Complete; Sub-Phases 6B–6D Planned)**
+
+---
+
 ## Recommended Execution Sequence
 
 ```text
@@ -340,4 +487,8 @@ Cross-references:
 4. P3 (Sky Early-Z, Shaders, Grass)  → verify: ≥40% GPU/high-res drop, Tier-0 + test-graphics green
 5. P4 (UBO/Ring, RAM, Server/DB)     → verify: WASM/RAM/server targets met, make test-fast green
 6. P5 (Zero-Spill iGPU & Prewarm)    → verify: INTEL_DEBUG=fs spills slashed, 21/21 GLSL pass, hitch-free real-GPU bench
+7. P6A (Fast Boot, Stencil Water, Shadow) → verify: cold boot ~3s, WATER -4–6ms, TREE_SHADOW -50%, all GLSL pass
+8. P6B (Chunk Derived Map & Noise LUTs)   → verify: 0:0 spills all variants, TERRAIN/WATER/CLOUDS 2–3× faster, shore parity
+9. P6C (Cloud Reproj, FBO/MSAA, DRS)      → verify: R11F_G11F_B10F + stencil contract, 45–60 FPS on Intel ADL GT2
+10. P6D (SIMD Populate & Array Instancing) → verify: bit-exact SIMD test, zoom CPU ≤25ms, wide-zoom draws 159→≤8
 ```

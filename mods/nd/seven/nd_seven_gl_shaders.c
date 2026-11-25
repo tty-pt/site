@@ -233,73 +233,6 @@ static const char s_glsl_meadow_bed_fn[] =
 	"    return smoothstep(0.22, 0.58, fert);\n"
 	"}\n";
 
-/* Canonical 19-biome ground substrate RGB table (matches CPU ndw_biome_base_rgb in nd_seven_ground.c). */
-static const char s_glsl_biome_rgb_fn[] =
-	"vec3 nd_glsl_biome_rgb(float bioF) {\n"
-	"    int b = int(floor(bioF + 0.5));\n"
-	"    if (b == 1)  return vec3(244.0, 249.0, 255.0) / 255.0;\n"
-	"    if (b == 2)  return vec3(134.0, 140.0, 126.0) / 255.0;\n"
-	"    if (b == 3)  return vec3( 88.0, 148.0, 106.0) / 255.0;\n"
-	"    if (b == 4)  return vec3(178.0, 132.0,  86.0) / 255.0;\n"
-	"    if (b == 5)  return vec3( 58.0, 108.0,  94.0) / 255.0;\n"
-	"    if (b == 6)  return vec3(176.0, 162.0, 132.0) / 255.0;\n"
-	"    if (b == 7)  return vec3(148.0, 136.0,  88.0) / 255.0;\n"
-	"    if (b == 8)  return vec3( 64.0, 108.0,  78.0) / 255.0;\n"
-	"    if (b == 9)  return vec3( 58.0,  94.0,  76.0) / 255.0;\n"
-	"    if (b == 10) return vec3(106.0, 148.0,  72.0) / 255.0;\n"
-	"    if (b == 11) return vec3( 92.0, 136.0,  74.0) / 255.0;\n"
-	"    if (b == 12) return vec3(116.0, 134.0,  68.0) / 255.0;\n"
-	"    if (b == 13) return vec3( 52.0, 112.0,  68.0) / 255.0;\n"
-	"    if (b == 14) return vec3(218.0, 184.0, 126.0) / 255.0;\n"
-	"    if (b == 15) return vec3(198.0, 152.0,  72.0) / 255.0;\n"
-	"    if (b == 16) return vec3(142.0, 140.0,  68.0) / 255.0;\n"
-	"    if (b == 17) return vec3( 46.0, 114.0,  52.0) / 255.0;\n"
-	"    if (b == 18) return vec3( 54.0,  48.0,  52.0) / 255.0;\n"
-	"    return vec3(106.0, 148.0, 72.0) / 255.0;\n"
-	"}\n";
-
-/* Shared Biome-Matched Ground Substrate Evaluator (linear RGB matched to s_fs_terrain).
- * Used to root-blend 3D grass, medium/large flora bases, and geobreak earth/moss mounds.
- * Requires nd_to_lin(), nd_glsl_biome_rgb(), and chaff_grad_noise2d(). */
-static const char s_glsl_substrate_fn[] =
-	"vec3 nd_eval_ground_substrate(vec2 worldXY, float bankT, float bioId, float groveM) {\n"
-	"    int b = int(floor(bioId + 0.5));\n"
-	"    float turfVar = chaff_grad_noise2d(worldXY * 0.28, 0x47524153u).x;\n"
-	"    float macroV  = chaff_grad_noise2d(worldXY * 0.045, 0x474E4432u).x;\n"
-	"    vec3 bioLin = nd_to_lin(nd_glsl_biome_rgb(bioId));\n"
-	"    vec3 col = bioLin * vec3(0.84, 0.96, 0.76);\n"
-	"    if (b == 1) {\n"
-	"        col = vec3(0.71762, 0.79311, 0.91411);\n"
-	"    } else if (b == 2) {\n"
-	"        col = mix(vec3(0.11899, 0.13321, 0.09317), vec3(0.21764, 0.23725, 0.14830), macroV);\n"
-	"    } else if (b == 4) {\n"
-	"        col = mix(vec3(0.25779, 0.09317, 0.03575), vec3(0.11899, 0.16428, 0.04737), macroV * 0.65);\n"
-	"    } else if (b == 5) {\n"
-	"        col = mix(vec3(0.04330, 0.07603, 0.03575), vec3(0.07074, 0.19894, 0.07074), macroV);\n"
-	"    } else if (b == 6 || b == 14) {\n"
-	"        col = mix(vec3(0.42807, 0.30168, 0.14830), vec3(0.57891, 0.40086, 0.18994), macroV);\n"
-	"    } else if (b == 15) {\n"
-	"        col = mix(vec3(0.25779, 0.10565, 0.03228), vec3(0.37462, 0.21764, 0.06078), macroV);\n"
-	"    } else if (b == 8 || b == 9) {\n"
-	"        col = mix(vec3(0.07074, 0.05163, 0.02899), vec3(0.08153, 0.13321, 0.04330), macroV);\n"
-	"    } else if (b == 12) {\n"
-	"        col = mix(vec3(0.18116, 0.09930, 0.03228), vec3(0.10565, 0.16428, 0.04330), macroV);\n"
-	"    } else if (b == 16) {\n"
-	"        col = mix(vec3(0.16428, 0.11899, 0.03575), vec3(0.08153, 0.19894, 0.04330), macroV);\n"
-	"    } else if (b == 17) {\n"
-	"        col = mix(vec3(0.09317, 0.05163, 0.02299), vec3(0.04330, 0.16428, 0.02899), macroV);\n"
-	"    } else if (b == 18) {\n"
-	"        col = vec3(0.03228, 0.02899, 0.03943);\n"
-	"    }\n"
-	"    col *= (0.84 + 0.26 * turfVar);\n"
-	"    float isWood = (b == 8 || b == 9 || b == 11 || b == 12 || b == 13 || b == 16 || b == 17) ? 1.0 : 0.0;\n"
-	"    vec3 duffCol = vec3(0.07603, 0.05163, 0.02590);\n"
-	"    col = mix(col, duffCol, isWood * smoothstep(0.42, 0.78, groveM) * 0.42);\n"
-	"    vec3 bankCol = vec3(0.17261, 0.13321, 0.07603) * (0.86 + 0.24 * turfVar);\n"
-	"    col = mix(col, bankCol, clamp(bankT, 0.0, 1.0) * 0.45);\n"
-	"    return col;\n"
-	"}\n";
-
 /* Toroidal geometric self-eclipse raymarch:
  * Tests if the ray towards the sun traverses across the central throat and penetrates the opposite ring rim.
  * In the torus frame (Z = axis of revolution), core circle has radius R in Z=0, tube radius r0.
@@ -634,38 +567,40 @@ static const char s_glsl_water_waves_shared_fn[] =
 	"    float windFetch = clamp(0.25 + 0.40 * smoothstep(0.4, 5.0, d_up1) + 0.35 * smoothstep(1.2, 12.0, d_up2), 0.25, 1.0);\n"
 	"    return vec2(openSeaFactor, windFetch);\n"
 	"}\n"
-	"vec4 eval_zoom_water_waves_core(vec2 pos, vec4 wind, float anim_time, float dist, float fw, float openSeaFactor) {\n"
+	"vec4 eval_water_waves_lo(vec2 pos, vec4 wind, float anim_time, float dist, float fw, float openSeaFactor,\n"
+	"                         out vec2 outPRot, out mat2 outInvRot, out float outSwellH, out bool outOct2Ran) {\n"
 	"    vec2 wDir = wind.xy;\n"
 	"    vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
 	"    float gust = wind.z;\n"
-	"    const float freqs[6] = float[6](0.024, 0.072, 0.220, 0.680, 2.150, 6.800);\n"
-	"    const float amps[6]  = float[6](1.450, 0.680, 0.360, 0.160, 0.055, 0.020);\n"
-	"    const float spds[6]  = float[6](0.180, 0.340, 0.620, 1.050, 1.750, 2.800);\n"
-	"    const float dFar[6]  = float[6](65000.0, 18000.0, 4800.0, 1600.0, 520.0, 200.0);\n"
-	"    const float dNear[6] = float[6](14000.0,  3600.0, 1100.0,  360.0, 130.0,  42.0);\n"
-	"    const uint  seeds[6] = uint[6](0x4F434530u, 0x5357454Cu, 0x57415645u, 0x52495050u, 0x46494E45u, 0x53505241u);\n"
-	"    const vec2  dirs[6]  = vec2[6](\n"
+	"    const float freqs[3]     = float[3](0.024, 0.072, 0.220);\n"
+	"    const float amps[3]      = float[3](1.450, 0.680, 0.360);\n"
+	"    const float swellAmps[3] = float[3](1.450, 0.680, 0.280);\n"
+	"    const float spds[3]      = float[3](0.180, 0.340, 0.620);\n"
+	"    const float dFar[3]      = float[3](65000.0, 18000.0, 4800.0);\n"
+	"    const float dNear[3]     = float[3](14000.0,  3600.0, 1100.0);\n"
+	"    const uint  seeds[3]     = uint[3](0x4F434530u, 0x5357454Cu, 0x57415645u);\n"
+	"    const vec2  dirs[3]      = vec2[3](\n"
 	"        vec2( 0.8575, -0.5145),\n"
 	"        vec2( 0.6402, -0.7682),\n"
-	"        vec2( 0.9285, -0.3714),\n"
-	"        vec2( 0.5145, -0.8575),\n"
-	"        vec2( 0.7809, -0.6247),\n"
-	"        vec2( 0.3714, -0.9285)\n"
+	"        vec2( 0.9285, -0.3714)\n"
 	"    );\n"
-	"    const mat2  rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
-	"    const mat2  irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
+	"    const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"    const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
 	"    float h = 0.0;\n"
 	"    vec2 grad = vec2(0.0);\n"
 	"    float crest = 0.0;\n"
+	"    float swellH = 0.0;\n"
 	"    vec2 pRot = pos;\n"
 	"    mat2 curInvRot = mat2(1.0, 0.0, 0.0, 1.0);\n"
-	"    for (int i = 0; i < 6; i++) {\n"
+	"    bool oct2Ran = false;\n"
+	"    for (int i = 0; i < 3; i++) {\n"
 	"        float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
 	"        float wNyq  = (1.0 - smoothstep(0.16, 0.55, freqs[i] * fw));\n"
-	"        float gustScale = (i >= 3) ? (0.75 + 0.45 * gust) : (0.85 + 0.20 * gust);\n"
+	"        float wBase = wDist * wNyq * (0.85 + 0.20 * gust);\n"
 	"        float basinGate = (i < 2) ? smoothstep(0.12, 0.55, openSeaFactor) : 1.0;\n"
-	"        float w = wDist * wNyq * gustScale * basinGate;\n"
+	"        float w = wBase * basinGate;\n"
 	"        if (w <= 0.001) { if (i < 2) continue; break; }\n"
+	"        if (i == 2) oct2Ran = true;\n"
 	"        float phase = mod(anim_time * spds[i], 1024.0);\n"
 	"        vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
 	"        vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
@@ -677,12 +612,67 @@ static const char s_glsl_water_waves_shared_fn[] =
 	"        vec2 worldG = curInvRot * g.yz;\n"
 	"        h += shaped * amps[i] * w;\n"
 	"        grad += worldG * (dShape * freqs[i] * amps[i] * w);\n"
-	"        crest += max(0.0, ridge - 0.22) * (w * ((i <= 2) ? 1.4 : 0.8));\n"
+	"        crest += max(0.0, ridge - 0.22) * (w * 1.4);\n"
+	"        swellH += shaped * swellAmps[i] * wBase;\n"
 	"        pRot += g.yz * (0.11 * w);\n"
 	"        pRot = rot * pRot;\n"
 	"        curInvRot = curInvRot * irot;\n"
 	"    }\n"
+	"    outPRot = pRot;\n"
+	"    outInvRot = curInvRot;\n"
+	"    outSwellH = swellH;\n"
+	"    outOct2Ran = oct2Ran;\n"
+	"    return vec4(h, grad.x, grad.y, crest);\n"
+	"}\n"
+	"vec4 eval_water_waves_hi(vec2 pRot, mat2 curInvRot, vec4 lo, bool oct2Ran, vec4 wind, float anim_time, float dist, float fw) {\n"
+	"    float h = lo.x;\n"
+	"    vec2 grad = lo.yz;\n"
+	"    float crest = lo.w;\n"
+	"    if (oct2Ran) {\n"
+	"        vec2 wDir = wind.xy;\n"
+	"        vec2 wPerp = vec2(-wDir.y, wDir.x);\n"
+	"        float gust = wind.z;\n"
+	"        const float freqs[3] = float[3](0.680, 2.150, 6.800);\n"
+	"        const float amps[3]  = float[3](0.160, 0.055, 0.020);\n"
+	"        const float spds[3]  = float[3](1.050, 1.750, 2.800);\n"
+	"        const float dFar[3]  = float[3](1600.0, 520.0, 200.0);\n"
+	"        const float dNear[3] = float[3]( 360.0, 130.0,  42.0);\n"
+	"        const uint  seeds[3] = uint[3](0x52495050u, 0x46494E45u, 0x53505241u);\n"
+	"        const vec2  dirs[3]  = vec2[3](\n"
+	"            vec2(0.5145, -0.8575),\n"
+	"            vec2(0.7809, -0.6247),\n"
+	"            vec2(0.3714, -0.9285)\n"
+	"        );\n"
+	"        const mat2 rot  = mat2(0.8, -0.6, 0.6, 0.8);\n"
+	"        const mat2 irot = mat2(0.8,  0.6, -0.6, 0.8);\n"
+	"        for (int i = 0; i < 3; i++) {\n"
+	"            float wDist = clamp((dFar[i] - dist) / max(1.0, dFar[i] - dNear[i]), 0.0, 1.0);\n"
+	"            float wNyq  = (1.0 - smoothstep(0.16, 0.55, freqs[i] * fw));\n"
+	"            float w = wDist * wNyq * (0.75 + 0.45 * gust);\n"
+	"            if (w <= 0.001) break;\n"
+	"            float phase = mod(anim_time * spds[i], 1024.0);\n"
+	"            vec2 windWarp = (wDir * (gust - 0.65) + wPerp * (wind.w - 0.5)) * 0.45;\n"
+	"            vec2 q = pRot * freqs[i] + windWarp - dirs[i] * phase;\n"
+	"            vec3 g = chaff_grad_noise2d(q, seeds[i]);\n"
+	"            float signedVal = g.x - 0.5;\n"
+	"            float ridge = 0.5 - abs(signedVal);\n"
+	"            float shaped = mix(signedVal, ridge - 0.18, 0.35);\n"
+	"            float dShape = 0.85 + 0.45 * ridge;\n"
+	"            vec2 worldG = curInvRot * g.yz;\n"
+	"            h += shaped * amps[i] * w;\n"
+	"            grad += worldG * (dShape * freqs[i] * amps[i] * w);\n"
+	"            crest += max(0.0, ridge - 0.22) * (w * 0.8);\n"
+	"            pRot += g.yz * (0.11 * w);\n"
+	"            pRot = rot * pRot;\n"
+	"            curInvRot = curInvRot * irot;\n"
+	"        }\n"
+	"    }\n"
 	"    return vec4(h, grad.x, grad.y, clamp(crest, 0.0, 1.0));\n"
+	"}\n"
+	"vec4 eval_zoom_water_waves_core(vec2 pos, vec4 wind, float anim_time, float dist, float fw, float openSeaFactor) {\n"
+	"    vec2 pRot; mat2 invRot; float dummySwell; bool oct2Ran;\n"
+	"    vec4 lo = eval_water_waves_lo(pos, wind, anim_time, dist, fw, openSeaFactor, pRot, invRot, dummySwell, oct2Ran);\n"
+	"    return eval_water_waves_hi(pRot, invRot, lo, oct2Ran, wind, anim_time, dist, fw);\n"
 	"}\n"
 	"vec2 eval_wind_capillary_facets(vec2 pos, float anim_time, vec4 wind, float dist, float fw) {\n"
 	"    float distVis = clamp(1.0 - (dist - 550.0) / 2200.0, 0.0, 1.0);\n"
@@ -772,7 +762,7 @@ static const char s_glsl_shore_swash_and_wake_fn[] =
 	" * Driven by the smooth travelling wave octaves (eval_shore_wave_swell) + gentle shoreward phase\n"
 	" * on both lakes and oceans, with zero high-frequency shoreline static.\n"
 	" * Returns vec4(swashSurfZ, highWaterZ, swashFoam, swashFilmMask). */\n"
-	"vec4 eval_shore_swash(vec2 pos, vec4 wind, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw, float openSeaFactor, float localSeaLevel) {\n"
+	"vec4 eval_shore_swash_with_swell(vec2 pos, vec4 wind, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw, float openSeaFactor, float localSeaLevel, bool hasPreSwell, float preSwellH) {\n"
 	"    float isOcean = smoothstep(0.20, 0.65, openSeaFactor) * (1.0 - smoothstep(0.25, 0.75, abs(localSeaLevel - uBaseSeaLevel)));\n"
 	"    float slopeMag = length(slopeGrad);\n"
 	"    float relZ = terrainZ - baseTideZ;\n"
@@ -790,8 +780,8 @@ static const char s_glsl_shore_swash_and_wake_fn[] =
 	"        float groupEnv = 0.76 + 0.24 * sin(mod(anim_time * 0.24, 628.3185) + (nAlong.x - 0.5) * 2.2);\n"
 	"        float waveArg = mod(anim_time * 0.92, 628.3185) - relZ * 0.32 + (nAlong.x - 0.5) * 1.8;\n"
 	"        float swellWave = sin(waveArg) + 0.22 * sin(2.0 * waveArg - 0.35);\n"
-	"        vec2 shoreWaves = eval_shore_wave_swell(pos, wind, anim_time, dist, fw);\n"
-	"        float waveletRunup = shoreWaves.x * 0.86 * slopeResponse;\n"
+	"        float swellH = hasPreSwell ? preSwellH : eval_shore_wave_swell(pos, wind, anim_time, dist, fw).x;\n"
+	"        float waveletRunup = swellH * 0.86 * slopeResponse;\n"
 	"        float swellRunup = swellWave * 0.58 * groupEnv * slopeResponse;\n"
 	"        oceanSwell = (waveletRunup + swellRunup) * isOcean;\n"
 	"    }\n"
@@ -806,6 +796,9 @@ static const char s_glsl_shore_swash_and_wake_fn[] =
 	"    float swashFoam = clamp(edgeLip * 0.16 * bodyFoamScale * distFade, 0.0, 0.24);\n"
 	"    float swashFilm = smoothstep(highWaterZ + 0.12, swashSurfZ - 0.04, terrainZ) * step(swashSurfZ, terrainZ) * distFade;\n"
 	"    return vec4(swashSurfZ, highWaterZ, swashFoam, swashFilm);\n"
+	"}\n"
+	"vec4 eval_shore_swash(vec2 pos, vec4 wind, float baseTideZ, float terrainZ, vec2 slopeGrad, float anim_time, float dist, float fw, float openSeaFactor, float localSeaLevel) {\n"
+	"    return eval_shore_swash_with_swell(pos, wind, baseTideZ, terrainZ, slopeGrad, anim_time, dist, fw, openSeaFactor, localSeaLevel, false, 0.0);\n"
 	"}\n"
 	"vec4 eval_lamb_wake_ribbon(vec2 pos, float anim_time, float dist, float fw) {\n"
 	"    float headEnergy = uLambWakeHead.w;\n"
@@ -2786,13 +2779,10 @@ static const char *const s_parts_fs_water[] = {
 	s_glsl_chaff_grad_noise,
 	s_glsl_chaff_flow,
 	s_glsl_chaff_sample_3d_fn,
-	s_glsl_synoptic_cloud_fn,
 	s_glsl_torus_eclipse_fn,
 	s_glsl_eval_wind_2arg_fn,
 	s_glsl_scene_light,
-	s_glsl_cloud_shadow_fn,
 	s_glsl_csm_lookup_fn,
-	s_glsl_cloud_shadow_entry_fn,
 	s_glsl_valley_fog_fn,
 	"vec3 eval_shore_micro_relief(vec2 worldPos, float depth, float fw) {\n"
 	"    float env = (1.0 - smoothstep(0.25, 3.2, abs(depth)));\n"
@@ -2810,12 +2800,8 @@ static const char *const s_parts_fs_water[] = {
 	"    return (1.0 - smoothstep(0.28, 0.92, fw / max(1e-4, wavelength)));\n"
 	"}\n",
 	s_glsl_water_waves_shared_fn,
-	"vec4 eval_zoom_water_waves(vec2 pos, vec4 wind, float anim_time, float dist, float fw, float openSeaFactor) {\n"
-	"    if (dist >= 65000.0) return vec4(0.0);\n"
-	"    return eval_zoom_water_waves_core(pos, wind, anim_time, dist, fw, openSeaFactor);\n"
-	"}\n"
 	"vec2 eval_shore_wave_swell(vec2 pos, vec4 wind, float anim_time, float dist, float fw) {\n"
-	"    return eval_shore_wave_swell_core(pos, wind, anim_time, dist, fw, 0.35);\n"
+	"    return vec2(0.0);\n"
 	"}\n",
 	s_glsl_shore_swash_and_wake_fn,
 	"/* Linear eye depth of a window-space depth value, written to stay accurate for a 8e7 far plane */\n"
@@ -2922,7 +2908,15 @@ static const char *const s_parts_fs_water[] = {
 	"    float rawDepth = baseTideSeaLevel - fragZ;\n"
 	"    vec3 shoreRelief = eval_shore_micro_relief(surfXY, rawDepth, fw) * (1.0 - 0.65 * riverProx);\n"
 	"    shoreGrad += shoreRelief.yz;\n"
-	"    vec4 swashState = eval_shore_swash(surfXY, wind, baseTideSeaLevel, fragZ, shoreGrad, uAnimTime, vDistance, fw, openSeaFactor, effSeaLevel);\n"
+	"    vec2 wavePRot3 = vec2(0.0); mat2 waveInvRot3 = mat2(1.0); float preSwellH = 0.0; bool waveOct2Ran = false;\n"
+	"    vec4 waveLo = vec4(0.0);\n"
+	"    bool hasPreWaveLo = false;\n"
+	"    float isOceanPre = smoothstep(0.20, 0.65, openSeaFactor) * (1.0 - smoothstep(0.25, 0.75, abs(effSeaLevel - uBaseSeaLevel)));\n"
+	"    if (isOceanPre > 0.01 && rawDepth > -2.4 && rawDepth < 4.5 && vDistance <= 3800.0) {\n"
+	"        waveLo = eval_water_waves_lo(surfXY, wind, uAnimTime, trueSurfDist, fw, openSeaFactor, wavePRot3, waveInvRot3, preSwellH, waveOct2Ran);\n"
+	"        hasPreWaveLo = true;\n"
+	"    }\n"
+	"    vec4 swashState = eval_shore_swash_with_swell(surfXY, wind, baseTideSeaLevel, fragZ, shoreGrad, uAnimTime, vDistance, fw, openSeaFactor, effSeaLevel, hasPreWaveLo, preSwellH);\n"
 	"    vec4 lambWake = eval_lamb_wake_ribbon(surfXY, uAnimTime, vDistance, fw);\n"
 	"    float liveSeaLevel = swashState.x + lambWake.x;\n"
 	"    float liveSurfDist = trueSurfDist - (liveSeaLevel - effSeaLevel) / cosV;\n"
@@ -2936,6 +2930,9 @@ static const char *const s_parts_fs_water[] = {
 	"    }\n"
 	"    if (fragWaterDepth <= 0.0) {\n"
 	"        discard;\n"
+	"    }\n"
+	"    if (!hasPreWaveLo) {\n"
+	"        waveLo = eval_water_waves_lo(surfXY, wind, uAnimTime, trueSurfDist, fw, openSeaFactor, wavePRot3, waveInvRot3, preSwellH, waveOct2Ran);\n"
 	"    }\n"
 	"    vec3 sDir = (length(uSunDir) > 0.001) ? normalize(uSunDir) : vec3(1.0, 0.0, 0.0);\n"
 	"    float orbitLight = smoothstep(24000.0, 220000.0, vDistance);\n"
@@ -2980,7 +2977,7 @@ static const char *const s_parts_fs_water[] = {
 	"    float midLatWet = (1.0 - smoothstep(0.0, 18.0, abs(latDeg - 38.0))) * 0.12;\n"
 	"    float subpolarWet = (1.0 - smoothstep(0.0, 10.0, abs(latDeg - 58.0))) * 0.08;\n"
 	"    float bioHumidity = clamp(0.55 * wTemperate + 0.84 * wTropical + 0.88 * wWet0 + 0.58 * wBoreal + 0.45 * wPolar + 0.15 * wVolcanic + 0.10 * wDesert + 0.25 * smoothstep(-4.0, 8.0, fragWaterDepth) - eqEvapDry + midLatWet + subpolarWet, 0.06, 0.95);\n"
-	"    float cloudShadow = nd_cloud_shadow(surfXY, liveSeaLevel, uAnimTime, bioHumidity, trueSurfDist, fw);\n"
+	"    float cloudShadow = nd_cloud_shadow_map(surfXY, liveSeaLevel, trueSurfDist);\n"
 	"    float sunTrans = nd_sun_trans(cloudShadow);\n"
 	"    vec3 C_SHALLOW = vec3(0.01774, 0.27926, 0.34935) * wTropical\n"
 	"                   + vec3(0.00778, 0.14830, 0.18116) * wTemperate\n"
@@ -3001,7 +2998,7 @@ static const char *const s_parts_fs_water[] = {
 	"    /* Reuse recursive moving wind field & height-model basin/fetch profile */\n"
 	"    float shoreWaveDamp = smoothstep(0.0, 1.8, fragWaterDepth);\n"
 	"    float basinWaveScale = (0.38 + 0.62 * openSeaFactor) * windFetch * (0.30 + 0.70 * shoreWaveDamp) * (1.0 - freezeFactor * 0.95);\n"
-	"    vec4 waves = eval_zoom_water_waves(surfXY, wind, uAnimTime, trueSurfDist, fw, openSeaFactor) * (1.0 - freezeFactor * 0.95);\n"
+	"    vec4 waves = eval_water_waves_hi(wavePRot3, waveInvRot3, waveLo, waveOct2Ran, wind, uAnimTime, trueSurfDist, fw) * (1.0 - freezeFactor * 0.95);\n"
 	"    vec2 capGrad = eval_wind_capillary_facets(surfXY, uAnimTime, wind, trueSurfDist, fw) * smoothstep(0.4, 2.8, fragWaterDepth) * (1.0 - freezeFactor * 0.95);\n"
 	"    vec2 waveGrad = waves.yz * basinWaveScale + capGrad * 0.20 + lambWake.yz * 1.85 * (1.0 - freezeFactor);\n"
 	"    vec2 specGrad = waves.yz * (basinWaveScale * 1.15 + 0.22) + capGrad * 0.25 + lambWake.yz * 2.25 * (1.0 - freezeFactor);\n"
@@ -3817,7 +3814,7 @@ static const char *const s_parts_vs_mesh3d[] = {
 	"layout (location = 0) in vec4 a_vpos;   /* xyz: local 3D pos in canonical wu, w: wind weight 0..1 */\n"
 	"layout (location = 1) in vec4 a_vnorm;  /* xyz: local 3D unit normal, w: ambient occlusion 0.12..1.0 */\n"
 	"layout (location = 2) in vec4 a_vcol;   /* rgb: 5-6-5 palette albedo, a: ND_MAT3D_* material class */\n"
-	"/* Per-instance attributes (divisor 1, stride 112 bytes) */\n"
+	"/* Per-instance attributes (divisor 1, stride 128 bytes) */\n"
 	"layout (location = 3) in vec4 a_ibase;  /* xyz: torus world base_pos rel cur_origin, w: scale_xy */\n"
 	"layout (location = 4) in vec4 a_iE;     /* xyz: rotated East tangent basis, w: scale_z */\n"
 	"layout (location = 5) in vec4 a_iS;     /* xyz: rotated South tangent basis, w: wind_sx */\n"
@@ -3825,9 +3822,8 @@ static const char *const s_parts_vs_mesh3d[] = {
 	"layout (location = 7) in vec4 a_itint;  /* rgba: instance tint & distance fade alpha */\n"
 	"layout (location = 8) in vec4 a_iparam; /* xyz: world (wx, wy, ground_wz), w: style + 16.0 if inWaterTile */\n"
 	"layout (location = 9) in vec4 a_iterr;  /* xyz: terrain slope (gx, gy) & curvature, w: signed (shFlags + yaw01) */\n"
+	"layout (location = 10) in vec4 a_isub;  /* rgb: CPU-evaluated linear ground substrate, a: unused */\n"
 	"uniform int uShadowPass;\n"
-	"uniform vec3 uTreeShadowWriteOrigin;\n"
-	"uniform mat4 uTreeShadowWriteVP;\n"
 	"out vec3 vWorldPos;\n"
 	"out vec3 vLocalPos;\n"
 	"out vec3 vNormal;\n"
@@ -3842,11 +3838,13 @@ static const char *const s_parts_vs_mesh3d[] = {
 	"out vec3 vSunLocal;\n"
 	"out vec3 vViewLocal;\n"
 	"out float vFlip;\n"
-	"out vec2 vTerrGrad;\n",
+	"out vec2 vTerrGrad;\n"
+	"flat out vec3 vSubCol;\n",
 	s_glsl_frame_ubo,
 	"void main() {\n"
 	"    vViewLocal = vec3(0.0, 0.0, 1.0);\n"
 	"    vTerrGrad = a_iterr.xy;\n"
+	"    vSubCol = a_isub.rgb;\n"
 	"    float scXY = a_ibase.w;\n"
 	"    float scZ  = a_iE.w;\n"
     "    bool hasCardU = (a_vpos.w > 1.0);\n"
@@ -3914,24 +3912,6 @@ static const char *const s_parts_vs_mesh3d[] = {
 	"    vTorusN = a_iN.xyz;\n"
 	"    vSunLocal = sunLoc;\n"
 	"    vFlip = flip;\n"
-	"    if (uShadowPass == 3) {\n"
-	"        if (a_itint.a <= 0.05) {\n"
-	"            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
-	"            return;\n"
-	"        }\n"
-	"        vec3 wGrid = vec3(a_iparam.x + dx_e, a_iparam.y + dy_s, a_iparam.z + lz);\n"
-	"        vWorldPos = a_ibase.xyz + dx_e * E + dy_s * S + lz * a_iN.xyz;\n"
-	"        vLocalPos = wGrid;\n"
-	"        vNormal = a_iN.xyz;\n"
-	"        vLocalN = rotLocalN;\n"
-	"        vCol = a_vcol;\n"
-	"        vTint = a_itint;\n"
-	"        vParam = a_iparam;\n"
-	"        vAO = a_vnorm.w;\n"
-	"        vHeightAboveGround = lz;\n"
-	"        gl_Position = uTreeShadowWriteVP * vec4(wGrid - uTreeShadowWriteOrigin, 1.0);\n"
-	"        return;\n"
-	"    }\n"
 	"    if (uShadowPass > 0) {\n"
 	"        bool emitSun  = (shFlags >= 0.5 && (shFlags < 1.5 || shFlags >= 2.5));\n"
 	"        bool emitLamb = (shFlags >= 1.5);\n"
@@ -4030,6 +4010,7 @@ static const char s_m3d_fs_head[] =
 	"in vec3 vViewLocal;\n"
 	"in float vFlip;\n"
 	"in vec2 vTerrGrad;\n"
+	"flat in vec3 vSubCol;\n"
 	"uniform float uSeaLevel;\n"
 	"uniform int uShadowPass;\n"
 	"uniform sampler2D uBranchletTex;\n"
@@ -4040,7 +4021,7 @@ static const char s_m3d_fs_head[] =
 	"uniform sampler2D uBarkNorm;\n"
 	"out vec4 FragColor;\n";
 
-static const char s_m3d_fs_helpers[] =
+static const char s_m3d_fs_alpha_helpers[] =
 	"vec2 nd_branchlet_uv(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
 	"    vec2 tileOff = isCon ? vec2(0.0, 0.0)\n"
 	"                 : (isOv ? vec2(0.5, 0.0)\n"
@@ -4051,9 +4032,6 @@ static const char s_m3d_fs_helpers[] =
 	"vec4 nd_sample_branchlet(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
 	"    return texture(uBranchletTex, nd_branchlet_uv(cuv, isCon, isOv, isLob));\n"
 	"}\n"
-	"vec4 nd_sample_branchlet_norm(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
-	"    return texture(uBranchletNorm, nd_branchlet_uv(cuv, isCon, isOv, isLob));\n"
-	"}\n"
 	"vec2 nd_grass_uv(vec2 cuv, bool isTall) {\n"
 	"    float tileX = isTall ? 0.5 : 0.0;\n"
 	"    return vec2(tileX + 0.004 + clamp(cuv.x, 0.0, 1.0) * 0.492,\n"
@@ -4061,6 +4039,11 @@ static const char s_m3d_fs_helpers[] =
 	"}\n"
 	"vec4 nd_sample_grass(vec2 cuv, bool isTall) {\n"
 	"    return texture(uGrassTex, nd_grass_uv(cuv, isTall));\n"
+	"}\n";
+
+static const char s_m3d_fs_norm_helpers[] =
+	"vec4 nd_sample_branchlet_norm(vec2 cuv, bool isCon, bool isOv, bool isLob) {\n"
+	"    return texture(uBranchletNorm, nd_branchlet_uv(cuv, isCon, isOv, isLob));\n"
 	"}\n"
 	"vec4 nd_sample_grass_norm(vec2 cuv, bool isTall) {\n"
 	"    return texture(uGrassNorm, nd_grass_uv(cuv, isTall));\n"
@@ -4082,30 +4065,11 @@ static const char s_m3d_fs_alpha_gate[] =
 	"    bool isFlower  = (mat > 0.425 && mat <= 0.55);\n"
 	"    bool isRock    = (mat > 0.55 && mat < 0.85);\n"
 	"    bool isCrystal = (mat >= 0.85);\n"
-	"    if (uShadowPass == 3) {\n"
-	"        if (vTint.a <= 0.05) discard;\n"
-	"        if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 4.0) discard;\n"
-	"        if (isFoliage && !isFolCore) {\n"
-	"            if (vCardUV.x >= 0.0) {\n"
-	"                vec4 br = isFolGrass ? nd_sample_grass(vCardUV, isFolGrassTall)\n"
-	"                                     : nd_sample_branchlet(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
-	"                if (br.a < (isFolGrass ? 0.40 : 0.38)) discard;\n"
-	"            } else {\n"
-	"                vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.58 + vec2(-vHeightAboveGround * 0.36, vLocalPos.x * 0.24), 0x464F4C32u);\n"
-	"                vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.45 + vec2(vHeightAboveGround * 0.95, vLocalPos.y * 0.75), 0x4C463333u);\n"
-	"                float poreField = 0.55 * gLeaf.x + 0.45 * gMicro.x;\n"
-	"                if (poreField < (isFolFringe ? 0.36 : 0.24)) discard;\n"
-	"            }\n"
-	"        }\n"
-	"        FragColor = vec4(0.0);\n"
-	"        return;\n"
-	"    }\n"
 	"    float vDist = length(uCameraPos - vWorldPos);\n"
 	"    float fogFactor = clamp((vDist - uFogStart) / max(1.0, uFogEnd - uFogStart), 0.0, 1.0);\n"
 	"    float baseStyle = mod(vParam.w, 32.0);\n"
 	"    float bioSlot = floor(vParam.w / 32.0 + 0.01);\n"
 	"    bool hasBio = (bioSlot >= 0.5);\n"
-	"    float bioId = hasBio ? (bioSlot - 1.0) : 10.0;\n"
 	"    bool inWaterTile = (baseStyle >= 15.5);\n"
 	"    float style = inWaterTile ? (baseStyle - 16.0) : baseStyle;\n"
 	"    bool canSubmerge = inWaterTile && (style < 0.5 || (style > 2.5 && style < 4.5));\n"
@@ -4220,7 +4184,6 @@ static const char s_m3d_fs_opaque_gate[] =
 	"    float baseStyle = mod(vParam.w, 32.0);\n"
 	"    float bioSlot = floor(vParam.w / 32.0 + 0.01);\n"
 	"    bool hasBio = (bioSlot >= 0.5);\n"
-	"    float bioId = hasBio ? (bioSlot - 1.0) : 10.0;\n"
 	"    bool inWaterTile = (baseStyle >= 15.5);\n"
 	"    float style = inWaterTile ? (baseStyle - 16.0) : baseStyle;\n"
 	"    bool canSubmerge = inWaterTile && (style < 0.5 || (style > 2.5 && style < 4.5));\n"
@@ -4271,12 +4234,7 @@ static const char s_m3d_fs_body_mid[] =
 	"    bool isGeoMesh   = (style < 0.5);\n"
 	"    bool needSubGround = (vDist < 1500.0 && isGrassMesh) || (vDist < 1100.0 && hasBio && ((isFloraMesh && vHeightAboveGround < 7.0) || (isGeoMesh && (isRock || vHeightAboveGround < 6.0))));\n"
 	"    if (needSubGround) {\n"
-	"        int gb = int(floor(bioId + 0.5));\n"
-	"        float isWood = (gb == 8 || gb == 9 || gb == 11 || gb == 12 || gb == 13 || gb == 16 || gb == 17) ? 1.0 : 0.0;\n"
-	"        float isOpen = (gb == 4 || gb == 7 || gb == 10 || gb == 15) ? 1.0 : 0.0;\n"
-	"        float groveM = nd_eval_grove_ecology_weight(vLocalPos.xy, 0.0, isWood, isOpen);\n"
-	"        float bankT = (uSeaLevel > -900.0) ? (1.0 - smoothstep(0.6, 6.5, vLocalPos.z - uSeaLevel)) : 0.0;\n"
-	"        vec3 subCol = nd_eval_ground_substrate(vLocalPos.xy, bankT, bioId, groveM);\n"
+	"        vec3 subCol = vSubCol;\n"
 	"        if (isGrassMesh) {\n"
 	"            float rootT = 1.0 - smoothstep(0.0, 5.2, vHeightAboveGround);\n"
 	"            float tipT  = smoothstep(2.8, 9.0, vHeightAboveGround);\n"
@@ -4525,10 +4483,8 @@ static const char *const s_parts_fs_mesh3d[] = {
 	s_glsl_chaff_hash,
 	s_glsl_chaff_grad_noise,
 	s_glsl_valley_fog_fn,
-	s_glsl_biome_rgb_fn,
-	s_glsl_grove_ecology_fn,
-	s_glsl_substrate_fn,
-	s_m3d_fs_helpers,
+	s_m3d_fs_alpha_helpers,
+	s_m3d_fs_norm_helpers,
 	s_m3d_fs_alpha_gate,
 	s_m3d_fs_body_mid,
 	s_m3d_fs_fol_pore_discard,
@@ -4549,10 +4505,8 @@ static const char *const s_parts_fs_mesh3d_opaque[] = {
 	s_glsl_chaff_hash,
 	s_glsl_chaff_grad_noise,
 	s_glsl_valley_fog_fn,
-	s_glsl_biome_rgb_fn,
-	s_glsl_grove_ecology_fn,
-	s_glsl_substrate_fn,
-	s_m3d_fs_helpers,
+	s_m3d_fs_alpha_helpers,
+	s_m3d_fs_norm_helpers,
 	s_m3d_fs_opaque_gate,
 	s_m3d_fs_body_mid,
 	"            }\n",
@@ -4560,6 +4514,155 @@ static const char *const s_parts_fs_mesh3d_opaque[] = {
 	NULL
 };
 static nd_glsl_prog_src_t s_prog_fs_mesh3d_opaque = { s_parts_fs_mesh3d_opaque, NULL };
+
+/* Dedicated Pass A depth-only shadow-map shaders for 3D meshes (TREE_SHADOW).
+ * Shared minimal VS skips normal/sun/view/substrate math; paired with either a tiny
+ * alpha-cutout FS (foliage/grass) or an empty zero-discard FS (trunks/rocks/solids). */
+static const char *const s_parts_vs_mesh3d_shadow[] = {
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"precision highp int;\n"
+	"layout (location = 0) in vec4 a_vpos;\n"
+	"layout (location = 2) in vec4 a_vcol;\n"
+	"layout (location = 3) in vec4 a_ibase;\n"
+	"layout (location = 4) in vec4 a_iE;\n"
+	"layout (location = 5) in vec4 a_iS;\n"
+	"layout (location = 6) in vec4 a_iN;\n"
+	"layout (location = 7) in vec4 a_itint;\n"
+	"layout (location = 8) in vec4 a_iparam;\n"
+	"layout (location = 9) in vec4 a_iterr;\n"
+	"uniform vec3 uTreeShadowWriteOrigin;\n"
+	"uniform mat4 uTreeShadowWriteVP;\n"
+	"out vec3 vLocalPos;\n"
+	"out float vMat;\n"
+	"out float vTintA;\n"
+	"out float vHeightAboveGround;\n"
+	"out vec2 vCardUV;\n",
+	s_glsl_frame_ubo,
+	"void main() {\n"
+	"    if (a_itint.a <= 0.05) {\n"
+	"        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"        vLocalPos = vec3(0.0); vMat = 0.0; vTintA = 0.0; vHeightAboveGround = 0.0; vCardUV = vec2(-1.0);\n"
+	"        return;\n"
+	"    }\n"
+	"    float scXY = a_ibase.w;\n"
+	"    float scZ  = a_iE.w;\n"
+	"    bool hasCardU = (a_vpos.w > 1.0);\n"
+	"    float wgt  = hasCardU ? fract(a_vpos.w) : a_vpos.w;\n"
+	"    float cardU = hasCardU ? ((floor(a_vpos.w) - 1.0) / 249.0) : -1.0;\n"
+	"    float baseStyle = mod(a_iparam.w, 32.0);\n"
+	"    bool isGrassMesh = (baseStyle >= 4.5 && baseStyle < 5.5) || (baseStyle >= 20.5 && baseStyle < 21.5);\n"
+	"    if (isGrassMesh && hasCardU && cardU < 0.05) wgt = 0.0;\n"
+	"    float mat = a_vcol.a;\n"
+	"    float cardV = 0.5;\n"
+	"    if (hasCardU && mat >= 0.198 && mat <= 0.425) {\n"
+	"        if (mat < 0.239) cardV = clamp((mat - 0.200) / 0.038, 0.0, 1.0);\n"
+	"        else if (mat < 0.279) cardV = clamp((mat - 0.240) / 0.038, 0.0, 1.0);\n"
+	"        else if (mat < 0.319) cardV = clamp((mat - 0.280) / 0.038, 0.0, 1.0);\n"
+	"        else if (mat < 0.354) cardV = clamp((mat - 0.320) / 0.030, 0.0, 1.0);\n"
+	"        else if (mat < 0.388) cardV = clamp((mat - 0.356) / 0.030, 0.0, 1.0);\n"
+	"        else cardV = clamp((mat - 0.390) / 0.030, 0.0, 1.0);\n"
+	"    }\n"
+	"    float wind_sx = a_iS.w * wgt;\n"
+	"    float wind_sy = a_iN.w * wgt;\n"
+	"    float wind_dz = 0.06 * (a_iS.w * a_iS.w + a_iN.w * a_iN.w) * wgt;\n"
+	"    float min_lz = isGrassMesh ? -1.8 : -1.5;\n"
+	"    float lx = a_vpos.x * scXY;\n"
+	"    float ly = a_vpos.y * scXY;\n"
+	"    float lz = max(min_lz, a_vpos.z * scZ - wind_dz - ((isGrassMesh && hasCardU && cardU < 0.05) ? 0.45 * scZ : 0.0));\n"
+	"    float tw = a_iterr.w;\n"
+	"    float flip = (tw < 0.0) ? -1.0 : 1.0;\n"
+	"    float yaw = (fract(abs(tw)) - 0.5) * 6.28318530718;\n"
+	"    float cy = cos(yaw), sy = sin(yaw);\n"
+	"    float wMag = length(vec2(a_iS.w, a_iN.w));\n"
+	"    float bPhase = uAnimTime * (isGrassMesh ? 3.1 : 1.9) + dot(a_iparam.xy, vec2(0.031, 0.023)) + (a_vpos.x * 0.14 + a_vpos.y * 0.11 + a_vpos.z * 0.06);\n"
+	"    float lPhase = uAnimTime * 4.4 + (a_vpos.x * 0.38 - a_vpos.y * 0.34) + cardU * 6.2831853;\n"
+	"    float flutterScale = (0.35 + 0.65 * wMag) * (wgt * wgt) * (isGrassMesh ? 1.35 : 1.0);\n"
+	"    float fl_e = (sin(bPhase) * 0.55 + (hasCardU ? sin(lPhase) * 0.32 : 0.0)) * flutterScale;\n"
+	"    float fl_s = (cos(bPhase * 0.87) * 0.45 + (hasCardU ? cos(lPhase * 1.13) * 0.28 : 0.0)) * flutterScale;\n"
+	"    float fl_z = (hasCardU ? sin(lPhase * 0.93 + 1.2) * 0.24 : 0.0) * flutterScale;\n"
+	"    float trample_e = 0.0, trample_s = 0.0, trample_squash = 1.0;\n"
+	"    if (isGrassMesh) {\n"
+	"        vec2 fromLamb = a_iparam.xy - uLambLight.xy;\n"
+	"        float dLamb = length(fromLamb);\n"
+	"        float dzLamb = abs(a_iparam.z - uLambLight.z);\n"
+	"        float trample = (1.0 - smoothstep(4.0, 22.0, dLamb)) * (1.0 - smoothstep(14.0, 28.0, dzLamb));\n"
+	"        if (trample > 0.001) {\n"
+	"            vec2 tDir = (dLamb > 0.25) ? (fromLamb / dLamb) : normalize(vec2((cy * flip) * lx - sy * ly + 0.01, (sy * flip) * lx + cy * ly + 0.01));\n"
+	"            trample_e = tDir.x * (trample * 9.5 * wgt);\n"
+	"            trample_s = tDir.y * (trample * 9.5 * wgt);\n"
+	"            trample_squash = 1.0 - trample * 0.60 * wgt;\n"
+	"        }\n"
+	"    }\n"
+	"    float dx_e = (cy * flip) * lx - sy * ly + wind_sx + fl_e + trample_e;\n"
+	"    float dy_s = (sy * flip) * lx + cy * ly + wind_sy + fl_s + trample_s;\n"
+	"    lz = max(min_lz, (lz + fl_z) * trample_squash);\n"
+	"    vec3 wGrid = vec3(a_iparam.x + dx_e, a_iparam.y + dy_s, a_iparam.z + lz);\n"
+	"    vLocalPos = wGrid;\n"
+	"    vMat = mat;\n"
+	"    vTintA = a_itint.a;\n"
+	"    vHeightAboveGround = lz;\n"
+	"    vCardUV = vec2(cardU, cardV);\n"
+	"    gl_Position = uTreeShadowWriteVP * vec4(wGrid - uTreeShadowWriteOrigin, 1.0);\n"
+	"}\n",
+	NULL
+};
+static nd_glsl_prog_src_t s_prog_vs_mesh3d_shadow = { s_parts_vs_mesh3d_shadow, NULL };
+
+static const char *const s_parts_fs_mesh3d_shadow_alpha[] = {
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"precision highp int;\n"
+	"precision highp sampler2D;\n"
+	"in vec3 vLocalPos;\n"
+	"in float vMat;\n"
+	"in float vTintA;\n"
+	"in float vHeightAboveGround;\n"
+	"in vec2 vCardUV;\n"
+	"uniform float uSeaLevel;\n"
+	"uniform sampler2D uBranchletTex;\n"
+	"uniform sampler2D uGrassTex;\n"
+	"out vec4 FragColor;\n",
+	s_glsl_chaff_hash,
+	s_glsl_chaff_grad_noise,
+	s_m3d_fs_alpha_helpers,
+	"void main() {\n"
+	"    if (vTintA <= 0.05) discard;\n"
+	"    if (uSeaLevel > -900.0 && vLocalPos.z < uSeaLevel - 4.0) discard;\n"
+	"    float mat = vMat;\n"
+	"    bool isFoliage = (mat >= 0.18 && mat <= 0.425);\n"
+	"    bool isFolCore = (mat >= 0.18 && mat < 0.195);\n"
+	"    if (isFoliage && !isFolCore) {\n"
+	"        if (vCardUV.x >= 0.0) {\n"
+	"            bool isFolConifer   = (mat >= 0.198 && mat < 0.239);\n"
+	"            bool isFolOvate     = (mat >= 0.239 && mat < 0.279);\n"
+	"            bool isFolLobed     = (mat >= 0.279 && mat < 0.319);\n"
+	"            bool isFolGrass     = (mat >= 0.354 && mat <= 0.425);\n"
+	"            bool isFolGrassTall = (mat >= 0.388 && mat <= 0.425);\n"
+	"            vec4 br = isFolGrass ? nd_sample_grass(vCardUV, isFolGrassTall)\n"
+	"                                 : nd_sample_branchlet(vCardUV, isFolConifer, isFolOvate, isFolLobed);\n"
+	"            if (br.a < (isFolGrass ? 0.40 : 0.38)) discard;\n"
+	"        } else {\n"
+	"            bool isFolFringe = (mat >= 0.28 && mat <= 0.354);\n"
+	"            vec3 gLeaf  = chaff_grad_noise2d(vLocalPos.xy * 0.58 + vec2(-vHeightAboveGround * 0.36, vLocalPos.x * 0.24), 0x464F4C32u);\n"
+	"            vec3 gMicro = chaff_grad_noise2d(vLocalPos.xy * 1.45 + vec2(vHeightAboveGround * 0.95, vLocalPos.y * 0.75), 0x4C463333u);\n"
+	"            float poreField = 0.55 * gLeaf.x + 0.45 * gMicro.x;\n"
+	"            if (poreField < (isFolFringe ? 0.36 : 0.24)) discard;\n"
+	"        }\n"
+	"    }\n"
+	"    FragColor = vec4(0.0);\n"
+	"}\n",
+	NULL
+};
+static nd_glsl_prog_src_t s_prog_fs_mesh3d_shadow_alpha = { s_parts_fs_mesh3d_shadow_alpha, NULL };
+
+static const char s_fs_mesh3d_shadow_opaque[] =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"out vec4 FragColor;\n"
+	"void main() {\n"
+	"    FragColor = vec4(0.0);\n"
+	"}\n";
 
 
 /* Depth-only terrain heightmap shadow caster (renders Level 0/1 hills, ridges, and riverbanks
@@ -5841,6 +5944,9 @@ const char *nd_seven_gl_fs_billboard(void) { return nd_glsl_assemble(&s_prog_fs_
 const char *nd_seven_gl_vs_mesh3d(void) { return nd_glsl_assemble(&s_prog_vs_mesh3d); }
 const char *nd_seven_gl_fs_mesh3d(void) { return nd_glsl_assemble(&s_prog_fs_mesh3d); }
 const char *nd_seven_gl_fs_mesh3d_opaque(void) { return nd_glsl_assemble(&s_prog_fs_mesh3d_opaque); }
+const char *nd_seven_gl_vs_mesh3d_shadow(void) { return nd_glsl_assemble(&s_prog_vs_mesh3d_shadow); }
+const char *nd_seven_gl_fs_mesh3d_shadow_alpha(void) { return nd_glsl_assemble(&s_prog_fs_mesh3d_shadow_alpha); }
+const char *nd_seven_gl_fs_mesh3d_shadow_opaque(void) { return s_fs_mesh3d_shadow_opaque; }
 const char *nd_seven_gl_vs_terrain_shadow(void) { return s_vs_terrain_shadow; }
 const char *nd_seven_gl_fs_terrain_shadow(void) { return s_fs_terrain_shadow; }
 const char *nd_seven_gl_vs_grass(void) { return nd_glsl_assemble(&s_prog_vs_grass); }

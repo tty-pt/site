@@ -976,12 +976,164 @@ static inline bool pack_bb_lamb_shadow_quad_instance(const lam_billboard_gpu_t *
 }
 
 
-static nd_seven_gl_mesh3d_inst_t s_mesh3d_staging[MAX_BB_INSTANCES];
+static gl_mesh3d_inst_t s_mesh3d_staging[MAX_BB_INSTANCES];
 static uint8_t s_mesh3d_staging_ids[MAX_BB_INSTANCES];
-static nd_seven_gl_mesh3d_inst_t s_mesh3d_sorted[MAX_BB_INSTANCES];
+static gl_mesh3d_inst_t s_mesh3d_sorted[MAX_BB_INSTANCES];
 static uint32_t s_mesh3d_counts[ND_SEVEN_MESH3D_TOTAL];
 static uint32_t s_mesh3d_offsets[ND_SEVEN_MESH3D_TOTAL];
 static uint32_t s_mesh3d_cursors[ND_SEVEN_MESH3D_TOTAL];
+
+static inline float gl_mixf(float a, float b, float t)
+{
+	return a + (b - a) * t;
+}
+
+static inline void gl_mix3(float out[3], const float a[3], const float b[3], float t)
+{
+	out[0] = a[0] + (b[0] - a[0]) * t;
+	out[1] = a[1] + (b[1] - a[1]) * t;
+	out[2] = a[2] + (b[2] - a[2]) * t;
+}
+
+/* CPU mirror of the terrain ground substrate evaluator (formerly in mesh3d FS/VS).
+ * Runs once per mesh3d instance behind a 1024-entry direct-mapped cache instead of
+ * executing 5x chaff_grad_noise2d across ~2M instanced vertices on the GPU. */
+static inline void eval_mesh3d_ground_substrate_cpu(float wx, float wy, float wz,
+                                                    float sea_level, int bio_id,
+                                                    float out_rgb[3])
+{
+	static struct {
+		int32_t  qx, qy, qz, qsea;
+		uint16_t bio;
+		uint16_t valid;
+		float    rgb[3];
+	} s_sub_cache[1024];
+
+	int32_t qx = (int32_t)floorf(wx * 2.0f + 0.5f);
+	int32_t qy = (int32_t)floorf(wy * 2.0f + 0.5f);
+	int32_t qz = (int32_t)floorf(wz * 4.0f + 0.5f);
+	int32_t qsea = (sea_level > -900.0f) ? (int32_t)floorf(sea_level * 4.0f + 0.5f) : -9999;
+	uint16_t bio_u = (uint16_t)((bio_id >= 0 && bio_id <= 31) ? bio_id : 10);
+	uint32_t h = ((uint32_t)qx * 2654435761u) ^ ((uint32_t)qy * 2246822519u) ^
+	             ((uint32_t)qz * 3266489917u) ^ ((uint32_t)qsea * 668265263u) ^
+	             ((uint32_t)bio_u * 374761393u);
+	uint32_t slot = (h ^ (h >> 10)) & 1023u;
+	if (s_sub_cache[slot].valid &&
+	    s_sub_cache[slot].qx == qx && s_sub_cache[slot].qy == qy &&
+	    s_sub_cache[slot].qz == qz && s_sub_cache[slot].qsea == qsea &&
+	    s_sub_cache[slot].bio == bio_u) {
+		out_rgb[0] = s_sub_cache[slot].rgb[0];
+		out_rgb[1] = s_sub_cache[slot].rgb[1];
+		out_rgb[2] = s_sub_cache[slot].rgb[2];
+		return;
+	}
+
+	int b = (int)bio_u;
+	float is_wood = (b == 8 || b == 9 || b == 11 || b == 12 || b == 13 || b == 16 || b == 17) ? 1.0f : 0.0f;
+	float is_open = (b == 4 || b == 7 || b == 10 || b == 15) ? 1.0f : 0.0f;
+
+	float dv, wgx, wgy, n_grove, n_copse, turf_var, macro_v, d1, d2;
+	gl_chaff_grad_noise2d(wx * (1.0f / 220.0f), wy * (1.0f / 220.0f), 0x47525750u, &dv, &wgx, &wgy);
+	wgx *= 64.0f;
+	wgy *= 64.0f;
+	gl_chaff_grad_noise2d((wx + wgx) * (1.0f / 520.0f), (wy + wgy) * (1.0f / 520.0f), 0x47524F56u, &n_grove, &d1, &d2);
+	gl_chaff_grad_noise2d((wx - wgy * 0.5f) * (1.0f / 190.0f), (wy + wgx * 0.5f) * (1.0f / 190.0f), 0x434F5053u, &n_copse, &d1, &d2);
+	float grove_m = 0.65f * n_grove + 0.35f * n_copse + is_wood * 0.14f - is_open * 0.10f;
+	if (grove_m < 0.0f) grove_m = 0.0f;
+	if (grove_m > 1.0f) grove_m = 1.0f;
+
+	gl_chaff_grad_noise2d(wx * 0.28f, wy * 0.28f, 0x47524153u, &turf_var, &d1, &d2);
+	gl_chaff_grad_noise2d(wx * 0.045f, wy * 0.045f, 0x474E4432u, &macro_v, &d1, &d2);
+
+	static const uint8_t k_bio_srgb[19][3] = {
+		{ 106, 148,  72 }, { 244, 249, 255 }, { 134, 140, 126 }, {  88, 148, 106 },
+		{ 178, 132,  86 }, {  58, 108,  94 }, { 176, 162, 132 }, { 148, 136,  88 },
+		{  64, 108,  78 }, {  58,  94,  76 }, { 106, 148,  72 }, {  92, 136,  74 },
+		{ 116, 134,  68 }, {  52, 112,  68 }, { 218, 184, 126 }, { 198, 152,  72 },
+		{ 142, 140,  68 }, {  46, 114,  52 }, {  54,  48,  52 }
+	};
+	float col[3];
+	if (b == 1) {
+		col[0] = 0.71762f; col[1] = 0.79311f; col[2] = 0.91411f;
+	} else if (b == 2) {
+		static const float a[3] = { 0.11899f, 0.13321f, 0.09317f };
+		static const float c[3] = { 0.21764f, 0.23725f, 0.14830f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 4) {
+		static const float a[3] = { 0.25779f, 0.09317f, 0.03575f };
+		static const float c[3] = { 0.11899f, 0.16428f, 0.04737f };
+		gl_mix3(col, a, c, macro_v * 0.65f);
+	} else if (b == 5) {
+		static const float a[3] = { 0.04330f, 0.07603f, 0.03575f };
+		static const float c[3] = { 0.07074f, 0.19894f, 0.07074f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 6 || b == 14) {
+		static const float a[3] = { 0.42807f, 0.30168f, 0.14830f };
+		static const float c[3] = { 0.57891f, 0.40086f, 0.18994f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 15) {
+		static const float a[3] = { 0.25779f, 0.10565f, 0.03228f };
+		static const float c[3] = { 0.37462f, 0.21764f, 0.06078f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 8 || b == 9) {
+		static const float a[3] = { 0.07074f, 0.05163f, 0.02899f };
+		static const float c[3] = { 0.08153f, 0.13321f, 0.04330f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 12) {
+		static const float a[3] = { 0.18116f, 0.09930f, 0.03228f };
+		static const float c[3] = { 0.10565f, 0.16428f, 0.04330f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 16) {
+		static const float a[3] = { 0.16428f, 0.11899f, 0.03575f };
+		static const float c[3] = { 0.08153f, 0.19894f, 0.04330f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 17) {
+		static const float a[3] = { 0.09317f, 0.05163f, 0.02299f };
+		static const float c[3] = { 0.04330f, 0.16428f, 0.02899f };
+		gl_mix3(col, a, c, macro_v);
+	} else if (b == 18) {
+		col[0] = 0.03228f; col[1] = 0.02899f; col[2] = 0.03943f;
+	} else {
+		int idx = (b >= 1 && b <= 18) ? b : 0;
+		col[0] = powf((float)k_bio_srgb[idx][0] * (1.0f / 255.0f), 2.2f) * 0.84f;
+		col[1] = powf((float)k_bio_srgb[idx][1] * (1.0f / 255.0f), 2.2f) * 0.96f;
+		col[2] = powf((float)k_bio_srgb[idx][2] * (1.0f / 255.0f), 2.2f) * 0.76f;
+	}
+
+	float tv_sc = 0.84f + 0.26f * turf_var;
+	col[0] *= tv_sc;
+	col[1] *= tv_sc;
+	col[2] *= tv_sc;
+
+	float duff_t = is_wood * gl_smoothstep01(0.42f, 0.78f, grove_m) * 0.42f;
+	if (duff_t > 0.0f) {
+		col[0] = gl_mixf(col[0], 0.07603f, duff_t);
+		col[1] = gl_mixf(col[1], 0.05163f, duff_t);
+		col[2] = gl_mixf(col[2], 0.02590f, duff_t);
+	}
+
+	float bank_t = (sea_level > -900.0f) ? (1.0f - gl_smoothstep01(0.6f, 6.5f, wz - sea_level)) : 0.0f;
+	if (bank_t > 0.0f) {
+		float b_sc = 0.86f + 0.24f * turf_var;
+		float bt = bank_t * 0.45f;
+		col[0] = gl_mixf(col[0], 0.17261f * b_sc, bt);
+		col[1] = gl_mixf(col[1], 0.13321f * b_sc, bt);
+		col[2] = gl_mixf(col[2], 0.07603f * b_sc, bt);
+	}
+
+	s_sub_cache[slot].qx = qx;
+	s_sub_cache[slot].qy = qy;
+	s_sub_cache[slot].qz = qz;
+	s_sub_cache[slot].qsea = qsea;
+	s_sub_cache[slot].bio = bio_u;
+	s_sub_cache[slot].valid = 1u;
+	s_sub_cache[slot].rgb[0] = col[0];
+	s_sub_cache[slot].rgb[1] = col[1];
+	s_sub_cache[slot].rgb[2] = col[2];
+	out_rgb[0] = col[0];
+	out_rgb[1] = col[1];
+	out_rgb[2] = col[2];
+}
 
 bool nd_seven_gl_billboard_is_mesh3d_only(const lam_billboard_gpu_t *b)
 {
@@ -1039,8 +1191,10 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const nd_mesh3d_slice_t *sl,
                                         bool want_shadow,
                                         bool want_lamb_shadow,
-                                        nd_seven_gl_mesh3d_inst_t *out)
+                                        float bb_sea_level,
+                                        gl_mesh3d_inst_t *out_inst)
 {
+	nd_seven_gl_mesh3d_inst_t *out = &out_inst->base;
 	float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
 	float ref_h = (sl && sl->mesh_h_wu > 0.1f) ? sl->mesh_h_wu : ((sl && sl->sprite_h > 0.1f) ? (float)sl->sprite_h : 12.0f);
 	float scale_xy = fmaxf(0.15f, b->width / ref_w);
@@ -1105,8 +1259,9 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	float gx = 0.0f, gy = 0.0f, curv = 0.0f;
 	float dx_c = bx - s_gl.cur_tx;
 	float dy_c = by - s_gl.cur_ty;
+	float d2_c = dx_c * dx_c + dy_c * dy_c;
 	bool want_slope_norm = (b->style == ND_BB_STYLE_GRASS || b->style == ND_BB_STYLE_FLORA) &&
-	                       (dx_c * dx_c + dy_c * dy_c < 650.0f * 650.0f);
+	                       (d2_c < 650.0f * 650.0f);
 	bool need_terr_plane = want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
 	if (need_terr_plane && nd_seven_get_chunk_sys()) {
 		static struct {
@@ -1173,6 +1328,21 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	out->terr[1] = gy;
 	out->terr[2] = curv;
 	out->terr[3] = flip * (sh_flags + yaw01);
+
+	/* Pre-evaluate linear ground substrate RGB once per instance for root/earth blending */
+	bool is_grass = (b->style == ND_BB_STYLE_GRASS);
+	bool need_sub = (is_grass && d2_c < 1650.0f * 1650.0f) ||
+	                (bio_slot > 0u && (b->style == ND_BB_STYLE_FLORA || b->style == ND_BB_STYLE_STANDARD) &&
+	                 d2_c < 1250.0f * 1250.0f);
+	if (need_sub) {
+		int bio_id = (bio_slot > 0u) ? ((int)bio_slot - 1) : 10;
+		eval_mesh3d_ground_substrate_cpu(bx, by, bz, bb_sea_level, bio_id, out_inst->sub_col);
+	} else {
+		out_inst->sub_col[0] = 0.0f;
+		out_inst->sub_col[1] = 0.0f;
+		out_inst->sub_col[2] = 0.0f;
+	}
+	out_inst->sub_col[3] = 0.0f;
 }
 
 static uint8_t s_mesh3d_has_fade[ND_SEVEN_MESH3D_TOTAL];
@@ -1238,10 +1408,10 @@ static void gl_draw_mesh3d_bucket(uint32_t m)
 	const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
 	if (!sl || sl->idx_count == 0) return;
 
-	size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
-	for (GLuint a = 0; a < 7; a++) {
+	size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(gl_mesh3d_inst_t);
+	for (GLuint a = 0; a < 8; a++) {
 		lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
-		                             sizeof(nd_seven_gl_mesh3d_inst_t),
+		                             sizeof(gl_mesh3d_inst_t),
 		                             inst_base_bytes + (size_t)(a * 16));
 	}
 	lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
@@ -1268,7 +1438,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		uint8_t mid = s_mesh3d_staging_ids[i];
 		if (mid > 0 && mid < ND_SEVEN_MESH3D_TOTAL) {
 			s_mesh3d_counts[mid]++;
-			if (s_mesh3d_staging[i].tint[3] < 0.995f)
+			if (s_mesh3d_staging[i].base.tint[3] < 0.995f)
 				s_mesh3d_has_fade[mid] = 1u;
 		}
 	}
@@ -1297,11 +1467,12 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	gl_end_terrain_pass();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(nd_seven_gl_mesh3d_inst_t), s_mesh3d_sorted);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(gl_mesh3d_inst_t), s_mesh3d_sorted);
 
-	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
+	/* Pass A: True 3D directional depth shadow map pass into ping-pong 1024x1024 FBO using
+	 * dedicated depth-only shadow pipelines (opaque zero-discard + alpha-cutout foliage).
 	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops.
-	 * Flush terrain shadow casters before enabling mesh3d attributes 1..9 so WebGL2 never sees
+	 * Flush terrain shadow casters before enabling mesh3d attributes 1..10 so WebGL2 never sees
 	 * unbound enabled attributes during glDrawElements. */
 	bool run_pass_a = (s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f);
 	if (run_pass_a) {
@@ -1326,8 +1497,6 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		}
 	}
 
-	gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_pipe, bb_sea_level, space_t, true);
-
 	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO + instanced VBO (locations 3..9, divisor 1) */
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
 	for (GLuint a = 0; a < 3; a++) {
@@ -1343,37 +1512,101 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	}
 
 	if (run_pass_a) {
-		if (s_gl.mesh3d_pipe.uTreeShadowTex >= 0)
-			glUniform1i(s_gl.mesh3d_pipe.uTreeShadowTex, 12);
-		if (s_gl.mesh3d_pipe.uTreeShadowWriteOrigin >= 0)
-			glUniform3fv(s_gl.mesh3d_pipe.uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
-		if (s_gl.mesh3d_pipe.uTreeShadowWriteVP >= 0)
-			glUniformMatrix4fv(s_gl.mesh3d_pipe.uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
-		glUniform1i(s_gl.mesh3d_pipe.uShadowPass, 3);
+		bool any_sh_opaque = false;
+		bool any_sh_alpha = false;
 		for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
 			if (m >= ND_MESH3D_MEADOW_BASE && m < ND_MESH3D_MEADOW_BASE + ND_MESH3D_MEADOW_COUNT)
 				continue;
-			uint32_t icnt = s_mesh3d_counts[m];
-			if (icnt == 0) continue;
-			const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
-			if (!sl || sl->idx_count == 0) continue;
-
-			size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
-			for (GLuint a = 0; a < 7; a++) {
-				lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
-				                             sizeof(nd_seven_gl_mesh3d_inst_t),
-				                             inst_base_bytes + (size_t)(a * 16));
-			}
-			lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
-			                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
+			if (s_mesh3d_counts[m] == 0) continue;
+			if (nd_seven_mesh3d_is_opaque((uint8_t)m))
+				any_sh_opaque = true;
+			else
+				any_sh_alpha = true;
 		}
-		gl_flush_cmd_ring();
+
+		/* Pass A1: Opaque shadow casters (zero-discard empty FS -> full hardware Hi-Z depth write) */
+		const gl_mesh3d_shadow_pipe_t *op = s_gl.mesh3d_shadow_opaque_pipe.prog
+			? &s_gl.mesh3d_shadow_opaque_pipe : &s_gl.mesh3d_shadow_alpha_pipe;
+		if (any_sh_opaque && op->prog) {
+			glUseProgram(op->prog);
+			if (op->uTreeShadowWriteOrigin >= 0)
+				glUniform3fv(op->uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
+			if (op->uTreeShadowWriteVP >= 0)
+				glUniformMatrix4fv(op->uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
+			if (op == &s_gl.mesh3d_shadow_alpha_pipe && op->uSeaLevel >= 0)
+				glUniform1f(op->uSeaLevel, bb_sea_level);
+			for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
+				if (m >= ND_MESH3D_MEADOW_BASE && m < ND_MESH3D_MEADOW_BASE + ND_MESH3D_MEADOW_COUNT)
+					continue;
+				if (!nd_seven_mesh3d_is_opaque((uint8_t)m)) continue;
+				uint32_t icnt = s_mesh3d_counts[m];
+				if (icnt == 0) continue;
+				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
+				if (!sl || sl->idx_count == 0) continue;
+
+				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(gl_mesh3d_inst_t);
+				for (GLuint a = 0; a < 7; a++) {
+					lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
+					                             sizeof(gl_mesh3d_inst_t),
+					                             inst_base_bytes + (size_t)(a * 16));
+				}
+				lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+				                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
+			}
+			gl_flush_cmd_ring();
+		}
+
+		/* Pass A2: Alpha-cutout shadow casters (minimal depth-only foliage/grass cutout FS) */
+		const gl_mesh3d_shadow_pipe_t *ap = &s_gl.mesh3d_shadow_alpha_pipe;
+		if (any_sh_alpha && ap->prog) {
+			if (s_gl.fol_atlas_tex) {
+				glActiveTexture(GL_TEXTURE0 + 3);
+				glBindTexture(GL_TEXTURE_2D, s_gl.fol_atlas_tex);
+			}
+			if (s_gl.fol_grass_tex) {
+				glActiveTexture(GL_TEXTURE0 + 5);
+				glBindTexture(GL_TEXTURE_2D, s_gl.fol_grass_tex);
+			}
+			glActiveTexture(GL_TEXTURE0);
+			glUseProgram(ap->prog);
+			if (ap->uTreeShadowWriteOrigin >= 0)
+				glUniform3fv(ap->uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
+			if (ap->uTreeShadowWriteVP >= 0)
+				glUniformMatrix4fv(ap->uTreeShadowWriteVP, 1, GL_FALSE, s_gl.tree_shadow_write_vp);
+			if (ap->uSeaLevel >= 0)
+				glUniform1f(ap->uSeaLevel, bb_sea_level);
+			for (uint32_t m = 1; m < ND_SEVEN_MESH3D_TOTAL; m++) {
+				if (m >= ND_MESH3D_MEADOW_BASE && m < ND_MESH3D_MEADOW_BASE + ND_MESH3D_MEADOW_COUNT)
+					continue;
+				if (nd_seven_mesh3d_is_opaque((uint8_t)m)) continue;
+				uint32_t icnt = s_mesh3d_counts[m];
+				if (icnt == 0) continue;
+				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
+				if (!sl || sl->idx_count == 0) continue;
+
+				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(gl_mesh3d_inst_t);
+				for (GLuint a = 0; a < 7; a++) {
+					lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
+					                             sizeof(gl_mesh3d_inst_t),
+					                             inst_base_bytes + (size_t)(a * 16));
+				}
+				lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
+				                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
+			}
+			gl_flush_cmd_ring();
+		}
+
 		glTimerEnd(ND_GPU_PASS_TREE_SHADOW);
 		s_gl.tree_shadow_write_draws = true;
 		gl_bind_scene_target();
 	}
 
-	/* Bind read-side 3D directional shadow map for main 3D tree self-shadowing */
+	/* Enable per-instance substrate RGB attribute (location 10) for main mesh3d VS (Pass B + Pass C) */
+	glEnableVertexAttribArray(10);
+	glVertexAttribDivisor(10, 1);
+
+	/* Bind main 3D mesh uniforms, foliage/bark textures, and read-side 3D directional shadow map */
+	gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_pipe, bb_sea_level, space_t, true);
 	gl_bind_tree_shadow_read(s_gl.mesh3d_pipe.uTreeShadowTex);
 
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1401,10 +1634,10 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 				const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice((uint8_t)m);
 				if (!sl || sl->idx_count == 0) continue;
 
-				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(nd_seven_gl_mesh3d_inst_t);
-				for (GLuint a = 0; a < 7; a++) {
+				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(gl_mesh3d_inst_t);
+				for (GLuint a = 0; a < 8; a++) {
 					lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
-					                             sizeof(nd_seven_gl_mesh3d_inst_t),
+					                             sizeof(gl_mesh3d_inst_t),
 					                             inst_base_bytes + (size_t)(a * 16));
 				}
 				lam_gl_cmd_draw_elements_instanced(&s_gl.cmd_buf, GL_TRIANGLES, (GLsizei)sl->idx_count, GL_UNSIGNED_INT,
@@ -1416,10 +1649,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	}
 
 	/* Pass C: Main 3D mesh geometry pass — split into Pass C1 (opaque Early-Z, zero discard)
-	 * and Pass C2 (alpha-tested foliage / LOD-fading meshes). */
+	 * and Pass C2 (alpha-tested foliage / LOD-fading meshes).
+	 * Sets bit 0x01 (sprite/mesh) and clears bit 0x08 (seabed) for water early-stencil. */
 	glDepthMask(GL_TRUE);
-	glStencilMask(0x01);
-	glStencilFunc(GL_ALWAYS, 1, 0x01);
+	glStencilMask(0x09);
+	glStencilFunc(GL_ALWAYS, 0x01, 0x09);
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
 	if (any_opaque_c1) {
@@ -1459,7 +1693,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	glStencilMask(0xFF);
 	glDisable(GL_STENCIL_TEST);
-	for (GLuint a = 1; a < 10; a++) {
+	for (GLuint a = 1; a < 11; a++) {
 		if (a >= 3) glVertexAttribDivisor(a, 0);
 		glDisableVertexAttribArray(a);
 	}
@@ -1635,8 +1869,8 @@ static void gl_submit_staged_billboards(const uint32_t *atlas_rgba, bool final_s
 			glDisable(GL_BLEND);
 			glDepthMask(GL_TRUE);
 			glEnable(GL_STENCIL_TEST);
-			glStencilMask(0x01);
-			glStencilFunc(GL_ALWAYS, 1, 0x01);
+			glStencilMask(0x09);
+			glStencilFunc(GL_ALWAYS, 0x01, 0x09);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
 			glStencilMask(0xFF);
@@ -1842,9 +2076,9 @@ void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
 			if (want_lamb_shadow) s_bb_frame_mesh3d_lamb_sh = true;
 			s_mesh3d_staging_ids[s_bb_frame_mesh3d_n] = batch[i].mesh_id;
 			pack_mesh3d_instance(&batch[i], &basis, m3d_slice, want_shadow, want_lamb_shadow,
-			                     &s_mesh3d_staging[s_bb_frame_mesh3d_n]);
+			                     bb_sea_level, &s_mesh3d_staging[s_bb_frame_mesh3d_n]);
 			if (lod_mesh_keep < 0.995f)
-				s_mesh3d_staging[s_bb_frame_mesh3d_n].tint[3] *= lod_mesh_keep;
+				s_mesh3d_staging[s_bb_frame_mesh3d_n].base.tint[3] *= lod_mesh_keep;
 			s_bb_frame_mesh3d_n++;
 			if (emit_impostor_crossfade) {
 				pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[s_bb_frame_core_n]);
