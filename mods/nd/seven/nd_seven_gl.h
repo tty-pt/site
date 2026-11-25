@@ -289,6 +289,10 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
                                           int32_t span_w, int32_t span_h,
                                           const nd_planet_def_t *eff_pdef);
 
+void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
+                                  uint32_t count,
+                                  const uint32_t *atlas_rgba);
+void nd_seven_gl_submit_billboards(const uint32_t *atlas_rgba);
 void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
                                   uint32_t count,
                                   const uint32_t *atlas_rgba);
@@ -298,6 +302,8 @@ const char *nd_seven_gl_vs_sky(void);
 const char *nd_seven_gl_fs_sky(void);
 const char *nd_seven_gl_vs_terrain(void);
 const char *nd_seven_gl_fs_terrain(void);
+const char *nd_seven_gl_fs_terrain_dry_near(void);
+const char *nd_seven_gl_fs_terrain_macro(void);
 const char *nd_seven_gl_vs_water(void);
 const char *nd_seven_gl_fs_water(void);
 const char *nd_seven_gl_vs_billboard(void);

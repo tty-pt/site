@@ -556,6 +556,7 @@ void nd_seven_gl_flush_clouds(void)
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
 	gl_end_terrain_pass();
+	glTimerBegin(ND_GPU_PASS_CLOUDS);
 	glUseProgram(s_gl.cloud_pipe.prog);
 	gl_bind_csm(s_gl.cloud_pipe.uCloudShadowMap);
 
@@ -706,6 +707,7 @@ void nd_seven_gl_flush_clouds(void)
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
 	glActiveTexture(GL_TEXTURE0);
+	glTimerEnd(ND_GPU_PASS_CLOUDS);
 	s_gl.res_color_valid = false;
 	s_gl.cloud_count = 0;
 }

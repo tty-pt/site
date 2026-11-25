@@ -375,6 +375,7 @@ bool gl_build_hiz_pyramid(void)
 	gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
 
 	gl_end_terrain_pass();
+	glTimerBegin(ND_GPU_PASS_HIZ);
 	glUseProgram(prog);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
@@ -410,6 +411,7 @@ bool gl_build_hiz_pyramid(void)
 
 	s_gl.gpu_hiz_built = true;
 	glBindTexture(GL_TEXTURE_2D, 0);
+	glTimerEnd(ND_GPU_PASS_HIZ);
 	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
 	return true;
@@ -574,6 +576,9 @@ static bool gl_ensure_tree_shadow_targets(void)
 	s_gl.tree_shadow_ready = true;
 	s_gl.tree_shadow_read_idx = 0;
 	s_gl.tree_shadow_read_valid = false;
+	s_gl.tree_shadow_skip_write = false;
+	s_gl.tree_shadow_rendered_time = -1000.0f;
+	s_gl.tree_shadow_rendered_preset = -1;
 	return true;
 }
 
@@ -581,6 +586,8 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
                                          const float E[3], const float S[3], const float N[3])
 {
 	s_gl.tree_shadow_write_draws = false;
+	s_gl.tree_shadow_skip_write = false;
+	s_gl.terr_shadow_q_count = 0;
 	float dist_fade = fminf(1.0f, fmaxf(0.0f, (4200.0f - s_gl.cur_dist) / 1000.0f));
 	if (dist_fade <= 0.001f || !s_gl.pipelines_ready) {
 		s_gl.tree_shadow_active = 0.0f;
@@ -636,7 +643,6 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	s_gl.tree_shadow_write_origin[1] = spr * ry + spu * uy + pl * ly;
 	s_gl.tree_shadow_write_origin[2] = spr * rz + spu * uz + pl * lz;
 	s_gl.tree_shadow_write_half_xy = half_xy;
-	s_gl.terr_shadow_q_count = 0;
 
 	float inv_xy = 1.0f / half_xy;
 	float inv_z  = 1.0f / half_z;
@@ -648,6 +654,27 @@ void gl_prepare_tree_shadow_frame(float tx, float ty, float tz,
 	m[12] = 0.0f;         m[13] = 0.0f;         m[14] = 0.0f;         m[15] = 1.0f;
 
 	s_gl.tree_shadow_active = s_gl.tree_shadow_read_valid ? dist_fade : 0.0f;
+
+	/* Dirty-gate 1024x1024 shadow FBO writes: reuse cached shadow map while snapped origin,
+	 * light VP, and quality preset are unchanged (time-based TTL for wind sway: 0.16s High / 0.40s Low). */
+	int preset = nd_seven_get_quality_preset();
+	float max_dt = (preset == ND_QUALITY_LOW) ? 0.40f : 0.16f;
+	if (s_gl.tree_shadow_read_valid &&
+	    s_gl.tree_shadow_rendered_preset == preset &&
+	    fabsf(s_gl.cur_anim_time - s_gl.tree_shadow_rendered_time) < max_dt) {
+		float d0 = fabsf(s_gl.tree_shadow_write_origin[0] - s_gl.tree_shadow_read_origin[0]);
+		float d1 = fabsf(s_gl.tree_shadow_write_origin[1] - s_gl.tree_shadow_read_origin[1]);
+		float d2 = fabsf(s_gl.tree_shadow_write_origin[2] - s_gl.tree_shadow_read_origin[2]);
+		float vp_diff = 0.0f;
+		for (int k = 0; k < 16; k++) {
+			float dv = fabsf(s_gl.tree_shadow_write_vp[k] - s_gl.tree_shadow_read_vp[k]);
+			if (dv > vp_diff) vp_diff = dv;
+		}
+		if (d0 < 0.05f && d1 < 0.05f && d2 < 0.05f && vp_diff < 1e-4f) {
+			s_gl.tree_shadow_skip_write = true;
+			return;
+		}
+	}
 
 	/* Clear write shadow map depth buffer to 1.0 (unoccluded) */
 	int write_idx = 1 - s_gl.tree_shadow_read_idx;
@@ -700,13 +727,19 @@ void nd_seven_gl_end_frame(void)
 		nd_seven_gl_flush_sky();
 	s_gl.frame_open = false;
 	if (s_gl.tree_shadow_ready) {
-		if (s_gl.tree_shadow_write_draws) {
+		if (s_gl.tree_shadow_skip_write) {
+			/* Keep cached read shadow map intact */
+		} else if (s_gl.tree_shadow_write_draws) {
 			s_gl.tree_shadow_read_idx = 1 - s_gl.tree_shadow_read_idx;
 			memcpy(s_gl.tree_shadow_read_origin, s_gl.tree_shadow_write_origin, sizeof(s_gl.tree_shadow_read_origin));
 			memcpy(s_gl.tree_shadow_read_vp, s_gl.tree_shadow_write_vp, sizeof(s_gl.tree_shadow_read_vp));
 			s_gl.tree_shadow_read_valid = true;
+			s_gl.tree_shadow_rendered_time = s_gl.cur_anim_time;
+			s_gl.tree_shadow_rendered_preset = nd_seven_get_quality_preset();
 		} else {
 			s_gl.tree_shadow_read_valid = false;
+			s_gl.tree_shadow_rendered_time = -1000.0f;
+			s_gl.tree_shadow_rendered_preset = -1;
 		}
 	}
 	if (!s_gl.scene_ok) return;
@@ -727,6 +760,7 @@ void nd_seven_gl_end_frame(void)
 	gl_resolve_scene(end_resolve_mask);
 	if (run_post) {
 		gl_end_terrain_pass();
+		glTimerBegin(ND_GPU_PASS_POST);
 		glDisableVertexAttribArray(0);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -831,6 +865,7 @@ void nd_seven_gl_end_frame(void)
 		glActiveTexture(GL_TEXTURE0);
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
+		glTimerEnd(ND_GPU_PASS_POST);
 	} else {
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, s_gl.res_fbo);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1106,17 +1141,19 @@ void gl_render_cloud_shadow_map(void)
 	}
 
 	/* --- RENDER CURRENT CSM --- */
+	gl_end_terrain_pass();
+	glTimerBegin(ND_GPU_PASS_CSM);
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
 	glViewport(0, 0, ND_CSM_RES, ND_CSM_RES);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	gl_end_terrain_pass();
 	glUseProgram(s_gl.csm_pipe.prog);
 	glUniform3f(s_gl.csm_pipe.uCsm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
 	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.csm_pipe.uSeaWet, sea_wet);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glTimerEnd(ND_GPU_PASS_CSM);
 
 	gl_bind_scene_target();
 	glEnable(GL_DEPTH_TEST);
@@ -1132,7 +1169,8 @@ void gl_bind_csm(GLint loc_tex)
 {
 	glActiveTexture(GL_TEXTURE0 + 7);
 	glBindTexture(GL_TEXTURE_2D, s_gl.csm_valid ? s_gl.csm_tex : 0);
-	glUniform1i(loc_tex, 7);
+	if (loc_tex >= 0)
+		glUniform1i(loc_tex, 7);
 	glActiveTexture(GL_TEXTURE0);
 }
 

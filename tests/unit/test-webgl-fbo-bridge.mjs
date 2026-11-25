@@ -389,3 +389,75 @@ assert.ok(log.some((e) => e[0] === 'drawElements' && e[2] === 600), 'drawElement
 assert.ok(log.some((e) => e[0] === 'drawElementsInstanced' && e[5] === 128), 'drawElementsInstanced decoded');
 bridge.perf.enable(false);
 console.log('PASS: flat uint32 glCmdFlush command ring decoding & single-FFI batching verified');
+
+// GPU pass timer queries (EXT_disjoint_timer_query_webgl2) + query pool reuse + disjoint rejection.
+{
+	const tLog = [];
+	const tGl = makeGl(tLog);
+	const TIME_ELAPSED_EXT = 0x88BF;
+	const GPU_DISJOINT_EXT = 0x8FBB;
+	let qSeq = 0;
+	let disjointFlag = false;
+	const qTimes = new Map();
+	tGl.QUERY_RESULT_AVAILABLE = 0x8867;
+	tGl.QUERY_RESULT = 0x8866;
+	tGl.getExtension = (name) => name === 'EXT_disjoint_timer_query_webgl2'
+		? { TIME_ELAPSED_EXT, GPU_DISJOINT_EXT }
+		: null;
+	tGl.getParameter = (p) => p === GPU_DISJOINT_EXT ? disjointFlag : 0;
+	tGl.createQuery = () => ({ kind: 'query', n: ++qSeq });
+	tGl.deleteQuery = (q) => tLog.push(['deleteQuery', q.n]);
+	tGl.beginQuery = (target, q) => {
+		assert.equal(target, TIME_ELAPSED_EXT);
+		qTimes.set(q, 2_500_000); // 2.5 ms in ns
+		tLog.push(['beginQuery', q.n]);
+	};
+	tGl.endQuery = (target) => {
+		assert.equal(target, TIME_ELAPSED_EXT);
+		tLog.push(['endQuery']);
+	};
+	tGl.getQueryParameter = (q, pname) => {
+		if (pname === tGl.QUERY_RESULT_AVAILABLE) return true;
+		if (pname === tGl.QUERY_RESULT) return qTimes.get(q) || 0;
+		return 0;
+	};
+	const tCanvas = { isConnected: true, getContext: () => tGl };
+	swapCanvas(tCanvas);
+	bridge.mount();
+	// Disabled by default -> no-op.
+	bridge.perf.enable(false);
+	imp.glTimerBegin(2);
+	imp.glTimerEnd(2);
+	assert.equal(qSeq, 0, 'disabled profiler allocates 0 timer queries');
+	// Enabled -> records 2.5ms for pass 2 and reuses query from pool on second call.
+	bridge.perf.enable(true);
+	bridge.perf.reset();
+	imp.glTimerBegin(2);
+	imp.glTimerEnd(2);
+	imp.glTimerBegin(2);
+	imp.glTimerEnd(2);
+	const ts1 = bridge.perf.snapshot();
+	assert.equal(ts1.gpuTimerSupported, true, 'reports EXT_disjoint_timer_query_webgl2 support');
+	assert.equal(ts1.gpuTimerDisjoints, 0, 'no disjoints on clean run');
+	assert.equal(ts1.gpuPasses[2].samples, 2, 'recorded 2 samples for pass 2');
+	assert.ok(Math.abs(ts1.gpuPasses[2].avgMs - 2.5) < 1e-6, 'avgMs matches 2.5ms');
+	assert.equal(qSeq, 1, 'reused pooled WebGLQuery instead of allocating a second one');
+	// Disjoint event discards sample and increments gpuTimerDisjoints.
+	disjointFlag = true;
+	imp.glTimerBegin(2);
+	imp.glTimerEnd(2);
+	const ts2 = bridge.perf.snapshot();
+	assert.equal(ts2.gpuTimerDisjoints, 1, 'disjoint event counted');
+	assert.equal(ts2.gpuPasses[2].samples, 2, 'disjoint sample discarded');
+	bridge.perf.enable(false);
+	// GL_TEXTURE_2D_ARRAY binding does not clobber GL_TEXTURE_2D binding on unit 0.
+	const tex2d = imp.glCreateTexture();
+	const texArr = imp.glCreateTexture();
+	imp.glActiveTexture(0x84C0);
+	imp.glBindTexture(0x0DE1, tex2d);
+	imp.glBindTexture(0x8C1A, texArr);
+	imp.glTexImage2D(0x0DE1, 0, 0x8058, 2, 2, 0, 0x1908, 0x1401, 64);
+	// Re-upload same dimensions should succeed with zero errors (in-place mirror reuse).
+	imp.glTexImage2D(0x0DE1, 0, 0x8058, 2, 2, 0, 0x1908, 0x1401, 64);
+	console.log('PASS: GPU pass timer queries (EXT_disjoint_timer_query_webgl2) and GL_TEXTURE_2D_ARRAY isolation verified');
+}

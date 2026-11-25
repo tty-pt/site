@@ -284,6 +284,16 @@ typedef struct {
 	uint32_t cloud_queued;
 	uint32_t ar_populates;
 	uint32_t ar_active_chunks;
+	uint32_t ar_nodes_visited;
+	uint32_t ar_nodes_frustum_culled;
+	uint32_t ar_nodes_occ_culled;
+	uint32_t ar_leaves_emitted;
+	uint32_t ar_evictions;
+	uint32_t ar_probe_calls;
+	uint32_t ar_probe_avg_steps_x100;
+	float ar_update_ms;
+	float ar_populate_ms;
+	float ar_occ_ms;
 } nd_seven_perf_t;
 
 void nd_seven_perf_set_enabled(int enabled);

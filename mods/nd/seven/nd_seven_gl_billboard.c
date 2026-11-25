@@ -1315,7 +1315,8 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
 	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops. */
-	if (s_gl.tree_shadow_ready && s_gl.cur_dist < 2300.0f) {
+	if (s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f) {
+		glTimerBegin(ND_GPU_PASS_TREE_SHADOW);
 		int write_idx = 1 - s_gl.tree_shadow_read_idx;
 		GLuint dummy = gl_ensure_tree_shadow_dummy();
 		glActiveTexture(GL_TEXTURE0 + 12);
@@ -1372,6 +1373,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 			                                   (size_t)sl->first_idx * sizeof(uint32_t), (GLsizei)icnt);
 		}
 		gl_flush_cmd_ring();
+		glTimerEnd(ND_GPU_PASS_TREE_SHADOW);
 		s_gl.tree_shadow_write_draws = true;
 		gl_bind_scene_target();
 	}
@@ -1424,6 +1426,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
 	if (any_opaque_c1) {
+		glTimerBegin(ND_GPU_PASS_MESH3D_OPAQUE);
 		glDisable(GL_BLEND);
 		gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_opaque_pipe, bb_sea_level, space_t, false);
 		gl_bind_tree_shadow_read(s_gl.mesh3d_opaque_pipe.uTreeShadowTex);
@@ -1435,9 +1438,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 				gl_draw_mesh3d_bucket(m);
 		}
 		gl_flush_cmd_ring();
+		glTimerEnd(ND_GPU_PASS_MESH3D_OPAQUE);
 	}
 
 	if (any_alpha_c2) {
+		glTimerBegin(ND_GPU_PASS_MESH3D_ALPHA);
 		if (any_opaque_c1) {
 			glUseProgram(s_gl.mesh3d_pipe.prog);
 			glEnable(GL_BLEND);
@@ -1449,6 +1454,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 				gl_draw_mesh3d_bucket(m);
 		}
 		gl_flush_cmd_ring();
+		glTimerEnd(ND_GPU_PASS_MESH3D_ALPHA);
 	}
 
 	s_gl.res_depth_valid = false;
@@ -1461,31 +1467,28 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		glDisableVertexAttribArray(a);
 	}
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-	/* Restore billboard program & attribute bindings for remaining 2D quads / ground shadows */
-	glUseProgram(s_gl.bb_pipe.prog);
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
-	for (GLuint a = 0; a < 7; a++) {
-		glEnableVertexAttribArray(a);
-		glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_inst_t), (size_t)(a * 16));
-		glVertexAttribDivisor(a, 1);
-	}
 }
 
-void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
-                                  uint32_t count,
-                                  const uint32_t *atlas_rgba)
+/* Single-pass frame staging accumulators: queue across all CPU scenery passes and flush ONCE/frame */
+static uint32_t s_bb_frame_core_n = 0;
+static uint32_t s_bb_frame_other_n = 0;
+static uint32_t s_bb_frame_mesh3d_n = 0;
+static bool     s_bb_frame_mesh3d_sun_sh = false;
+static bool     s_bb_frame_mesh3d_lamb_sh = false;
+static const uint32_t *s_bb_frame_atlas_rgba = NULL;
+
+void gl_reset_billboard_frame_state(void)
 {
-	if (!batch || count == 0) return;
-	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
-	s_gl.perf_bb_flushes++;
+	s_bb_frame_core_n = 0;
+	s_bb_frame_other_n = 0;
+	s_bb_frame_mesh3d_n = 0;
+	s_bb_frame_mesh3d_sun_sh = false;
+	s_bb_frame_mesh3d_lamb_sh = false;
+	s_bb_frame_atlas_rgba = NULL;
+}
 
-	/* Build GPU Hi-Z depth pyramid once after terrain pass and before first non-trivial billboard batch */
-	if (!s_gl.gpu_hiz_built && s_gl.scene_ok && s_gl.hiz_valid &&
-	    !(count <= 2u && s_gl.cur_dist > 2500.0f)) {
-		(void)gl_build_hiz_pyramid();
-	}
-
+static void gl_upload_atlas_if_needed(const uint32_t *atlas_rgba)
+{
 	uint32_t cur_ver = atlas_rgba_version();
 	if ((!s_gl.atlas_tex || !s_gl.atlas_norm_tex || s_gl.atlas_ver != cur_ver) && atlas_rgba) {
 		const uint32_t *norm_rgba = atlas_norm_rgba();
@@ -1536,6 +1539,189 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		}
 		s_gl.atlas_ver = cur_ver;
 	}
+}
+
+static void gl_submit_staged_billboards(const uint32_t *atlas_rgba, bool final_submit)
+{
+	uint32_t mesh3d_n = s_bb_frame_mesh3d_n;
+	uint32_t core_n = s_bb_frame_core_n;
+	uint32_t other_n = s_bb_frame_other_n;
+	bool mesh3d_sun_sh = s_bb_frame_mesh3d_sun_sh;
+	bool mesh3d_lamb_sh = s_bb_frame_mesh3d_lamb_sh;
+
+	s_bb_frame_core_n = 0;
+	s_bb_frame_other_n = 0;
+	s_bb_frame_mesh3d_n = 0;
+	s_bb_frame_mesh3d_sun_sh = false;
+	s_bb_frame_mesh3d_lamb_sh = false;
+
+	uint32_t total_items = mesh3d_n + core_n + other_n;
+	bool need_terr_shadow = (final_submit && s_gl.terr_shadow_q_count > 0 &&
+	                         s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write &&
+	                         s_gl.cur_dist < 2300.0f);
+	if (total_items == 0 && !need_terr_shadow)
+		return;
+
+	gl_end_terrain_pass();
+
+	if (total_items > 0) {
+		s_gl.perf_bb_flushes++;
+		/* Build GPU Hi-Z depth pyramid once after terrain pass and before first non-trivial batch */
+		if (!s_gl.gpu_hiz_built && s_gl.scene_ok && s_gl.hiz_valid &&
+		    !(total_items <= 2u && s_gl.cur_dist > 2500.0f)) {
+			(void)gl_build_hiz_pyramid();
+		}
+		gl_upload_atlas_if_needed(atlas_rgba);
+	}
+
+	float bb_sea_level = (s_gl.focal_sea_level > -900.0f) ? s_gl.focal_sea_level : s_gl.cur_sea_level;
+	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+
+	if (mesh3d_n > 0) {
+		s_gl.perf_mesh3d_count += mesh3d_n;
+		flush_mesh3d_staging(mesh3d_n, bb_sea_level, space_t, mesh3d_sun_sh, mesh3d_lamb_sh);
+	}
+
+	if (core_n > 0 || other_n > 0) {
+		float cos_y = s_gl.cur_cos_y;
+		float sin_y = s_gl.cur_sin_y;
+		float cos_p = s_gl.cur_cos_p;
+		float sin_p = s_gl.cur_sin_p;
+		if (cos_y * cos_y + sin_y * sin_y < 0.01f) {
+			float pitch_rad = ((s_gl.cur_pitch_deg > 1.0f) ? s_gl.cur_pitch_deg : 55.0f) * (PI_F / 180.0f);
+			float yaw_rad = s_gl.cur_yaw_deg * (PI_F / 180.0f);
+			cos_y = cosf(yaw_rad);
+			sin_y = sinf(yaw_rad);
+			cos_p = cosf(pitch_rad);
+			sin_p = sinf(pitch_rad);
+		}
+
+		glTimerBegin(ND_GPU_PASS_BILLBOARDS);
+		glUseProgram(s_gl.bb_pipe.prog);
+		glUniform4f(s_gl.bb_pipe.uCamAngles, cos_y, sin_y, cos_p, sin_p);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
+		glUniform1i(s_gl.bb_pipe.uAtlasTex, 0);
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, s_gl.atlas_norm_tex);
+		glUniform1i(s_gl.bb_pipe.uAtlasNormTex, 2);
+		{
+			int hiz_lvl = (s_gl.hiz_levels > 2) ? 2 : (s_gl.hiz_levels > 0 ? (s_gl.hiz_levels - 1) : 0);
+			GLuint hiz_tex = (s_gl.gpu_hiz_built && hiz_lvl >= 0) ? s_gl.hiz_mip_tex[hiz_lvl] : 0;
+			glActiveTexture(GL_TEXTURE0 + 11);
+			glBindTexture(GL_TEXTURE_2D, hiz_tex);
+			glUniform1i(s_gl.bb_pipe.uHiZTex, 11);
+			glUniform1f(s_gl.bb_pipe.uHiZActive, (s_gl.gpu_hiz_built && hiz_tex != 0) ? 1.0f : 0.0f);
+			glActiveTexture(GL_TEXTURE0);
+		}
+		gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap);
+		gl_bind_tree_shadow_read(s_gl.bb_pipe.uTreeShadowTex);
+		glUniform1f(s_gl.bb_pipe.uSeaLevel, bb_sea_level);
+
+		glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
+		for (GLuint a = 0; a < 7; a++) {
+			glEnableVertexAttribArray(a);
+			glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_inst_t), (size_t)(a * 16));
+			glVertexAttribDivisor(a, 1);
+		}
+
+		if (core_n > 0) {
+			s_gl.perf_bb_count += core_n;
+			glBufferSubData(GL_ARRAY_BUFFER, 0, core_n * sizeof(nd_seven_gl_bb_inst_t), s_bb_instances);
+			/* pass 0: core */
+			glUniform1i(s_gl.bb_pipe.uPass, 0);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			glDisable(GL_BLEND);
+			glDepthMask(GL_TRUE);
+			glEnable(GL_STENCIL_TEST);
+			glStencilMask(0x01);
+			glStencilFunc(GL_ALWAYS, 1, 0x01);
+			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
+			glStencilMask(0xFF);
+			glDisable(GL_STENCIL_TEST);
+			/* pass 1: anti-aliased fringe */
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+			glUniform1i(s_gl.bb_pipe.uPass, 1);
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask(GL_FALSE);
+			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
+			s_gl.res_depth_valid = false;
+			s_gl.res_color_valid = false;
+			if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+				nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+				cmd->count = 4u;
+				cmd->instance_count = core_n;
+				cmd->first_index = 0u;
+				cmd->base_vertex = 0;
+				cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+			}
+		}
+		if (other_n > 0) {
+			glBufferSubData(GL_ARRAY_BUFFER, 0,
+			                other_n * sizeof(nd_seven_gl_bb_inst_t), s_bb_other_instances);
+			glUniform1i(s_gl.bb_pipe.uPass, 2);
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask(GL_FALSE);
+			glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)other_n);
+			s_gl.res_color_valid = false;
+			if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
+				nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
+				cmd->count = 4u;
+				cmd->instance_count = other_n;
+				cmd->first_index = 0u;
+				cmd->base_vertex = 0;
+				cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+			}
+		}
+
+		glTimerEnd(ND_GPU_PASS_BILLBOARDS);
+		for (GLuint a = 0; a < 7; a++) {
+			glVertexAttribDivisor(a, 0);
+			if (a > 0) glDisableVertexAttribArray(a);
+		}
+	}
+
+	if (final_submit && s_gl.terr_shadow_q_count > 0 && s_gl.tree_shadow_ready &&
+	    !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f) {
+		glTimerBegin(ND_GPU_PASS_TREE_SHADOW);
+		int write_idx = 1 - s_gl.tree_shadow_read_idx;
+		GLuint dummy = gl_ensure_tree_shadow_dummy();
+		glActiveTexture(GL_TEXTURE0 + 12);
+		glBindTexture(GL_TEXTURE_2D, dummy);
+		glActiveTexture(GL_TEXTURE0);
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
+		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glDisable(GL_BLEND);
+		glDisable(GL_STENCIL_TEST);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glDepthMask(GL_TRUE);
+		gl_flush_terrain_shadows_to_fbo();
+		glTimerEnd(ND_GPU_PASS_TREE_SHADOW);
+		s_gl.tree_shadow_write_draws = true;
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+		gl_bind_scene_target();
+	}
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+}
+
+void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
+                                  uint32_t count,
+                                  const uint32_t *atlas_rgba)
+{
+	if (!batch || count == 0) return;
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
+	if (atlas_rgba)
+		s_bb_frame_atlas_rgba = atlas_rgba;
 
 	float det_scale = nd_seven_get_detail_scale();
 	bool emit_shadows = (s_gl.cur_dist < 5000.0f * det_scale);
@@ -1553,228 +1739,123 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 		cos_p = cosf(pitch_rad);
 		sin_p = sinf(pitch_rad);
 	}
-
-	gl_end_terrain_pass();
-	glUseProgram(s_gl.bb_pipe.prog);
-	glUniform4f(s_gl.bb_pipe.uCamAngles, cos_y, sin_y, cos_p, sin_p);
-	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_LEQUAL);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
-	glUniform1i(s_gl.bb_pipe.uAtlasTex, 0);
-	glActiveTexture(GL_TEXTURE2);
-	glBindTexture(GL_TEXTURE_2D, s_gl.atlas_norm_tex);
-	glUniform1i(s_gl.bb_pipe.uAtlasNormTex, 2);
-	{
-		int hiz_lvl = (s_gl.hiz_levels > 2) ? 2 : (s_gl.hiz_levels > 0 ? (s_gl.hiz_levels - 1) : 0);
-		GLuint hiz_tex = (s_gl.gpu_hiz_built && hiz_lvl >= 0) ? s_gl.hiz_mip_tex[hiz_lvl] : 0;
-		glActiveTexture(GL_TEXTURE0 + 11);
-		glBindTexture(GL_TEXTURE_2D, hiz_tex);
-		glUniform1i(s_gl.bb_pipe.uHiZTex, 11);
-		glUniform1f(s_gl.bb_pipe.uHiZActive, (s_gl.gpu_hiz_built && hiz_tex != 0) ? 1.0f : 0.0f);
-		glActiveTexture(GL_TEXTURE0);
-	}
-	gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap);
-	gl_bind_tree_shadow_read(s_gl.bb_pipe.uTreeShadowTex);
-
 	float bb_sea_level = (s_gl.focal_sea_level > -900.0f) ? s_gl.focal_sea_level : s_gl.cur_sea_level;
-	glUniform1f(s_gl.bb_pipe.uSeaLevel, bb_sea_level);
-	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
 
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.bb_vbo);
-
-	for (GLuint a = 0; a < 7; a++) {
-		glEnableVertexAttribArray(a);
-		glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_seven_gl_bb_inst_t), (size_t)(a * 16));
-		glVertexAttribDivisor(a, 1);
-	}
-
-	/* Sprites and 3D meshes are drawn in the same depth buffer as terrain and water:
-	 *   - 3D meshes (batch[i].mesh_id > 0): instanced 3D triangle draws + 3D projected shadows via s_gl.mesh3d_pipe;
-	 *   - pass 0 (core)   opaque 2D sprite pixels (alpha >= 0.5): depth write + stencil mark;
-	 *   - pass 1 (fringe) anti-aliased edges of 2D sprites (alpha < 0.5), blended, no depth write;
-	 *   - pass 2 (other)  2D sprite ground contact shadows, glow auras and spray particles, blended, no depth write. */
-	uint32_t core_n = 0, other_n = 0, mesh3d_n = 0;
-	bool mesh3d_any_sun_sh = false, mesh3d_any_lamb_sh = false;
-	for (uint32_t i = 0; i <= count; i++) {
-		bool last = (i == count);
-		bool is_other = false, is_mesh3d = false, is_understory = false, emit_impostor_crossfade = false;
-		bool is_crossed_tree = false;
+	for (uint32_t i = 0; i < count; i++) {
+		bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
+		bool is_understory = (batch[i].mesh_id >= ND_MESH3D_UNDERSTORY_BASE &&
+		                      batch[i].mesh_id < ND_MESH3D_TOTAL);
+		bool is_mesh3d_only = nd_seven_gl_billboard_is_mesh3d_only(&batch[i]);
+		bool is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
+		bool is_tall_tree = (!is_grass && !is_other &&
+		                     (batch[i].height >= 90.0f ||
+		                      (is_understory && batch[i].height >= 64.0f)) &&
+		                     batch[i].mesh_id >= ND_MESH3D_PLANT_BASE &&
+		                     batch[i].mesh_id < ND_MESH3D_TOTAL);
+		bool is_mesh3d = false, emit_impostor_crossfade = false, is_crossed_tree = false;
 		bool want_shadow = false, want_lamb_shadow = false;
 		float lod_mesh_keep = 1.0f;
-		uint32_t need_core = 0, need_other = 0, need_mesh3d = 0;
 		const nd_mesh3d_slice_t *m3d_slice = NULL;
-		if (!last) {
-			bool is_grass = (batch[i].style == ND_BB_STYLE_GRASS);
-			is_understory = (batch[i].mesh_id >= ND_MESH3D_UNDERSTORY_BASE &&
-			                 batch[i].mesh_id < ND_MESH3D_TOTAL);
-			bool is_mesh3d_only = nd_seven_gl_billboard_is_mesh3d_only(&batch[i]);
-			is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
-			bool is_tall_tree = (!is_grass && !is_other &&
-			                     (batch[i].height >= 90.0f ||
-			                      (is_understory && batch[i].height >= 64.0f)) &&
-			                     batch[i].mesh_id >= ND_MESH3D_PLANT_BASE &&
-			                     batch[i].mesh_id < ND_MESH3D_TOTAL);
-			if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
-				float dx_m = batch[i].x - s_gl.cur_tx;
-				float dy_m = batch[i].y - s_gl.cur_ty;
-				float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
-				float max_m3d_dist = is_grass ? fmaxf(720.0f, 1150.0f * det_scale)
-				                              : (is_tall_tree ? fmaxf(1550.0f, 2500.0f * det_scale)
-				                                              : fmaxf(1050.0f, 1650.0f * det_scale));
-				float cross_band = max_m3d_dist * 0.08f;
-				float cross_start = max_m3d_dist - cross_band;
-				if (d2_m <= max_m3d_dist * max_m3d_dist) {
-					m3d_slice = nd_seven_mesh3d_slice(batch[i].mesh_id);
-					if (m3d_slice && m3d_slice->idx_count > 0) {
-						is_mesh3d = true;
-						float d_m = sqrtf(d2_m);
-						if (d_m > cross_start) {
-							float lod_t = (d_m - cross_start) / fmaxf(1.0f, cross_band);
-							lod_mesh_keep = fmaxf(0.02f, fminf(0.98f, 1.0f - lod_t));
-							if (!is_mesh3d_only &&
-							    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1)
-								emit_impostor_crossfade = true;
-						}
-					}
-				}
-				if (!is_mesh3d && is_tall_tree && !is_mesh3d_only &&
-				    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1) {
-					float max_cross_d = max_m3d_dist * 2.2f;
-					if (d2_m <= max_cross_d * max_cross_d)
-						is_crossed_tree = true;
-				}
-			}
-			if (!is_other && is_mesh3d_only && !is_mesh3d)
-				continue;
-			if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
-				float grgba[4];
-				nd_seven_gl_unpack_rgba_u32(batch[i].tint_rgba, grgba);
-				if (grgba[3] > 0.05f) {
-					float dx_l = batch[i].x - s_gl.cur_lamb_light[0];
-					float dy_l = batch[i].y - s_gl.cur_lamb_light[1];
-					/* Skip duplicate of primary Lamb glow if within 4 world units */
-					if (s_gl.cur_lamb_light[3] <= 0.01f || (dx_l * dx_l + dy_l * dy_l) > 16.0f) {
-						(void)nd_seven_gl_add_point_light(batch[i].x, batch[i].y, batch[i].z + 360.0f,
-						                                  grgba[0], grgba[1], grgba[2], grgba[3] * 1.25f, 1200.0f);
+
+		if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
+			float dx_m = batch[i].x - s_gl.cur_tx;
+			float dy_m = batch[i].y - s_gl.cur_ty;
+			float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
+			float max_m3d_dist = is_grass ? fmaxf(720.0f, 1150.0f * det_scale)
+			                              : (is_tall_tree ? fmaxf(1550.0f, 2500.0f * det_scale)
+			                                              : fmaxf(1050.0f, 1650.0f * det_scale));
+			float cross_band = max_m3d_dist * 0.08f;
+			float cross_start = max_m3d_dist - cross_band;
+			if (d2_m <= max_m3d_dist * max_m3d_dist) {
+				m3d_slice = nd_seven_mesh3d_slice(batch[i].mesh_id);
+				if (m3d_slice && m3d_slice->idx_count > 0) {
+					is_mesh3d = true;
+					float d_m = sqrtf(d2_m);
+					if (d_m > cross_start) {
+						float lod_t = (d_m - cross_start) / fmaxf(1.0f, cross_band);
+						lod_mesh_keep = fmaxf(0.02f, fminf(0.98f, 1.0f - lod_t));
+						if (!is_mesh3d_only &&
+						    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1)
+							emit_impostor_crossfade = true;
 					}
 				}
 			}
-			if (!is_other && (batch[i].tint_rgba & 0xFFu) >= 90u) {
-				if (is_grass)
-					want_shadow = emit_grass_shadows && (batch[i].width >= 4.0f && batch[i].height >= 4.0f);
-				else
-					want_shadow = emit_shadows && (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
+			if (!is_mesh3d && is_tall_tree && !is_mesh3d_only &&
+			    batch[i].u0 != batch[i].u1 && batch[i].v0 != batch[i].v1) {
+				float max_cross_d = max_m3d_dist * 2.2f;
+				if (d2_m <= max_cross_d * max_cross_d)
+					is_crossed_tree = true;
 			}
-			if (want_shadow && emit_lamb_shadows) {
-				float north_shift = (batch[i].mesh_id > 0 && batch[i].anchor_y > 0.0f) ? (batch[i].anchor_y * 0.5f) : 0.0f;
-				float dx_l = batch[i].x - s_lamb_shadow_light[0];
-				float dy_l = (batch[i].y - north_shift) - s_lamb_shadow_light[1];
-				float d2_l = dx_l * dx_l + dy_l * dy_l;
-				want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 290.0f * 290.0f);
-			}
-			need_core   = (is_other || (is_mesh3d && !emit_impostor_crossfade)) ? 0u : (is_crossed_tree ? 2u : 1u);
-			need_mesh3d = is_mesh3d ? 1u : 0u;
-			need_other  = (is_other ? 1u : 0u) +
-			              ((!is_mesh3d && want_shadow) ? 1u : 0u) +
-			              ((!is_mesh3d && want_lamb_shadow) ? 1u : 0u);
 		}
-		if (last || core_n + need_core > MAX_BB_INSTANCES || other_n + need_other > MAX_BB_INSTANCES ||
-		    mesh3d_n + need_mesh3d > MAX_BB_INSTANCES) {
-			if (mesh3d_n > 0) {
-				s_gl.perf_mesh3d_count += mesh3d_n;
-				flush_mesh3d_staging(mesh3d_n, bb_sea_level, space_t,
-				                     mesh3d_any_sun_sh, mesh3d_any_lamb_sh);
-				mesh3d_n = 0;
-				mesh3d_any_sun_sh = false;
-				mesh3d_any_lamb_sh = false;
-			}
-			if (core_n > 0) {
-				s_gl.perf_bb_count += core_n;
-				glBufferSubData(GL_ARRAY_BUFFER, 0, core_n * sizeof(nd_seven_gl_bb_inst_t), s_bb_instances);
-				/* pass 0: core */
-				glUniform1i(s_gl.bb_pipe.uPass, 0);
-				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-				glDisable(GL_BLEND);
-				glDepthMask(GL_TRUE);
-				glEnable(GL_STENCIL_TEST);
-				glStencilMask(0x01);
-				glStencilFunc(GL_ALWAYS, 1, 0x01);
-				glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
-				glStencilMask(0xFF);
-				glDisable(GL_STENCIL_TEST);
-				/* pass 1: anti-aliased fringe */
-				glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-				glUniform1i(s_gl.bb_pipe.uPass, 1);
-				glEnable(GL_BLEND);
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-				glDepthMask(GL_FALSE);
-				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)core_n);
-				s_gl.res_depth_valid = false;
-				s_gl.res_color_valid = false;
-				if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
-					nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
-					cmd->count = 4u;
-					cmd->instance_count = core_n;
-					cmd->first_index = 0u;
-					cmd->base_vertex = 0;
-					cmd->base_instance = s_gl.indirect_cmd_count - 1u;
+		if (!is_other && is_mesh3d_only && !is_mesh3d)
+			continue;
+		if (batch[i].style == ND_BB_STYLE_GLOW && s_gl.local_light_count < ND_MAX_TOTAL_LIGHTS) {
+			float grgba[4];
+			nd_seven_gl_unpack_rgba_u32(batch[i].tint_rgba, grgba);
+			if (grgba[3] > 0.05f) {
+				float dx_l = batch[i].x - s_gl.cur_lamb_light[0];
+				float dy_l = batch[i].y - s_gl.cur_lamb_light[1];
+				/* Skip duplicate of primary Lamb glow if within 4 world units */
+				if (s_gl.cur_lamb_light[3] <= 0.01f || (dx_l * dx_l + dy_l * dy_l) > 16.0f) {
+					(void)nd_seven_gl_add_point_light(batch[i].x, batch[i].y, batch[i].z + 360.0f,
+					                                  grgba[0], grgba[1], grgba[2], grgba[3] * 1.25f, 1200.0f);
 				}
 			}
-			if (other_n > 0) {
-				glBufferSubData(GL_ARRAY_BUFFER, 0,
-				                other_n * sizeof(nd_seven_gl_bb_inst_t), s_bb_other_instances);
-				glUniform1i(s_gl.bb_pipe.uPass, 2);
-				glEnable(GL_BLEND);
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-				glDepthMask(GL_FALSE);
-				glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, (GLsizei)other_n);
-				s_gl.res_color_valid = false;
-				if (s_gl.indirect_cmd_count < ND_GPU_INDIRECT_MAX) {
-					nd_gpu_draw_elements_indirect_cmd_t *cmd = &s_gl.indirect_cmds[s_gl.indirect_cmd_count++];
-					cmd->count = 4u;
-					cmd->instance_count = other_n;
-					cmd->first_index = 0u;
-					cmd->base_vertex = 0;
-					cmd->base_instance = s_gl.indirect_cmd_count - 1u;
-				}
-			}
-			core_n = 0;
-			other_n = 0;
 		}
-		if (last) break;
+		if (!is_other && (batch[i].tint_rgba & 0xFFu) >= 90u) {
+			if (is_grass)
+				want_shadow = emit_grass_shadows && (batch[i].width >= 4.0f && batch[i].height >= 4.0f);
+			else
+				want_shadow = emit_shadows && (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
+		}
+		if (want_shadow && emit_lamb_shadows) {
+			float north_shift = (batch[i].mesh_id > 0 && batch[i].anchor_y > 0.0f) ? (batch[i].anchor_y * 0.5f) : 0.0f;
+			float dx_l = batch[i].x - s_lamb_shadow_light[0];
+			float dy_l = (batch[i].y - north_shift) - s_lamb_shadow_light[1];
+			float d2_l = dx_l * dx_l + dy_l * dy_l;
+			want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 290.0f * 290.0f);
+		}
+		uint32_t need_core   = (is_other || (is_mesh3d && !emit_impostor_crossfade)) ? 0u : (is_crossed_tree ? 2u : 1u);
+		uint32_t need_mesh3d = is_mesh3d ? 1u : 0u;
+		uint32_t need_other  = (is_other ? 1u : 0u) +
+		                       ((!is_mesh3d && want_shadow) ? 1u : 0u) +
+		                       ((!is_mesh3d && want_lamb_shadow) ? 1u : 0u);
+
+		if (s_bb_frame_core_n + need_core > MAX_BB_INSTANCES ||
+		    s_bb_frame_other_n + need_other > MAX_BB_INSTANCES ||
+		    s_bb_frame_mesh3d_n + need_mesh3d > MAX_BB_INSTANCES) {
+			gl_submit_staged_billboards(s_bb_frame_atlas_rgba, false);
+		}
+
 		billboard_basis_t basis;
 		eval_billboard_basis(&batch[i], &s_gl.cur_pdef, s_gl.cur_origin, &basis);
 		if (!is_mesh3d) {
 			if (want_shadow) {
-				pack_bb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n++]);
+				pack_bb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[s_bb_frame_other_n++]);
 			}
 			if (want_lamb_shadow) {
-				if (pack_bb_lamb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[other_n]))
-					other_n++;
+				if (pack_bb_lamb_shadow_quad_instance(&batch[i], &basis, &s_bb_other_instances[s_bb_frame_other_n]))
+					s_bb_frame_other_n++;
 			}
 		}
 		if (is_other) {
-			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_other_instances[other_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_other_instances[s_bb_frame_other_n++]);
 		} else if (is_mesh3d) {
-			if (want_shadow) mesh3d_any_sun_sh = true;
-			if (want_lamb_shadow) mesh3d_any_lamb_sh = true;
-			s_mesh3d_staging_ids[mesh3d_n] = batch[i].mesh_id;
+			if (want_shadow) s_bb_frame_mesh3d_sun_sh = true;
+			if (want_lamb_shadow) s_bb_frame_mesh3d_lamb_sh = true;
+			s_mesh3d_staging_ids[s_bb_frame_mesh3d_n] = batch[i].mesh_id;
 			pack_mesh3d_instance(&batch[i], &basis, m3d_slice, want_shadow, want_lamb_shadow,
-			                     &s_mesh3d_staging[mesh3d_n]);
+			                     &s_mesh3d_staging[s_bb_frame_mesh3d_n]);
 			if (lod_mesh_keep < 0.995f)
-				s_mesh3d_staging[mesh3d_n].tint[3] *= lod_mesh_keep;
-			mesh3d_n++;
+				s_mesh3d_staging[s_bb_frame_mesh3d_n].tint[3] *= lod_mesh_keep;
+			s_bb_frame_mesh3d_n++;
 			if (emit_impostor_crossfade) {
-				pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[core_n]);
+				pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[s_bb_frame_core_n]);
 				int k31 = (int)roundf(lod_mesh_keep * 31.0f);
 				if (k31 < 1) k31 = 1;
 				if (k31 > 30) k31 = 30;
-				s_bb_instances[core_n].param[3] += (float)k31 * 32.0f;
-				core_n++;
+				s_bb_instances[s_bb_frame_core_n].param[3] += (float)k31 * 32.0f;
+				s_bb_frame_core_n++;
 			}
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
@@ -1788,44 +1869,34 @@ void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
 			float sin_p28 = sin_y * c28 + cos_y * s28;
 			float cos_m28 = cos_y * c28 + sin_y * s28;
 			float sin_m28 = sin_y * c28 - cos_y * s28;
-			pack_bb_quad_instance(&batch[i], &basis, cos_p28, sin_p28, cos_p, sin_p, &s_bb_instances[core_n++]);
-			pack_bb_quad_instance(&batch[i], &basis, cos_m28, sin_m28, cos_p, sin_p, &s_bb_instances[core_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_p28, sin_p28, cos_p, sin_p, &s_bb_instances[s_bb_frame_core_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_m28, sin_m28, cos_p, sin_p, &s_bb_instances[s_bb_frame_core_n++]);
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
 			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
 				s_gl.sprites_in_water = true;
 		} else {
-			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[core_n++]);
+			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[s_bb_frame_core_n++]);
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
 			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
 			if (can_sub && bb_sea_level > -900.0f && (batch[i].z - batch[i].water_z_off) < bb_sea_level + 0.15f)
 				s_gl.sprites_in_water = true;
 		}
 	}
+}
 
-	for (GLuint a = 0; a < 7; a++) {
-		glVertexAttribDivisor(a, 0);
-		if (a > 0) glDisableVertexAttribArray(a);
-	}
-	if (s_gl.terr_shadow_q_count > 0 && s_gl.tree_shadow_ready && s_gl.cur_dist < 2300.0f) {
-		int write_idx = 1 - s_gl.tree_shadow_read_idx;
-		GLuint dummy = gl_ensure_tree_shadow_dummy();
-		glActiveTexture(GL_TEXTURE0 + 12);
-		glBindTexture(GL_TEXTURE_2D, dummy);
-		glActiveTexture(GL_TEXTURE0);
-		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
-		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
-		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		glDisable(GL_BLEND);
-		glDisable(GL_STENCIL_TEST);
-		glEnable(GL_DEPTH_TEST);
-		glDepthFunc(GL_LEQUAL);
-		glDepthMask(GL_TRUE);
-		gl_flush_terrain_shadows_to_fbo();
-		s_gl.tree_shadow_write_draws = true;
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-		gl_bind_scene_target();
-	}
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glDepthMask(GL_TRUE);
+void nd_seven_gl_submit_billboards(const uint32_t *atlas_rgba)
+{
+	if (!s_gl.initialized || !s_gl.pipelines_ready || !s_gl.bb_pipe.prog) return;
+	if (atlas_rgba)
+		s_bb_frame_atlas_rgba = atlas_rgba;
+	gl_submit_staged_billboards(s_bb_frame_atlas_rgba, true);
+}
+
+void nd_seven_gl_flush_billboards(const lam_billboard_gpu_t *batch,
+                                  uint32_t count,
+                                  const uint32_t *atlas_rgba)
+{
+	nd_seven_gl_queue_billboards(batch, count, atlas_rgba);
+	nd_seven_gl_submit_billboards(atlas_rgba);
 }

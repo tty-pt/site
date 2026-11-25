@@ -134,6 +134,7 @@ ND_UX_INCLUDES="\
 	-I$REPO_ROOT/external/nd-fight/include \
 	-I$REPO_ROOT/external/nd-mortal/include \
 	-I$REPO_ROOT/external/libareole/include \
+	-I$REPO_ROOT/external/libislet/include \
 	-I$REPO_ROOT/external/libcorolla/include \
 	-I$REPO_ROOT/external/libxylem/include \
 	-I$REPO_ROOT/external/libchaff/include \

@@ -63,6 +63,8 @@ seven/nd_seven_gl_shaders.gen.c: seven/nd_seven_gl_shaders.c $(ND_GLSL_MACRO_HDR
 ND_UX_HDRS = ux/nd_ui.h ux/nd_ui_internal.h ux/nd_lamina.h
 ND_SEVEN_HDRS = seven/nd_seven.h seven/nd_seven_atlas.h seven/nd_seven_atlas_draw.h seven/nd_seven_gl.h seven/nd_seven_gl_internal.h seven/nd_seven_ground.h seven/nd_seven_mesh3d.h seven/nd_seven_motion.h seven/nd_seven_objects.h seven/nd_seven_shader.h
 
-$(TARGET): seven/nd_seven_gl_shaders.gen.c $(ND_UX_HDRS) $(ND_SEVEN_HDRS) $(REPO_ROOT)/external/nd-world/include/nd/field.h
+ND_AREOLE_DEPS = $(wildcard $(REPO_ROOT)/external/libareole/src/*.c $(REPO_ROOT)/external/libareole/src/*.h $(REPO_ROOT)/external/libareole/include/ttypt/*.h)
 
-$(WASM_PATH)/nd.wasm: seven/nd_seven_gl_shaders.gen.c $(nd-src) $(ND_UX_HDRS) $(ND_SEVEN_HDRS) $(REPO_ROOT)/external/nd-seven/include/nd/seven-world.h $(REPO_ROOT)/external/nd-world/include/nd/field.h $(REPO_ROOT)/external/axil-nd/include/nd/bcp.h $(REPO_ROOT)/external/axil/include/ttypt/axil-ws.h $(REPO_ROOT)/external/liblamina/include/ttypt/lam.h
+$(TARGET): seven/nd_seven_gl_shaders.gen.c $(ND_UX_HDRS) $(ND_SEVEN_HDRS) $(ND_AREOLE_DEPS) $(REPO_ROOT)/external/nd-world/include/nd/field.h
+
+$(WASM_PATH)/nd.wasm: seven/nd_seven_gl_shaders.gen.c $(nd-src) $(ND_UX_HDRS) $(ND_SEVEN_HDRS) $(ND_AREOLE_DEPS) $(REPO_ROOT)/external/nd-seven/include/nd/seven-world.h $(REPO_ROOT)/external/nd-world/include/nd/field.h $(REPO_ROOT)/external/axil-nd/include/nd/bcp.h $(REPO_ROOT)/external/axil/include/ttypt/axil-ws.h $(REPO_ROOT)/external/liblamina/include/ttypt/lam.h

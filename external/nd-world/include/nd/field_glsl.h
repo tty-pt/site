@@ -149,10 +149,14 @@
 	"        float ry_f = (64.0 - worldPos.y) / 128.0;\n" \
 	"        int rx0 = int(floor(rx_f));\n" \
 	"        int ry0 = int(floor(ry_f));\n" \
-	"        float h00 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0,     fw);\n" \
-	"        float h10 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0,     fw);\n" \
-	"        float h01 = nd_gpu_room_hyp_coarse(seed, rx0,     ry0 + 1, fw);\n" \
-	"        float h11 = nd_gpu_room_hyp_coarse(seed, rx0 + 1, ry0 + 1, fw);\n" \
+	"        float h00 = 0.0, h10 = 0.0, h01 = 0.0, h11 = 0.0;\n" \
+	"        for (int cr = 0; cr < 4; cr++) {\n" \
+	"            float hc = nd_gpu_room_hyp_coarse(seed, rx0 + (cr & 1), ry0 + (cr >> 1), fw);\n" \
+	"            if (cr == 0) h00 = hc;\n" \
+	"            else if (cr == 1) h10 = hc;\n" \
+	"            else if (cr == 2) h01 = hc;\n" \
+	"            else h11 = hc;\n" \
+	"        }\n" \
 	"        vec2 f = vec2(rx_f - floor(rx_f), ry_f - floor(ry_f));\n" \
 	"        vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n" \
 	"        vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);\n" \

@@ -4,6 +4,7 @@ REPO_ROOT="$(pwd)"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT HUP INT TERM
 gcc -Wall -Wextra -Werror -O1 \
+    -I"$REPO_ROOT/external/libislet/include" \
     -I"$REPO_ROOT/external/libareole/include" \
     -I"$REPO_ROOT/external/libchaff/include" \
     -I"$REPO_ROOT/external/libcorolla/include" \

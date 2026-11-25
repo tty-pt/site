@@ -41,6 +41,22 @@
 #endif
 #define ND_TREE_SHADOW_RES 1024
 
+/* GPU pass IDs for EXT_disjoint_timer_query_webgl2 (non-nested, 1-based) */
+typedef enum {
+	ND_GPU_PASS_CSM           = 1u,
+	ND_GPU_PASS_TERRAIN       = 2u,
+	ND_GPU_PASS_SKY           = 3u,
+	ND_GPU_PASS_HIZ           = 4u,
+	ND_GPU_PASS_TREE_SHADOW   = 5u,
+	ND_GPU_PASS_MESH3D_OPAQUE = 6u,
+	ND_GPU_PASS_MESH3D_ALPHA  = 7u,
+	ND_GPU_PASS_BILLBOARDS    = 8u,
+	ND_GPU_PASS_GRASS         = 9u,
+	ND_GPU_PASS_WATER         = 10u,
+	ND_GPU_PASS_CLOUDS        = 11u,
+	ND_GPU_PASS_POST          = 12u
+} nd_gpu_pass_id_t;
+
 #define PI_F 3.14159265358979323846f
 #define TWO_PI_F 6.28318530717958647692f
 
@@ -382,6 +398,13 @@ typedef struct {
 	GLint uFxaaActive;
 } gl_post_pipe_t;
 
+typedef enum {
+	ND_TERR_VAR_FULL     = 0,
+	ND_TERR_VAR_DRY_NEAR = 1,
+	ND_TERR_VAR_MACRO    = 2,
+	ND_TERR_VAR_COUNT    = 3
+} nd_terr_var_t;
+
 typedef struct {
 	uint16_t world;
 	uint8_t level;
@@ -391,6 +414,9 @@ typedef struct {
 	int32_t span_w, span_h;
 	uint32_t tex_w, tex_h;
 	uint32_t last_touch;
+	int16_t min_h_q12_4;
+	int16_t max_h_q12_4;
+	uint8_t has_river;
 	GLuint height_tex;
 	GLuint substrate_tex;
 } gl_chunk_tex_t;
@@ -411,7 +437,7 @@ typedef struct {
 typedef struct {
 	bool initialized;
 	bool pipelines_ready;
-	gl_terrain_pipe_t terrain_pipe;
+	gl_terrain_pipe_t terrain_pipes[ND_TERR_VAR_COUNT];
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
 	gl_mesh3d_pipe_t mesh3d_pipe;
@@ -519,6 +545,9 @@ typedef struct {
 	bool   tree_shadow_failed;
 	bool   tree_shadow_read_valid;
 	bool   tree_shadow_write_draws;
+	bool   tree_shadow_skip_write;
+	float  tree_shadow_rendered_time;
+	int    tree_shadow_rendered_preset;
 	float  tree_shadow_read_origin[3];
 	float  tree_shadow_read_vp[16];
 	float  tree_shadow_write_origin[3];
@@ -549,12 +578,16 @@ typedef struct {
 	/* Hoisted terrain pass state (reset on begin_frame and non-terrain passes) */
 	bool terrain_pass_active;
 	bool terrain_pass_has_body;
-	bool terrain_pass_has_sea;
+	int terrain_pass_variant;
+	bool terrain_var_body_valid[ND_TERR_VAR_COUNT];
+	bool terrain_var_sea_valid[ND_TERR_VAR_COUNT];
+	float terrain_var_sea_level[ND_TERR_VAR_COUNT];
+	bool terrain_full_wake_valid;
+	int32_t terrain_pass_sea_offset_q12_4;
 	uint16_t terrain_pass_world;
 	nd_planet_def_t terrain_pass_pdef;
 	float terrain_pass_rel_center[3];
 	float terrain_pass_rot_mat4[16];
-	float terrain_pass_sea_level;
 	GLuint terrain_pass_vbo;
 
 	gl_water_chunk_t water_queue[MAX_WATER_QUEUE_BASE];
@@ -690,6 +723,7 @@ GLuint gl_ensure_tree_shadow_dummy(void);
 void gl_bind_tree_shadow_read(GLint uTex);
 void gl_render_cloud_shadow_map(void);
 void gl_bind_csm(GLint loc_tex);
+void gl_reset_billboard_frame_state(void);
 bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,
                                        float sea_wet, float fw,
                                        bool want_cirrus, float margin);
@@ -702,7 +736,10 @@ static inline void gl_flush_cmd_ring(void)
 static inline void gl_end_terrain_pass(void)
 {
 	gl_flush_cmd_ring();
-	s_gl.terrain_pass_active = false;
+	if (s_gl.terrain_pass_active) {
+		glTimerEnd(ND_GPU_PASS_TERRAIN);
+		s_gl.terrain_pass_active = false;
+	}
 }
 
 int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius);

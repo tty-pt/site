@@ -5,6 +5,7 @@ out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT HUP INT TERM
 
 gcc -Wall -Wextra -Werror -O3 \
+    -I"$REPO_ROOT/external/libislet/include" \
     -I"$REPO_ROOT/external/libareole/include" \
     -I"$REPO_ROOT/external/libchaff/include" \
     -I"$REPO_ROOT/external/nd-world/include" \

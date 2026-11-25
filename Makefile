@@ -357,7 +357,8 @@ STANDALONE_UNIT_SCRIPTS = \
 
 GRAPHICS_UNIT_SCRIPTS = \
 	run-test-scene-sync.sh run-test-ssr-hydration.sh run-test-seven-world.sh \
-	run-test-map-render.sh run-test-seven-render.sh run-test-lod-zoom-consistency.sh \
+	run-test-map-render.sh run-test-seven-render.sh run-test-seven-perf.sh \
+	run-test-seven-gl-ffi.sh run-test-lod-zoom-consistency.sh \
 	run-test-ground-zoom-lod.sh run-test-viewport-registry.sh run-test-seven-stage-html.sh \
 	run-test-lamina-bridge.sh run-test-axil-ws-multiplex.sh run-test-torus-planetary-renderer.sh \
 	run-test-areole-chaff-occlusion.sh run-xylem-wasm.sh
@@ -377,6 +378,7 @@ standalone-unit-tests:
 	@for s in $(STANDALONE_UNIT_SCRIPTS); do sh "tests/unit/$$s" || exit 1; done
 
 test-graphics:
+	@$(MAKE) -C external/libareole test
 	@for s in $(GRAPHICS_UNIT_SCRIPTS); do sh "tests/unit/$$s" || exit 1; done
 
 pages-test: all

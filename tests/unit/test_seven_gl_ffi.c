@@ -132,6 +132,8 @@ void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0
 void lam_glBindBufferBase(GLenum t, GLuint idx, GLuint b) { (void)t; (void)idx; (void)b; g_gl.total_calls++; g_gl.bind_buffer++; }
 GLuint lam_glGetUniformBlockIndex(GLuint p, const char *n, size_t l) { (void)p; (void)n; (void)l; g_gl.total_calls++; return 0u; }
 void lam_glUniformBlockBinding(GLuint p, GLuint bi, GLuint bb) { (void)p; (void)bi; (void)bb; g_gl.total_calls++; }
+void lam_glTimerBegin(GLuint p) { (void)p; g_gl.total_calls++; }
+void lam_glTimerEnd(GLuint p) { (void)p; g_gl.total_calls++; }
 void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count)
 {
 	g_gl.total_calls++;

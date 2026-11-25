@@ -7,6 +7,7 @@ trap 'rm -rf "$out"' EXIT HUP INT TERM
 gcc -Wall -Wextra -O1 \
     -I"$REPO_ROOT/external/nd-world/include" \
     -I"$REPO_ROOT/external/libchaff/include" \
+    -I"$REPO_ROOT/external/libislet/include" \
     -I"$REPO_ROOT/external/libareole/include" \
     -I"$REPO_ROOT/include" \
     -I"$REPO_ROOT/external/axil-nd/include" \

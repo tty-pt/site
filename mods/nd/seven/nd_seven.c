@@ -105,9 +105,10 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 		/* Natural ecological ecotone mosaic: modulate smooth Whittaker blend (0..128)
 		 * with multi-scale spatial patches and micro-relief (hollows vs rises) so
 		 * adjacent biomes interdigitate organically without hard seams or flat washes. */
+		static _CHAFF_TLS noise_wcache_t s_eco_c5, s_eco_c3;
 		int16_t p_eco[2] = { (int16_t)wy, (int16_t)wx };
-		uint32_t n_meso = noise_wpoint_n(p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
-		uint32_t n_loc  = noise_wpoint_n(p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_meso = noise_wpoint_c(&s_eco_c5, p_eco, 5, 8, 0x45434F31u ^ world, 2, NOISE_FADE5) >> 16;
+		uint32_t n_loc  = noise_wpoint_c(&s_eco_c3, p_eco, 3, 8, 0x45434F32u ^ world, 2, NOISE_FADE5) >> 16;
 		int32_t eco_jitter = ((int32_t)n_meso - 128) + (((int32_t)n_loc - 128) >> 1) - ((int32_t)fs.fine_elev * 2);
 		int32_t span = (blend <= 128) ? 128 : 252;
 		int32_t env_w = (int32_t)blend * (span - (int32_t)blend);
@@ -225,6 +226,8 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.samples_pool_capacity = 64;
 		cfg.samples_max_level = 2;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
+		if (s_seven_chunk_sys && nd_seven_perf_get_enabled())
+			ar_system_set_timing_enabled(s_seven_chunk_sys, true);
 	}
 	return s_seven_chunk_sys;
 }
@@ -903,6 +906,15 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	float prim_inner_r = pdef->major_r - pdef->minor_r;
 	if (prim_inner_r < 1.0f) prim_inner_r = 1.0f;
 
+	static uint16_t s_last_pop_world = 0xFFFFu;
+	static float s_last_pop_dist = 0.0f;
+	bool instant_jump = (s_visible_leaf_count == 0 || s_last_pop_world != world ||
+	                     s_last_pop_dist <= 1.0f ||
+	                     dist > s_last_pop_dist * 2.5f || dist < s_last_pop_dist * 0.4f);
+	uint32_t max_pops_query = instant_jump ? 0u : 20u;
+	s_last_pop_world = world;
+	s_last_pop_dist = dist;
+
 	ar_cull_opts_t opts = {
 		.z_min = z_min_cull,
 		.z_max = z_max_cull,
@@ -921,7 +933,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.min_level = min_lvl,
 		.max_level = 14,
 		.view_id = 0,
-		.max_populates_per_query = 0,
+		.max_populates_per_query = max_pops_query,
 		.split_hysteresis = 0.15f,
 		.occluder = occ,
 		.occluder_z_bias = 1.5f,
@@ -1140,17 +1152,14 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		}
 	}
 
-	/* Sort s_visible_leaves strictly front-to-back relative to the 3D camera eye position
-	 * so foreground mountains & front torus surfaces render first into the hardware Z-buffer
-	 * (maximizing GPU Early-Z rejection). */
+	/* s_visible_leaves is already ordered front-to-back by ar_system_update_view();
+	 * copy leaf bounds into s_front_leaf_bounds[] in O(N) for introspection & diagnostics. */
 	(void)cos_p;
 	if (macro_count >= 1) {
-		float leaf_d2[SEVEN_MAX_VISIBLE_LEAVES];
-		size_t sort_n = (macro_count <= SEVEN_MAX_VISIBLE_LEAVES) ? macro_count : SEVEN_MAX_VISIBLE_LEAVES;
-		for (size_t a = 0; a < sort_n; a++) {
+		size_t copy_n = (macro_count <= SEVEN_MAX_VISIBLE_LEAVES) ? macro_count : SEVEN_MAX_VISIBLE_LEAVES;
+		for (size_t a = 0; a < copy_n; a++) {
 			const ar_node_t *nd = s_visible_leaves[a];
 			if (!nd) {
-				leaf_d2[a] = 1e30f;
 				memset(&s_front_leaf_bounds[a], 0, sizeof(s_front_leaf_bounds[a]));
 				continue;
 			}
@@ -1160,32 +1169,6 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			s_front_leaf_bounds[a].h  = nd->h;
 			s_front_leaf_bounds[a].level = nd->level;
 			s_front_leaf_bounds[a].rev   = nd->rev;
-			float bmin[3], bmax[3];
-			seven_torus_bounds_3d_cb(&primary_bctx, (float)nd->ox, (float)nd->oy,
-			                         (float)nd->w, (float)nd->h, z_min_cull, z_max_cull,
-			                         bmin, bmax, NULL, NULL, NULL);
-			float dx = (eye_rel[0] < bmin[0]) ? (bmin[0] - eye_rel[0])
-			         : ((eye_rel[0] > bmax[0]) ? (eye_rel[0] - bmax[0]) : 0.0f);
-			float dy = (eye_rel[1] < bmin[1]) ? (bmin[1] - eye_rel[1])
-			         : ((eye_rel[1] > bmax[1]) ? (eye_rel[1] - bmax[1]) : 0.0f);
-			float dz = (eye_rel[2] < bmin[2]) ? (bmin[2] - eye_rel[2])
-			         : ((eye_rel[2] > bmax[2]) ? (eye_rel[2] - bmax[2]) : 0.0f);
-			leaf_d2[a] = dx * dx + dy * dy + dz * dz;
-		}
-		for (size_t a = 1; a < sort_n; a++) {
-			const ar_node_t *key_node = s_visible_leaves[a];
-			seven_leaf_bounds_t key_bnd = s_front_leaf_bounds[a];
-			float key_d2 = leaf_d2[a];
-			size_t b = a;
-			while (b > 0 && leaf_d2[b - 1] > key_d2) {
-				s_visible_leaves[b] = s_visible_leaves[b - 1];
-				s_front_leaf_bounds[b] = s_front_leaf_bounds[b - 1];
-				leaf_d2[b] = leaf_d2[b - 1];
-				b--;
-			}
-			s_visible_leaves[b] = key_node;
-			s_front_leaf_bounds[b] = key_bnd;
-			leaf_d2[b] = key_d2;
 		}
 	}
 
@@ -1325,7 +1308,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 #define MID_MAX_DRAW 262144
 #define MID_STREAM_CHUNK 16384
+#ifndef __wasm__
 static lam_billboard_gpu_t s_mid_gpu_batch[MID_MAX_DRAW];
+#endif
 static lam_billboard_gpu_t s_mid_stream_batch[MID_STREAM_CHUNK];
 static uint32_t s_mid_batch_len = 0;
 static uint32_t s_last_mid_gpu_count = 0;
@@ -1535,6 +1520,84 @@ static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, i
 	*out_wl = local_wl;
 }
 
+static inline void seven_sample_node_slope_at(const ar_node_t *node, int32_t wx, int32_t wy,
+                                              int16_t base_wl, int16_t elev_q,
+                                              const ar_node_t *const *adj_leaves, size_t adj_cnt,
+                                              int16_t *out_eq_x, int16_t *out_eq_y)
+{
+	int16_t dummy_wl = base_wl;
+	int16_t eq_x = elev_q;
+	int16_t eq_y = elev_q;
+
+	if (wx + 8 < node->ox + node->w) {
+		seven_sample_node_smooth(node, wx + 8, wy, base_wl, &eq_x, &dummy_wl);
+	} else {
+		const ar_node_t *nx_node = NULL;
+		for (size_t i = 0; i < adj_cnt; i++) {
+			const ar_node_t *cand = adj_leaves[i];
+			if (cand && cand->values && cand->level <= 1 &&
+			    wx + 8 >= cand->ox && wx + 8 < cand->ox + cand->w &&
+			    wy >= cand->oy && wy < cand->oy + cand->h) {
+				if (!nx_node || cand->level < nx_node->level)
+					nx_node = cand;
+			}
+		}
+		if (nx_node) {
+			seven_sample_node_smooth(nx_node, wx + 8, wy, base_wl, &eq_x, &dummy_wl);
+		} else {
+			int32_t bx = (wx - 8 >= node->ox) ? (wx - 8) : node->ox;
+			int16_t eq_bx = elev_q;
+			seven_sample_node_smooth(node, bx, wy, base_wl, &eq_bx, &dummy_wl);
+			int32_t ext_x = 2 * (int32_t)elev_q - (int32_t)eq_bx;
+			if (ext_x < -32768) ext_x = -32768;
+			if (ext_x >  32767) ext_x =  32767;
+			eq_x = (int16_t)ext_x;
+		}
+	}
+
+	if (wy + 8 < node->oy + node->h) {
+		seven_sample_node_smooth(node, wx, wy + 8, base_wl, &eq_y, &dummy_wl);
+	} else {
+		const ar_node_t *ny_node = NULL;
+		for (size_t i = 0; i < adj_cnt; i++) {
+			const ar_node_t *cand = adj_leaves[i];
+			if (cand && cand->values && cand->level <= 1 &&
+			    wx >= cand->ox && wx < cand->ox + cand->w &&
+			    wy + 8 >= cand->oy && wy + 8 < cand->oy + cand->h) {
+				if (!ny_node || cand->level < ny_node->level)
+					ny_node = cand;
+			}
+		}
+		if (ny_node) {
+			seven_sample_node_smooth(ny_node, wx, wy + 8, base_wl, &eq_y, &dummy_wl);
+		} else {
+			int32_t by = (wy - 8 >= node->oy) ? (wy - 8) : node->oy;
+			int16_t eq_by = elev_q;
+			seven_sample_node_smooth(node, wx, by, base_wl, &eq_by, &dummy_wl);
+			int32_t ext_y = 2 * (int32_t)elev_q - (int32_t)eq_by;
+			if (ext_y < -32768) ext_y = -32768;
+			if (ext_y >  32767) ext_y =  32767;
+			eq_y = (int16_t)ext_y;
+		}
+	}
+
+	*out_eq_x = eq_x;
+	*out_eq_y = eq_y;
+}
+
+static inline void seven_sample_node_elev_slope(const ar_node_t *node, int32_t wx, int32_t wy,
+                                                int16_t base_wl,
+                                                const ar_node_t *const *adj_leaves, size_t adj_cnt,
+                                                int16_t *out_elev_q, int16_t *out_eq_x,
+                                                int16_t *out_eq_y, int16_t *out_local_wl)
+{
+	seven_sample_node_smooth(node, wx, wy, base_wl, out_elev_q, out_local_wl);
+	int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
+	if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && *out_local_wl < base_wl)
+		*out_local_wl = base_wl;
+	seven_sample_node_slope_at(node, wx, wy, base_wl, *out_elev_q, adj_leaves, adj_cnt, out_eq_x, out_eq_y);
+}
+
 #define BLOCK_BB_CACHE_SLOTS 4096u
 #define BLOCK_BB_ARENA_CAP   262144u
 #define BLOCK_BB_MAX_PER_BLK 192u
@@ -1631,14 +1694,8 @@ static void seven_async_block_bb_worker(void *ctx)
 				bb.z = z_f;
 				seven_calc_obj_billboard_dims(&raw_objs[k], &sr_val, &bb.width, &bb.height, &bb.anchor_y);
 				if (raw_objs[k].kind == NDW_K_DECID || raw_objs[k].kind == NDW_K_TALL || raw_objs[k].kind == NDW_K_FIR) {
-					int16_t eq_x = elev_q, eq_y = elev_q, d_wl = local_wl;
-					if (wx + 8 < node->ox + node->w && wy + 8 < node->oy + node->h) {
-						seven_sample_node_smooth(node, wx + 8, wy, w_level, &eq_x, &d_wl);
-						seven_sample_node_smooth(node, wx, wy + 8, w_level, &eq_y, &d_wl);
-					} else {
-						eq_x = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-						eq_y = nd_seven_ground_elevation_q12_4(wx, wy + 8);
-					}
+					int16_t eq_x = elev_q, eq_y = elev_q;
+					seven_sample_node_slope_at(node, wx, wy, w_level, elev_q, NULL, 0, &eq_x, &eq_y);
 					float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
 					float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
 					float slope_m = sqrtf(dz_dx * dz_dx + dz_dy * dz_dy);
@@ -1684,14 +1741,16 @@ static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb
 	if (alpha_pack == 0)
 		return 0;
 	if (s_mid_batch_len == MID_STREAM_CHUNK) {
-		nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+		nd_seven_gl_queue_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
 		s_mid_batch_len = 0;
 	}
 	lam_billboard_gpu_t bb = *src_bb;
 	bb.tint_rgba = (src_bb->tint_rgba & 0xFFFFFF00u) | (alpha_pack & 0xFFu);
 	s_mid_stream_batch[s_mid_batch_len++] = bb;
+#ifndef __wasm__
 	if (s_last_mid_gpu_count < MID_MAX_DRAW)
 		s_mid_gpu_batch[s_last_mid_gpu_count] = bb;
+#endif
 	s_last_mid_gpu_count++;
 	return 1;
 }
@@ -1757,10 +1816,9 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		float z_f = (float)elev_q / 16.0f;
 		bb.z = z_f;
 		if (raw_objs[k].kind == NDW_K_DECID || raw_objs[k].kind == NDW_K_TALL || raw_objs[k].kind == NDW_K_FIR) {
-			int16_t eq_x = elev_q, eq_y = elev_q, d_wl = local_wl;
-			if (node && wx + 8 < node->ox + node->w && wy + 8 < node->oy + node->h) {
-				seven_sample_node_smooth(node, wx + 8, wy, w_level, &eq_x, &d_wl);
-				seven_sample_node_smooth(node, wx, wy + 8, w_level, &eq_y, &d_wl);
+			int16_t eq_x = elev_q, eq_y = elev_q;
+			if (node) {
+				seven_sample_node_slope_at(node, wx, wy, w_level, elev_q, NULL, 0, &eq_x, &eq_y);
 			} else {
 				eq_x = nd_seven_ground_elevation_q12_4(wx + 8, wy);
 				eq_y = nd_seven_ground_elevation_q12_4(wx, wy + 8);
@@ -2928,11 +2986,12 @@ typedef struct {
 typedef struct {
 	int32_t  bx, by;
 	int32_t  step;
-	uint32_t node_lod_sig;
+	uint32_t last_leaf_sig;
 	uint32_t map_bio_sig;
 	uint32_t atlas_ver;
 	uint32_t forget_seq;
-	uint64_t arena_seq; /* start_seq in s_flora_blk_arena */
+	uint64_t filled_mask; /* bit (ly<<3)|lx = 1 once cell is deterministically resolved */
+	uint64_t arena_seq;   /* start_seq in s_flora_blk_arena */
 	uint32_t arena_off;
 	uint32_t last_use;
 	uint16_t world;
@@ -3027,11 +3086,28 @@ flora_blk_find_leaf(int32_t wx, int32_t wy,
 	return best;
 }
 
+static inline unsigned
+flora_lookup_biome(const nd_client_state_t *st, int32_t wx, int32_t wy,
+                   int *cached_ti, int *cached_tj, unsigned *cached_bio)
+{
+	int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
+	int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
+	if (ti != *cached_ti || tj != *cached_tj) {
+		*cached_ti = ti;
+		*cached_tj = tj;
+		*cached_bio = 10u;
+		ndw_tile_t mt;
+		int16_t mpos[4];
+		if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
+			*cached_bio = mt.biome;
+	}
+	return *cached_bio;
+}
+
 static flora_blk_slot_t *
 flora_blk_lookup(uint8_t pass_id, uint16_t world, int16_t base_wl,
                  int32_t step, int32_t bx, int32_t by,
-                 uint32_t node_lod_sig, uint32_t map_bio_sig,
-                 uint32_t atlas_ver, uint32_t forget_seq,
+                 uint32_t map_bio_sig, uint32_t atlas_ver, uint32_t forget_seq,
                  int *out_hit)
 {
 	uint32_t h = (uint32_t)bx * 0x9E3779B1u
@@ -3052,11 +3128,16 @@ flora_blk_lookup(uint8_t pass_id, uint16_t world, int16_t base_wl,
 		    s->step == step &&
 		    s->bx == bx &&
 		    s->by == by &&
-		    s->node_lod_sig == node_lod_sig &&
 		    s->map_bio_sig == map_bio_sig &&
 		    s->atlas_ver == atlas_ver &&
-		    s->forget_seq == forget_seq &&
-		    (s->count == 0u || (s_flora_blk_arena_cursor - s->arena_seq) <= FLORA_BLK_ARENA_CAP)) {
+		    s->forget_seq == forget_seq) {
+			if (s->count > 0u && (s_flora_blk_arena_cursor - s->arena_seq) > FLORA_BLK_ARENA_CAP) {
+				s->filled_mask = 0ULL;
+				s->count = 0u;
+				s->last_leaf_sig = 0u;
+				*out_hit = 0;
+				return s;
+			}
 			s->last_use = ++s_flora_blk_lru_tick;
 			*out_hit = 1;
 			return s;
@@ -3077,8 +3158,8 @@ static void
 flora_blk_commit(flora_blk_slot_t *slot,
                  uint8_t pass_id, uint16_t world, int16_t base_wl,
                  int32_t step, int32_t bx, int32_t by,
-                 uint32_t node_lod_sig, uint32_t map_bio_sig,
-                 uint32_t atlas_ver, uint32_t forget_seq,
+                 uint32_t last_leaf_sig, uint64_t filled_mask,
+                 uint32_t map_bio_sig, uint32_t atlas_ver, uint32_t forget_seq,
                  const flora_blk_entry_t *tmp_entries, uint8_t cnt)
 {
 	uint32_t cur_off = 0u;
@@ -3096,7 +3177,8 @@ flora_blk_commit(flora_blk_slot_t *slot,
 	slot->bx = bx;
 	slot->by = by;
 	slot->step = step;
-	slot->node_lod_sig = node_lod_sig;
+	slot->last_leaf_sig = last_leaf_sig;
+	slot->filled_mask = filled_mask;
 	slot->map_bio_sig = map_bio_sig;
 	slot->atlas_ver = atlas_ver;
 	slot->forget_seq = forget_seq;
@@ -3110,87 +3192,116 @@ flora_blk_commit(flora_blk_slot_t *slot,
 	slot->valid = 1u;
 }
 
+typedef struct {
+	int32_t  wx, wy;
+	uint32_t h;
+	unsigned bio;
+	uint8_t  pre_mesh_id;
+} flora_cell_prep_t;
+
+typedef struct {
+	uint8_t  pass_id;
+	uint8_t  use_lamb_occl;
+	int32_t  step;
+	int32_t  rad;
+	int32_t  j_max;
+	int32_t  j_span;
+	float    min_r2;
+	float    frustum_pad;
+	float    frustum_zmin;
+	float    frustum_zmax;
+	float    max_cull2;
+	uint32_t atlas_ver;
+	int (*prefilter)(int32_t gx, int32_t gy, int32_t j_span,
+	                 const nd_client_state_t *st,
+	                 int *cached_ti, int *cached_tj, unsigned *cached_bio,
+	                 flora_cell_prep_t *out);
+	int (*eval_cell)(const flora_cell_prep_t *prep,
+	                 float z_f, int16_t local_wl, float dz_dx, float dz_dy,
+	                 flora_blk_entry_t *out_entry);
+} flora_pass_desc_t;
+
 static void
-seven_emit_living_meadow(seven_frame_ctx_t *ctx)
+flora_emit_pass(seven_frame_ctx_t *ctx, const flora_pass_desc_t *desc)
 {
 	const nd_client_state_t *st = ctx->st;
 	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
 	uint32_t all_gpu_count = ctx->batch_count;
 
-	/* Emit deterministic Living Meadow areas, shoreline reed beds, and wildflower glades:
-	 * Spread out on a 26-unit lattice with natural jitter so tufts are less frequent and never cluttered,
-	 * evaluated by the universal size/distance billboard fade & cull law with zero special cases. */
-	float max_meadow_cull = seven_billboard_cull_dist(18.0f, 18.0f);
-	int32_t meadow_step = nd_seven_meadow_lattice_step(s_cam_dist, max_meadow_cull);
-	if (meadow_step > 0 && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
-		uint16_t m_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
-		int16_t base_wl = nd_field_water_level(m_world);
-		int64_t lwx64 = 0, lwy64 = 0;
-		nd_seven_world_pos(st, &lwx64, &lwy64);
-		int32_t lwx = (int32_t)lwx64;
-		int32_t lwy = (int32_t)lwy64;
-		float lwx_f = (float)lwx;
-		float lwy_f = (float)lwy;
+	if (desc->step <= 0 || desc->rad <= 0 || all_gpu_count + 16 >= ALL_GPU_MAX_DRAW)
+		return;
 
-		const int32_t step = meadow_step;
-		float max_meadow_horiz = 2.88f * sqrtf(max_meadow_cull * max_meadow_cull - s_cam_dist * s_cam_dist);
-		int32_t dyn_rad = (int32_t)(s_cam_dist * 1.65f);
-		if (dyn_rad < 624) dyn_rad = 624;
-		if (dyn_rad > (int32_t)max_meadow_horiz) dyn_rad = (int32_t)max_meadow_horiz;
-		if (dyn_rad > 1404) dyn_rad = 1404;
-		int32_t max_rad_for_step = step * 24;
-		if (dyn_rad > max_rad_for_step) dyn_rad = max_rad_for_step;
-		const int32_t rad = (dyn_rad / step) * step;
-		const float rad2_f = (float)rad * (float)rad;
-		const int32_t ix0 = ndw_fdiv(lwx - rad, step);
-		const int32_t ix1 = ndw_fdiv(lwx + rad, step);
-		const int32_t iy0 = ndw_fdiv(lwy - rad, step);
-		const int32_t iy1 = ndw_fdiv(lwy + rad, step);
-		const int32_t bx0 = ndw_fdiv(ix0, FLORA_BLK_DIM);
-		const int32_t bx1 = ndw_fdiv(ix1, FLORA_BLK_DIM);
-		const int32_t by0 = ndw_fdiv(iy0, FLORA_BLK_DIM);
-		const int32_t by1 = ndw_fdiv(iy1, FLORA_BLK_DIM);
-		const int32_t j_span = (step > 4) ? (step - 2) : step;
-		const int32_t j_max = (j_span >> 1) + 1;
-		const float max_meadow_cull2 = max_meadow_cull * max_meadow_cull;
-		const uint32_t map_sig = flora_map_bio_sig(st);
-		const uint32_t atlas_ver = atlas_rgba_version();
-		const uint32_t forget_seq = nd_seven_get_forget_seq();
+	const uint16_t world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
+	const int16_t base_wl = nd_field_water_level(world);
+	int64_t lwx64 = 0, lwy64 = 0;
+	nd_seven_world_pos(st, &lwx64, &lwy64);
+	const int32_t lwx = (int32_t)lwx64;
+	const int32_t lwy = (int32_t)lwy64;
+	const float lwx_f = (float)lwx;
+	const float lwy_f = (float)lwy;
 
-		for (int32_t by = by0; by <= by1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; by++) {
-			int32_t blk_gy0 = by * FLORA_BLK_DIM * step;
-			int32_t blk_gy1 = (by * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * step;
-			float blk_min_y = (float)(blk_gy0 - j_max);
-			float blk_max_y = (float)(blk_gy1 + j_max);
-			for (int32_t bx = bx0; bx <= bx1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; bx++) {
-				int32_t blk_gx0 = bx * FLORA_BLK_DIM * step;
-				int32_t blk_gx1 = (bx * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * step;
-				float blk_min_x = (float)(blk_gx0 - j_max);
-				float blk_max_x = (float)(blk_gx1 + j_max);
+	const int32_t step = desc->step;
+	const int32_t rad = desc->rad;
+	const int32_t j_max = desc->j_max;
+	const float rad2_f = (float)rad * (float)rad;
+	const int32_t ix0 = ndw_fdiv(lwx - rad, step);
+	const int32_t ix1 = ndw_fdiv(lwx + rad, step);
+	const int32_t iy0 = ndw_fdiv(lwy - rad, step);
+	const int32_t iy1 = ndw_fdiv(lwy + rad, step);
+	const int32_t bx0 = ndw_fdiv(ix0, FLORA_BLK_DIM);
+	const int32_t bx1 = ndw_fdiv(ix1, FLORA_BLK_DIM);
+	const int32_t by0 = ndw_fdiv(iy0, FLORA_BLK_DIM);
+	const int32_t by1 = ndw_fdiv(iy1, FLORA_BLK_DIM);
+	const uint32_t map_sig = flora_map_bio_sig(st);
+	const uint32_t forget_seq = nd_seven_get_forget_seq();
 
-				if (flora_blk_min_dist2(lwx_f, lwy_f, blk_min_x, blk_min_y, blk_max_x, blk_max_y) > rad2_f)
-					continue;
-				if (s_cam_dist * s_cam_dist +
-				    0.12f * flora_blk_min_dist2(s_cam_focal_x, s_cam_focal_y,
-				                                blk_min_x, blk_min_y, blk_max_x, blk_max_y) >= max_meadow_cull2)
-					continue;
-				if (s_frame_frustum_valid &&
-				    !seven_test_frustum_xy(blk_min_x - 24.0f, blk_min_y - 24.0f,
-				                           blk_max_x + 24.0f, blk_max_y + 24.0f,
-				                           lwx_f, lwy_f, -256.0f, 320.0f))
-					continue;
+	for (int32_t by = by0; by <= by1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; by++) {
+		int32_t blk_gy0 = by * FLORA_BLK_DIM * step;
+		int32_t blk_gy1 = (by * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * step;
+		float blk_min_y = (float)(blk_gy0 - j_max);
+		float blk_max_y = (float)(blk_gy1 + j_max);
+		for (int32_t bx = bx0; bx <= bx1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; bx++) {
+			int32_t blk_gx0 = bx * FLORA_BLK_DIM * step;
+			int32_t blk_gx1 = (bx * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * step;
+			float blk_min_x = (float)(blk_gx0 - j_max);
+			float blk_max_x = (float)(blk_gx1 + j_max);
 
+			if (flora_blk_min_dist2(lwx_f, lwy_f, blk_min_x, blk_min_y, blk_max_x, blk_max_y) > rad2_f)
+				continue;
+			if (desc->max_cull2 > 0.0f &&
+			    s_cam_dist * s_cam_dist +
+			    0.12f * flora_blk_min_dist2(s_cam_focal_x, s_cam_focal_y,
+			                                blk_min_x, blk_min_y, blk_max_x, blk_max_y) >= desc->max_cull2)
+				continue;
+			if (s_frame_frustum_valid &&
+			    !seven_test_frustum_xy(blk_min_x - desc->frustum_pad, blk_min_y - desc->frustum_pad,
+			                           blk_max_x + desc->frustum_pad, blk_max_y + desc->frustum_pad,
+			                           lwx_f, lwy_f, desc->frustum_zmin, desc->frustum_zmax))
+				continue;
+
+			int hit = 0;
+			flora_blk_slot_t *slot = flora_blk_lookup(desc->pass_id, world, base_wl, step, bx, by,
+			                                          map_sig, desc->atlas_ver, forget_seq, &hit);
+
+			int need_fill = !hit || (slot->filled_mask != ~0ULL);
+			if (need_fill) {
 				const ar_node_t *blk_leaves[16];
 				size_t blk_leaf_cnt = 0;
 				uint32_t lod_sig = flora_blk_collect_leaves(blk_gx0 - j_max, blk_gy0 - j_max,
 				                                            blk_gx1 + j_max + 8, blk_gy1 + j_max + 8,
 				                                            blk_leaves, 16, &blk_leaf_cnt);
-				int hit = 0;
-				flora_blk_slot_t *slot = flora_blk_lookup(1u, m_world, base_wl, step, bx, by,
-				                                          lod_sig, map_sig, atlas_ver, forget_seq, &hit);
-				if (!hit) {
+				if (!(hit && slot->last_leaf_sig == lod_sig)) {
 					flora_blk_entry_t tmp[FLORA_BLK_MAX_CELLS];
-					uint8_t cnt = 0;
+					uint8_t orig_cnt = hit ? slot->count : 0u;
+					uint8_t cnt = orig_cnt;
+					uint64_t filled = hit ? slot->filled_mask : 0ULL;
+					if (orig_cnt > 0u)
+						memcpy(tmp, &s_flora_blk_arena[slot->arena_off],
+						       (size_t)orig_cnt * sizeof(flora_blk_entry_t));
+
+					const ar_node_t *const *adj_arr = (blk_leaf_cnt <= 16)
+						? blk_leaves : (const ar_node_t *const *)s_visible_leaves;
+					size_t adj_cnt = (blk_leaf_cnt <= 16) ? blk_leaf_cnt : s_visible_leaf_count;
 					const ar_node_t *m_node = NULL;
 					int cached_ti = 0x7FFFFFFF, cached_tj = 0x7FFFFFFF;
 					unsigned cached_bio = 10u;
@@ -3198,1072 +3309,715 @@ seven_emit_living_meadow(seven_frame_ctx_t *ctx)
 					for (int ly = 0; ly < FLORA_BLK_DIM; ly++) {
 						int32_t gy = (by * FLORA_BLK_DIM + ly) * step;
 						for (int lx = 0; lx < FLORA_BLK_DIM; lx++) {
-							int32_t gx = (bx * FLORA_BLK_DIM + lx) * step;
-							uint32_t jh = meadow_hash32(gx, gy, 0x4A495454u);
-							int32_t wx = gx + (int32_t)(jh % (uint32_t)j_span) - (j_span >> 1);
-							int32_t wy = gy + (int32_t)((jh >> 6u) % (uint32_t)j_span) - (j_span >> 1);
-
-							m_node = flora_blk_find_leaf(wx, wy, m_node, blk_leaves, blk_leaf_cnt, 16);
-							if (m_node && m_node->level > 1)
+							unsigned cell_idx = (unsigned)((ly << 3) | lx);
+							uint64_t bit = 1ULL << cell_idx;
+							if (filled & bit)
 								continue;
 
-							int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-							int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-							if (ti != cached_ti || tj != cached_tj) {
-								cached_ti = ti;
-								cached_tj = tj;
-								cached_bio = 10u;
-								ndw_tile_t mt;
-								int16_t mpos[4];
-								if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-									cached_bio = mt.biome;
+							int32_t gx = (bx * FLORA_BLK_DIM + lx) * step;
+							flora_cell_prep_t prep;
+							if (!desc->prefilter(gx, gy, desc->j_span, st,
+							                     &cached_ti, &cached_tj, &cached_bio, &prep)) {
+								filled |= bit;
+								continue;
 							}
-							unsigned bio = cached_bio;
 
 							int16_t elev_q = 0, eq_x = 0, eq_y = 0;
 							int16_t local_wl = base_wl;
-							if (m_node && wx + 8 < m_node->ox + m_node->w && wy + 8 < m_node->oy + m_node->h) {
-								int16_t dummy_wl = base_wl;
-								seven_sample_node_smooth(m_node, wx,     wy,     base_wl, &elev_q, &local_wl);
-								seven_sample_node_smooth(m_node, wx + 8, wy,     base_wl, &eq_x,   &dummy_wl);
-								seven_sample_node_smooth(m_node, wx,     wy + 8, base_wl, &eq_y,   &dummy_wl);
-								int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
-								if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && local_wl < base_wl)
-									local_wl = base_wl;
+							if (s_visible_leaf_count > 0) {
+								m_node = flora_blk_find_leaf(prep.wx, prep.wy, m_node,
+								                             blk_leaves, blk_leaf_cnt, 16);
+								if (!m_node || m_node->level > 1)
+									continue; /* leave bit unset for incremental fill */
+								seven_sample_node_elev_slope(m_node, prep.wx, prep.wy, base_wl,
+								                             adj_arr, adj_cnt,
+								                             &elev_q, &eq_x, &eq_y, &local_wl);
 							} else {
-								elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-								eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-								eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
-								seven_has_water_at(m_world, wx, wy, &local_wl);
+								elev_q = nd_seven_ground_elevation_q12_4(prep.wx, prep.wy);
+								eq_x   = nd_seven_ground_elevation_q12_4(prep.wx + 8, prep.wy);
+								eq_y   = nd_seven_ground_elevation_q12_4(prep.wx, prep.wy + 8);
+								seven_has_water_at(world, prep.wx, prep.wy, &local_wl);
 							}
 
+							filled |= bit;
 							float z_f = (float)elev_q / 16.0f;
 							float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
 							float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
-							float slope_mag = sqrtf(dz_dx * dz_dx + dz_dy * dz_dy);
 
-							int zone = ND_MEADOW_NONE;
-							float scale_m = 1.0f;
-							int flip = 0;
-							if (!nd_seven_eval_meadow_area(wx, wy, z_f, (float)local_wl, slope_mag,
-							                               bio, 999999.0f, &zone, &scale_m, &flip))
-								continue;
-
-							nd_seven_sprite_rect_t sr;
-							if (!meadow_lookup_rect(zone, bio, jh >> 8u, &sr))
-								continue;
-
-							uint8_t m_id = nd_seven_meadow_mesh3d_id(zone, bio, jh >> 16u);
-							const nd_mesh3d_slice_t *m_sl = (m_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(m_id) : NULL;
-							float h_var = 0.58f + 0.92f * ((float)((jh >> 20u) & 255u) * (1.0f / 255.0f));
-							float w_var = 0.94f + 0.44f * ((float)((jh >> 12u) & 255u) * (1.0f / 255.0f));
-							float bw_m = m_sl ? (m_sl->mesh_w_wu * scale_m * w_var) : ((float)sr.w * scale_m * 1.15f * w_var);
-							float bh_m = m_sl ? (m_sl->mesh_h_wu * scale_m * h_var) : ((float)sr.h * scale_m * h_var);
-							if (zone != ND_MEADOW_REED && zone != ND_MEADOW_TALL_GRASS) {
-								if (bh_m < 4.0f) bh_m = 4.0f;
-								if (bh_m > 12.0f) bh_m = 12.0f;
-							} else if (bh_m < 6.0f) {
-								bh_m = 6.0f;
+							if (cnt < FLORA_BLK_MAX_CELLS &&
+							    desc->eval_cell(&prep, z_f, local_wl, dz_dx, dz_dy, &tmp[cnt])) {
+								tmp[cnt].cell_xy = (uint8_t)cell_idx;
+								cnt++;
 							}
-
-							flora_blk_entry_t *e = &tmp[cnt++];
-							lam_billboard_gpu_t *bb = &e->bb;
-							bb->x = (float)wx;
-							bb->y = (float)wy;
-							bb->z = z_f;
-							bb->width = bw_m;
-							bb->height = bh_m;
-							bb->anchor_y = 1.6f * scale_m;
-							bb->water_z_off = 1.6f * scale_m;
-							if (flip) {
-								bb->u0 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
-								bb->u1 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
-							} else {
-								bb->u0 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
-								bb->u1 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
-							}
-							bb->v0 = (float)sr.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-							bb->v1 = (float)(sr.y + sr.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-							bb->tint_rgba = meadow_biome_tint(bio, zone, jh >> 12u, 0u);
-							bb->style = ND_BB_STYLE_GRASS;
-							{
-								float grx = bb->width * 0.28f;
-								if (grx < 2.0f) grx = 2.0f;
-								float gry = grx * 0.45f;
-								if (gry < 1.0f) gry = 1.0f;
-								bb->shadow_rx = (uint8_t)grx;
-								bb->shadow_ry = (uint8_t)gry;
-							}
-							bb->pad0 = nd_seven_gl_pack_pad0((uint8_t)zone, bio, false);
-							bb->mesh_id = m_id;
-							e->cull_w = (float)sr.w * scale_m;
-							e->cell_xy = (uint8_t)((ly << 3) | lx);
 						}
 					}
-					flora_blk_commit(slot, 1u, m_world, base_wl, step, bx, by,
-					                 lod_sig, map_sig, atlas_ver, forget_seq, tmp, cnt);
-				}
 
-				if (slot->count == 0u)
-					continue;
-				int check_bounds = (bx == bx0 || bx == bx1 || by == by0 || by == by1);
-				int32_t base_ix = bx * FLORA_BLK_DIM;
-				int32_t base_iy = by * FLORA_BLK_DIM;
-				const flora_blk_entry_t *entries = &s_flora_blk_arena[slot->arena_off];
-				for (uint8_t ci = 0; ci < slot->count && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; ci++) {
-					const flora_blk_entry_t *e = &entries[ci];
-					if (check_bounds) {
-						int32_t ix = base_ix + (int32_t)(e->cell_xy & 7u);
-						int32_t iy = base_iy + (int32_t)(e->cell_xy >> 3u);
-						if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1)
-							continue;
+					if (hit && cnt == orig_cnt) {
+						slot->filled_mask = filled;
+						slot->last_leaf_sig = lod_sig;
+						slot->last_use = ++s_flora_blk_lru_tick;
+					} else {
+						flora_blk_commit(slot, desc->pass_id, world, base_wl, step, bx, by,
+						                 lod_sig, filled, map_sig, desc->atlas_ver, forget_seq,
+						                 tmp, cnt);
 					}
-					float ddx = e->bb.x - lwx_f;
-					float ddy = e->bb.y - lwy_f;
-					if (ddx * ddx + ddy * ddy > rad2_f)
+				}
+			}
+
+			if (slot->count == 0u)
+				continue;
+			int check_bounds = (bx == bx0 || bx == bx1 || by == by0 || by == by1);
+			int32_t base_ix = bx * FLORA_BLK_DIM;
+			int32_t base_iy = by * FLORA_BLK_DIM;
+			const flora_blk_entry_t *entries = &s_flora_blk_arena[slot->arena_off];
+			for (uint8_t ci = 0; ci < slot->count && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; ci++) {
+				const flora_blk_entry_t *e = &entries[ci];
+				if (check_bounds) {
+					int32_t ix = base_ix + (int32_t)(e->cell_xy & 7u);
+					int32_t iy = base_iy + (int32_t)(e->cell_xy >> 3u);
+					if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1)
 						continue;
+				}
+				float ddx = e->bb.x - lwx_f;
+				float ddy = e->bb.y - lwy_f;
+				float r2 = ddx * ddx + ddy * ddy;
+				if (r2 > rad2_f || (desc->min_r2 > 0.0f && r2 < desc->min_r2))
+					continue;
+				if (desc->max_cull2 > 0.0f) {
 					float mdx = e->bb.x - s_cam_focal_x;
 					float mdy = e->bb.y - s_cam_focal_y;
-					if (s_cam_dist * s_cam_dist + 0.12f * (mdx * mdx + mdy * mdy) >= max_meadow_cull2)
+					if (s_cam_dist * s_cam_dist + 0.12f * (mdx * mdx + mdy * mdy) >= desc->max_cull2)
 						continue;
-					if (s_frame_frustum_valid &&
-					    !seven_test_frustum_xy(e->bb.x - 24.0f, e->bb.y - 24.0f,
-					                           e->bb.x + 24.0f, e->bb.y + 24.0f,
-					                           lwx_f, lwy_f, -256.0f, 320.0f))
-						continue;
-					float sort_y1 = e->bb.y;
+				}
+				if (s_frame_frustum_valid &&
+				    !seven_test_frustum_xy(e->bb.x - desc->frustum_pad, e->bb.y - desc->frustum_pad,
+				                           e->bb.x + desc->frustum_pad, e->bb.y + desc->frustum_pad,
+				                           lwx_f, lwy_f, desc->frustum_zmin, desc->frustum_zmax))
+					continue;
+				float sort_y1 = e->bb.y;
+				if (desc->use_lamb_occl) {
 					float sc_dummy = 1.0f;
 					if (!nd_seven_eval_meadow_lamb_occlusion(e->bb.x, e->bb.y, lwx_f, lwy_f, &sort_y1, &sc_dummy))
 						continue;
-					float eff_alpha = seven_eval_billboard_alpha(e->bb.x, e->bb.y, e->bb.z, e->cull_w, e->bb.height);
-					uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
-					if (base_alpha_pack == 0)
-						continue;
-					lam_billboard_gpu_t *dst = &s_all_gpu_batch[all_gpu_count++];
-					*dst = e->bb;
-					dst->y = sort_y1;
-					dst->tint_rgba = e->bb.tint_rgba | (base_alpha_pack & 0xFFu);
 				}
+				float eff_alpha = seven_eval_billboard_alpha(e->bb.x, e->bb.y, e->bb.z, e->cull_w, e->bb.height);
+				uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
+				if (base_alpha_pack == 0)
+					continue;
+				lam_billboard_gpu_t *dst = &s_all_gpu_batch[all_gpu_count++];
+				*dst = e->bb;
+				if (desc->use_lamb_occl)
+					dst->y = sort_y1;
+				dst->tint_rgba = e->bb.tint_rgba | (base_alpha_pack & 0xFFu);
 			}
 		}
 	}
 
 	ctx->batch_count = all_gpu_count;
+}
+
+static int
+flora_prefilter_meadow(int32_t gx, int32_t gy, int32_t j_span,
+                       const nd_client_state_t *st,
+                       int *cached_ti, int *cached_tj, unsigned *cached_bio,
+                       flora_cell_prep_t *out)
+{
+	uint32_t jh = meadow_hash32(gx, gy, 0x4A495454u);
+	int32_t wx = gx + (int32_t)(jh % (uint32_t)j_span) - (j_span >> 1);
+	int32_t wy = gy + (int32_t)((jh >> 6u) % (uint32_t)j_span) - (j_span >> 1);
+	out->wx = wx;
+	out->wy = wy;
+	out->h = jh;
+	out->bio = flora_lookup_biome(st, wx, wy, cached_ti, cached_tj, cached_bio);
+	out->pre_mesh_id = ND_MESH3D_NONE;
+	return 1;
+}
+
+static int
+flora_eval_meadow_cell(const flora_cell_prep_t *prep,
+                       float z_f, int16_t local_wl, float dz_dx, float dz_dy,
+                       flora_blk_entry_t *e)
+{
+	float slope_mag = sqrtf(dz_dx * dz_dx + dz_dy * dz_dy);
+	int zone = ND_MEADOW_NONE;
+	float scale_m = 1.0f;
+	int flip = 0;
+	if (!nd_seven_eval_meadow_area(prep->wx, prep->wy, z_f, (float)local_wl, slope_mag,
+	                               prep->bio, 999999.0f, &zone, &scale_m, &flip))
+		return 0;
+
+	nd_seven_sprite_rect_t sr;
+	if (!meadow_lookup_rect(zone, prep->bio, prep->h >> 8u, &sr))
+		return 0;
+
+	uint8_t m_id = nd_seven_meadow_mesh3d_id(zone, prep->bio, prep->h >> 16u);
+	const nd_mesh3d_slice_t *m_sl = (m_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(m_id) : NULL;
+	float h_var = 0.58f + 0.92f * ((float)((prep->h >> 20u) & 255u) * (1.0f / 255.0f));
+	float w_var = 0.94f + 0.44f * ((float)((prep->h >> 12u) & 255u) * (1.0f / 255.0f));
+	float bw_m = m_sl ? (m_sl->mesh_w_wu * scale_m * w_var) : ((float)sr.w * scale_m * 1.15f * w_var);
+	float bh_m = m_sl ? (m_sl->mesh_h_wu * scale_m * h_var) : ((float)sr.h * scale_m * h_var);
+	if (zone != ND_MEADOW_REED && zone != ND_MEADOW_TALL_GRASS) {
+		if (bh_m < 4.0f) bh_m = 4.0f;
+		if (bh_m > 12.0f) bh_m = 12.0f;
+	} else if (bh_m < 6.0f) {
+		bh_m = 6.0f;
+	}
+
+	lam_billboard_gpu_t *bb = &e->bb;
+	bb->x = (float)prep->wx;
+	bb->y = (float)prep->wy;
+	bb->z = z_f;
+	bb->width = bw_m;
+	bb->height = bh_m;
+	bb->anchor_y = 1.6f * scale_m;
+	bb->water_z_off = 1.6f * scale_m;
+	if (flip) {
+		bb->u0 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
+		bb->u1 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
+	} else {
+		bb->u0 = (float)sr.x / (float)ND_SEVEN_ATLAS_W;
+		bb->u1 = (float)(sr.x + sr.w) / (float)ND_SEVEN_ATLAS_W;
+	}
+	bb->v0 = (float)sr.y / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+	bb->v1 = (float)(sr.y + sr.h) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
+	bb->tint_rgba = meadow_biome_tint(prep->bio, zone, prep->h >> 12u, 0u);
+	bb->style = ND_BB_STYLE_GRASS;
+	{
+		float grx = bb->width * 0.28f;
+		if (grx < 2.0f) grx = 2.0f;
+		float gry = grx * 0.45f;
+		if (gry < 1.0f) gry = 1.0f;
+		bb->shadow_rx = (uint8_t)grx;
+		bb->shadow_ry = (uint8_t)gry;
+	}
+	bb->pad0 = nd_seven_gl_pack_pad0((uint8_t)zone, prep->bio, false);
+	bb->mesh_id = m_id;
+	e->cull_w = (float)sr.w * scale_m;
+	return 1;
+}
+
+static void
+seven_emit_living_meadow(seven_frame_ctx_t *ctx)
+{
+	/* Emit deterministic Living Meadow areas, shoreline reed beds, and wildflower glades. */
+	float max_meadow_cull = seven_billboard_cull_dist(18.0f, 18.0f);
+	int32_t step = nd_seven_meadow_lattice_step(s_cam_dist, max_meadow_cull);
+	if (step <= 0)
+		return;
+	float max_meadow_horiz = 2.88f * sqrtf(max_meadow_cull * max_meadow_cull - s_cam_dist * s_cam_dist);
+	int32_t dyn_rad = (int32_t)(s_cam_dist * 1.65f);
+	if (dyn_rad < 624) dyn_rad = 624;
+	if (dyn_rad > (int32_t)max_meadow_horiz) dyn_rad = (int32_t)max_meadow_horiz;
+	if (dyn_rad > 1404) dyn_rad = 1404;
+	int32_t max_rad_for_step = step * 24;
+	if (dyn_rad > max_rad_for_step) dyn_rad = max_rad_for_step;
+	int32_t rad = (dyn_rad / step) * step;
+	int32_t j_span = (step > 4) ? (step - 2) : step;
+	const flora_pass_desc_t desc = {
+		.pass_id = 1u,
+		.use_lamb_occl = 1u,
+		.step = step,
+		.rad = rad,
+		.j_max = (j_span >> 1) + 1,
+		.j_span = j_span,
+		.min_r2 = 0.0f,
+		.frustum_pad = 24.0f,
+		.frustum_zmin = -256.0f,
+		.frustum_zmax = 320.0f,
+		.max_cull2 = max_meadow_cull * max_meadow_cull,
+		.atlas_ver = atlas_rgba_version(),
+		.prefilter = flora_prefilter_meadow,
+		.eval_cell = flora_eval_meadow_cell,
+	};
+	flora_emit_pass(ctx, &desc);
+}
+
+static int
+flora_prefilter_logs(int32_t gx, int32_t gy, int32_t j_span,
+                     const nd_client_state_t *st,
+                     int *cached_ti, int *cached_tj, unsigned *cached_bio,
+                     flora_cell_prep_t *out)
+{
+	(void)j_span;
+	uint32_t uh = meadow_hash32(gx, gy, 0x4C4F4753u);
+	/* Sparse natural occurrence (~16.7% of forest cells) */
+	if ((uh % 6u) != 0u)
+		return 0;
+	int32_t wx = gx + (int32_t)((uh >> 4u) % 49u) - 24;
+	int32_t wy = gy + (int32_t)((uh >> 10u) % 49u) - 24;
+	unsigned bio = flora_lookup_biome(st, wx, wy, cached_ti, cached_tj, cached_bio);
+	uint8_t u_mesh_id = nd_seven_understory_mesh3d_id(bio, uh >> 16u);
+	if (u_mesh_id == ND_MESH3D_NONE)
+		return 0;
+	out->wx = wx;
+	out->wy = wy;
+	out->h = uh;
+	out->bio = bio;
+	out->pre_mesh_id = u_mesh_id;
+	return 1;
+}
+
+static int
+flora_eval_logs_cell(const flora_cell_prep_t *prep,
+                     float z_f, int16_t local_wl, float dz_dx, float dz_dy,
+                     flora_blk_entry_t *e)
+{
+	if (z_f <= (float)local_wl + 0.8f)
+		return 0;
+	if (dz_dx * dz_dx + dz_dy * dz_dy > 0.36f * 0.36f)
+		return 0;
+	const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice(prep->pre_mesh_id);
+	if (!sl)
+		return 0;
+	float sc_u = 0.88f + 0.36f * ((float)((prep->h >> 20u) & 15u) / 15.0f);
+	float bw_u = sl->mesh_w_wu * sc_u;
+	float bh_u = sl->mesh_h_wu * sc_u;
+	int flip_u = (int)((prep->h >> 24u) & 1u);
+
+	lam_billboard_gpu_t *bb = &e->bb;
+	bb->x = (float)prep->wx;
+	bb->y = (float)prep->wy;
+	bb->z = z_f;
+	bb->width = bw_u;
+	bb->height = bh_u;
+	bb->anchor_y = 0.0f;
+	bb->water_z_off = 0.0f;
+	bb->u0 = flip_u ? 1.0f : 0.0f;
+	bb->u1 = flip_u ? 0.0f : 1.0f;
+	bb->v0 = 0.0f;
+	bb->v1 = 0.0f;
+	bb->tint_rgba = 0xF2F6EC00u;
+	bb->style = ND_BB_STYLE_FLORA;
+	bb->shadow_rx = (uint8_t)(bw_u * 0.32f > 4.0f ? bw_u * 0.32f : 4.0f);
+	bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
+	bb->pad0 = nd_seven_gl_pack_pad0(1u, prep->bio, false);
+	bb->mesh_id = prep->pre_mesh_id;
+	e->cull_w = bw_u;
+	return 1;
 }
 
 static void
 seven_emit_forest_floor_logs(seven_frame_ctx_t *ctx)
 {
-	const nd_client_state_t *st = ctx->st;
-	const float eff_cam_dist = ctx->eff_cam_dist;
-	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
-	uint32_t all_gpu_count = ctx->batch_count;
-
 	/* Emit deterministic 3D forest-floor fallen logs & ancient mossy stumps across woodland biomes */
-	if (eff_cam_dist < 1600.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
-		uint16_t u_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
-		int16_t u_base_wl = nd_field_water_level(u_world);
-		int64_t ulwx64 = 0, ulwy64 = 0;
-		nd_seven_world_pos(st, &ulwx64, &ulwy64);
-		int32_t ulwx = (int32_t)ulwx64;
-		int32_t ulwy = (int32_t)ulwy64;
-		float ulwx_f = (float)ulwx;
-		float ulwy_f = (float)ulwy;
+	if (ctx->eff_cam_dist >= 1600.0f)
+		return;
+	static const flora_pass_desc_t desc = {
+		.pass_id = 2u,
+		.use_lamb_occl = 0u,
+		.step = 112,
+		.rad = 1120,
+		.j_max = 24,
+		.j_span = 0,
+		.min_r2 = 36.0f * 36.0f,
+		.frustum_pad = 36.0f,
+		.frustum_zmin = -256.0f,
+		.frustum_zmax = 320.0f,
+		.max_cull2 = 0.0f,
+		.atlas_ver = 0u,
+		.prefilter = flora_prefilter_logs,
+		.eval_cell = flora_eval_logs_cell,
+	};
+	flora_emit_pass(ctx, &desc);
+}
 
-		const int32_t log_step = 112;
-		const int32_t log_rad  = 1120;
-		const float rad2_f = (float)log_rad * (float)log_rad;
-		const int32_t ix0 = ndw_fdiv(ulwx - log_rad, log_step);
-		const int32_t ix1 = ndw_fdiv(ulwx + log_rad, log_step);
-		const int32_t iy0 = ndw_fdiv(ulwy - log_rad, log_step);
-		const int32_t iy1 = ndw_fdiv(ulwy + log_rad, log_step);
-		const int32_t bx0 = ndw_fdiv(ix0, FLORA_BLK_DIM);
-		const int32_t bx1 = ndw_fdiv(ix1, FLORA_BLK_DIM);
-		const int32_t by0 = ndw_fdiv(iy0, FLORA_BLK_DIM);
-		const int32_t by1 = ndw_fdiv(iy1, FLORA_BLK_DIM);
-		const uint32_t map_sig = flora_map_bio_sig(st);
-		const uint32_t forget_seq = nd_seven_get_forget_seq();
+static int
+flora_prefilter_medium(int32_t gx, int32_t gy, int32_t j_span,
+                       const nd_client_state_t *st,
+                       int *cached_ti, int *cached_tj, unsigned *cached_bio,
+                       flora_cell_prep_t *out)
+{
+	(void)j_span;
+	uint32_t sh = meadow_hash32(gx, gy, 0x53485242u);
+	/* Hash-first rejection: (sh%3)==0 && (sh%9)!=0 fails both in_patch and !in_patch */
+	if ((sh % 3u) == 0u && (sh % 9u) != 0u)
+		return 0;
+	int32_t wx = gx + (int32_t)((sh >> 4u) % 33u) - 16;
+	int32_t wy = gy + (int32_t)((sh >> 10u) % 33u) - 16;
+	unsigned bio = flora_lookup_biome(st, wx, wy, cached_ti, cached_tj, cached_bio);
+	if (bio == 0u || bio == 1u || bio == 6u || bio == 14u || bio == 18u)
+		return 0;
+	out->wx = wx;
+	out->wy = wy;
+	out->h = sh;
+	out->bio = bio;
+	out->pre_mesh_id = ND_MESH3D_NONE;
+	return 1;
+}
 
-		for (int32_t by = by0; by <= by1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; by++) {
-			int32_t blk_gy0 = by * FLORA_BLK_DIM * log_step;
-			int32_t blk_gy1 = (by * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * log_step;
-			float blk_min_y = (float)(blk_gy0 - 24);
-			float blk_max_y = (float)(blk_gy1 + 24);
-			for (int32_t bx = bx0; bx <= bx1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; bx++) {
-				int32_t blk_gx0 = bx * FLORA_BLK_DIM * log_step;
-				int32_t blk_gx1 = (bx * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * log_step;
-				float blk_min_x = (float)(blk_gx0 - 24);
-				float blk_max_x = (float)(blk_gx1 + 24);
+static int
+flora_eval_medium_cell(const flora_cell_prep_t *prep,
+                       float z_f, int16_t local_wl, float dz_dx, float dz_dy,
+                       flora_blk_entry_t *e)
+{
+	if (z_f <= (float)local_wl + 0.6f)
+		return 0;
+	float slope2 = dz_dx * dz_dx + dz_dy * dz_dy;
+	if (slope2 > 0.44f * 0.44f)
+		return 0;
+	float slope_m = sqrtf(slope2);
+	float trail_w = (z_f > (float)local_wl + 1.2f)
+	              ? nd_seven_eval_trail_weight((float)prep->wx, (float)prep->wy, slope_m)
+	              : 0.0f;
+	if (trail_w > 0.35f)
+		return 0;
 
-				if (flora_blk_min_dist2(ulwx_f, ulwy_f, blk_min_x, blk_min_y, blk_max_x, blk_max_y) > rad2_f)
-					continue;
-				if (s_frame_frustum_valid &&
-				    !seven_test_frustum_xy(blk_min_x - 36.0f, blk_min_y - 36.0f,
-				                           blk_max_x + 36.0f, blk_max_y + 36.0f,
-				                           ulwx_f, ulwy_f, -256.0f, 320.0f))
-					continue;
+	/* Macro-patch clustering: lush mid-story drifts & riverbank bands separated by open turf */
+	float med_patch = meadow_noise_2d((float)prep->wx, (float)prep->wy, 148.0f, 0x4D454432u);
+	int near_bank = (z_f <= (float)local_wl + 7.5f);
+	int in_patch = (med_patch > 0.44f) || (near_bank && med_patch > 0.30f);
+	uint32_t sh = prep->h;
+	if (in_patch) {
+		if ((sh % 3u) == 0u)
+			return 0;
+	} else {
+		if ((sh % 9u) != 0u)
+			return 0;
+	}
 
-				const ar_node_t *blk_leaves[16];
-				size_t blk_leaf_cnt = 0;
-				uint32_t lod_sig = flora_blk_collect_leaves(blk_gx0 - 24, blk_gy0 - 24,
-				                                            blk_gx1 + 32, blk_gy1 + 32,
-				                                            blk_leaves, 16, &blk_leaf_cnt);
-				int hit = 0;
-				flora_blk_slot_t *slot = flora_blk_lookup(2u, u_world, u_base_wl, log_step, bx, by,
-				                                          lod_sig, map_sig, 0u, forget_seq, &hit);
-				if (!hit) {
-					flora_blk_entry_t tmp[FLORA_BLK_MAX_CELLS];
-					uint8_t cnt = 0;
-					const ar_node_t *u_node = NULL;
-					int u_cached_ti = 0x7FFFFFFF, u_cached_tj = 0x7FFFFFFF;
-					unsigned u_cached_bio = 10u;
+	unsigned bio = prep->bio;
+	unsigned fam = (sh >> 16u) % 10u;
+	uint8_t s_mesh_id = ND_MESH3D_NONE;
+	uint8_t s_style = ND_BB_STYLE_FLORA;
+	uint8_t s_pad0 = nd_seven_gl_pack_pad0(1u, bio, false);
+	int s_grass_zone = ND_MEADOW_TALL_GRASS;
+	int is_grass_clump = 0;
 
-					for (int ly = 0; ly < FLORA_BLK_DIM; ly++) {
-						int32_t gy = (by * FLORA_BLK_DIM + ly) * log_step;
-						for (int lx = 0; lx < FLORA_BLK_DIM; lx++) {
-							int32_t gx = (bx * FLORA_BLK_DIM + lx) * log_step;
-							uint32_t uh = meadow_hash32(gx, gy, 0x4C4F4753u);
-							/* Sparse natural occurrence (~16.7% of forest cells) */
-							if ((uh % 6u) != 0u)
-								continue;
-							int32_t wx = gx + (int32_t)((uh >> 4u) % 49u) - 24;
-							int32_t wy = gy + (int32_t)((uh >> 10u) % 49u) - 24;
-
-							int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-							int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-							if (ti != u_cached_ti || tj != u_cached_tj) {
-								u_cached_ti = ti;
-								u_cached_tj = tj;
-								u_cached_bio = 10u;
-								ndw_tile_t mt;
-								int16_t mpos[4];
-								if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-									u_cached_bio = mt.biome;
-							}
-							unsigned bio = u_cached_bio;
-							uint8_t u_mesh_id = nd_seven_understory_mesh3d_id(bio, uh >> 16u);
-							if (u_mesh_id == ND_MESH3D_NONE)
-								continue;
-
-							u_node = flora_blk_find_leaf(wx, wy, u_node, blk_leaves, blk_leaf_cnt, 16);
-							if (u_node && u_node->level > 1)
-								continue;
-
-							int16_t elev_q = 0, eq_x = 0, eq_y = 0;
-							int16_t local_wl = u_base_wl;
-							if (u_node && wx + 8 < u_node->ox + u_node->w && wy + 8 < u_node->oy + u_node->h) {
-								int16_t dummy_wl = u_base_wl;
-								seven_sample_node_smooth(u_node, wx,     wy,     u_base_wl, &elev_q, &local_wl);
-								seven_sample_node_smooth(u_node, wx + 8, wy,     u_base_wl, &eq_x,   &dummy_wl);
-								seven_sample_node_smooth(u_node, wx,     wy + 8, u_base_wl, &eq_y,   &dummy_wl);
-								int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
-								if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && local_wl < u_base_wl)
-									local_wl = u_base_wl;
-							} else {
-								elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-								eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-								eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
-								seven_has_water_at(u_world, wx, wy, &local_wl);
-							}
-
-							float z_f = (float)elev_q / 16.0f;
-							if (z_f <= (float)local_wl + 0.8f)
-								continue;
-							float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
-							float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
-							if (dz_dx * dz_dx + dz_dy * dz_dy > 0.36f * 0.36f)
-								continue;
-
-							const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice(u_mesh_id);
-							if (!sl)
-								continue;
-							float sc_u = 0.88f + 0.36f * ((float)((uh >> 20u) & 15u) / 15.0f);
-							float bw_u = sl->mesh_w_wu * sc_u;
-							float bh_u = sl->mesh_h_wu * sc_u;
-							int flip_u = (int)((uh >> 24u) & 1u);
-
-							flora_blk_entry_t *e = &tmp[cnt++];
-							lam_billboard_gpu_t *bb = &e->bb;
-							bb->x = (float)wx;
-							bb->y = (float)wy;
-							bb->z = z_f;
-							bb->width = bw_u;
-							bb->height = bh_u;
-							bb->anchor_y = 0.0f;
-							bb->water_z_off = 0.0f;
-							bb->u0 = flip_u ? 1.0f : 0.0f;
-							bb->u1 = flip_u ? 0.0f : 1.0f;
-							bb->v0 = 0.0f;
-							bb->v1 = 0.0f;
-							bb->tint_rgba = 0xF2F6EC00u;
-							bb->style = ND_BB_STYLE_FLORA;
-							bb->shadow_rx = (uint8_t)(bw_u * 0.32f > 4.0f ? bw_u * 0.32f : 4.0f);
-							bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
-							bb->pad0 = nd_seven_gl_pack_pad0(1u, bio, false);
-							bb->mesh_id = u_mesh_id;
-							e->cull_w = bw_u;
-							e->cell_xy = (uint8_t)((ly << 3) | lx);
-						}
-					}
-					flora_blk_commit(slot, 2u, u_world, u_base_wl, log_step, bx, by,
-					                 lod_sig, map_sig, 0u, forget_seq, tmp, cnt);
-				}
-
-				if (slot->count == 0u)
-					continue;
-				int check_bounds = (bx == bx0 || bx == bx1 || by == by0 || by == by1);
-				int32_t base_ix = bx * FLORA_BLK_DIM;
-				int32_t base_iy = by * FLORA_BLK_DIM;
-				const flora_blk_entry_t *entries = &s_flora_blk_arena[slot->arena_off];
-				for (uint8_t ci = 0; ci < slot->count && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; ci++) {
-					const flora_blk_entry_t *e = &entries[ci];
-					if (check_bounds) {
-						int32_t ix = base_ix + (int32_t)(e->cell_xy & 7u);
-						int32_t iy = base_iy + (int32_t)(e->cell_xy >> 3u);
-						if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1)
-							continue;
-					}
-					float ddx = e->bb.x - ulwx_f;
-					float ddy = e->bb.y - ulwy_f;
-					float r2 = ddx * ddx + ddy * ddy;
-					if (r2 > rad2_f || r2 < 36.0f * 36.0f)
-						continue;
-					if (s_frame_frustum_valid &&
-					    !seven_test_frustum_xy(e->bb.x - 36.0f, e->bb.y - 36.0f,
-					                           e->bb.x + 36.0f, e->bb.y + 36.0f,
-					                           ulwx_f, ulwy_f, -256.0f, 320.0f))
-						continue;
-					float eff_alpha = seven_eval_billboard_alpha(e->bb.x, e->bb.y, e->bb.z, e->cull_w, e->bb.height);
-					uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
-					if (base_alpha_pack == 0)
-						continue;
-					lam_billboard_gpu_t *dst = &s_all_gpu_batch[all_gpu_count++];
-					*dst = e->bb;
-					dst->tint_rgba = e->bb.tint_rgba | (base_alpha_pack & 0xFFu);
-				}
-			}
+	if (fam < 5u) {
+		/* Medium 3D shrubs: creeping juniper (0), heather/sage (2), giant bracken fern (3) */
+		s_mesh_id = nd_seven_shrub_mesh3d_id(bio, sh >> 18u);
+		if (s_mesh_id >= ND_MESH3D_SHRUB_BASE + 2u && s_mesh_id < ND_MESH3D_SHRUB_BASE + 4u) {
+			unsigned sub = (sh >> 18u) & 1u;
+			unsigned m_arch = (bio == 5u || bio == 8u || bio == 9u || bio == 11u ||
+			                   bio == 12u || bio == 13u || bio == 16u || bio == 17u)
+			                ? 3u : (((sh >> 19u) & 1u) ? 2u : 0u);
+			s_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + m_arch * 2u + sub);
+		} else if (s_mesh_id >= ND_MESH3D_SHRUB_BASE + 8u) {
+			s_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + (((sh >> 19u) & 1u) ? 4u : 0u) + ((sh >> 18u) & 1u));
+		}
+	} else if (fam < 8u) {
+		/* Scaled tall meadow grass / forest fern clumps (16-28 wu) */
+		int is_wood = (bio == 8u || bio == 9u || bio == 11u ||
+		               bio == 12u || bio == 13u || bio == 16u || bio == 17u);
+		s_grass_zone = (is_wood && !near_bank && ((sh >> 19u) & 1u))
+		             ? ND_MEADOW_UNDERSTORY : ND_MEADOW_TALL_GRASS;
+		s_mesh_id = nd_seven_meadow_mesh3d_id(s_grass_zone, bio, sh >> 18u);
+		s_style = ND_BB_STYLE_GRASS;
+		s_pad0 = nd_seven_gl_pack_pad0((uint8_t)s_grass_zone, bio, false);
+		is_grass_clump = 1;
+	} else {
+		/* Wild tall flowering herbs (flax, wild carrot umbels, leafy berry bushes) */
+		if (bio == 2u || bio == 3u || bio == 7u || bio == 15u) {
+			s_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + 4u + ((sh >> 18u) & 1u));
+		} else {
+			static const uint8_t herb_sp[3] = { 3u, 8u, 9u };
+			unsigned hsp = herb_sp[(sh >> 18u) % 3u];
+			s_mesh_id = nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(hsp, 1u, (sh >> 20u) & 3u));
 		}
 	}
 
-	ctx->batch_count = all_gpu_count;
+	const nd_mesh3d_slice_t *sl = (s_mesh_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(s_mesh_id) : NULL;
+	if (!sl || sl->mesh_h_wu <= 0.1f)
+		return 0;
+
+	float t_h = (float)((sh >> 22u) & 15u) / 15.0f;
+	float target_h = is_grass_clump ? (16.0f + 12.0f * t_h) : (16.0f + 16.0f * t_h);
+	float sc_s = target_h / sl->mesh_h_wu;
+	float bw_s = sl->mesh_w_wu * sc_s * (is_grass_clump ? 1.12f : 1.0f);
+	float bh_s = target_h;
+	int flip_s = (int)((sh >> 26u) & 1u);
+
+	lam_billboard_gpu_t *bb = &e->bb;
+	bb->x = (float)prep->wx;
+	bb->y = (float)prep->wy;
+	bb->z = z_f;
+	bb->width = bw_s;
+	bb->height = bh_s;
+	bb->anchor_y = 0.0f;
+	bb->water_z_off = 0.0f;
+	bb->u0 = flip_s ? 1.0f : 0.0f;
+	bb->u1 = flip_s ? 0.0f : 1.0f;
+	bb->v0 = 0.0f;
+	bb->v1 = 0.0f;
+	bb->tint_rgba = is_grass_clump
+	              ? meadow_biome_tint(bio, s_grass_zone, sh >> 12u, 0u)
+	              : 0xF4F7EE00u;
+	bb->style = s_style;
+	bb->shadow_rx = (uint8_t)(bw_s * 0.30f > 4.0f ? bw_s * 0.30f : 4.0f);
+	bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
+	bb->pad0 = s_pad0;
+	bb->mesh_id = s_mesh_id;
+	e->cull_w = bw_s;
+	return 1;
 }
 
 static void
 seven_emit_medium_botanical(seven_frame_ctx_t *ctx)
 {
-	const nd_client_state_t *st = ctx->st;
-	const float eff_cam_dist = ctx->eff_cam_dist;
-	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
-	uint32_t all_gpu_count = ctx->batch_count;
+	/* Emit deterministic 3D Medium botanical stratum (16-32 wu) */
+	if (ctx->eff_cam_dist >= 2200.0f)
+		return;
+	static const flora_pass_desc_t desc = {
+		.pass_id = 3u,
+		.use_lamb_occl = 0u,
+		.step = 52,
+		.rad = 1456,
+		.j_max = 16,
+		.j_span = 0,
+		.min_r2 = 28.0f * 28.0f,
+		.frustum_pad = 32.0f,
+		.frustum_zmin = -256.0f,
+		.frustum_zmax = 320.0f,
+		.max_cull2 = 0.0f,
+		.atlas_ver = 0u,
+		.prefilter = flora_prefilter_medium,
+		.eval_cell = flora_eval_medium_cell,
+	};
+	flora_emit_pass(ctx, &desc);
+}
 
-	/* Emit deterministic 3D Medium botanical stratum (16-32 wu):
-	 * Macro-patch clustered ferns, heather cushions, creeping juniper, tall meadow grass clumps,
-	 * and wild flowering herbs (flax, wild carrot umbels, leafy berry bushes). */
-	if (eff_cam_dist < 2200.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
-		uint16_t s_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
-		int16_t s_base_wl = nd_field_water_level(s_world);
-		int64_t slwx64 = 0, slwy64 = 0;
-		nd_seven_world_pos(st, &slwx64, &slwy64);
-		int32_t slwx = (int32_t)slwx64;
-		int32_t slwy = (int32_t)slwy64;
-		float slwx_f = (float)slwx;
-		float slwy_f = (float)slwy;
+static int
+flora_prefilter_large(int32_t gx, int32_t gy, int32_t j_span,
+                      const nd_client_state_t *st,
+                      int *cached_ti, int *cached_tj, unsigned *cached_bio,
+                      flora_cell_prep_t *out)
+{
+	(void)j_span;
+	uint32_t lh = meadow_hash32(gx, gy, 0x4C524753u);
+	if ((lh % 3u) == 0u)
+		return 0;
+	int32_t wx = gx + (int32_t)((lh >> 4u) % 53u) - 26;
+	int32_t wy = gy + (int32_t)((lh >> 10u) % 53u) - 26;
+	unsigned bio = flora_lookup_biome(st, wx, wy, cached_ti, cached_tj, cached_bio);
+	if (bio == 0u || bio == 1u || bio == 18u)
+		return 0;
+	out->wx = wx;
+	out->wy = wy;
+	out->h = lh;
+	out->bio = bio;
+	out->pre_mesh_id = ND_MESH3D_NONE;
+	return 1;
+}
 
-		const int32_t med_step = 52;
-		const int32_t med_rad  = 1456;
-		const float rad2_f = (float)med_rad * (float)med_rad;
-		const int32_t ix0 = ndw_fdiv(slwx - med_rad, med_step);
-		const int32_t ix1 = ndw_fdiv(slwx + med_rad, med_step);
-		const int32_t iy0 = ndw_fdiv(slwy - med_rad, med_step);
-		const int32_t iy1 = ndw_fdiv(slwy + med_rad, med_step);
-		const int32_t bx0 = ndw_fdiv(ix0, FLORA_BLK_DIM);
-		const int32_t bx1 = ndw_fdiv(ix1, FLORA_BLK_DIM);
-		const int32_t by0 = ndw_fdiv(iy0, FLORA_BLK_DIM);
-		const int32_t by1 = ndw_fdiv(iy1, FLORA_BLK_DIM);
-		const uint32_t map_sig = flora_map_bio_sig(st);
-		const uint32_t forget_seq = nd_seven_get_forget_seq();
+static int
+flora_eval_large_cell(const flora_cell_prep_t *prep,
+                      float z_f, int16_t local_wl, float dz_dx, float dz_dy,
+                      flora_blk_entry_t *e)
+{
+	int near_bank = (z_f <= (float)local_wl + 8.5f);
+	if (z_f <= (float)local_wl + (near_bank ? 0.15f : 0.8f))
+		return 0;
+	float slope2 = dz_dx * dz_dx + dz_dy * dz_dy;
+	if (slope2 > 0.44f * 0.44f)
+		return 0;
+	float slope_m = sqrtf(slope2);
+	float trail_w = (z_f > (float)local_wl + 1.2f)
+	              ? nd_seven_eval_trail_weight((float)prep->wx, (float)prep->wy, slope_m)
+	              : 0.0f;
+	if (trail_w > 0.35f)
+		return 0;
 
-		for (int32_t by = by0; by <= by1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; by++) {
-			int32_t blk_gy0 = by * FLORA_BLK_DIM * med_step;
-			int32_t blk_gy1 = (by * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * med_step;
-			float blk_min_y = (float)(blk_gy0 - 16);
-			float blk_max_y = (float)(blk_gy1 + 16);
-			for (int32_t bx = bx0; bx <= bx1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; bx++) {
-				int32_t blk_gx0 = bx * FLORA_BLK_DIM * med_step;
-				int32_t blk_gx1 = (bx * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * med_step;
-				float blk_min_x = (float)(blk_gx0 - 16);
-				float blk_max_x = (float)(blk_gx1 + 16);
+	unsigned bio = prep->bio;
+	uint32_t lh = prep->h;
+	float krumm = 1.0f;
+	float grove = nd_seven_eval_grove_ecology(prep->wx, prep->wy, z_f, (float)local_wl, slope_m, bio, &krumm);
+	float large_patch = meadow_noise_2d((float)prep->wx, (float)prep->wy, 210.0f, 0x4C524733u);
 
-				if (flora_blk_min_dist2(slwx_f, slwy_f, blk_min_x, blk_min_y, blk_max_x, blk_max_y) > rad2_f)
-					continue;
-				if (s_frame_frustum_valid &&
-				    !seven_test_frustum_xy(blk_min_x - 32.0f, blk_min_y - 32.0f,
-				                           blk_max_x + 32.0f, blk_max_y + 32.0f,
-				                           slwx_f, slwy_f, -256.0f, 320.0f))
-					continue;
+	uint8_t l_mesh_id = ND_MESH3D_NONE;
+	float t_h = (float)((lh >> 20u) & 15u) / 15.0f;
+	float target_h = 36.0f + 39.0f * t_h;
 
-				const ar_node_t *blk_leaves[16];
-				size_t blk_leaf_cnt = 0;
-				uint32_t lod_sig = flora_blk_collect_leaves(blk_gx0 - 16, blk_gy0 - 16,
-				                                            blk_gx1 + 24, blk_gy1 + 24,
-				                                            blk_leaves, 16, &blk_leaf_cnt);
-				int hit = 0;
-				flora_blk_slot_t *slot = flora_blk_lookup(3u, s_world, s_base_wl, med_step, bx, by,
-				                                          lod_sig, map_sig, 0u, forget_seq, &hit);
-				if (!hit) {
-					flora_blk_entry_t tmp[FLORA_BLK_MAX_CELLS];
-					uint8_t cnt = 0;
-					const ar_node_t *s_node = NULL;
-					int s_cached_ti = 0x7FFFFFFF, s_cached_tj = 0x7FFFFFFF;
-					unsigned s_cached_bio = 10u;
-
-					for (int ly = 0; ly < FLORA_BLK_DIM; ly++) {
-						int32_t gy = (by * FLORA_BLK_DIM + ly) * med_step;
-						for (int lx = 0; lx < FLORA_BLK_DIM; lx++) {
-							int32_t gx = (bx * FLORA_BLK_DIM + lx) * med_step;
-							uint32_t sh = meadow_hash32(gx, gy, 0x53485242u);
-							/* Hash-first rejection: (sh%3)==0 && (sh%9)!=0 fails both in_patch and !in_patch */
-							if ((sh % 3u) == 0u && (sh % 9u) != 0u)
-								continue;
-							int32_t wx = gx + (int32_t)((sh >> 4u) % 33u) - 16;
-							int32_t wy = gy + (int32_t)((sh >> 10u) % 33u) - 16;
-
-							int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-							int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-							if (ti != s_cached_ti || tj != s_cached_tj) {
-								s_cached_ti = ti;
-								s_cached_tj = tj;
-								s_cached_bio = 10u;
-								ndw_tile_t mt;
-								int16_t mpos[4];
-								if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-									s_cached_bio = mt.biome;
-							}
-							unsigned bio = s_cached_bio;
-							if (bio == 0u || bio == 1u || bio == 6u || bio == 14u || bio == 18u)
-								continue;
-
-							s_node = flora_blk_find_leaf(wx, wy, s_node, blk_leaves, blk_leaf_cnt, 16);
-							if (s_node && s_node->level > 1)
-								continue;
-
-							int16_t elev_q = 0, eq_x = 0, eq_y = 0;
-							int16_t local_wl = s_base_wl;
-							if (s_node && wx + 8 < s_node->ox + s_node->w && wy + 8 < s_node->oy + s_node->h) {
-								int16_t dummy_wl = s_base_wl;
-								seven_sample_node_smooth(s_node, wx,     wy,     s_base_wl, &elev_q, &local_wl);
-								seven_sample_node_smooth(s_node, wx + 8, wy,     s_base_wl, &eq_x,   &dummy_wl);
-								seven_sample_node_smooth(s_node, wx,     wy + 8, s_base_wl, &eq_y,   &dummy_wl);
-								int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
-								if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && local_wl < s_base_wl)
-									local_wl = s_base_wl;
-							} else {
-								elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-								eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-								eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
-								seven_has_water_at(s_world, wx, wy, &local_wl);
-							}
-
-							float z_f = (float)elev_q / 16.0f;
-							if (z_f <= (float)local_wl + 0.6f)
-								continue;
-							float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
-							float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
-							float slope2 = dz_dx * dz_dx + dz_dy * dz_dy;
-							if (slope2 > 0.44f * 0.44f)
-								continue;
-							float slope_m = sqrtf(slope2);
-							float trail_w = (z_f > (float)local_wl + 1.2f)
-							              ? nd_seven_eval_trail_weight((float)wx, (float)wy, slope_m)
-							              : 0.0f;
-							if (trail_w > 0.35f)
-								continue;
-
-							/* Macro-patch clustering: lush mid-story drifts & riverbank bands separated by open turf */
-							float med_patch = meadow_noise_2d((float)wx, (float)wy, 148.0f, 0x4D454432u);
-							int near_bank = (z_f <= (float)local_wl + 7.5f);
-							int in_patch = (med_patch > 0.44f) || (near_bank && med_patch > 0.30f);
-							if (in_patch) {
-								if ((sh % 3u) == 0u)
-									continue;
-							} else {
-								if ((sh % 9u) != 0u)
-									continue;
-							}
-
-							unsigned fam = (sh >> 16u) % 10u;
-							uint8_t s_mesh_id = ND_MESH3D_NONE;
-							uint8_t s_style = ND_BB_STYLE_FLORA;
-							uint8_t s_pad0 = nd_seven_gl_pack_pad0(1u, bio, false);
-							int s_grass_zone = ND_MEADOW_TALL_GRASS;
-							int is_grass_clump = 0;
-
-							if (fam < 5u) {
-								/* Medium 3D shrubs: creeping juniper (0), heather/sage (2), giant bracken fern (3) */
-								s_mesh_id = nd_seven_shrub_mesh3d_id(bio, sh >> 18u);
-								if (s_mesh_id >= ND_MESH3D_SHRUB_BASE + 2u && s_mesh_id < ND_MESH3D_SHRUB_BASE + 4u) {
-									unsigned sub = (sh >> 18u) & 1u;
-									unsigned m_arch = (bio == 5u || bio == 8u || bio == 9u || bio == 11u ||
-									                   bio == 12u || bio == 13u || bio == 16u || bio == 17u)
-									                ? 3u : (((sh >> 19u) & 1u) ? 2u : 0u);
-									s_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + m_arch * 2u + sub);
-								} else if (s_mesh_id >= ND_MESH3D_SHRUB_BASE + 8u) {
-									s_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + (((sh >> 19u) & 1u) ? 4u : 0u) + ((sh >> 18u) & 1u));
-								}
-							} else if (fam < 8u) {
-								/* Scaled tall meadow grass / forest fern clumps (16-28 wu) */
-								int is_wood = (bio == 8u || bio == 9u || bio == 11u ||
-								               bio == 12u || bio == 13u || bio == 16u || bio == 17u);
-								s_grass_zone = (is_wood && !near_bank && ((sh >> 19u) & 1u))
-								             ? ND_MEADOW_UNDERSTORY : ND_MEADOW_TALL_GRASS;
-								s_mesh_id = nd_seven_meadow_mesh3d_id(s_grass_zone, bio, sh >> 18u);
-								s_style = ND_BB_STYLE_GRASS;
-								s_pad0 = nd_seven_gl_pack_pad0((uint8_t)s_grass_zone, bio, false);
-								is_grass_clump = 1;
-							} else {
-								/* Wild tall flowering herbs (flax, wild carrot umbels, leafy berry bushes) */
-								if (bio == 2u || bio == 3u || bio == 7u || bio == 15u) {
-									s_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + 4u + ((sh >> 18u) & 1u));
-								} else {
-									static const uint8_t herb_sp[3] = { 3u, 8u, 9u };
-									unsigned hsp = herb_sp[(sh >> 18u) % 3u];
-									s_mesh_id = nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(hsp, 1u, (sh >> 20u) & 3u));
-								}
-							}
-
-							const nd_mesh3d_slice_t *sl = (s_mesh_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(s_mesh_id) : NULL;
-							if (!sl || sl->mesh_h_wu <= 0.1f)
-								continue;
-
-							float t_h = (float)((sh >> 22u) & 15u) / 15.0f;
-							float target_h = is_grass_clump ? (16.0f + 12.0f * t_h) : (16.0f + 16.0f * t_h);
-							float sc_s = target_h / sl->mesh_h_wu;
-							float bw_s = sl->mesh_w_wu * sc_s * (is_grass_clump ? 1.12f : 1.0f);
-							float bh_s = target_h;
-							int flip_s = (int)((sh >> 26u) & 1u);
-
-							flora_blk_entry_t *e = &tmp[cnt++];
-							lam_billboard_gpu_t *bb = &e->bb;
-							bb->x = (float)wx;
-							bb->y = (float)wy;
-							bb->z = z_f;
-							bb->width = bw_s;
-							bb->height = bh_s;
-							bb->anchor_y = 0.0f;
-							bb->water_z_off = 0.0f;
-							bb->u0 = flip_s ? 1.0f : 0.0f;
-							bb->u1 = flip_s ? 0.0f : 1.0f;
-							bb->v0 = 0.0f;
-							bb->v1 = 0.0f;
-							bb->tint_rgba = is_grass_clump
-							              ? meadow_biome_tint(bio, s_grass_zone, sh >> 12u, 0u)
-							              : 0xF4F7EE00u;
-							bb->style = s_style;
-							bb->shadow_rx = (uint8_t)(bw_s * 0.30f > 4.0f ? bw_s * 0.30f : 4.0f);
-							bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
-							bb->pad0 = s_pad0;
-							bb->mesh_id = s_mesh_id;
-							e->cull_w = bw_s;
-							e->cell_xy = (uint8_t)((ly << 3) | lx);
-						}
-					}
-					flora_blk_commit(slot, 3u, s_world, s_base_wl, med_step, bx, by,
-					                 lod_sig, map_sig, 0u, forget_seq, tmp, cnt);
-				}
-
-				if (slot->count == 0u)
-					continue;
-				int check_bounds = (bx == bx0 || bx == bx1 || by == by0 || by == by1);
-				int32_t base_ix = bx * FLORA_BLK_DIM;
-				int32_t base_iy = by * FLORA_BLK_DIM;
-				const flora_blk_entry_t *entries = &s_flora_blk_arena[slot->arena_off];
-				for (uint8_t ci = 0; ci < slot->count && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; ci++) {
-					const flora_blk_entry_t *e = &entries[ci];
-					if (check_bounds) {
-						int32_t ix = base_ix + (int32_t)(e->cell_xy & 7u);
-						int32_t iy = base_iy + (int32_t)(e->cell_xy >> 3u);
-						if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1)
-							continue;
-					}
-					float ddx = e->bb.x - slwx_f;
-					float ddy = e->bb.y - slwy_f;
-					float r2 = ddx * ddx + ddy * ddy;
-					if (r2 > rad2_f || r2 < 28.0f * 28.0f)
-						continue;
-					if (s_frame_frustum_valid &&
-					    !seven_test_frustum_xy(e->bb.x - 32.0f, e->bb.y - 32.0f,
-					                           e->bb.x + 32.0f, e->bb.y + 32.0f,
-					                           slwx_f, slwy_f, -256.0f, 320.0f))
-						continue;
-					float eff_alpha = seven_eval_billboard_alpha(e->bb.x, e->bb.y, e->bb.z, e->cull_w, e->bb.height);
-					uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
-					if (base_alpha_pack == 0)
-						continue;
-					lam_billboard_gpu_t *dst = &s_all_gpu_batch[all_gpu_count++];
-					*dst = e->bb;
-					dst->tint_rgba = e->bb.tint_rgba | (base_alpha_pack & 0xFFu);
-				}
-			}
+	if ((near_bank || bio == 5u) && bio != 6u && bio != 14u &&
+	    large_patch > 0.36f && ((lh >> 14u) & 3u) < 2u) {
+		l_mesh_id = nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(15u, 1u, (lh >> 16u) & 3u));
+		target_h = 36.0f + 24.0f * t_h;
+	} else {
+		if (grove < 0.26f && large_patch < 0.54f)
+			return 0;
+		if (bio == 6u || bio == 14u) {
+			if (large_patch < 0.62f)
+				return 0;
+			l_mesh_id = nd_seven_sapling_mesh3d_id(bio, lh >> 16u);
+			target_h = 36.0f + 26.0f * t_h;
+		} else if (((lh >> 14u) % 100u) < 45u) {
+			l_mesh_id = nd_seven_sapling_mesh3d_id(bio, lh >> 16u);
+			target_h = 42.0f + 33.0f * t_h;
+		} else if (((lh >> 14u) % 100u) >= 88u &&
+		           (bio == 2u || bio == 3u || bio == 8u || bio == 9u ||
+		            bio == 11u || bio == 12u || bio == 13u)) {
+			l_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + 8u + ((lh >> 16u) & 1u));
+			target_h = 42.0f + 30.0f * t_h;
+		} else {
+			l_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + 2u + ((lh >> 16u) & 1u));
+			target_h = 36.0f + 28.0f * t_h;
 		}
 	}
 
-	ctx->batch_count = all_gpu_count;
+	const nd_mesh3d_slice_t *sl = (l_mesh_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(l_mesh_id) : NULL;
+	if (!sl || sl->mesh_h_wu <= 0.1f)
+		return 0;
+	target_h = 36.0f + (target_h - 36.0f) * krumm;
+	if (target_h < 36.0f) target_h = 36.0f;
+	if (target_h > 75.0f) target_h = 75.0f;
+
+	float sc_l = target_h / sl->mesh_h_wu;
+	float bw_l = sl->mesh_w_wu * sc_l;
+	float bh_l = target_h;
+	int flip_l = (int)((lh >> 24u) & 1u);
+
+	lam_billboard_gpu_t *bb = &e->bb;
+	bb->x = (float)prep->wx;
+	bb->y = (float)prep->wy;
+	bb->z = z_f;
+	bb->width = bw_l;
+	bb->height = bh_l;
+	bb->anchor_y = 0.0f;
+	bb->water_z_off = 0.0f;
+	bb->u0 = flip_l ? 1.0f : 0.0f;
+	bb->u1 = flip_l ? 0.0f : 1.0f;
+	bb->v0 = 0.0f;
+	bb->v1 = 0.0f;
+	bb->tint_rgba = 0xF2F6EC00u;
+	bb->style = ND_BB_STYLE_FLORA;
+	bb->shadow_rx = (uint8_t)(bw_l * 0.32f > 5.0f ? bw_l * 0.32f : 5.0f);
+	bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
+	bb->pad0 = nd_seven_gl_pack_pad0(2u, bio, false);
+	bb->mesh_id = l_mesh_id;
+	e->cull_w = bw_l;
+	return 1;
 }
 
 static void
 seven_emit_large_undergrowth(seven_frame_ctx_t *ctx)
 {
-	const nd_client_state_t *st = ctx->st;
-	const float eff_cam_dist = ctx->eff_cam_dist;
-	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
-	uint32_t all_gpu_count = ctx->batch_count;
+	/* Emit deterministic 3D Large undergrowth stratum (36-75 wu) */
+	if (ctx->eff_cam_dist >= 2600.0f)
+		return;
+	static const flora_pass_desc_t desc = {
+		.pass_id = 4u,
+		.use_lamb_occl = 0u,
+		.step = 92,
+		.rad = 1564,
+		.j_max = 26,
+		.j_span = 0,
+		.min_r2 = 40.0f * 40.0f,
+		.frustum_pad = 48.0f,
+		.frustum_zmin = -256.0f,
+		.frustum_zmax = 360.0f,
+		.max_cull2 = 0.0f,
+		.atlas_ver = 0u,
+		.prefilter = flora_prefilter_large,
+		.eval_cell = flora_eval_large_cell,
+	};
+	flora_emit_pass(ctx, &desc);
+}
 
-	/* Emit deterministic 3D Large undergrowth stratum (36-75 wu):
-	 * Biome-matched juvenile saplings, hazel/berry coppice thickets, tall riparian cattail/bulrush stands,
-	 * and occasional deadwood snags bridging mid-story shrubs into the mature tree canopy. */
-	if (eff_cam_dist < 2600.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
-		uint16_t l_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
-		int16_t l_base_wl = nd_field_water_level(l_world);
-		int64_t llwx64 = 0, llwy64 = 0;
-		nd_seven_world_pos(st, &llwx64, &llwy64);
-		int32_t llwx = (int32_t)llwx64;
-		int32_t llwy = (int32_t)llwy64;
-		float llwx_f = (float)llwx;
-		float llwy_f = (float)llwy;
+static int
+flora_prefilter_geobreak(int32_t gx, int32_t gy, int32_t j_span,
+                         const nd_client_state_t *st,
+                         int *cached_ti, int *cached_tj, unsigned *cached_bio,
+                         flora_cell_prep_t *out)
+{
+	(void)j_span;
+	uint32_t gh = meadow_hash32(gx, gy, 0x47454F42u);
+	if ((gh % 100u) >= 64u)
+		return 0;
+	int32_t wx = gx + (int32_t)((gh >> 4u) % 41u) - 20;
+	int32_t wy = gy + (int32_t)((gh >> 10u) % 41u) - 20;
+	unsigned bio = flora_lookup_biome(st, wx, wy, cached_ti, cached_tj, cached_bio);
+	uint8_t g_mesh_id = nd_seven_geobreak_mesh3d_id(bio, gh >> 16u);
+	if (g_mesh_id == ND_MESH3D_NONE)
+		return 0;
+	out->wx = wx;
+	out->wy = wy;
+	out->h = gh;
+	out->bio = bio;
+	out->pre_mesh_id = g_mesh_id;
+	return 1;
+}
 
-		const int32_t large_step = 92;
-		const int32_t large_rad  = 1564;
-		const float rad2_f = (float)large_rad * (float)large_rad;
-		const int32_t ix0 = ndw_fdiv(llwx - large_rad, large_step);
-		const int32_t ix1 = ndw_fdiv(llwx + large_rad, large_step);
-		const int32_t iy0 = ndw_fdiv(llwy - large_rad, large_step);
-		const int32_t iy1 = ndw_fdiv(llwy + large_rad, large_step);
-		const int32_t bx0 = ndw_fdiv(ix0, FLORA_BLK_DIM);
-		const int32_t bx1 = ndw_fdiv(ix1, FLORA_BLK_DIM);
-		const int32_t by0 = ndw_fdiv(iy0, FLORA_BLK_DIM);
-		const int32_t by1 = ndw_fdiv(iy1, FLORA_BLK_DIM);
-		const uint32_t map_sig = flora_map_bio_sig(st);
-		const uint32_t forget_seq = nd_seven_get_forget_seq();
+static int
+flora_eval_geobreak_cell(const flora_cell_prep_t *prep,
+                         float z_f, int16_t local_wl, float dz_dx, float dz_dy,
+                         flora_blk_entry_t *e)
+{
+	if (z_f <= (float)local_wl + 0.7f)
+		return 0;
+	float slope2 = dz_dx * dz_dx + dz_dy * dz_dy;
+	if (slope2 > 0.44f * 0.44f)
+		return 0;
+	float slope_m = sqrtf(slope2);
+	float trail_w = (z_f > (float)local_wl + 1.2f)
+	              ? nd_seven_eval_trail_weight((float)prep->wx, (float)prep->wy, slope_m)
+	              : 0.0f;
+	if (trail_w > 0.38f)
+		return 0;
 
-		for (int32_t by = by0; by <= by1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; by++) {
-			int32_t blk_gy0 = by * FLORA_BLK_DIM * large_step;
-			int32_t blk_gy1 = (by * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * large_step;
-			float blk_min_y = (float)(blk_gy0 - 26);
-			float blk_max_y = (float)(blk_gy1 + 26);
-			for (int32_t bx = bx0; bx <= bx1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; bx++) {
-				int32_t blk_gx0 = bx * FLORA_BLK_DIM * large_step;
-				int32_t blk_gx1 = (bx * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * large_step;
-				float blk_min_x = (float)(blk_gx0 - 26);
-				float blk_max_x = (float)(blk_gx1 + 26);
+	unsigned bio = prep->bio;
+	uint32_t gh = prep->h;
+	float krumm = 1.0f;
+	float grove = nd_seven_eval_grove_ecology(prep->wx, prep->wy, z_f, (float)local_wl, slope_m, bio, &krumm);
+	float hummock_patch = meadow_noise_2d((float)prep->wx, (float)prep->wy, 165.0f, 0x48554D32u);
+	int on_shoulder = (trail_w >= 0.05f && trail_w <= 0.38f);
+	int on_grove_edge = (grove >= 0.24f && grove <= 0.68f);
+	int on_riverbank = (z_f <= (float)local_wl + 10.0f);
+	if (!on_shoulder && !on_grove_edge && !on_riverbank &&
+	    hummock_patch < 0.44f && ((gh >> 3u) % 3u) != 0u)
+		return 0;
 
-				if (flora_blk_min_dist2(llwx_f, llwy_f, blk_min_x, blk_min_y, blk_max_x, blk_max_y) > rad2_f)
-					continue;
-				if (s_frame_frustum_valid &&
-				    !seven_test_frustum_xy(blk_min_x - 48.0f, blk_min_y - 48.0f,
-				                           blk_max_x + 48.0f, blk_max_y + 48.0f,
-				                           llwx_f, llwy_f, -256.0f, 360.0f))
-					continue;
+	const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice(prep->pre_mesh_id);
+	if (!sl || sl->mesh_h_wu <= 0.1f)
+		return 0;
+	float sc_g = 0.78f + 0.46f * ((float)((gh >> 20u) & 15u) / 15.0f);
+	float bw_g = sl->mesh_w_wu * sc_g;
+	float bh_g = sl->mesh_h_wu * sc_g;
+	int flip_g = (int)((gh >> 24u) & 1u);
 
-				const ar_node_t *blk_leaves[16];
-				size_t blk_leaf_cnt = 0;
-				uint32_t lod_sig = flora_blk_collect_leaves(blk_gx0 - 26, blk_gy0 - 26,
-				                                            blk_gx1 + 34, blk_gy1 + 34,
-				                                            blk_leaves, 16, &blk_leaf_cnt);
-				int hit = 0;
-				flora_blk_slot_t *slot = flora_blk_lookup(4u, l_world, l_base_wl, large_step, bx, by,
-				                                          lod_sig, map_sig, 0u, forget_seq, &hit);
-				if (!hit) {
-					flora_blk_entry_t tmp[FLORA_BLK_MAX_CELLS];
-					uint8_t cnt = 0;
-					const ar_node_t *l_node = NULL;
-					int l_cached_ti = 0x7FFFFFFF, l_cached_tj = 0x7FFFFFFF;
-					unsigned l_cached_bio = 10u;
-
-					for (int ly = 0; ly < FLORA_BLK_DIM; ly++) {
-						int32_t gy = (by * FLORA_BLK_DIM + ly) * large_step;
-						for (int lx = 0; lx < FLORA_BLK_DIM; lx++) {
-							int32_t gx = (bx * FLORA_BLK_DIM + lx) * large_step;
-							uint32_t lh = meadow_hash32(gx, gy, 0x4C524753u);
-							if ((lh % 3u) == 0u)
-								continue;
-							int32_t wx = gx + (int32_t)((lh >> 4u) % 53u) - 26;
-							int32_t wy = gy + (int32_t)((lh >> 10u) % 53u) - 26;
-
-							int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-							int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-							if (ti != l_cached_ti || tj != l_cached_tj) {
-								l_cached_ti = ti;
-								l_cached_tj = tj;
-								l_cached_bio = 10u;
-								ndw_tile_t mt;
-								int16_t mpos[4];
-								if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-									l_cached_bio = mt.biome;
-							}
-							unsigned bio = l_cached_bio;
-							if (bio == 0u || bio == 1u || bio == 18u)
-								continue;
-
-							l_node = flora_blk_find_leaf(wx, wy, l_node, blk_leaves, blk_leaf_cnt, 16);
-							if (l_node && l_node->level > 1)
-								continue;
-
-							int16_t elev_q = 0, eq_x = 0, eq_y = 0;
-							int16_t local_wl = l_base_wl;
-							if (l_node && wx + 8 < l_node->ox + l_node->w && wy + 8 < l_node->oy + l_node->h) {
-								int16_t dummy_wl = l_base_wl;
-								seven_sample_node_smooth(l_node, wx,     wy,     l_base_wl, &elev_q, &local_wl);
-								seven_sample_node_smooth(l_node, wx + 8, wy,     l_base_wl, &eq_x,   &dummy_wl);
-								seven_sample_node_smooth(l_node, wx,     wy + 8, l_base_wl, &eq_y,   &dummy_wl);
-								int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
-								if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && local_wl < l_base_wl)
-									local_wl = l_base_wl;
-							} else {
-								elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-								eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-								eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
-								seven_has_water_at(l_world, wx, wy, &local_wl);
-							}
-
-							float z_f = (float)elev_q / 16.0f;
-							int near_bank = (z_f <= (float)local_wl + 8.5f);
-							if (z_f <= (float)local_wl + (near_bank ? 0.15f : 0.8f))
-								continue;
-							float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
-							float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
-							float slope2 = dz_dx * dz_dx + dz_dy * dz_dy;
-							if (slope2 > 0.44f * 0.44f)
-								continue;
-							float slope_m = sqrtf(slope2);
-							float trail_w = (z_f > (float)local_wl + 1.2f)
-							              ? nd_seven_eval_trail_weight((float)wx, (float)wy, slope_m)
-							              : 0.0f;
-							if (trail_w > 0.35f)
-								continue;
-
-							float krumm = 1.0f;
-							float grove = nd_seven_eval_grove_ecology(wx, wy, z_f, (float)local_wl, slope_m, bio, &krumm);
-							float large_patch = meadow_noise_2d((float)wx, (float)wy, 210.0f, 0x4C524733u);
-
-							uint8_t l_mesh_id = ND_MESH3D_NONE;
-							float t_h = (float)((lh >> 20u) & 15u) / 15.0f;
-							float target_h = 36.0f + 39.0f * t_h;
-
-							if ((near_bank || bio == 5u) && bio != 6u && bio != 14u &&
-							    large_patch > 0.36f && ((lh >> 14u) & 3u) < 2u) {
-								l_mesh_id = nd_seven_plant_mesh3d_id(ND_PLANT_PACK_ID(15u, 1u, (lh >> 16u) & 3u));
-								target_h = 36.0f + 24.0f * t_h;
-							} else {
-								if (grove < 0.26f && large_patch < 0.54f)
-									continue;
-								if (bio == 6u || bio == 14u) {
-									if (large_patch < 0.62f)
-										continue;
-									l_mesh_id = nd_seven_sapling_mesh3d_id(bio, lh >> 16u);
-									target_h = 36.0f + 26.0f * t_h;
-								} else if (((lh >> 14u) % 100u) < 45u) {
-									l_mesh_id = nd_seven_sapling_mesh3d_id(bio, lh >> 16u);
-									target_h = 42.0f + 33.0f * t_h;
-								} else if (((lh >> 14u) % 100u) >= 88u &&
-								           (bio == 2u || bio == 3u || bio == 8u || bio == 9u ||
-								            bio == 11u || bio == 12u || bio == 13u)) {
-									l_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + 8u + ((lh >> 16u) & 1u));
-									target_h = 42.0f + 30.0f * t_h;
-								} else {
-									l_mesh_id = (uint8_t)(ND_MESH3D_SHRUB_BASE + 2u + ((lh >> 16u) & 1u));
-									target_h = 36.0f + 28.0f * t_h;
-								}
-							}
-
-							const nd_mesh3d_slice_t *sl = (l_mesh_id != ND_MESH3D_NONE) ? nd_seven_mesh3d_slice(l_mesh_id) : NULL;
-							if (!sl || sl->mesh_h_wu <= 0.1f)
-								continue;
-							target_h = 36.0f + (target_h - 36.0f) * krumm;
-							if (target_h < 36.0f) target_h = 36.0f;
-							if (target_h > 75.0f) target_h = 75.0f;
-
-							float sc_l = target_h / sl->mesh_h_wu;
-							float bw_l = sl->mesh_w_wu * sc_l;
-							float bh_l = target_h;
-							int flip_l = (int)((lh >> 24u) & 1u);
-
-							flora_blk_entry_t *e = &tmp[cnt++];
-							lam_billboard_gpu_t *bb = &e->bb;
-							bb->x = (float)wx;
-							bb->y = (float)wy;
-							bb->z = z_f;
-							bb->width = bw_l;
-							bb->height = bh_l;
-							bb->anchor_y = 0.0f;
-							bb->water_z_off = 0.0f;
-							bb->u0 = flip_l ? 1.0f : 0.0f;
-							bb->u1 = flip_l ? 0.0f : 1.0f;
-							bb->v0 = 0.0f;
-							bb->v1 = 0.0f;
-							bb->tint_rgba = 0xF2F6EC00u;
-							bb->style = ND_BB_STYLE_FLORA;
-							bb->shadow_rx = (uint8_t)(bw_l * 0.32f > 5.0f ? bw_l * 0.32f : 5.0f);
-							bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.45f > 2.0f ? bb->shadow_rx * 0.45f : 2.0f);
-							bb->pad0 = nd_seven_gl_pack_pad0(2u, bio, false);
-							bb->mesh_id = l_mesh_id;
-							e->cull_w = bw_l;
-							e->cell_xy = (uint8_t)((ly << 3) | lx);
-						}
-					}
-					flora_blk_commit(slot, 4u, l_world, l_base_wl, large_step, bx, by,
-					                 lod_sig, map_sig, 0u, forget_seq, tmp, cnt);
-				}
-
-				if (slot->count == 0u)
-					continue;
-				int check_bounds = (bx == bx0 || bx == bx1 || by == by0 || by == by1);
-				int32_t base_ix = bx * FLORA_BLK_DIM;
-				int32_t base_iy = by * FLORA_BLK_DIM;
-				const flora_blk_entry_t *entries = &s_flora_blk_arena[slot->arena_off];
-				for (uint8_t ci = 0; ci < slot->count && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; ci++) {
-					const flora_blk_entry_t *e = &entries[ci];
-					if (check_bounds) {
-						int32_t ix = base_ix + (int32_t)(e->cell_xy & 7u);
-						int32_t iy = base_iy + (int32_t)(e->cell_xy >> 3u);
-						if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1)
-							continue;
-					}
-					float ddx = e->bb.x - llwx_f;
-					float ddy = e->bb.y - llwy_f;
-					float r2 = ddx * ddx + ddy * ddy;
-					if (r2 > rad2_f || r2 < 40.0f * 40.0f)
-						continue;
-					if (s_frame_frustum_valid &&
-					    !seven_test_frustum_xy(e->bb.x - 48.0f, e->bb.y - 48.0f,
-					                           e->bb.x + 48.0f, e->bb.y + 48.0f,
-					                           llwx_f, llwy_f, -256.0f, 360.0f))
-						continue;
-					float eff_alpha = seven_eval_billboard_alpha(e->bb.x, e->bb.y, e->bb.z, e->cull_w, e->bb.height);
-					uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
-					if (base_alpha_pack == 0)
-						continue;
-					lam_billboard_gpu_t *dst = &s_all_gpu_batch[all_gpu_count++];
-					*dst = e->bb;
-					dst->tint_rgba = e->bb.tint_rgba | (base_alpha_pack & 0xFFu);
-				}
-			}
-		}
-	}
-
-	ctx->batch_count = all_gpu_count;
+	lam_billboard_gpu_t *bb = &e->bb;
+	bb->x = (float)prep->wx;
+	bb->y = (float)prep->wy;
+	bb->z = z_f;
+	bb->width = bw_g;
+	bb->height = bh_g;
+	bb->anchor_y = 0.0f;
+	bb->water_z_off = 0.0f;
+	bb->u0 = flip_g ? 1.0f : 0.0f;
+	bb->u1 = flip_g ? 0.0f : 1.0f;
+	bb->v0 = 0.0f;
+	bb->v1 = 0.0f;
+	bb->tint_rgba = 0xEEF2EA00u;
+	bb->style = ND_BB_STYLE_STANDARD;
+	bb->shadow_rx = (uint8_t)(bw_g * 0.32f > 4.0f ? bw_g * 0.32f : 4.0f);
+	bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.48f > 2.0f ? bb->shadow_rx * 0.48f : 2.0f);
+	bb->pad0 = nd_seven_gl_pack_pad0(0u, bio, false);
+	bb->mesh_id = prep->pre_mesh_id;
+	e->cull_w = bw_g;
+	return 1;
 }
 
 static void
 seven_emit_geobreak_props(seven_frame_ctx_t *ctx)
 {
-	const nd_client_state_t *st = ctx->st;
-	const float eff_cam_dist = ctx->eff_cam_dist;
-	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
-	uint32_t all_gpu_count = ctx->batch_count;
-
-	/* Emit deterministic 3D ground-breaker relief props (mossy hummocks, scree outcrops, turf berms)
-	 * across flat lowlands, riverbanks, grove margins, and footpath shoulders */
-	if (eff_cam_dist < 2200.0f && all_gpu_count + 16 < ALL_GPU_MAX_DRAW) {
-		uint16_t g_world = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
-		int16_t g_base_wl = nd_field_water_level(g_world);
-		int64_t glwx64 = 0, glwy64 = 0;
-		nd_seven_world_pos(st, &glwx64, &glwy64);
-		int32_t glwx = (int32_t)glwx64;
-		int32_t glwy = (int32_t)glwy64;
-		float glwx_f = (float)glwx;
-		float glwy_f = (float)glwy;
-
-		const int32_t geobreak_step = 52;
-		const int32_t geobreak_rad  = 1456;
-		const float rad2_f = (float)geobreak_rad * (float)geobreak_rad;
-		const int32_t ix0 = ndw_fdiv(glwx - geobreak_rad, geobreak_step);
-		const int32_t ix1 = ndw_fdiv(glwx + geobreak_rad, geobreak_step);
-		const int32_t iy0 = ndw_fdiv(glwy - geobreak_rad, geobreak_step);
-		const int32_t iy1 = ndw_fdiv(glwy + geobreak_rad, geobreak_step);
-		const int32_t bx0 = ndw_fdiv(ix0, FLORA_BLK_DIM);
-		const int32_t bx1 = ndw_fdiv(ix1, FLORA_BLK_DIM);
-		const int32_t by0 = ndw_fdiv(iy0, FLORA_BLK_DIM);
-		const int32_t by1 = ndw_fdiv(iy1, FLORA_BLK_DIM);
-		const uint32_t map_sig = flora_map_bio_sig(st);
-		const uint32_t forget_seq = nd_seven_get_forget_seq();
-
-		for (int32_t by = by0; by <= by1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; by++) {
-			int32_t blk_gy0 = by * FLORA_BLK_DIM * geobreak_step;
-			int32_t blk_gy1 = (by * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * geobreak_step;
-			float blk_min_y = (float)(blk_gy0 - 20);
-			float blk_max_y = (float)(blk_gy1 + 20);
-			for (int32_t bx = bx0; bx <= bx1 && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; bx++) {
-				int32_t blk_gx0 = bx * FLORA_BLK_DIM * geobreak_step;
-				int32_t blk_gx1 = (bx * FLORA_BLK_DIM + (FLORA_BLK_DIM - 1)) * geobreak_step;
-				float blk_min_x = (float)(blk_gx0 - 20);
-				float blk_max_x = (float)(blk_gx1 + 20);
-
-				if (flora_blk_min_dist2(glwx_f, glwy_f, blk_min_x, blk_min_y, blk_max_x, blk_max_y) > rad2_f)
-					continue;
-				if (s_frame_frustum_valid &&
-				    !seven_test_frustum_xy(blk_min_x - 36.0f, blk_min_y - 36.0f,
-				                           blk_max_x + 36.0f, blk_max_y + 36.0f,
-				                           glwx_f, glwy_f, -256.0f, 320.0f))
-					continue;
-
-				const ar_node_t *blk_leaves[16];
-				size_t blk_leaf_cnt = 0;
-				uint32_t lod_sig = flora_blk_collect_leaves(blk_gx0 - 20, blk_gy0 - 20,
-				                                            blk_gx1 + 28, blk_gy1 + 28,
-				                                            blk_leaves, 16, &blk_leaf_cnt);
-				int hit = 0;
-				flora_blk_slot_t *slot = flora_blk_lookup(5u, g_world, g_base_wl, geobreak_step, bx, by,
-				                                          lod_sig, map_sig, 0u, forget_seq, &hit);
-				if (!hit) {
-					flora_blk_entry_t tmp[FLORA_BLK_MAX_CELLS];
-					uint8_t cnt = 0;
-					const ar_node_t *g_node = NULL;
-					int g_cached_ti = 0x7FFFFFFF, g_cached_tj = 0x7FFFFFFF;
-					unsigned g_cached_bio = 10u;
-
-					for (int ly = 0; ly < FLORA_BLK_DIM; ly++) {
-						int32_t gy = (by * FLORA_BLK_DIM + ly) * geobreak_step;
-						for (int lx = 0; lx < FLORA_BLK_DIM; lx++) {
-							int32_t gx = (bx * FLORA_BLK_DIM + lx) * geobreak_step;
-							uint32_t gh = meadow_hash32(gx, gy, 0x47454F42u);
-							if ((gh % 100u) >= 64u)
-								continue;
-							int32_t wx = gx + (int32_t)((gh >> 4u) % 41u) - 20;
-							int32_t wy = gy + (int32_t)((gh >> 10u) % 41u) - 20;
-
-							int ti = ndw_fdiv(wx, NDW_TILE_W) - (st ? (int)st->map_data.pos[0] : 0);
-							int tj = (st ? (int)st->map_data.pos[1] : 0) - (-ndw_fdiv(wy, NDW_TILE_H));
-							if (ti != g_cached_ti || tj != g_cached_tj) {
-								g_cached_ti = ti;
-								g_cached_tj = tj;
-								g_cached_bio = 10u;
-								ndw_tile_t mt;
-								int16_t mpos[4];
-								if (nd_seven_tile_at(st, ti, tj, &mt, mpos))
-									g_cached_bio = mt.biome;
-							}
-							unsigned bio = g_cached_bio;
-							uint8_t g_mesh_id = nd_seven_geobreak_mesh3d_id(bio, gh >> 16u);
-							if (g_mesh_id == ND_MESH3D_NONE)
-								continue;
-
-							g_node = flora_blk_find_leaf(wx, wy, g_node, blk_leaves, blk_leaf_cnt, 16);
-							if (g_node && g_node->level > 1)
-								continue;
-
-							int16_t elev_q = 0, eq_x = 0, eq_y = 0;
-							int16_t local_wl = g_base_wl;
-							if (g_node && wx + 8 < g_node->ox + g_node->w && wy + 8 < g_node->oy + g_node->h) {
-								int16_t dummy_wl = g_base_wl;
-								seven_sample_node_smooth(g_node, wx,     wy,     g_base_wl, &elev_q, &local_wl);
-								seven_sample_node_smooth(g_node, wx + 8, wy,     g_base_wl, &eq_x,   &dummy_wl);
-								seven_sample_node_smooth(g_node, wx,     wy + 8, g_base_wl, &eq_y,   &dummy_wl);
-								int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
-								if (ndw_fdiv(wx, NDW_TILE_W) == -3 && pos_y_grid == 0 && local_wl < g_base_wl)
-									local_wl = g_base_wl;
-							} else {
-								elev_q = nd_seven_ground_elevation_q12_4(wx, wy);
-								eq_x   = nd_seven_ground_elevation_q12_4(wx + 8, wy);
-								eq_y   = nd_seven_ground_elevation_q12_4(wx, wy + 8);
-								seven_has_water_at(g_world, wx, wy, &local_wl);
-							}
-
-							float z_f = (float)elev_q / 16.0f;
-							if (z_f <= (float)local_wl + 0.7f)
-								continue;
-							float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
-							float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
-							float slope2 = dz_dx * dz_dx + dz_dy * dz_dy;
-							if (slope2 > 0.44f * 0.44f)
-								continue;
-							float slope_m = sqrtf(slope2);
-							float trail_w = (z_f > (float)local_wl + 1.2f)
-							              ? nd_seven_eval_trail_weight((float)wx, (float)wy, slope_m)
-							              : 0.0f;
-							if (trail_w > 0.38f)
-								continue;
-							float krumm = 1.0f;
-							float grove = nd_seven_eval_grove_ecology(wx, wy, z_f, (float)local_wl, slope_m, bio, &krumm);
-							float hummock_patch = meadow_noise_2d((float)wx, (float)wy, 165.0f, 0x48554D32u);
-							int on_shoulder = (trail_w >= 0.05f && trail_w <= 0.38f);
-							int on_grove_edge = (grove >= 0.24f && grove <= 0.68f);
-							int on_riverbank = (z_f <= (float)local_wl + 10.0f);
-							if (!on_shoulder && !on_grove_edge && !on_riverbank &&
-							    hummock_patch < 0.44f && ((gh >> 3u) % 3u) != 0u)
-								continue;
-
-							const nd_mesh3d_slice_t *sl = nd_seven_mesh3d_slice(g_mesh_id);
-							if (!sl || sl->mesh_h_wu <= 0.1f)
-								continue;
-							float sc_g = 0.78f + 0.46f * ((float)((gh >> 20u) & 15u) / 15.0f);
-							float bw_g = sl->mesh_w_wu * sc_g;
-							float bh_g = sl->mesh_h_wu * sc_g;
-							int flip_g = (int)((gh >> 24u) & 1u);
-
-							flora_blk_entry_t *e = &tmp[cnt++];
-							lam_billboard_gpu_t *bb = &e->bb;
-							bb->x = (float)wx;
-							bb->y = (float)wy;
-							bb->z = z_f;
-							bb->width = bw_g;
-							bb->height = bh_g;
-							bb->anchor_y = 0.0f;
-							bb->water_z_off = 0.0f;
-							bb->u0 = flip_g ? 1.0f : 0.0f;
-							bb->u1 = flip_g ? 0.0f : 1.0f;
-							bb->v0 = 0.0f;
-							bb->v1 = 0.0f;
-							bb->tint_rgba = 0xEEF2EA00u;
-							bb->style = ND_BB_STYLE_STANDARD;
-							bb->shadow_rx = (uint8_t)(bw_g * 0.32f > 4.0f ? bw_g * 0.32f : 4.0f);
-							bb->shadow_ry = (uint8_t)(bb->shadow_rx * 0.48f > 2.0f ? bb->shadow_rx * 0.48f : 2.0f);
-							bb->pad0 = nd_seven_gl_pack_pad0(0u, bio, false);
-							bb->mesh_id = g_mesh_id;
-							e->cull_w = bw_g;
-							e->cell_xy = (uint8_t)((ly << 3) | lx);
-						}
-					}
-					flora_blk_commit(slot, 5u, g_world, g_base_wl, geobreak_step, bx, by,
-					                 lod_sig, map_sig, 0u, forget_seq, tmp, cnt);
-				}
-
-				if (slot->count == 0u)
-					continue;
-				int check_bounds = (bx == bx0 || bx == bx1 || by == by0 || by == by1);
-				int32_t base_ix = bx * FLORA_BLK_DIM;
-				int32_t base_iy = by * FLORA_BLK_DIM;
-				const flora_blk_entry_t *entries = &s_flora_blk_arena[slot->arena_off];
-				for (uint8_t ci = 0; ci < slot->count && all_gpu_count + 4 < ALL_GPU_MAX_DRAW; ci++) {
-					const flora_blk_entry_t *e = &entries[ci];
-					if (check_bounds) {
-						int32_t ix = base_ix + (int32_t)(e->cell_xy & 7u);
-						int32_t iy = base_iy + (int32_t)(e->cell_xy >> 3u);
-						if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1)
-							continue;
-					}
-					float ddx = e->bb.x - glwx_f;
-					float ddy = e->bb.y - glwy_f;
-					float r2 = ddx * ddx + ddy * ddy;
-					if (r2 > rad2_f || r2 < 26.0f * 26.0f)
-						continue;
-					if (s_frame_frustum_valid &&
-					    !seven_test_frustum_xy(e->bb.x - 36.0f, e->bb.y - 36.0f,
-					                           e->bb.x + 36.0f, e->bb.y + 36.0f,
-					                           glwx_f, glwy_f, -256.0f, 320.0f))
-						continue;
-					float eff_alpha = seven_eval_billboard_alpha(e->bb.x, e->bb.y, e->bb.z, e->cull_w, e->bb.height);
-					uint32_t base_alpha_pack = seven_pack_white_alpha(eff_alpha);
-					if (base_alpha_pack == 0)
-						continue;
-					lam_billboard_gpu_t *dst = &s_all_gpu_batch[all_gpu_count++];
-					*dst = e->bb;
-					dst->tint_rgba = e->bb.tint_rgba | (base_alpha_pack & 0xFFu);
-				}
-			}
-		}
-	}
-
-	ctx->batch_count = all_gpu_count;
+	/* Emit deterministic 3D ground-breaker relief props (mossy hummocks, scree outcrops, turf berms) */
+	if (ctx->eff_cam_dist >= 2200.0f)
+		return;
+	static const flora_pass_desc_t desc = {
+		.pass_id = 5u,
+		.use_lamb_occl = 0u,
+		.step = 52,
+		.rad = 1456,
+		.j_max = 20,
+		.j_span = 0,
+		.min_r2 = 26.0f * 26.0f,
+		.frustum_pad = 36.0f,
+		.frustum_zmin = -256.0f,
+		.frustum_zmax = 320.0f,
+		.max_cull2 = 0.0f,
+		.atlas_ver = 0u,
+		.prefilter = flora_prefilter_geobreak,
+		.eval_cell = flora_eval_geobreak_cell,
+	};
+	flora_emit_pass(ctx, &desc);
 }
 
 static void
@@ -4500,11 +4254,11 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 			                    + (float)((cam_cy >= 0.0f) ? node->oy : (node->oy + node->h)) * cam_cy;
 			if (!near_flushed && leaf_min_proj >= near_max_proj - 0.5f) {
 				if (s_mid_batch_len > 0) {
-					nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+					nd_seven_gl_queue_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
 					s_mid_batch_len = 0;
 				}
 				if (all_gpu_count > 0)
-					nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+					nd_seven_gl_queue_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 				near_flushed = 1;
 			}
 
@@ -4526,11 +4280,11 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 				                   + ((cam_cy >= 0.0f) ? row_wy0 : row_wy1) * cam_cy;
 				if (!near_flushed && cam_cy >= 0.0f && row_min_proj >= near_max_proj - 0.5f) {
 					if (s_mid_batch_len > 0) {
-						nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+						nd_seven_gl_queue_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
 						s_mid_batch_len = 0;
 					}
 					if (all_gpu_count > 0)
-						nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+						nd_seven_gl_queue_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 					near_flushed = 1;
 				}
 				for (int32_t bx0 = cx0; bx0 < cx1; bx0 += 8) {
@@ -4756,11 +4510,11 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 						                  + ((cam_cy >= 0.0f) ? (float)(ry_grid * NDW_TILE_H) : (float)((ry_grid + 1) * NDW_TILE_H)) * cam_cy;
 						if (!near_flushed && cam_cy >= 0.0f && ry_min_proj >= near_max_proj - 0.5f) {
 							if (s_mid_batch_len > 0) {
-								nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+								nd_seven_gl_queue_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
 								s_mid_batch_len = 0;
 							}
 							if (all_gpu_count > 0)
-								nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+								nd_seven_gl_queue_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 							near_flushed = 1;
 						}
 						for (int32_t rx_grid = bx0; rx_grid < bx1; rx_grid++) {
@@ -4792,14 +4546,16 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 				}
 			}
 		}
-		if (s_mid_batch_len > 0)
-			nd_seven_gl_flush_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+		if (s_mid_batch_len > 0) {
+			nd_seven_gl_queue_billboards(s_mid_stream_batch, s_mid_batch_len, atlas_rgba());
+			s_mid_batch_len = 0;
+		}
 		nd_seven_set_scenery_synth_budget(0xFFFFFFFFu);
 	}
 	if (!near_flushed && all_gpu_count > 0) {
-		nd_seven_gl_flush_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
+		nd_seven_gl_queue_billboards(s_all_gpu_batch, all_gpu_count, atlas_rgba());
 	}
-
+	nd_seven_gl_submit_billboards(atlas_rgba());
 }
 
 static nd_seven_perf_t s_perf = {0};
@@ -4816,6 +4572,8 @@ void nd_seven_perf_set_enabled(int enabled)
 {
 	s_perf.enabled = enabled ? 1u : 0u;
 	nd_seven_ground_perf_set(enabled ? 1 : 0);
+	if (s_seven_chunk_sys)
+		ar_system_set_timing_enabled(s_seven_chunk_sys, enabled != 0);
 }
 
 int nd_seven_perf_get_enabled(void)
@@ -4855,6 +4613,7 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 			ar_stats_t as;
 			ar_system_get_stats(s_seven_chunk_sys, &as);
 			ar_pop_before = as.sampler_invocations_total;
+			ar_system_reset_frame_metrics(s_seven_chunk_sys);
 		}
 		t0 = seven_perf_now_ms();
 	}
@@ -4957,13 +4716,36 @@ void nd_seven_render(uint32_t wu, uint32_t hu, const nd_client_state_t *st)
 		                                &s_perf.cloud_queued);
 		if (s_seven_chunk_sys) {
 			ar_stats_t as;
+			ar_metrics_t am;
 			ar_system_get_stats(s_seven_chunk_sys, &as);
+			ar_system_get_metrics(s_seven_chunk_sys, &am);
 			s_perf.ar_populates = (as.sampler_invocations_total >= ar_pop_before)
 				? (uint32_t)(as.sampler_invocations_total - ar_pop_before) : 0u;
 			s_perf.ar_active_chunks = (uint32_t)as.active_chunks_last_frame;
+			s_perf.ar_nodes_visited = am.frame_cands_evaluated;
+			s_perf.ar_nodes_frustum_culled = am.frame_frustum_culled;
+			s_perf.ar_nodes_occ_culled = am.frame_occ_culled;
+			s_perf.ar_leaves_emitted = (uint32_t)s_visible_leaf_count;
+			s_perf.ar_evictions = am.frame_evictions;
+			s_perf.ar_probe_calls = am.frame_probes;
+			s_perf.ar_probe_avg_steps_x100 = (am.frame_map_lookups > 0u)
+				? (uint32_t)(((uint64_t)am.frame_map_probe_steps * 100ULL) / (uint64_t)am.frame_map_lookups) : 0u;
+			s_perf.ar_update_ms = (float)am.us_query_total * 0.001f;
+			s_perf.ar_populate_ms = (float)am.us_populate * 0.001f;
+			s_perf.ar_occ_ms = (float)(am.us_occ_raster + am.us_occ_test) * 0.001f;
 		} else {
 			s_perf.ar_populates = 0u;
 			s_perf.ar_active_chunks = 0u;
+			s_perf.ar_nodes_visited = 0u;
+			s_perf.ar_nodes_frustum_culled = 0u;
+			s_perf.ar_nodes_occ_culled = 0u;
+			s_perf.ar_leaves_emitted = 0u;
+			s_perf.ar_evictions = 0u;
+			s_perf.ar_probe_calls = 0u;
+			s_perf.ar_probe_avg_steps_x100 = 0u;
+			s_perf.ar_update_ms = 0.0f;
+			s_perf.ar_populate_ms = 0.0f;
+			s_perf.ar_occ_ms = 0.0f;
 		}
 	}
 }
@@ -4975,6 +4757,10 @@ uint32_t nd_seven_last_mid_billboard_count(void)
 
 int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, float *w, float *h)
 {
+#ifdef __wasm__
+	(void)idx; (void)x; (void)y; (void)z; (void)w; (void)h;
+	return 0;
+#else
 	if (idx >= s_last_mid_gpu_count || idx >= MID_MAX_DRAW)
 		return 0;
 	if (x) *x = s_mid_gpu_batch[idx].x;
@@ -4983,6 +4769,7 @@ int nd_seven_last_mid_billboard(uint32_t idx, float *x, float *y, float *z, floa
 	if (w) *w = s_mid_gpu_batch[idx].width;
 	if (h) *h = s_mid_gpu_batch[idx].height;
 	return 1;
+#endif
 }
 
 uint32_t nd_seven_last_visible_leaf_count(void)
