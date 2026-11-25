@@ -2003,6 +2003,14 @@ if (isWorkerContext) {
 					slot: msg.slot
 				});
 				globalScope.__stele_worker_canvases_gen = (globalScope.__stele_worker_canvases_gen || 0) + 1;
+				const comp = workerClient.slotInstances.get(msg.slot);
+				const renderFn = comp?.instance?.exports?.wasm_canvas_render;
+				if (typeof renderFn === 'function') {
+					initChain = initChain.then(() => {
+						try { renderFn(); } catch (_) {}
+						flushWorkerCanvases(msg.slot);
+					});
+				}
 			}
 			break;
 		}

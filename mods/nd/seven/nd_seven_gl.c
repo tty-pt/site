@@ -693,6 +693,20 @@ static void gl_link_terrain_pipe(gl_terrain_pipe_t *tp)
 
 static void init_pipelines(void)
 {
+	/* Probe GL context readiness before allocating buffers or queuing shaders:
+	 * in WASM worker mode, the real stage canvas attaches via stele:canvas_attach
+	 * a few milliseconds after the first tick. Deferring init until a real context
+	 * exists avoids double-compiling all 22 shaders across a throwaway canvas. */
+	GLuint probe = glCreateBuffer();
+	if (!probe)
+		return;
+	glDeleteBuffer(probe);
+
+	/* Upload static geometry VBOs/IBOs and 1x1 placeholder textures BEFORE
+	 * queuing 22 async shader compiles so large glBufferData uploads never
+	 * stall Chrome's GPU command buffer behind pending shader links. */
+	init_grid_buffers();
+
 	const char *vs_terr = nd_seven_gl_vs_terrain();
 	s_gl.sky_pipe.prog                                   = create_program_async(nd_seven_gl_vs_sky(), nd_seven_gl_fs_sky());
 	s_gl.terrain_pipes[ND_TERR_VAR_FULL].prog        = create_program_async(vs_terr, nd_seven_gl_fs_terrain());
@@ -717,7 +731,6 @@ static void init_pipelines(void)
 	s_gl.bloom_pipe.prog         = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_bloom());
 	s_gl.post_pipe.prog          = create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_post());
 	s_gl.terrain_shadow_pipe.prog = create_program_async(nd_seven_gl_vs_terrain_shadow(), nd_seven_gl_fs_terrain_shadow());
-	init_grid_buffers();
 	s_gl.initialized = true;
 	s_gl.pipelines_ready = false;
 }
@@ -1024,37 +1037,54 @@ static bool check_pipelines_ready(void)
 	return true;
 }
 
-/* Force driver backend (Mesa/ANGLE GEN12) shader compilation once at startup into the exact
- * RGBA16F scene_fbo / cloud_fbo formats with a 1x1 viewport right before the first glClear(),
- * eliminating multi-hundred-ms first-draw hitches when zooming across LOD regimes. */
+/* Force driver backend (Mesa/ANGLE GEN12) shader compilation incrementally (1 variant per
+ * frame after the first rendered frame) into the exact RGBA16F scene_fbo / cloud_fbo formats
+ * with a 1x1 viewport right before glClear(), eliminating both the 8+ second monolithic
+ * startup freeze and multi-hundred-ms first-draw hitches when zooming across LOD regimes. */
 static void gl_prewarm_pipelines(void)
 {
 	if (s_gl.pipelines_prewarmed || !s_gl.pipelines_ready || !s_gl.scene_ok || !s_gl.grid_vbo_macro)
 		return;
-	s_gl.pipelines_prewarmed = true;
 
-	int16_t dummy_h = 0;
-	uint8_t dummy_c[4] = { 128, 128, 128, 255 };
-	GLuint dummy_i16 = glCreateTexture();
-	GLuint dummy_rgba = glCreateTexture();
+	/* Let the very first ready frame render immediately before warming off-regime variants. */
+	if (s_gl.prewarm_step == 0u) {
+		s_gl.prewarm_step = 1u;
+		return;
+	}
 
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, dummy_i16);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, 1, 1, 0, GL_RED_INTEGER, GL_SHORT, &dummy_h);
+	const uint8_t total_steps = (uint8_t)(ND_TERR_VAR_COUNT + 1 + ND_CLOUD_VAR_COUNT);
+	uint8_t idx = (uint8_t)(s_gl.prewarm_step - 1u);
 
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, dummy_rgba);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, dummy_c);
+	if (!s_gl.prewarm_dummy_i16 || !s_gl.prewarm_dummy_rgba) {
+		int16_t dummy_h = 0;
+		uint8_t dummy_c[4] = { 128, 128, 128, 255 };
+		if (!s_gl.prewarm_dummy_i16) {
+			s_gl.prewarm_dummy_i16 = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, s_gl.prewarm_dummy_i16);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, 1, 1, 0, GL_RED_INTEGER, GL_SHORT, &dummy_h);
+		}
+		if (!s_gl.prewarm_dummy_rgba) {
+			s_gl.prewarm_dummy_rgba = glCreateTexture();
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, s_gl.prewarm_dummy_rgba);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, dummy_c);
+		}
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	}
+
+	GLuint dummy_i16 = s_gl.prewarm_dummy_i16;
+	GLuint dummy_rgba = s_gl.prewarm_dummy_rgba;
 
 	static const GLenum rgba_units[] = {
 		GL_TEXTURE0 + 7, GL_TEXTURE0 + 9, GL_TEXTURE0 + 10, GL_TEXTURE0 + 11, GL_TEXTURE0 + 12
@@ -1063,7 +1093,6 @@ static void gl_prewarm_pipelines(void)
 		glActiveTexture(rgba_units[i]);
 		glBindTexture(GL_TEXTURE_2D, dummy_rgba);
 	}
-	glActiveTexture(GL_TEXTURE0);
 
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_macro);
 	glEnableVertexAttribArray(0);
@@ -1071,61 +1100,74 @@ static void gl_prewarm_pipelines(void)
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
 
 	glViewport(0, 0, 1, 1);
-	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_LEQUAL);
-	glDepthMask(GL_TRUE);
-	glDisable(GL_BLEND);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_STENCIL_TEST);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-	/* 1. Prewarm all 7 terrain variants into scene_fbo (RGBA16F MSAA) */
-	for (int v = 0; v < ND_TERR_VAR_COUNT; v++) {
-		const gl_terrain_pipe_t *tp = &s_gl.terrain_pipes[v];
-		if (!tp->prog) continue;
-		glUseProgram(tp->prog);
-		glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
-	}
-
-	/* 2. Prewarm water pipeline into scene_fbo (exact color-mask & depth-mask state) */
-	if (s_gl.water_pipe.prog) {
-		glUseProgram(s_gl.water_pipe.prog);
-		glActiveTexture(GL_TEXTURE0 + 4);
-		glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex ? s_gl.res_color_tex : dummy_rgba);
-		glActiveTexture(GL_TEXTURE0 + 5);
-		glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex ? s_gl.res_depth_tex : dummy_rgba);
-		glActiveTexture(GL_TEXTURE0);
-		if (s_gl.water_pipe.uViewport >= 0)     glUniform2f(s_gl.water_pipe.uViewport, 1.0f, 1.0f);
-		if (s_gl.water_pipe.uSceneUvScale >= 0) glUniform2f(s_gl.water_pipe.uSceneUvScale, 1.0f, 1.0f);
-		if (s_gl.water_pipe.uNearFar >= 0)      glUniform2f(s_gl.water_pipe.uNearFar, 2.0f, 10000.0f);
-		if (s_gl.water_pipe.uProjScale >= 0)    glUniform2f(s_gl.water_pipe.uProjScale, 1.0f, 1.0f);
-		glDepthMask(GL_FALSE);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-		glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
-	}
-
-	/* 3. Prewarm all 3 cloud variants into cloud_fbo (RGBA16F 1x, premult alpha blend) */
-	if (s_gl.cloud_fbo)
-		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, dummy_rgba);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, dummy_i16);
-	glActiveTexture(GL_TEXTURE0);
-	glDisable(GL_DEPTH_TEST);
-	glDepthMask(GL_FALSE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	for (int v = 0; v < ND_CLOUD_VAR_COUNT; v++) {
-		const gl_cloud_pipe_t *cp = &s_gl.cloud_pipes[v];
-		if (!cp->prog) continue;
-		glUseProgram(cp->prog);
-		if (cp->uViewport >= 0)           glUniform2f(cp->uViewport, 1.0f, 1.0f);
-		if (cp->uCloudResScale >= 0)      glUniform1f(cp->uCloudResScale, 1.0f);
-		if (cp->uClusterGridDim >= 0)     glUniform3f(cp->uClusterGridDim, 16.0f, 16.0f, 24.0f);
-		if (cp->uClusterDepthParams >= 0) glUniform2f(cp->uClusterDepthParams, 2.0f, 10000.0f);
-		glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+	if (idx < ND_TERR_VAR_COUNT) {
+		/* 1. Prewarm one terrain variant into scene_fbo (RGBA16F MSAA) */
+		const gl_terrain_pipe_t *tp = &s_gl.terrain_pipes[idx];
+		if (tp->prog) {
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, dummy_i16);
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0);
+			glEnable(GL_DEPTH_TEST);
+			glDepthFunc(GL_LEQUAL);
+			glDepthMask(GL_TRUE);
+			glDisable(GL_BLEND);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			glUseProgram(tp->prog);
+			glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+		}
+	} else if (idx == ND_TERR_VAR_COUNT) {
+		/* 2. Prewarm water pipeline into scene_fbo (exact color-mask & depth-mask state) */
+		if (s_gl.water_pipe.prog) {
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, dummy_i16);
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0 + 4);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0);
+			glEnable(GL_DEPTH_TEST);
+			glDepthFunc(GL_LEQUAL);
+			glDepthMask(GL_FALSE);
+			glDisable(GL_BLEND);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+			glUseProgram(s_gl.water_pipe.prog);
+			if (s_gl.water_pipe.uViewport >= 0)     glUniform2f(s_gl.water_pipe.uViewport, 1.0f, 1.0f);
+			if (s_gl.water_pipe.uSceneUvScale >= 0) glUniform2f(s_gl.water_pipe.uSceneUvScale, 1.0f, 1.0f);
+			if (s_gl.water_pipe.uNearFar >= 0)      glUniform2f(s_gl.water_pipe.uNearFar, 2.0f, 10000.0f);
+			if (s_gl.water_pipe.uProjScale >= 0)    glUniform2f(s_gl.water_pipe.uProjScale, 1.0f, 1.0f);
+			glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+		}
+	} else {
+		/* 3. Prewarm one cloud variant into cloud_fbo (RGBA16F 1x, premult alpha blend) */
+		int cv = (int)(idx - (ND_TERR_VAR_COUNT + 1));
+		if (cv >= 0 && cv < ND_CLOUD_VAR_COUNT && s_gl.cloud_pipes[cv].prog) {
+			const gl_cloud_pipe_t *cp = &s_gl.cloud_pipes[cv];
+			if (s_gl.cloud_fbo)
+				glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, dummy_i16);
+			glActiveTexture(GL_TEXTURE0);
+			glDisable(GL_DEPTH_TEST);
+			glDepthMask(GL_FALSE);
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			glUseProgram(cp->prog);
+			if (cp->uViewport >= 0)           glUniform2f(cp->uViewport, 1.0f, 1.0f);
+			if (cp->uCloudResScale >= 0)      glUniform1f(cp->uCloudResScale, 1.0f);
+			if (cp->uClusterGridDim >= 0)     glUniform3f(cp->uClusterGridDim, 16.0f, 16.0f, 24.0f);
+			if (cp->uClusterDepthParams >= 0) glUniform4f(cp->uClusterDepthParams, 2.0f, 10000.0f, 1.0f, 0.0f);
+			glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+		}
 	}
 
 	/* Restore clean GL state and rebind scene target before frame glClear */
@@ -1139,8 +1181,19 @@ static void gl_prewarm_pipelines(void)
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	glDeleteTexture(dummy_i16);
-	glDeleteTexture(dummy_rgba);
+
+	s_gl.prewarm_step++;
+	if (s_gl.prewarm_step > total_steps) {
+		s_gl.pipelines_prewarmed = true;
+		if (s_gl.prewarm_dummy_i16) {
+			glDeleteTexture(s_gl.prewarm_dummy_i16);
+			s_gl.prewarm_dummy_i16 = 0;
+		}
+		if (s_gl.prewarm_dummy_rgba) {
+			glDeleteTexture(s_gl.prewarm_dummy_rgba);
+			s_gl.prewarm_dummy_rgba = 0;
+		}
+	}
 	gl_bind_scene_target();
 }
 
@@ -1404,7 +1457,7 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 
 	if (!s_gl.initialized) init_pipelines();
 	(void)check_pipelines_ready();
-	if (s_gl.atlas_bake_stage < 3) gl_advance_atlas_bake();
+	if (s_gl.pipelines_ready && s_gl.atlas_bake_stage < 3) gl_advance_atlas_bake();
 
 	s_gl.stage_w = stage_w;
 	s_gl.stage_h = stage_h;

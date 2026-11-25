@@ -414,6 +414,15 @@ nd-stage,
 
 #rpg-chat .xterm-viewport {
     background-color: transparent !important;
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(149, 137, 197, 0.45) transparent;
+}
+
+#term .xterm-viewport {
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(149, 137, 197, 0.45) transparent;
 }
 
 #rpg-chat .xterm-rows {
@@ -882,6 +891,8 @@ nd-stage,
 #settings {
     min-width: 330px !important;
     max-width: 380px !important;
+    max-height: calc(100vh - 32px) !important;
+    overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: stretch !important;
@@ -889,6 +900,7 @@ nd-stage,
 }
 
 #settings .rpg-modal-header {
+    flex: 0 0 auto !important;
     display: flex !important;
     align-items: center !important;
     justify-content: space-between !important;
@@ -898,10 +910,25 @@ nd-stage,
 }
 
 #settings .settings-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(149, 137, 197, 0.45) transparent;
     display: flex !important;
     flex-direction: column !important;
     gap: 12px !important;
     width: 100% !important;
+}
+
+#settings #settings-zoom-reset {
+    width: auto !important;
+    min-width: 44px !important;
+    padding: 0 8px !important;
+    border-radius: 9999px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
 }
 
 #settings .settings-row {

@@ -452,6 +452,9 @@ typedef struct {
 	bool initialized;
 	bool pipelines_ready;
 	bool pipelines_prewarmed;
+	uint8_t prewarm_step;
+	GLuint prewarm_dummy_i16;
+	GLuint prewarm_dummy_rgba;
 	gl_terrain_pipe_t terrain_pipes[ND_TERR_VAR_COUNT];
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;

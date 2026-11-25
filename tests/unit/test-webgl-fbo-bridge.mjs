@@ -461,3 +461,44 @@ console.log('PASS: flat uint32 glCmdFlush command ring decoding & single-FFI bat
 	imp.glTexImage2D(0x0DE1, 0, 0x8058, 2, 2, 0, 0x1908, 0x1401, 64);
 	console.log('PASS: GPU pass timer queries (EXT_disjoint_timer_query_webgl2) and GL_TEXTURE_2D_ARRAY isolation verified');
 }
+
+// Link-time scalar uniform replay (sampler units + float constants) and GL_STATIC_DRAW null+SubData buffer restoration across context swaps.
+{
+	const rLog = [];
+	const rGl1 = makeGl(rLog);
+	const rGl2 = makeGl(rLog);
+	let curCanvas = { isConnected: true, getContext: () => rGl1 };
+	const nextCanvas = { isConnected: false, getContext: () => rGl2 };
+	swapCanvas(curCanvas);
+	bridge.mount();
+	const [u0Ptr, u0Len] = writeStr(768, 'uHeightTex');
+	const [u1Ptr, u1Len] = writeStr(800, 'uSubstrateTex');
+	const [u2Ptr, u2Len] = writeStr(832, 'uCloudShadowMap');
+	const [u3Ptr, u3Len] = writeStr(864, 'uHeightScale');
+	const loc0 = imp.glGetUniformLocation(prog, u0Ptr, u0Len);
+	const loc1 = imp.glGetUniformLocation(prog, u1Ptr, u1Len);
+	const loc2 = imp.glGetUniformLocation(prog, u2Ptr, u2Len);
+	const loc3 = imp.glGetUniformLocation(prog, u3Ptr, u3Len);
+	imp.glUseProgram(prog);
+	imp.glUniform1i(loc0, 0);
+	imp.glUniform1i(loc1, 1);
+	imp.glUniform1i(loc2, 7);
+	imp.glUniform1f(loc3, 1.0);
+	// Null-initialized GL_STATIC_DRAW buffer populated via glBufferSubData.
+	const sBuf = imp.glCreateBuffer();
+	imp.glBindBuffer(0x8892, sBuf);
+	imp.glBufferData(0x8892, 0, 32, 0x88E4);
+	new Uint8Array(memory.buffer, 900, 16).fill(0x5A);
+	imp.glBufferSubData(0x8892, 8, 16, 900);
+	rLog.length = 0;
+	swapCanvas(nextCanvas);
+	bridge.mount();
+	imp.glActiveTexture(0x84C0);
+	assert.ok(rLog.some((e) => e[0] === 'uniform1i' && e[2] === 'uHeightTex' && e[3] === 0), 'uHeightTex=0 replayed on rebuilt program');
+	assert.ok(rLog.some((e) => e[0] === 'uniform1i' && e[2] === 'uSubstrateTex' && e[3] === 1), 'uSubstrateTex=1 replayed on rebuilt program');
+	assert.ok(rLog.some((e) => e[0] === 'uniform1i' && e[2] === 'uCloudShadowMap' && e[3] === 7), 'uCloudShadowMap=7 replayed on rebuilt program');
+	assert.ok(rLog.some((e) => e[0] === 'uniform1f' && e[1] === 'uHeightScale' && e[2] === 1.0), 'uHeightScale=1.0 replayed on rebuilt program');
+	assert.ok(rLog.some((e) => e[0] === 'bufferData' && e[1] === 0x8892 && e[2] === 32 && e[3] === 0x88E4), 'GL_STATIC_DRAW subdata buffer replayed on context swap');
+	console.log('PASS: link-time scalar uniforms and GL_STATIC_DRAW subdata buffers replay across context swaps');
+}
+

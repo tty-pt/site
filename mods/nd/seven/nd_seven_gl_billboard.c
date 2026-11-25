@@ -1296,9 +1296,39 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	}
 
 	gl_end_terrain_pass();
+	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(nd_seven_gl_mesh3d_inst_t), s_mesh3d_sorted);
+
+	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
+	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops.
+	 * Flush terrain shadow casters before enabling mesh3d attributes 1..9 so WebGL2 never sees
+	 * unbound enabled attributes during glDrawElements. */
+	bool run_pass_a = (s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f);
+	if (run_pass_a) {
+		glTimerBegin(ND_GPU_PASS_TREE_SHADOW);
+		int write_idx = 1 - s_gl.tree_shadow_read_idx;
+		GLuint dummy = gl_ensure_tree_shadow_dummy();
+		glActiveTexture(GL_TEXTURE0 + 12);
+		glBindTexture(GL_TEXTURE_2D, dummy);
+		glActiveTexture(GL_TEXTURE0);
+		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
+		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glDisable(GL_BLEND);
+		glDisable(GL_STENCIL_TEST);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LEQUAL);
+		glDepthMask(GL_TRUE);
+		if (s_gl.terr_shadow_q_count > 0) {
+			gl_flush_terrain_shadows_to_fbo();
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
+		}
+	}
+
 	gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_pipe, bb_sea_level, space_t, true);
 
-	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO */
+	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO + instanced VBO (locations 3..9, divisor 1) */
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
 	for (GLuint a = 0; a < 3; a++) {
 		glEnableVertexAttribArray(a);
@@ -1311,45 +1341,10 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		glEnableVertexAttribArray(a);
 		glVertexAttribDivisor(a, 1);
 	}
-	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(nd_seven_gl_mesh3d_inst_t), s_mesh3d_sorted);
 
-	/* Pass A: True 3D directional depth shadow map pass (uShadowPass = 3) into ping-pong 1024x1024 FBO.
-	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops. */
-	if (s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f) {
-		glTimerBegin(ND_GPU_PASS_TREE_SHADOW);
-		int write_idx = 1 - s_gl.tree_shadow_read_idx;
-		GLuint dummy = gl_ensure_tree_shadow_dummy();
-		glActiveTexture(GL_TEXTURE0 + 12);
-		glBindTexture(GL_TEXTURE_2D, dummy);
+	if (run_pass_a) {
 		if (s_gl.mesh3d_pipe.uTreeShadowTex >= 0)
 			glUniform1i(s_gl.mesh3d_pipe.uTreeShadowTex, 12);
-		glActiveTexture(GL_TEXTURE0);
-		glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
-		glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
-		glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		glDisable(GL_BLEND);
-		glDisable(GL_STENCIL_TEST);
-		glEnable(GL_DEPTH_TEST);
-		glDepthFunc(GL_LEQUAL);
-		glDepthMask(GL_TRUE);
-		if (s_gl.terr_shadow_q_count > 0) {
-			gl_flush_terrain_shadows_to_fbo();
-			glUseProgram(s_gl.mesh3d_pipe.prog);
-			glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
-			for (GLuint a = 0; a < 3; a++) {
-				glEnableVertexAttribArray(a);
-				glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_mesh3d_vert_t), (size_t)(a * 16));
-				glVertexAttribDivisor(a, 0);
-			}
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
-			glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
-			for (GLuint a = 3; a < 10; a++) {
-				glEnableVertexAttribArray(a);
-				glVertexAttribDivisor(a, 1);
-			}
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
-		}
 		if (s_gl.mesh3d_pipe.uTreeShadowWriteOrigin >= 0)
 			glUniform3fv(s_gl.mesh3d_pipe.uTreeShadowWriteOrigin, 1, s_gl.tree_shadow_write_origin);
 		if (s_gl.mesh3d_pipe.uTreeShadowWriteVP >= 0)
@@ -1464,8 +1459,8 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	glStencilMask(0xFF);
 	glDisable(GL_STENCIL_TEST);
-	for (GLuint a = 3; a < 10; a++) {
-		glVertexAttribDivisor(a, 0);
+	for (GLuint a = 1; a < 10; a++) {
+		if (a >= 3) glVertexAttribDivisor(a, 0);
 		glDisableVertexAttribArray(a);
 	}
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);

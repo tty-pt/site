@@ -125,12 +125,12 @@ assert.equal(termsCreated.length, 2, 'Second terminal should be created when pre
 assert.equal(termsCreated[0].disposed, true, 'First terminal should have been disposed');
 assert.equal(termsCreated[1].element, newContainer, 'Terminal 2 mounted to newContainer');
 
-// Writes should now go to terminal 2
+// Writes should now go to terminal 2, preserving session scrollback from terminal 1
 const testStr2 = 'Welcome back to terminal!';
 const encoded2 = encoder.encode(testStr2);
 new Uint8Array(memory.buffer, 256, encoded2.length).set(encoded2);
 imports.term_write(256, encoded2.length);
-assert.deepEqual(termsCreated[1].written, [testStr2]);
+assert.deepEqual(termsCreated[1].written, [testStr, testStr2]);
 
 // Test idempotence: repeated mount() on the same live container does not re-create or dispose
 bridge.mount();
@@ -151,7 +151,23 @@ bridge.mount();
 assert.equal(termsCreated.length, 3, 'Terminal 3 should be created despite stale __attached flag');
 assert.equal(termsCreated[1].disposed, true, 'Terminal 2 should have been disposed');
 assert.equal(termsCreated[2].element, staleFlagContainer, 'Terminal 3 mounted to staleFlagContainer');
+assert.deepEqual(termsCreated[2].written, [testStr, testStr2]);
 
+bridge.destroy();
+
+// After full destroy(), scrollback must be cleared for any subsequent fresh mount
+const freshContainer = {
+	id: 'term-4',
+	__attached: false,
+	addEventListener() {},
+	getAttribute() { return 'false'; }
+};
+liveElements.delete(staleFlagContainer);
+liveElements.add(freshContainer);
+activeContainer = freshContainer;
+bridge.mount();
+assert.equal(termsCreated.length, 4, 'Terminal 4 should be created after destroy()');
+assert.deepEqual(termsCreated[3].written, [], 'destroy() must clear scrollback');
 bridge.destroy();
 
 // 5. Test TerminalController class
