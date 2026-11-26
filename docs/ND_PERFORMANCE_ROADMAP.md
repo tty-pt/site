@@ -31,7 +31,7 @@ Cross-references:
 | **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | **Complete** | Sky-after-terrain Early-Z (`z=1.0`, `GL_LEQUAL`), 236 constant `nd_to_lin` `pow()` removed, single-eval wind, zero-`discard` `mesh3d_opaque` Pass C1, CPU pre-culled grass tuft VBO cache + 3-blade LOD (`bindTex` `152→112`, Low grass tris `-61%`), shared MSAA depth resolve (`blits=2.0/f`), dead CSM history blit removed, Bloom gated off on Low (`draws 186→183`) |
 | **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | **Complete** | `htdocs/nd.wasm` `-100.7 KB` (`1,172,744 → 1,072,053 B`), `libareole` `-20.52 MB` RAM, `NdFrameUBO` + `glCmdFlush` ring (`FFI -68.5%` stationary / `-82.8%` wide-zoom `3.4 calls/chunk`, live `ulLen=147`), BCP dirty-masking, incremental atlas bake, `0 corm_get` per `nd_write`, `libnd-mcp.so` BSS `655 MB → 264 B`, active-session TOD, graphical ANSI skip + plant cache |
 | **P5** | Zero-Spill Integrated GPU & Hitch-Free Zoom | Medium (1–2d) | Med | **Complete** | 3 cloud + 7 terrain zero-visual-diff shader variants + deferred Stage 8 water pass (`CLOUD_WIDE_CSM` `5.24×` fewer cycles / `31.5×` fewer fills; `TERRAIN` `24.86ms` + `WATER` `9.71ms` on Intel ADL GT2, `21/21` `glslangValidator -l` pass), startup `gl_prewarm_pipelines()` + `glTexSubImage2D` chunk reuse (`zoom_sweep max_ms` `4507 → 182.66ms`, `wide_zoom_steady` `24.4 fps` / `35.51ms` GPU) |
-| **P6** | Hardware-Filtered Shading, Fast Boot & SIMD Streaming | Large (4–6d) | Med | **Planned** | Target **20 → 45–60 FPS** on Intel ADL GT2 (`TERRAIN` 25→8–12ms, `WATER` 10→3–4ms, `CLOUDS` 7.8→2–3ms), cold boot **14.1s → ~2–3s**, zoom CPU spikes **82ms → ~20ms**, wide-zoom chunk draws **159 → ~5** |
+| **P6** | Hardware-Filtered Shading, Fast Boot & SIMD Streaming | Large (4–6d) | Med | **In Progress (6A–6B Complete)** | 6A+6B done: cold boot **16.2s → 5.97s (-63%)**, `stationary_1x` GPU **50.0 → 37.5ms** (`TERRAIN` -43%, `WATER` -77%/-97% vs P5), `wide_zoom_steady` **28.8 fps**; 6C (cloud reproj, FBO/MSAA, DRS) & 6D (SIMD populate, `sampler2DArray` instancing + VAOs) remain |
 
 ---
 
@@ -485,7 +485,7 @@ Even with Phase 5 eliminating most Gen12 register spills and mid-zoom compilatio
 | **Wide-zoom terrain draws / FFI** | 159 draws / 537 FFI | **≤ 8 draws / ≤ 120 FFI** | 6D `GL_TEXTURE_2D_ARRAY` instanced terrain + VAOs |
 | **Visual & Contract Gates** | `21/21` GLSL, 0 errors | **All GLSL ES 3.00 pass**, `docs/SHORE.md` parity, 0 console/WebGL errors, `make test-graphics` & `make test-fast` exit `0` | Per-sub-phase golden-frame & unit verification |
 
-**Status: In Progress (Sub-Phase 6A Complete; Sub-Phases 6B–6D Planned)**
+**Status: In Progress (Sub-Phases 6A & 6B Complete; Sub-Phases 6C–6D Planned)**
 
 ---
 
