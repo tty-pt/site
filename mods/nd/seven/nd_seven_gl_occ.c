@@ -1266,6 +1266,9 @@ void gl_render_cloud_shadow_map(void)
 	glDisable(GL_BLEND);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glUseProgram(s_gl.csm_pipe.prog);
+	glActiveTexture(GL_TEXTURE0 + 15);
+	glBindTexture(GL_TEXTURE_3D, s_gl.cloud_shape3d_tex);
+	glActiveTexture(GL_TEXTURE0);
 	glUniform3f(s_gl.csm_pipe.uCsm, s_gl.csm_win.cx, s_gl.csm_win.cy, s_gl.csm_win.half);
 	glUniform1f(s_gl.csm_pipe.uAnimTime, s_gl.cur_anim_time);
 	glUniform1f(s_gl.csm_pipe.uSeaWet, sea_wet);

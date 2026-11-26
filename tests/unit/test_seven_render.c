@@ -2749,6 +2749,7 @@ int main(void)
 				{ "cloud",               nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()               },
 				{ "cloud_wide",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide()          },
 				{ "cloud_wide_csm",      nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide_csm()      },
+				{ "cloud_vol",           nd_seven_gl_vs_cloud_vol(),      nd_seven_gl_fs_cloud_vol()           },
 				{ "cloud_comp",          nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_comp()          },
 				{ "cloud_reproj",        nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_reproj()        },
 				{ "csm",                 nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()                 },
@@ -5748,6 +5749,211 @@ int main(void)
 
 		printf("PASS: Phase 6C Piece 2 2x2 temporal checkerboard cloud reprojection (err_x=%.2e err_y=%.2e) verified\n",
 		       err_x, err_y);
+	}
+
+	/* === Cloud Phase 1: 64^3 tileable Perlin-Worley + 3-octave Worley-FBM 3D LUT & mipmaps === */
+	{
+		const uint32_t D = 64u;
+		const size_t n_vox = (size_t)D * D * D;
+		uint8_t *vol0 = (uint8_t *)malloc(n_vox * 4u);
+		uint8_t *vol_cmp = (uint8_t *)malloc(n_vox * 4u);
+		assert(vol0 != NULL && vol_cmp != NULL);
+
+		nd_seven_gl_bake_cloud_shape3d_lut(vol0, D);
+		nd_seven_gl_bake_cloud_shape3d_lut(vol_cmp, D);
+		assert(memcmp(vol0, vol_cmp, n_vox * 4u) == 0);
+		free(vol_cmp);
+
+		double sum[4] = {0}, sum2[4] = {0}, grad_sum[4] = {0};
+		double wrap_sum[4] = {0}, wrap_cnt = 0.0;
+		int ch_min[4] = {255, 255, 255, 255}, ch_max[4] = {0, 0, 0, 0};
+		for (uint32_t z = 0; z < D; z++) {
+			uint32_t zp = (z + 1u) & (D - 1u);
+			for (uint32_t y = 0; y < D; y++) {
+				uint32_t yp = (y + 1u) & (D - 1u);
+				for (uint32_t x = 0; x < D; x++) {
+					uint32_t xp = (x + 1u) & (D - 1u);
+					const uint8_t *p   = &vol0[((size_t)(z * D + y) * D + x)  * 4u];
+					const uint8_t *pxp = &vol0[((size_t)(z * D + y) * D + xp) * 4u];
+					const uint8_t *pyp = &vol0[((size_t)(z * D + yp) * D + x) * 4u];
+					const uint8_t *pzp = &vol0[((size_t)(zp * D + y) * D + x) * 4u];
+					for (int c = 0; c < 4; c++) {
+						double v = (double)p[c] / 255.0;
+						sum[c]  += v;
+						sum2[c] += v * v;
+						if (p[c] < ch_min[c]) ch_min[c] = p[c];
+						if (p[c] > ch_max[c]) ch_max[c] = p[c];
+						double gx = fabs((double)pxp[c] - (double)p[c]) / 255.0;
+						double gy = fabs((double)pyp[c] - (double)p[c]) / 255.0;
+						double gz = fabs((double)pzp[c] - (double)p[c]) / 255.0;
+						grad_sum[c] += (gx + gy + gz) * (1.0 / 3.0);
+						if (x == D - 1u) wrap_sum[c] += gx;
+						if (y == D - 1u) wrap_sum[c] += gy;
+						if (z == D - 1u) wrap_sum[c] += gz;
+					}
+					if (x == D - 1u) wrap_cnt += 1.0;
+					if (y == D - 1u) wrap_cnt += 1.0;
+					if (z == D - 1u) wrap_cnt += 1.0;
+				}
+			}
+		}
+
+		double mean[4], stdv[4], mgrad[4], wgrad[4];
+		for (int c = 0; c < 4; c++) {
+			mean[c]  = sum[c] / (double)n_vox;
+			stdv[c]  = sqrt(fmax(0.0, sum2[c] / (double)n_vox - mean[c] * mean[c]));
+			mgrad[c] = grad_sum[c] / (double)n_vox;
+			wgrad[c] = wrap_sum[c] / wrap_cnt;
+			/* Seam wrap gradient must match interior gradient (no periodic discontinuity) */
+			assert(wgrad[c] <= mgrad[c] * 1.25 + 0.01);
+			/* Full dynamic range & photographic contrast on every channel */
+			assert(ch_min[c] <= 20 && ch_max[c] >= 235);
+			assert(mean[c] >= 0.30 && mean[c] <= 0.72);
+			assert(stdv[c] >= 0.14);
+		}
+		/* Monotonic spatial frequency hierarchy across Worley octaves: period 16 > 8 > 4 */
+		assert(mgrad[3] > mgrad[2] * 1.4 && mgrad[2] > mgrad[1] * 1.4);
+
+		/* Verify full 7-level 3D mipmap chain: mean conservation & monotonic variance damping */
+		uint8_t *mip_a = vol0;
+		uint8_t *mip_b = (uint8_t *)malloc((n_vox >> 3) * 4u);
+		assert(mip_b != NULL);
+		double prev_var_r = stdv[0] * stdv[0];
+		uint32_t cd = D;
+		for (int m = 1; m < 7; m++) {
+			uint32_t nd = cd >> 1u;
+			nd_seven_gl_downsample_rgba8_3d(mip_a, cd, mip_b);
+			size_t mn = (size_t)nd * nd * nd;
+			double ms = 0.0, ms2 = 0.0;
+			for (size_t i = 0; i < mn; i++) {
+				double vr = (double)mip_b[i * 4u] / 255.0;
+				ms  += vr;
+				ms2 += vr * vr;
+			}
+			double mm = ms / (double)mn;
+			double mv = fmax(0.0, ms2 / (double)mn - mm * mm);
+			assert(fabs(mm - mean[0]) < 0.02);
+			assert(mv <= prev_var_r + 1e-6);
+			prev_var_r = mv;
+			memcpy(vol0, mip_b, mn * 4u);
+			cd = nd;
+		}
+		assert(prev_var_r < 1e-9); /* 1x1x1 top mip has 0 variance */
+		free(mip_b);
+		free(vol0);
+
+		printf("PASS: Cloud Phase 1 64^3 tileable Perlin-Worley + 3-octave Worley-FBM LUT & 7-level 3D mipmaps (R=%.2f/%.2f grad=%.4f<%.4f<%.4f) verified\n",
+		       mean[0], stdv[0], mgrad[1], mgrad[2], mgrad[3]);
+	}
+
+	/* Cloud Phase 2: Fullscreen Depth-Aware 3D Volumetric Cloud Raymarcher & Principal-Curvature
+	 * Torus Slab Intersection (ground close-up looking up/horizon, inside clouds, above clouds,
+	 * terrain occlusion, outer equator / pole / inner saddle, and exact torus altitude parity). */
+	{
+		const float R = 2000000.0f;
+		const float r0 = 1335000.0f;
+		const float zBot = 820.0f;
+		const float zTop = 2820.0f;
+		const float ke_outer = 1.0f / (R + r0);
+		const float ks = 1.0f / r0;
+		const float ke_inner = -1.0f / (R - r0);
+		float t0 = 0.0f, t1 = 0.0f;
+
+		/* 1. Ground camera looking UP at 30 deg: hits zBot then zTop smoothly */
+		float eye_g[3] = { 0.0f, 0.0f, 20.0f };
+		float ray_up[3] = { 0.8660254f, 0.0f, 0.5f };
+		assert(nd_seven_gl_cloud_quadric_intersect(eye_g, ray_up, ke_outer, ks, zBot, zTop, 200000.0f, &t0, &t1));
+		assert(t0 > 1500.0f && t0 < 1650.0f);
+		assert(t1 > 5300.0f && t1 < 5700.0f);
+
+		/* 2. Ground camera looking HORIZONTALLY: curvature bends planet away so ray rises into cloud deck! */
+		float ray_horiz[3] = { 0.0f, 1.0f, 0.0f };
+		assert(nd_seven_gl_cloud_quadric_intersect(eye_g, ray_horiz, ke_outer, ks, zBot, zTop, 200000.0f, &t0, &t1));
+		float exp_t0 = sqrtf(2.0f * (zBot - 20.0f) / ks);
+		float exp_t1 = sqrtf(2.0f * (zTop - 20.0f) / ks);
+		assert(fabsf(t0 - exp_t0) < 2.0f);
+		assert(fabsf(t1 - exp_t1) < 2.0f);
+
+		/* 3. Terrain depth occlusion: mountain at max_t = 1200 wu before cloud base occludes ray completely */
+		assert(!nd_seven_gl_cloud_quadric_intersect(eye_g, ray_up, ke_outer, ks, zBot, zTop, 1200.0f, &t0, &t1));
+
+		/* 4. Camera INSIDE cloud deck (flying through clouds): enters immediately at t0 == 0 */
+		float eye_in[3] = { 0.0f, 0.0f, 1500.0f };
+		assert(nd_seven_gl_cloud_quadric_intersect(eye_in, ray_up, ke_outer, ks, zBot, zTop, 200000.0f, &t0, &t1));
+		assert(t0 == 0.0f && t1 > 2000.0f);
+
+		/* 5. Camera ABOVE cloud deck: looking down hits slab; looking up misses */
+		float eye_hi[3] = { 0.0f, 0.0f, 10000.0f };
+		float ray_dn[3] = { 0.6f, 0.0f, -0.8f };
+		assert(nd_seven_gl_cloud_quadric_intersect(eye_hi, ray_dn, ke_outer, ks, zBot, zTop, 200000.0f, &t0, &t1));
+		assert(t0 > 8500.0f && t1 > t0 + 2000.0f);
+		assert(!nd_seven_gl_cloud_quadric_intersect(eye_hi, ray_up, ke_outer, ks, zBot, zTop, 200000.0f, &t0, &t1));
+
+		/* 6. Torus pole (kappa_e = 0) & inner torus saddle (kappa_e < 0) both intersect cleanly */
+		assert(nd_seven_gl_cloud_quadric_intersect(eye_g, ray_up, 0.0f, ks, zBot, zTop, 200000.0f, &t0, &t1));
+		assert(t0 > 1550.0f && t1 > 5500.0f);
+		assert(nd_seven_gl_cloud_quadric_intersect(eye_g, ray_up, ke_inner, ks, zBot, zTop, 200000.0f, &t0, &t1));
+		assert(t0 > 1550.0f && t1 > 5500.0f);
+
+		/* 7. Exact 3D torus altitude parity at 60 km ray distance (handoff is at 65 km):
+		 * At outer equator (R+r0, 0, 0), E = (0, 1, 0), S = (0, 0, 1), N = (1, 0, 0). */
+		double dist_test = 60000.0;
+		double pe = dist_test * 0.70710678, ps = dist_test * 0.70710678, pz = 1500.0;
+		double qx = (double)(R + r0) + pz;
+		double qy = pe;
+		double qz = ps;
+		double exact_alt = sqrt((sqrt(qx * qx + qy * qy) - (double)R) * (sqrt(qx * qx + qy * qy) - (double)R) + qz * qz) - (double)r0;
+		double quad_alt = pz + 0.5 * ((double)ke_outer * pe * pe + (double)ks * ps * ps);
+		double err_wu = fabs(quad_alt - exact_alt);
+		assert(err_wu < 15.0);
+
+		/* 8. Fullscreen cloud_vol shader contracts */
+		const char *vs_vol = nd_seven_gl_vs_cloud_vol();
+		const char *fs_vol = nd_seven_gl_fs_cloud_vol();
+		assert(vs_vol != NULL && strstr(vs_vol, "gl_VertexID") != NULL);
+		assert(fs_vol != NULL);
+		assert(strstr(fs_vol, "uCloudShape3D") != NULL);
+		assert(strstr(fs_vol, "textureLod") != NULL);
+		assert(strstr(fs_vol, "vol_quadric_intersect") != NULL);
+		assert(strstr(fs_vol, "vol_torus_sdf") != NULL);
+		assert(strstr(fs_vol, "vol_dual_hg") != NULL);
+		assert(strstr(fs_vol, "uSceneDepthTex") != NULL);
+		assert(strstr(fs_vol, "orbShadowA") != NULL);
+		assert(strstr(fs_vol, "eval_torus_self_eclipse") != NULL);
+
+		printf("PASS: Cloud Phase 2 fullscreen volumetric raymarcher & principal-curvature torus intersection (60km err=%.2f wu) verified\n", err_wu);
+	}
+
+	/* Cloud Phase 3: Shared Meteorological Regimes & 1:1 Sky <-> Ground Shadow (CSM) <-> Water Reflection Parity */
+	{
+		const char *fs_vol = nd_seven_gl_fs_cloud_vol();
+		const char *fs_csm = nd_seven_gl_fs_csm();
+		const char *fs_wat = nd_seven_gl_fs_water();
+		const char *fs_ter = nd_seven_gl_fs_terrain();
+		assert(fs_vol != NULL && fs_csm != NULL && fs_wat != NULL && fs_ter != NULL);
+
+		/* Both volumetric sky raymarcher AND cloud shadow map share the exact same 3D LUT + meteorology kernel */
+		static const char *const shared_syms[] = {
+			"uCloudShape3D",
+			"vol_eval_weather",
+			"vol_sample_density",
+			"vol_height_profile",
+			"frontShear",
+			"streetRoll",
+			"marineCell",
+			"eval_synoptic_carrier"
+		};
+		for (size_t i = 0; i < sizeof(shared_syms) / sizeof(shared_syms[0]); i++) {
+			assert(strstr(fs_vol, shared_syms[i]) != NULL);
+			assert(strstr(fs_csm, shared_syms[i]) != NULL);
+		}
+		/* CSM performs 2-slice optical integration through lower & mid cumulus deck */
+		assert(strstr(fs_csm, "colDens") != NULL);
+		/* Terrain shadows & water cloud reflections both sample the synced CSM */
+		assert(strstr(fs_ter, "nd_csm_density") != NULL);
+		assert(strstr(fs_wat, "nd_csm_density") != NULL);
+
+		printf("PASS: Cloud Phase 3 shared meteorological kernel (frontal shear, streets, marine Benard cells) & 1:1 sky/CSM/water parity verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

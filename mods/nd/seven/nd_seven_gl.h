@@ -264,6 +264,24 @@ void nd_seven_gl_bake_noise2d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t peri
  * Output holds dim*dim*dim*4 bytes in Z-major layout ((z*dim + y)*dim + x). */
 void nd_seven_gl_bake_noise3d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t period);
 
+/* Startup-baked tileable 3D Perlin-Worley + 3-octave Worley-FBM cloud volume LUT (RGBA8):
+ * R = Perlin-Worley base shape [0..1], G = inverted Worley (period 4),
+ * B = inverted Worley (period 8), A = inverted Worley (period 16).
+ * Output holds dim*dim*dim*4 bytes in Z-major layout ((z*dim + y)*dim + x). */
+void nd_seven_gl_bake_cloud_shape3d_lut(uint8_t *out_rgba, uint32_t dim);
+
+/* 2x2x2 box-filter 3D RGBA8 mipmap downsampler (src_dim -> src_dim/2, src_dim >= 2). */
+void nd_seven_gl_downsample_rgba8_3d(const uint8_t *src, uint32_t src_dim, uint8_t *dst);
+
+/* Phase 2: Fullscreen depth-aware 3D volumetric cloud raymarcher shaders & analytical
+ * principal-curvature torus slab intersection (exact match to GLSL cloud_vol_pipe). */
+const char *nd_seven_gl_vs_cloud_vol(void);
+const char *nd_seven_gl_fs_cloud_vol(void);
+bool nd_seven_gl_cloud_quadric_intersect(const float eye_l[3], const float ray_l[3],
+                                         float kappa_e, float kappa_s,
+                                         float z_bot, float z_top, float max_dist,
+                                         float *out_t_enter, float *out_t_exit);
+
 /* Phase 6C Piece 2: 2x2 interleaved temporal checkerboard cloud reprojection helpers.
  * Bayer phase (phase & 3) maps to subpixel (px, py) in {0,1}^2 and exact NDC jitter
  * ((0.5 - px) / qrw, (0.5 - py) / qrh) for the quarter-area cloud render target. */

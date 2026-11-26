@@ -735,6 +735,19 @@ static void gl_init_noise_lut_placeholders(void)
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 		glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, k_neutral);
 	}
+	if (!s_gl.cloud_shape3d_tex) {
+		s_gl.cloud_shape3d_tex = glCreateTexture();
+		glActiveTexture(GL_TEXTURE0 + 15);
+		glBindTexture(GL_TEXTURE_3D, s_gl.cloud_shape3d_tex);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, k_neutral);
+	}
 	s_gl.noise_lut_stage = 0;
 	glActiveTexture(GL_TEXTURE0);
 }
@@ -795,6 +808,41 @@ static void gl_advance_noise_luts(void)
 		}
 		free(buf3);
 		s_gl.noise_lut_stage = 2;
+		return;
+	}
+	if (s_gl.noise_lut_stage == 2 && s_gl.cloud_shape3d_tex) {
+		const int dim3 = 64;
+		const int mips = 7; /* 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1 */
+		uint8_t *buf0 = (uint8_t *)malloc((size_t)dim3 * (size_t)dim3 * (size_t)dim3 * 4u);
+		uint8_t *buf1 = (uint8_t *)malloc((size_t)(dim3 >> 1) * (size_t)(dim3 >> 1) * (size_t)(dim3 >> 1) * 4u);
+		if (buf0 && buf1) {
+			nd_seven_gl_bake_cloud_shape3d_lut(buf0, (uint32_t)dim3);
+			glActiveTexture(GL_TEXTURE0 + 15);
+			glBindTexture(GL_TEXTURE_3D, s_gl.cloud_shape3d_tex);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, mips - 1);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+			int cd = dim3;
+			uint8_t *src = buf0, *dst = buf1;
+			glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, cd, cd, cd, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int m = 1; m < mips; m++) {
+				int nd = cd >> 1;
+				nd_seven_gl_downsample_rgba8_3d(src, (uint32_t)cd, dst);
+				glTexImage3D(GL_TEXTURE_3D, m, GL_RGBA8, nd, nd, nd, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *tmp = src;
+				src = dst;
+				dst = tmp;
+				cd = nd;
+			}
+			glActiveTexture(GL_TEXTURE0);
+		}
+		free(buf0);
+		free(buf1);
+		s_gl.noise_lut_stage = 3;
 	}
 }
 
@@ -982,6 +1030,49 @@ static void gl_link_cloud_reproj_pipe(gl_cloud_reproj_pipe_t *crp)
 	if (crp->uCloudQuarterTex >= 0) glUniform1i(crp->uCloudQuarterTex, 6);
 	if (crp->uCloudDepthTex >= 0)   glUniform1i(crp->uCloudDepthTex, 11);
 	if (crp->uCloudHistTex >= 0)    glUniform1i(crp->uCloudHistTex, 12);
+}
+
+static void gl_link_cloud_vol_pipe(gl_cloud_vol_pipe_t *cvp)
+{
+	if (!cvp->prog)
+		return;
+	if (!glGetProgramParameter(cvp->prog, GL_LINK_STATUS)) {
+		glDeleteProgram(cvp->prog);
+		cvp->prog = 0;
+		return;
+	}
+	GLuint p = cvp->prog;
+	gl_bind_frame_ubo_prog(p);
+	cvp->uCamFwd         = glGetUniformLocation(p, "uCamFwd", 7);
+	cvp->uCamRight       = glGetUniformLocation(p, "uCamRight", 9);
+	cvp->uCamUp          = glGetUniformLocation(p, "uCamUp", 6);
+	cvp->uTanHalfAspect  = glGetUniformLocation(p, "uTanHalfAspect", 14);
+	cvp->uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
+	cvp->uCloudJitter    = glGetUniformLocation(p, "uCloudJitter", 12);
+	cvp->uEast           = glGetUniformLocation(p, "uEast", 5);
+	cvp->uSouth          = glGetUniformLocation(p, "uSouth", 6);
+	cvp->uZenith         = glGetUniformLocation(p, "uZenith", 7);
+	cvp->uEyeLocal       = glGetUniformLocation(p, "uEyeLocal", 9);
+	cvp->uRefWorldXY     = glGetUniformLocation(p, "uRefWorldXY", 11);
+	cvp->uCurvature      = glGetUniformLocation(p, "uCurvature", 10);
+	cvp->uTorusEye       = glGetUniformLocation(p, "uTorusEye", 9);
+	cvp->uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
+	cvp->uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
+	cvp->uCloudParams    = glGetUniformLocation(p, "uCloudParams", 12);
+	cvp->uSceneUvScale   = glGetUniformLocation(p, "uSceneUvScale", 13);
+	cvp->uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
+	cvp->uSceneDepthTex  = glGetUniformLocation(p, "uSceneDepthTex", 14);
+	cvp->uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+	cvp->uNoise2DTex     = glGetUniformLocation(p, "uNoise2DTex", 11);
+	cvp->uCloudShape3D   = glGetUniformLocation(p, "uCloudShape3D", 13);
+
+	/* Bind immutable sampler texture units once at link time */
+	glUseProgram(p);
+	if (cvp->uSceneDepthTex >= 0)  glUniform1i(cvp->uSceneDepthTex, 5);
+	if (cvp->uCloudShadowMap >= 0) glUniform1i(cvp->uCloudShadowMap, 7);
+	if (cvp->uNoise2DTex >= 0)     glUniform1i(cvp->uNoise2DTex, 13);
+	if (cvp->uCloudShape3D >= 0)   glUniform1i(cvp->uCloudShape3D, 15);
+	if (cvp->uCloudJitter >= 0)    glUniform2f(cvp->uCloudJitter, 0.0f, 0.0f);
 }
 
 static void gl_link_ssao_pipe(gl_ssao_pipe_t *sp)
@@ -1177,9 +1268,14 @@ static void gl_link_csm_pipe(gl_csm_pipe_t *cp)
 		return;
 	}
 	GLuint p = cp->prog;
-	cp->uCsm      = glGetUniformLocation(p, "uCsm", 4);
-	cp->uAnimTime = glGetUniformLocation(p, "uAnimTime", 9);
-	cp->uSeaWet   = glGetUniformLocation(p, "uSeaWet", 7);
+	cp->uCsm          = glGetUniformLocation(p, "uCsm", 4);
+	cp->uAnimTime     = glGetUniformLocation(p, "uAnimTime", 9);
+	cp->uSeaWet       = glGetUniformLocation(p, "uSeaWet", 7);
+	cp->uCloudShape3D = glGetUniformLocation(p, "uCloudShape3D", 13);
+	if (cp->uCloudShape3D >= 0) {
+		glUseProgram(p);
+		glUniform1i(cp->uCloudShape3D, 15);
+	}
 }
 
 static void gl_link_post_pipe(gl_post_pipe_t *pp)
@@ -1299,15 +1395,10 @@ static void gl_queue_next_shader_stage(void)
 		}
 		break;
 	}
-	case 7: {
-		GLuint vs_cloud = compile_shader(GL_VERTEX_SHADER, nd_seven_gl_vs_cloud());
-		if (vs_cloud) {
-			s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].pending_prog = create_program_with_vs_async(vs_cloud, nd_seven_gl_fs_cloud_wide_csm());
-			s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].pending_prog     = create_program_with_vs_async(vs_cloud, nd_seven_gl_fs_cloud_wide());
-			glDeleteShader(vs_cloud);
-		}
+	case 7:
+		s_gl.cloud_vol_pipe.pending_prog =
+			create_program_async(nd_seven_gl_vs_cloud_vol(), nd_seven_gl_fs_cloud_vol());
 		break;
-	}
 	case 8: {
 		GLuint vs_csm = compile_shader(GL_VERTEX_SHADER, nd_seven_gl_vs_csm());
 		if (vs_csm) {
@@ -1371,6 +1462,7 @@ static void poll_tier_b_pipelines(void)
 	for (int v = 0; v < ND_CLOUD_VAR_COUNT; v++)
 		GL_POLL_PIPE(&s_gl.cloud_pipes[v], gl_link_cloud_pipe, any_pending);
 
+	GL_POLL_PIPE(&s_gl.cloud_vol_pipe,    gl_link_cloud_vol_pipe,    any_pending);
 	GL_POLL_PIPE(&s_gl.cloud_comp_pipe,   gl_link_cloud_comp_pipe,   any_pending);
 	GL_POLL_PIPE(&s_gl.cloud_reproj_pipe, gl_link_cloud_reproj_pipe, any_pending);
 	GL_POLL_PIPE(&s_gl.ssao_pipe,         gl_link_ssao_pipe,         any_pending);
@@ -1401,7 +1493,7 @@ static bool check_pipelines_ready(void)
 
 void nd_seven_gl_shader_progress(int *out_ready, int *out_total)
 {
-	int total = 23;
+	int total = 22;
 	int ready = 0;
 	if (s_gl.sky_pipe.prog) ready++;
 	if (s_gl.terrain_pipes[ND_TERR_VAR_DRY_NEAR].prog) ready++;
@@ -1420,8 +1512,7 @@ void nd_seven_gl_shader_progress(int *out_ready, int *out_total)
 	if (s_gl.terrain_shadow_pipe.prog) ready++;
 	if (s_gl.mesh3d_shadow_alpha_pipe.prog) ready++;
 	if (s_gl.mesh3d_shadow_opaque_pipe.prog) ready++;
-	if (s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE_CSM].prog) ready++;
-	if (s_gl.cloud_pipes[ND_CLOUD_VAR_WIDE].prog) ready++;
+	if (s_gl.cloud_vol_pipe.prog) ready++;
 	if (s_gl.cloud_comp_pipe.prog) ready++;
 	if (s_gl.cloud_reproj_pipe.prog) ready++;
 	if (s_gl.ssao_pipe.prog) ready++;
@@ -1519,17 +1610,16 @@ static void gl_prewarm_pipelines(void)
 		return;
 	}
 
-	/* Prewarm only the 9 active specialized terrain/water/cloud pipelines.
-	 * Never force-draw the monolithic emergency fallback shaders (112-spill TERRAIN_FULL /
-	 * 81-spill CLOUD_FULL) so neither boot nor zoom_sweep triggers a multi-second Mesa JIT stall. */
-	static const uint8_t warm_order[9] = {
+	/* Prewarm only the 8 active specialized terrain/water/cloud_vol pipelines.
+	 * Never force-draw the monolithic emergency fallback shaders so neither boot
+	 * nor zoom_sweep triggers a multi-second Mesa JIT stall. */
+	static const uint8_t warm_order[8] = {
 		ND_TERR_VAR_DRY_NEAR,
 		ND_TERR_VAR_SEABED_NEAR,
-		ND_TERR_VAR_COUNT, /* water */
+		ND_TERR_VAR_COUNT,     /* water */
 		ND_TERR_VAR_MACRO,
 		ND_TERR_VAR_MACRO_FAR,
-		(uint8_t)(ND_TERR_VAR_COUNT + 1 + ND_CLOUD_VAR_WIDE_CSM),
-		(uint8_t)(ND_TERR_VAR_COUNT + 1 + ND_CLOUD_VAR_WIDE),
+		ND_TERR_VAR_COUNT + 1, /* cloud_vol */
 		ND_TERR_VAR_DRY_CSM,
 		ND_TERR_VAR_SEABED_MID,
 	};
@@ -1546,7 +1636,7 @@ static void gl_prewarm_pipelines(void)
 		else if (s == ND_TERR_VAR_COUNT)
 			prog = s_gl.water_pipe.prog;
 		else
-			prog = s_gl.cloud_pipes[s - (ND_TERR_VAR_COUNT + 1)].prog;
+			prog = s_gl.cloud_vol_pipe.prog;
 		if (prog) {
 			pick = (int)s;
 			break;
@@ -1658,33 +1748,36 @@ static void gl_prewarm_pipelines(void)
 			glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
 		}
 	} else {
-		/* 3. Prewarm one cloud variant into cloud_fbo (RGBA16F 1x, premult alpha blend) */
-		int cv = (int)(idx - (ND_TERR_VAR_COUNT + 1));
-		if (cv >= 0 && cv < ND_CLOUD_VAR_COUNT && s_gl.cloud_pipes[cv].prog) {
-			const gl_cloud_pipe_t *cp = &s_gl.cloud_pipes[cv];
-			if (s_gl.cloud_fbo)
+		/* 3. Prewarm fullscreen volumetric cloud pipeline into cloud_q_fbo / cloud_fbo (RGBA16F 1x) */
+		const gl_cloud_vol_pipe_t *cvp = &s_gl.cloud_vol_pipe;
+		if (cvp->prog) {
+			if (s_gl.cloud_q_fbo)
+				glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_q_fbo);
+			else if (s_gl.cloud_fbo)
 				glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
-			glBindBuffer(GL_ARRAY_BUFFER, s_gl.grid_vbo_macro);
-			glEnableVertexAttribArray(0);
-			glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, 0);
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.grid_ibo_macro);
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.substrate_array);
-			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.height_array);
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0 + 13);
+			glBindTexture(GL_TEXTURE_2D, s_gl.noise2d_tex ? s_gl.noise2d_tex : dummy_rgba);
+			glActiveTexture(GL_TEXTURE0 + 15);
+			glBindTexture(GL_TEXTURE_3D, s_gl.cloud_shape3d_tex);
 			glActiveTexture(GL_TEXTURE0);
 			glDisable(GL_DEPTH_TEST);
 			glDepthMask(GL_FALSE);
-			glEnable(GL_BLEND);
-			glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+			glDisable(GL_BLEND);
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			glUseProgram(cp->prog);
-			if (cp->uChunkLayer >= 0)         glUniform1f(cp->uChunkLayer, 0.0f);
-			if (cp->uViewport >= 0)           glUniform2f(cp->uViewport, 1.0f, 1.0f);
-			if (cp->uCloudResScale >= 0)      glUniform1f(cp->uCloudResScale, 1.0f);
-			if (cp->uClusterGridDim >= 0)     glUniform3f(cp->uClusterGridDim, 16.0f, 16.0f, 24.0f);
-			if (cp->uClusterDepthParams >= 0) glUniform4f(cp->uClusterDepthParams, 2.0f, 10000.0f, 1.0f, 0.0f);
-			glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+			glUseProgram(cvp->prog);
+			if (cvp->uCamFwd >= 0)        glUniform3f(cvp->uCamFwd, 0.0f, 0.0f, -1.0f);
+			if (cvp->uCamRight >= 0)      glUniform3f(cvp->uCamRight, 1.0f, 0.0f, 0.0f);
+			if (cvp->uCamUp >= 0)         glUniform3f(cvp->uCamUp, 0.0f, 1.0f, 0.0f);
+			if (cvp->uTanHalfAspect >= 0) glUniform2f(cvp->uTanHalfAspect, 0.5f, 1.333f);
+			if (cvp->uNearFar >= 0)       glUniform2f(cvp->uNearFar, 2.0f, 100000.0f);
+			if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 820.0f, 2820.0f, 6.0f, 2.0f);
+			if (cvp->uSceneUvScale >= 0)  glUniform2f(cvp->uSceneUvScale, 1.0f, 1.0f);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+			glActiveTexture(GL_TEXTURE0 + 5);
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glActiveTexture(GL_TEXTURE0);
 		}
 	}
 
@@ -1710,7 +1803,7 @@ static void gl_prewarm_pipelines(void)
 			uint8_t s = warm_order[o];
 			GLuint prog = (s < ND_TERR_VAR_COUNT) ? s_gl.terrain_pipes[s].prog
 			            : ((s == ND_TERR_VAR_COUNT) ? s_gl.water_pipe.prog
-			                                        : s_gl.cloud_pipes[s - (ND_TERR_VAR_COUNT + 1)].prog);
+			                                        : s_gl.cloud_vol_pipe.prog);
 			if (prog)
 				all_linked |= (1u << s);
 		}
@@ -1989,7 +2082,7 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	if (!s_gl.initialized) init_pipelines();
 	if (check_pipelines_ready() && s_gl.prewarm_frame0_seen) {
 		poll_tier_b_pipelines();
-		if (s_gl.noise_lut_stage < 2) gl_advance_noise_luts();
+		if (s_gl.noise_lut_stage < 3) gl_advance_noise_luts();
 		if (s_gl.atlas_bake_stage < 3) gl_advance_atlas_bake();
 	}
 

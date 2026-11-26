@@ -906,6 +906,275 @@ void nd_seven_gl_bake_noise3d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t peri
 	free(idx_tab);
 }
 
+static void gl_build_worley3d_points(float *pts_xyz, uint32_t cells, uint32_t seed)
+{
+	const float inv16 = 1.0f / 65535.0f;
+	for (uint32_t iz = 0; iz < cells; iz++) {
+		for (uint32_t iy = 0; iy < cells; iy++) {
+			for (uint32_t ix = 0; ix < cells; ix++) {
+				uint32_t h1 = gl_chaff_hash3((int32_t)ix, (int32_t)iy, (int32_t)iz, seed);
+				uint32_t h2 = gl_chaff_hash3((int32_t)ix, (int32_t)iy, (int32_t)iz, seed ^ 0x9E3779B9u);
+				size_t k = ((size_t)iz * (size_t)cells + (size_t)iy) * (size_t)cells + (size_t)ix;
+				pts_xyz[k * 3u + 0u] = 0.12f + 0.76f * ((float)(h1 & 0xFFFFu) * inv16);
+				pts_xyz[k * 3u + 1u] = 0.12f + 0.76f * ((float)(h1 >> 16u)    * inv16);
+				pts_xyz[k * 3u + 2u] = 0.12f + 0.76f * ((float)(h2 & 0xFFFFu) * inv16);
+			}
+		}
+	}
+}
+
+static inline float gl_eval_worley3d_inv(const float *pts_xyz, uint32_t cells,
+                                         float px, float py, float pz)
+{
+	uint32_t mask = cells - 1u;
+	int32_t cx = (int32_t)floorf(px);
+	int32_t cy = (int32_t)floorf(py);
+	int32_t cz = (int32_t)floorf(pz);
+	float fx = px - (float)cx;
+	float fy = py - (float)cy;
+	float fz = pz - (float)cz;
+	float min_d2 = 4.0f;
+	for (int32_t oz = -1; oz <= 1; oz++) {
+		uint32_t nz = (uint32_t)(cz + oz) & mask;
+		size_t sl = (size_t)nz * (size_t)cells;
+		float bz = (float)oz - fz;
+		for (int32_t oy = -1; oy <= 1; oy++) {
+			uint32_t ny = (uint32_t)(cy + oy) & mask;
+			size_t row = (sl + (size_t)ny) * (size_t)cells;
+			float by = (float)oy - fy;
+			for (int32_t ox = -1; ox <= 1; ox++) {
+				uint32_t nx = (uint32_t)(cx + ox) & mask;
+				const float *p = &pts_xyz[(row + (size_t)nx) * 3u];
+				float dx = (float)ox + p[0] - fx;
+				float dy = by + p[1];
+				float dz = bz + p[2];
+				float d2 = dx * dx + dy * dy + dz * dz;
+				if (d2 < min_d2) min_d2 = d2;
+			}
+		}
+	}
+	/* Parabolic cellular dome: rounded spherical top (f'(0)=0) with tucked crevices between bubbles */
+	float v = 1.0f - min_d2 * 1.25f;
+	return (v < 0.0f) ? 0.0f : ((v > 1.0f) ? 1.0f : v);
+}
+
+static void gl_build_perlin3d_grads(float *g_xyz, uint32_t period, uint32_t seed)
+{
+	for (uint32_t iz = 0; iz < period; iz++) {
+		for (uint32_t iy = 0; iy < period; iy++) {
+			for (uint32_t ix = 0; ix < period; ix++) {
+				uint32_t h1 = gl_chaff_hash3((int32_t)ix, (int32_t)iy, (int32_t)iz, seed);
+				uint32_t h2 = gl_chaff_hash3((int32_t)ix, (int32_t)iy, (int32_t)iz, seed ^ 0x85EBCA6Bu);
+				float x = (float)((int32_t)(h1 & 0xFFFFu) - 32768) * (1.0f / 32768.0f);
+				float y = (float)((int32_t)(h1 >> 16u)    - 32768) * (1.0f / 32768.0f);
+				float z = (float)((int32_t)(h2 & 0xFFFFu) - 32768) * (1.0f / 32768.0f);
+				float inv_l = 1.0f / sqrtf(x * x + y * y + z * z + 1e-6f);
+				size_t k = ((size_t)iz * (size_t)period + (size_t)iy) * (size_t)period + (size_t)ix;
+				g_xyz[k * 3u + 0u] = x * inv_l;
+				g_xyz[k * 3u + 1u] = y * inv_l;
+				g_xyz[k * 3u + 2u] = z * inv_l;
+			}
+		}
+	}
+}
+
+static inline float gl_eval_perlin3d_periodic(const float *g_xyz, uint32_t period,
+                                              float px, float py, float pz)
+{
+	uint32_t mask = period - 1u;
+	int32_t ix = (int32_t)floorf(px);
+	int32_t iy = (int32_t)floorf(py);
+	int32_t iz = (int32_t)floorf(pz);
+	float fx = px - (float)ix, fy = py - (float)iy, fz = pz - (float)iz;
+	float fx1 = fx - 1.0f, fy1 = fy - 1.0f, fz1 = fz - 1.0f;
+	float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+	float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+	float uz = fz * fz * fz * (fz * (fz * 6.0f - 15.0f) + 10.0f);
+	uint32_t x0 = (uint32_t)ix & mask, x1 = (x0 + 1u) & mask;
+	uint32_t y0 = (uint32_t)iy & mask, y1 = (y0 + 1u) & mask;
+	uint32_t z0 = (uint32_t)iz & mask, z1 = (z0 + 1u) & mask;
+	size_t p = (size_t)period;
+	size_t s00 = ((size_t)z0 * p + (size_t)y0) * p;
+	size_t s01 = ((size_t)z0 * p + (size_t)y1) * p;
+	size_t s10 = ((size_t)z1 * p + (size_t)y0) * p;
+	size_t s11 = ((size_t)z1 * p + (size_t)y1) * p;
+	const float *g000 = &g_xyz[(s00 + x0) * 3u], *g100 = &g_xyz[(s00 + x1) * 3u];
+	const float *g010 = &g_xyz[(s01 + x0) * 3u], *g110 = &g_xyz[(s01 + x1) * 3u];
+	const float *g001 = &g_xyz[(s10 + x0) * 3u], *g101 = &g_xyz[(s10 + x1) * 3u];
+	const float *g011 = &g_xyz[(s11 + x0) * 3u], *g111 = &g_xyz[(s11 + x1) * 3u];
+	float v000 = g000[0] * fx  + g000[1] * fy  + g000[2] * fz;
+	float v100 = g100[0] * fx1 + g100[1] * fy  + g100[2] * fz;
+	float v010 = g010[0] * fx  + g010[1] * fy1 + g010[2] * fz;
+	float v110 = g110[0] * fx1 + g110[1] * fy1 + g110[2] * fz;
+	float v001 = g001[0] * fx  + g001[1] * fy  + g001[2] * fz1;
+	float v101 = g101[0] * fx1 + g101[1] * fy  + g101[2] * fz1;
+	float v011 = g011[0] * fx  + g011[1] * fy1 + g011[2] * fz1;
+	float v111 = g111[0] * fx1 + g111[1] * fy1 + g111[2] * fz1;
+	float vx00 = v000 + (v100 - v000) * ux;
+	float vx10 = v010 + (v110 - v010) * ux;
+	float vx01 = v001 + (v101 - v001) * ux;
+	float vx11 = v011 + (v111 - v011) * ux;
+	float vxy0 = vx00 + (vx10 - vx00) * uy;
+	float vxy1 = vx01 + (vx11 - vx01) * uy;
+	float v = 0.5f + 0.85f * (vxy0 + (vxy1 - vxy0) * uz);
+	return (v < 0.0f) ? 0.0f : ((v > 1.0f) ? 1.0f : v);
+}
+
+void nd_seven_gl_bake_cloud_shape3d_lut(uint8_t *out_rgba, uint32_t dim)
+{
+	if (!out_rgba || dim == 0u)
+		return;
+
+	/* L1-resident periodic feature/gradient tables: Worley (4, 8, 16) + Perlin (4, 8) */
+	float wpts4[4 * 4 * 4 * 3];
+	float wpts8[8 * 8 * 8 * 3];
+	float *wpts16 = (float *)malloc(16u * 16u * 16u * 3u * sizeof(float));
+	float pgrad4[4 * 4 * 4 * 3];
+	float pgrad8[8 * 8 * 8 * 3];
+	if (!wpts16) {
+		memset(out_rgba, 128, (size_t)dim * (size_t)dim * (size_t)dim * 4u);
+		return;
+	}
+	gl_build_worley3d_points(wpts4,   4u, 0x574F5234u);
+	gl_build_worley3d_points(wpts8,   8u, 0x574F5238u);
+	gl_build_worley3d_points(wpts16, 16u, 0x574F5236u);
+	gl_build_perlin3d_grads(pgrad4,   4u, 0x50455234u);
+	gl_build_perlin3d_grads(pgrad8,   8u, 0x50455238u);
+
+	float inv_d = 1.0f / (float)dim;
+	uint8_t *dst = out_rgba;
+	for (uint32_t z = 0; z < dim; z++) {
+		float uz = ((float)z + 0.5f) * inv_d;
+		for (uint32_t y = 0; y < dim; y++) {
+			float uy = ((float)y + 0.5f) * inv_d;
+			for (uint32_t x = 0; x < dim; x++) {
+				float ux = ((float)x + 0.5f) * inv_d;
+				float w4  = gl_eval_worley3d_inv(wpts4,   4u, ux *  4.0f, uy *  4.0f, uz *  4.0f);
+				float w8  = gl_eval_worley3d_inv(wpts8,   8u, ux *  8.0f, uy *  8.0f, uz *  8.0f);
+				float w16 = gl_eval_worley3d_inv(wpts16, 16u, ux * 16.0f, uy * 16.0f, uz * 16.0f);
+				float p4  = gl_eval_perlin3d_periodic(pgrad4, 4u, ux * 4.0f, uy * 4.0f, uz * 4.0f);
+				float p8  = gl_eval_perlin3d_periodic(pgrad8, 8u, ux * 8.0f, uy * 8.0f, uz * 8.0f);
+				float perlin = 0.68f * p4 + 0.32f * p8;
+				float w_fbm  = 0.625f * w4 + 0.25f * w8 + 0.125f * w16;
+				/* Schneider Perlin-Worley base shape: maps dilated Perlin onto [1 - w_fbm, 1] -> [0, 1] */
+				float pw = 1.0f - (0.50f * (1.0f - perlin)) / (w_fbm > 1e-4f ? w_fbm : 1e-4f);
+				dst[0] = nd_lut_quant_u8(pw);
+				dst[1] = nd_lut_quant_u8(w4);
+				dst[2] = nd_lut_quant_u8(w8);
+				dst[3] = nd_lut_quant_u8(w16);
+				dst += 4;
+			}
+		}
+	}
+	free(wpts16);
+}
+
+void nd_seven_gl_downsample_rgba8_3d(const uint8_t *src, uint32_t src_dim, uint8_t *dst)
+{
+	if (!src || !dst || src_dim < 2u)
+		return;
+	uint32_t d = src_dim >> 1u;
+	size_t s_row = (size_t)src_dim * 4u;
+	size_t s_sl  = (size_t)src_dim * s_row;
+	for (uint32_t z = 0; z < d; z++) {
+		const uint8_t *z0 = src + (size_t)(z * 2u) * s_sl;
+		const uint8_t *z1 = z0 + s_sl;
+		for (uint32_t y = 0; y < d; y++) {
+			const uint8_t *y00 = z0 + (size_t)(y * 2u) * s_row;
+			const uint8_t *y01 = y00 + s_row;
+			const uint8_t *y10 = z1 + (size_t)(y * 2u) * s_row;
+			const uint8_t *y11 = y10 + s_row;
+			for (uint32_t x = 0; x < d; x++) {
+				size_t xo = (size_t)(x * 2u) * 4u;
+				for (uint32_t c = 0; c < 4u; c++) {
+					uint32_t sum = (uint32_t)y00[xo + c] + (uint32_t)y00[xo + 4u + c]
+					             + (uint32_t)y01[xo + c] + (uint32_t)y01[xo + 4u + c]
+					             + (uint32_t)y10[xo + c] + (uint32_t)y10[xo + 4u + c]
+					             + (uint32_t)y11[xo + c] + (uint32_t)y11[xo + 4u + c];
+					*dst++ = (uint8_t)((sum + 4u) >> 3u);
+				}
+			}
+		}
+	}
+}
+
+static void gl_quad_add_roots(float a, float b, float c, float max_t, float *ts, int *n)
+{
+	if (fabsf(a) < 1e-11f) {
+		if (fabsf(b) > 1e-7f) {
+			float r = -c / b;
+			if (r > 0.0f && r < max_t && *n < 6)
+				ts[(*n)++] = r;
+		}
+		return;
+	}
+	float disc = b * b - 4.0f * a * c;
+	if (disc < 0.0f) return;
+	float sd = sqrtf(disc);
+	float inv2a = 0.5f / a;
+	float r0 = (-b - sd) * inv2a;
+	float r1 = (-b + sd) * inv2a;
+	if (r0 > 0.0f && r0 < max_t && *n < 6) ts[(*n)++] = r0;
+	if (r1 > 0.0f && r1 < max_t && *n < 6) ts[(*n)++] = r1;
+}
+
+bool nd_seven_gl_cloud_quadric_intersect(const float eye_l[3], const float ray_l[3],
+                                         float kappa_e, float kappa_s,
+                                         float z_bot, float z_top, float max_dist,
+                                         float *out_t_enter, float *out_t_exit)
+{
+	if (!eye_l || !ray_l || max_dist <= 0.0f || z_top <= z_bot)
+		return false;
+	float A  = 0.5f * (kappa_e * ray_l[0] * ray_l[0] + kappa_s * ray_l[1] * ray_l[1]);
+	float B  = ray_l[2] + kappa_e * eye_l[0] * ray_l[0] + kappa_s * eye_l[1] * ray_l[1];
+	float C0 = eye_l[2] + 0.5f * (kappa_e * eye_l[0] * eye_l[0] + kappa_s * eye_l[1] * eye_l[1]);
+
+	float ts[6];
+	int n = 0;
+	ts[n++] = 0.0f;
+	ts[n++] = max_dist;
+	gl_quad_add_roots(A, B, C0 - z_bot, max_dist, ts, &n);
+	gl_quad_add_roots(A, B, C0 - z_top, max_dist, ts, &n);
+
+	/* Insertion sort <= 6 breakpoints */
+	for (int i = 1; i < n; i++) {
+		float key = ts[i];
+		int j = i - 1;
+		while (j >= 0 && ts[j] > key) {
+			ts[j + 1] = ts[j];
+			j--;
+		}
+		ts[j + 1] = key;
+	}
+
+	bool found = false;
+	float t0 = 0.0f, t1 = 0.0f;
+	for (int i = 0; i < n - 1; i++) {
+		float a_t = ts[i], b_t = ts[i + 1];
+		if (b_t - a_t <= 1e-3f) continue;
+		float tm = 0.5f * (a_t + b_t);
+		float alt = (A * tm + B) * tm + C0;
+		if (alt >= z_bot - 1e-2f && alt <= z_top + 1e-2f) {
+			if (!found) {
+				t0 = a_t;
+				t1 = b_t;
+				found = true;
+			} else if (fabsf(a_t - t1) <= 1e-2f) {
+				t1 = b_t;
+			} else {
+				break;
+			}
+		} else if (found) {
+			break;
+		}
+	}
+	if (!found || t1 <= t0 + 1e-3f)
+		return false;
+	if (out_t_enter) *out_t_enter = t0;
+	if (out_t_exit)  *out_t_exit  = t1;
+	return true;
+}
+
 uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist)
 {
 	/* Single unified LOD system: the libareole quadtree determines chunk spatial scale

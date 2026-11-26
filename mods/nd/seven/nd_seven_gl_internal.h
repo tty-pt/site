@@ -442,6 +442,7 @@ typedef struct {
 	GLint uCsm;
 	GLint uAnimTime;
 	GLint uSeaWet;
+	GLint uCloudShape3D;
 } gl_csm_pipe_t;
 
 typedef struct {
@@ -468,6 +469,33 @@ typedef struct {
 	GLint uCloudSubpixel;
 	GLint uHistoryValid;
 } gl_cloud_reproj_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLuint pending_prog;
+	GLint uCamFwd;
+	GLint uCamRight;
+	GLint uCamUp;
+	GLint uTanHalfAspect;
+	GLint uNearFar;
+	GLint uCloudJitter;
+	GLint uEast;
+	GLint uSouth;
+	GLint uZenith;
+	GLint uEyeLocal;
+	GLint uRefWorldXY;
+	GLint uCurvature;
+	GLint uTorusEye;
+	GLint uTorusRadii;
+	GLint uBodyRot;
+	GLint uCloudParams;
+	GLint uSceneUvScale;
+	GLint uSeaLevel;
+	GLint uSceneDepthTex;
+	GLint uCloudShadowMap;
+	GLint uNoise2DTex;
+	GLint uCloudShape3D;
+} gl_cloud_vol_pipe_t;
 
 typedef struct {
 	GLuint prog;
@@ -571,6 +599,7 @@ typedef struct {
 	GLuint prewarm_dummy_rgba;
 	GLuint noise2d_tex;
 	GLuint noise3d_tex;
+	GLuint cloud_shape3d_tex;
 	gl_terrain_pipe_t terrain_pipes[ND_TERR_VAR_COUNT];
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
@@ -581,6 +610,7 @@ typedef struct {
 	gl_grass_pipe_t grass_pipe;
 	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipes[ND_CLOUD_VAR_COUNT];
+	gl_cloud_vol_pipe_t cloud_vol_pipe;
 	gl_cloud_comp_pipe_t cloud_comp_pipe;
 	gl_cloud_reproj_pipe_t cloud_reproj_pipe;
 	gl_csm_pipe_t csm_pipe;
