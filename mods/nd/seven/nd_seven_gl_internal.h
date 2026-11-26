@@ -105,6 +105,7 @@ typedef enum {
 #define MAX_TERR_BODIES 8
 #define CHUNK_CACHE_HASH_SIZE 1024
 #define MAX_WATER_QUEUE_BASE 192
+#define MAX_CLOUD_QUEUE MAX_CHUNK_TEXTURES
 #define MAX_BB_VERTS 65536
 #define MAX_BB_OTHER_VERTS 32768
 #define MAX_BB_INSTANCES 16384
@@ -634,6 +635,8 @@ typedef struct {
 	float cloud_prev_mvp[16];
 	double cloud_prev_origin[3];
 	float cloud_prev_uv_scale[2];
+	uint32_t cloud_prev_trw;
+	uint32_t cloud_prev_trh;
 	uint32_t cloud_phase;
 	int cloud_hist_idx;
 	bool cloud_hist_valid;
@@ -753,7 +756,7 @@ typedef struct {
 
 	gl_water_chunk_t water_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t water_count;
-	gl_water_chunk_t cloud_queue[MAX_WATER_QUEUE_BASE];
+	gl_water_chunk_t cloud_queue[MAX_CLOUD_QUEUE];
 	uint32_t cloud_count;
 
 	/* Occlusion stats for HUD/debugging */

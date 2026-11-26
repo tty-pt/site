@@ -3039,8 +3039,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	/* Queue volumetric cloud shell pass for this chunk (gated by 3D cloud-shell frustum,
 	 * planetary limb visibility, zoom ramp, and synoptic clear-sky pre-cull) */
-	uint32_t max_cloud_q = (s_gl.cur_dist > 20000.0f) ? (uint32_t)MAX_WATER_QUEUE_BASE : (uint32_t)nd_seven_gl_max_water_queue();
-	if (s_gl.cloud_count < max_cloud_q &&
+	if (s_gl.cloud_count < (uint32_t)MAX_CLOUD_QUEUE &&
 	    nd_seven_gl_should_queue_cloud_chunk(ox, oy, span_w, span_h, eff_pdef)) {
 		gl_water_chunk_t *cq = &s_gl.cloud_queue[s_gl.cloud_count++];
 		cq->ox = ox;

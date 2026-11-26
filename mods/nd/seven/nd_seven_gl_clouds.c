@@ -129,9 +129,9 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 		float y0 = (float)oy - pad;
 		float w_pad = (float)span_w + 2.0f * pad;
 		float h_pad = (float)span_h + 2.0f * pad;
-		int steps = (span_w > 65536 || span_h > 65536) ? 4 : ((span_w > 8192 || span_h > 8192) ? 3 : 2);
+		int steps = (span_w > 65536 || span_h > 65536) ? 5 : ((span_w > 8192 || span_h > 8192) ? 3 : 2);
 		float inv_steps = 1.0f / (float)steps;
-		float margin = (span_w > 65536 || span_h > 65536) ? 0.040f : 0.024f;
+		float margin = (span_w > 65536 || span_h > 65536) ? 0.055f : 0.032f;
 		bool all_clear = true;
 		for (int gy = 0; gy <= steps && all_clear; gy++) {
 			float wy = y0 + ((float)gy * inv_steps) * h_pad;
@@ -607,13 +607,15 @@ void nd_seven_gl_flush_clouds(void)
 
 	uint32_t vp_w = half_res ? (use_temporal ? qrw : trw) : rw;
 	uint32_t vp_h = half_res ? (use_temporal ? qrh : trh) : rh;
-	/* Keep Nyquist cloud octave scale tied to the effective reconstructed cloud resolution (trw) */
-	float res_sc = (s_gl.stage_w > 0u) ? ((float)(half_res ? trw : rw) / (float)s_gl.stage_w) : 1.0f;
+	/* dFdx(entryWorldPos) already measures one rendered FBO texel footprint: when temporal 2x2 is active,
+	 * the reconstructed cloud pixel is half a quarter-texel (0.65x gives mild Nyquist damping against
+	 * sub-texel shimmer); when non-temporal, 1 rendered texel == 1 cloud texel (1.0x). */
+	float res_sc = (half_res && use_temporal) ? 0.65f : 1.0f;
 
 	/* Place proxy shell at the exact vertical midpoint of [zBase, zTopProj] (1,620 wu + 0.5 * eff_orbit_lift)
 	 * so sMidSlab = 0.5 * (sEnter + sExit) is identically 0 and entryWorldPos == vWorldPos! */
 	int cq = nd_seven_get_cloud_quality();
-	float max_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f : 4.0f);
+	float max_steps = (cq <= ND_CLOUD_QUALITY_MEDIUM) ? 3.0f : 4.0f;
 	float deck_base = 420.0f;
 	float deck_span = 2400.0f;
 	float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
@@ -701,7 +703,7 @@ void nd_seven_gl_flush_clouds(void)
 			cur_var = want_var;
 		}
 
-		int want_hi = (chk->level >= 9u || s_gl.cur_dist >= 200000.0f) ? 1 : 0;
+		int want_hi = (chk->level >= 8u || s_gl.cur_dist >= 120000.0f) ? 1 : 0;
 		if (want_hi != bound_hi) {
 			lam_gl_cmd_bind_buffer(&s_gl.cmd_buf, GL_ARRAY_BUFFER, want_hi ? s_gl.grid_vbo_hi : s_gl.grid_vbo_macro);
 			lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 0, 2, GL_FLOAT, GL_FALSE, 8, 0);
@@ -771,7 +773,9 @@ void nd_seven_gl_flush_clouds(void)
 			float reproj_mat[16] = {
 				1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1
 			};
-			bool hist_ok = s_gl.cloud_hist_valid;
+			bool hist_ok = s_gl.cloud_hist_valid &&
+			               s_gl.cloud_prev_trw == trw &&
+			               s_gl.cloud_prev_trh == trh;
 			if (hist_ok) {
 				double odx = s_gl.cur_origin[0] - s_gl.cloud_prev_origin[0];
 				double ody = s_gl.cur_origin[1] - s_gl.cloud_prev_origin[1];
@@ -826,6 +830,8 @@ void nd_seven_gl_flush_clouds(void)
 			memcpy(s_gl.cloud_prev_origin, s_gl.cur_origin, sizeof(s_gl.cloud_prev_origin));
 			s_gl.cloud_prev_uv_scale[0] = cuvx;
 			s_gl.cloud_prev_uv_scale[1] = cuvy;
+			s_gl.cloud_prev_trw = trw;
+			s_gl.cloud_prev_trh = trh;
 			s_gl.cloud_hist_valid = true;
 			s_gl.cloud_hist_idx = write_idx ^ 1;
 			s_gl.cloud_phase++;
