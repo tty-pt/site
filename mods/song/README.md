@@ -17,7 +17,7 @@ The song module provides functionality for:
 - **Dataset & Storage:** `libhyle-source` filesystem driver (`store_fs`) storing `var/song/{id}/`
 - **Schema:** Defined in `fields.h` using canonical `<hyle/schema.h>` descriptors (`hyle_schema_desc_t`)
 - **Transposition:** C library (`external/libpitch/`) for chord transposition
-- **WASM:** Detail-page enhancement via C compiled to `wasm32-wasi` (`ux/detail.c` → `htdocs/song_detail.wasm`) hydrated with `hyle_bud_state_apply_len`
+- **WASM:** Detail-page enhancement via `.cx` / C compiled to `wasm32-wasi` (`ux/detail.cx` → bundled in unified `htdocs/site.wasm`, or standalone `htdocs/song.wasm` / `song_detail.wasm`) hydrated with `hyle_bud_state_apply_len`
 
 ### SSR Route Pattern
 

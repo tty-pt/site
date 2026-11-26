@@ -30,7 +30,7 @@ i18n_set_user_locale("alice", "pt");
 
 ## Isomorphic UX / WASM Usage
 
-In dual-compiled UI components (`mods/*/ux/*.c`):
+In dual-compiled UI components (`mods/*/ux/*.cx`, `mods/*/ux/*.c`):
 
 ```c
 #include "i18n_dict.h"

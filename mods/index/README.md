@@ -37,7 +37,7 @@ index_module_init(&def);
 
 ### `list_fill_state`
 
-Serializes dataset query results and URL query parameters into a framework-neutral `list_state_t` structure. This structure is shared between native C SSR and the browser WASM bundle (`htdocs/list.wasm`).
+Serializes dataset query results and URL query parameters into a framework-neutral `list_state_t` structure. This structure is shared between native C SSR and the browser WASM bundle (unified `htdocs/site.wasm` or standalone `htdocs/list.wasm`). Isomorphic UI components live under `ux/` (`ux/home.cx`, `ux/list_filters.cx`, `ux/list_layout.cx`, `ux/list_render.cx`, `ux/list.c`, `ux/list_fe.c`).
 
 ## Dependencies
 
@@ -50,4 +50,4 @@ Serializes dataset query results and URL query parameters into a framework-neutr
 
 - `docs/ARCHITECTURE.md` — Generic routing and module lifecycle.
 - `docs/PICKERS.md` — Omni-dropdown picker options endpoint.
-- `docs/WEB_HAL_SPECIFICATION.md` — Isomorphic list view rendering (`htdocs/list.wasm`).
+- `docs/WEB_HAL_SPECIFICATION.md` — Isomorphic list view rendering (`htdocs/site.wasm` / `htdocs/list.wasm`).

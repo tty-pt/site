@@ -13,7 +13,7 @@ The grp module provides:
 ## Architecture
 
 - **Backend:** `grp.c` - C module with axil HTTP handlers; generic Add/Edit CRUD handled via `mods/index` (`index_open`)
-- **Frontend:** `ux/` directory handles detail and repertoire rendering (`detail.c`, `all.c`) using `site_ui_item_row` and `site_ui_action_form`
+- **Frontend:** `ux/` directory handles detail and repertoire rendering (`ux/detail.cx`, `ux/all.c`) using `site_ui_item_row` and `site_ui_action_form`
 - **Storage:** Filesystem persistence via `libhyle-source` (`store_fs`)
 - **Dependencies:** auth, common, mpfd, index, song
 

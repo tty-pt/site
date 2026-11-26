@@ -4,7 +4,7 @@ Browser-side WebAssembly enhancement for global site navigation, mobile menu dra
 
 ## Overview
 
-`mods/site_chrome` is a **WASM-only module** (`WASM_ONLY=1` in its Makefile). It has no native `.so` companion on the server. Instead, it compiles `mods/site_chrome/ux/chrome.c` (with `mods/common/ux/site_chrome.c`) to `htdocs/site_chrome.wasm` for progressive enhancement in the browser.
+`mods/site_chrome` is a **WASM-only module** (`WASM_ONLY=1` in its Makefile). It has no native `.so` companion on the server. Instead, `mods/site_chrome/ux/chrome.c` (with `mods/common/ux/site_chrome.cx`) is bundled into the unified `htdocs/site.wasm` (and can also be built standalone as `htdocs/site_chrome.wasm`) for progressive enhancement in the browser.
 
 ## Features
 

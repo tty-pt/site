@@ -35,7 +35,7 @@ var/software/{id}/
 - `fields.h` — Canonical `hyle_schema_desc_t` (`software_fields`) defining schema fields and filter hints.
 - `markdown.c` / `markdown.h` — Pure-C Markdown-to-HTML renderer used for `README.md` display.
 - `dict.h` — Internationalization dictionary entries registered via `i18n_register_dict`.
-- `ux/all.c` — Isomorphic `libbud` detail view fragment (`software_render_detail_body`).
+- `ux/detail.cx` — Isomorphic `.cx` / `libbud` detail view fragment (`software_render_detail_body`).
 
 ## Dependencies
 

@@ -6,7 +6,7 @@ Multi-session conversational AI interface backed by `axil-auren` (`127.0.0.1:424
 
 The `chat` module provides a full-featured local LLM chat interface at `/chat` that works both with and without JavaScript:
 - **No-JS / SSR**: Full server-side rendering of session lists and message history, with standard `POST` form actions for creating sessions, sending prompts, and deleting conversations.
-- **Progressive WebSocket + WASM**: Upgrades `/chat` connections to WebSocket for real-time token streaming and hydrates the UI via `htdocs/chat.wasm` (`ux/chat_fe.c` + `ux/chat_ui.c`).
+- **Progressive WebSocket + WASM**: Upgrades `/chat` connections to WebSocket for real-time token streaming and hydrates the UI via the unified `htdocs/site.wasm` bundle (or standalone `htdocs/chat.wasm`, built from `ux/chat_fe.c` + `ux/chat_ui.cx`).
 
 ## Routes & Endpoints
 
@@ -37,7 +37,7 @@ MSG|<role>|<timestamp>|<escaped_content>
 
 - `mods/common/common` — Page shell (`site_ui_respond_page`) and shared layout helpers.
 - `libcorm` — In-memory map tracking active WebSocket file descriptors to session IDs (`g_ws_session_map`).
-- `libbud` — Isomorphic SSR and browser WASM UI rendering (`ux/chat_ui.c`, `ux/chat_fe.c`).
+- `libbud` — Isomorphic SSR and browser WASM UI rendering (`ux/chat_ui.cx`, `ux/chat_fe.c`).
 
 ## Building & Testing
 

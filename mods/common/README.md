@@ -11,8 +11,11 @@ Shared C utilities used by every site module. Not a standalone XY module —
 | `common_response.c` | HTTP response helpers, CSRF, `site_ui_respond_*` page renderers |
 | `common_storage.c` | File I/O, path building, item CRUD, `slurp_file`, `write_file_path` |
 | `common_strlist.c` | Comma-separated list helpers: `str_list_contains`, `str_list_append`, `str_list_normalize`, `str_list_for_each` |
-| `ux/site_ui.c` | Page layout, `site_ui_action_form`, `site_ui_item_row`, `escape_html_into`, CSS/cache-bust |
-| `ux/site_forms.c` | Declarative form generation (`site_ui_form_from_desc`), string-first pickers (`site_ui_picker`, `site_ui_row_replace_picker`) |
+| `ux/site_ui.c` | Page layout aggregator, `site_ui_action_form`, `site_ui_item_row`, `escape_html_into`, CSS/cache-bust |
+| `ux/site_layout.cx` | Shared page shell layout (`site_cx.h`) |
+| `ux/site_chrome.cx` | Header navigation, drawer, and global chrome controls |
+| `ux/site_forms.cx` | Declarative form generation (`site_ui_form_from_desc`), string-first pickers (`site_ui_picker`, `site_ui_row_replace_picker`) |
+| `ux/site_media.cx` | Shared media players and embed rendering |
 
 ## Public API (via XY_DECL in `common.h`)
 

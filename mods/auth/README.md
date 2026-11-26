@@ -221,7 +221,7 @@ Set `AUTH_SKIP_CONFIRM=1` only when you intentionally want to bypass this requir
 
 Routes `/auth/login`, `/auth/register`, `/api/csrf` are registered in
 `auth.c` `xy_install`; the forms themselves are plain SSR pages built with
-bud (no separate SSR layer).
+`.cx` / `libbud` (`ux/login.cx`, `ux/register.cx`).
 
 ## Testing
 

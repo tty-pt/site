@@ -13,7 +13,7 @@ The gig module provides:
 ## Architecture
 
 - **Backend:** `gig.c` - C module with axil HTTP handlers
-- **Frontend & UI:** `ux/` directory handles HTML rendering via `libbud` (`detail.c`, `edit.c`, `add.c`) with declarative forms (`site_ui_form_from_desc`), string-first pickers (`site_ui_picker`), and inline row replacement (`site_ui_row_replace_picker`)
+- **Frontend & UI:** `ux/` directory handles isomorphic `.cx` / `libbud` rendering (`ux/detail.cx`, `ux/edit.cx`, bundled into `htdocs/site.wasm` or standalone `htdocs/gig.wasm`) with declarative forms (`site_ui_form_from_desc`), string-first pickers (`site_ui_picker`), persistent per-song transpose updates, and inline row replacement (`site_ui_row_replace_picker`)
 - **Storage:** Filesystem using `libhyle-source` ordered DSV (`data.txt`)
 - **Dependencies:** auth, common, mpfd, grp, song, index, source
 

@@ -94,6 +94,7 @@ Declared in `xy_deps[]` and loaded via `xy_load()` in `xy_install()`.
 **Backend:** `poem.c`
 - Declarative module initialization via `index_module_init(&(index_module_def_t){...})`
 - Schema defined in `fields.h` with `hyle_schema_desc_t` (`poem_fields`)
+- Detail view rendered via isomorphic `.cx` / `libbud` component `ux/detail.cx`
 - Standard Add/Edit forms and routes managed by `mods/index` via `site_ui_form_from_desc`
 - File persistence handled automatically by `libhyle-source` (`store_fs`) to `var/poem/{id}/pt_PT.html` and `comments.txt`
 

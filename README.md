@@ -113,10 +113,10 @@ When running Situation A (`./start.sh`), **Planet 2 ("Aethelgard")** is pre-conf
 
 ## Architecture & Core Invariants
 
-- **Single-Port Unified Service**: HTTP GET, SSR HTML, static assets (`/nd.wasm`, `/stele-client.js`, `/styles.css`), and full-duplex WebSocket upgrades are multiplexed on port `:8080` in a single process.
-- **SSR-First Isomorphic Architecture**: Pure-C UX components (`mods/*/ux`) compile twice — as native `.so` shared modules for instant Server-Side Rendering (SSR) and into WebAssembly (`htdocs/*.wasm`) for browser enhancement. Zero platform preprocessor branching (`#ifdef __wasm__`) in feature code.
-- **Universal WASM Substrate & Clean Library Decoupling**: `external/libbud` serves as a pure C UI tree and VDOM diff engine without runtime slot or browser assumptions; `external/libstele` acts as the domain-agnostic WASM substrate; `htdocs/stele-client.js` provisions dynamic on-demand component loading with isolated linear memory instances per component.
-- **Zero Foreign Runtime in the Request Path**: Pure C on the server and pure C in WASM. No Rust, Dioxus, Deno, or Node in the request pipeline.
+- **Single-Port Unified Service**: HTTP GET, SSR HTML, static assets (`/site.wasm`, `/nd.wasm`, `/stele-client.js`, `/*-cap.js`, `/styles.css`), and full-duplex WebSocket upgrades are multiplexed on port `:8080` in a single process.
+- **SSR-First Isomorphic `.cx` & C Architecture**: Pure-C and `.cx` reactive UX components (`mods/*/ux/*.cx`, `mods/*/ux/*.c`) compile twice — as native `.so` shared modules for instant Server-Side Rendering (SSR) and into WebAssembly (`htdocs/site.wasm` for the main site; `htdocs/nd.wasm` for NeverDark) for browser enhancement, plus a native OpenGL/GLFW desktop client (`apps/nd-native/` via `lib/bud-lamina/`). Zero platform preprocessor branching (`#ifdef __wasm__`) in feature code.
+- **Universal WASM Substrate & Clean Library Decoupling**: `external/libbud` provides the `.cx` transpiler, `cx-lsp`, `bud_arena`, pure-C VDOM diffing, and reactive reconciler; `external/libstele` acts as the domain-agnostic WASM & portable IPC/process substrate; `htdocs/stele-client.js` and modular `*-cap.js` capability bridges load and hydrate components cleanly with zero site-specific JavaScript.
+- **Zero Foreign Runtime in the Request Path**: Pure C on the server, pure C in WASM, and pure C in the native desktop client. No Rust, Dioxus, Deno, or Node in the request pipeline.
 - **Strict Module Encapsulation**: Strict two-header separation (`*-types.h` and `*.h`), zero `*_IMPL` guards, and cross-module communication solely via `libxylem` XY dispatch.
 - **Declarative Zero-Arithmetic BCP**: Dual-tier wire protocol ([`external/axil-nd/include/nd/bcp-meta.h`](./external/axil-nd/include/nd/bcp-meta.h)) with zero-copy packed memory-mapped structs and X-macro schema descriptors.
 
@@ -176,6 +176,7 @@ The repository maintains comprehensive architectural specifications and manuals 
 ### Frontend & Isomorphic UX
 | Document | Focus |
 | :--- | :--- |
+| **[`docs/CX_NATIVE_REACTIVE_UI_SPEC.md`](./docs/CX_NATIVE_REACTIVE_UI_SPEC.md)** | `.cx` native reactive UI syntax, transpiler (`cx.mk`), `cx-lsp`, and `bud_arena` integration. |
 | **[`docs/WEB_HAL_SPECIFICATION.md`](./docs/WEB_HAL_SPECIFICATION.md)** | Web Hardware Abstraction Layer: systems C/WASM boundary, 60fps frame loop, and multi-modal viewports. |
 | **[`docs/WEB_HAL_IMPLEMENTATION_PLAN.md`](./docs/WEB_HAL_IMPLEMENTATION_PLAN.md)** | Sequenced rollout roadmap: Web HAL bridges, frame loop contracts, and NeverDark/site harmonization. |
 | **[`docs/STYLING.md`](./docs/STYLING.md)** | CSS design tokens, asset versioning, and cache busting. |
@@ -194,6 +195,7 @@ The repository maintains comprehensive architectural specifications and manuals 
 | Document | Focus |
 | :--- | :--- |
 | **[`docs/TESTING.md`](./docs/TESTING.md)** | Unit, integration, and Playwright end-to-end testing requirements. |
+| **[`docs/REPORT_TEMPLATE.md`](./docs/REPORT_TEMPLATE.md)** | Mandatory Torvalds Doctrine task completion and verification report template. |
 | **[`docs/CI_NPM_DISTRIBUTION.md`](./docs/CI_NPM_DISTRIBUTION.md)** | CI automation and universal C/WASM package distribution via `@tty-pt/*` on NPM. |
 | **[`docs/RELEASE_EXECUTION_STRATEGY.md`](./docs/RELEASE_EXECUTION_STRATEGY.md)** | Ecosystem release sequencing and topological publishing strategy across submodules. |
 | **[`RELEASES.md`](./RELEASES.md)** | Live topological release tracker, version matrix, and CI status across all ecosystem packages. |
@@ -210,9 +212,9 @@ The codebase enforces strict test suites and architectural boundaries:
 ```bash
 make test                   # comprehensive test gate: boundaries, unit, pages, integration, and E2E suites
 make test-fast              # fast matrix, slugify, i18n, BCP, and pages smoke tests
-make test-e2e               # runs all 121 Playwright browser end-to-end test suites
+make test-e2e               # runs Playwright browser end-to-end test suites
 make test-universe          # runs automated headless E2E full-universe test suite
-make standalone-unit-tests  # runs C unit tests (BCP meta, scene sync, hydration, ws multiplex)
+make standalone-unit-tests  # runs C unit tests (BCP meta, scene sync, hydration, ws multiplex, Seven, SIMD field)
 
 # Targeted NeverDark E2E Testing:
 ./scripts/run-with-server.sh deno test --allow-all tests/e2e/nd-ws-roundtrip.test.ts
@@ -227,6 +229,7 @@ sh scripts/check-no-impl-guards.sh       # verifies zero *_IMPL guards & two-hea
 sh scripts/check-ux-purity.sh           # verifies pure-C isomorphic UX with zero XY hooks
 sh scripts/check-no-site-specific-js.sh  # verifies htdocs/*.js has zero domain-specific code
 sh scripts/check-module-boundaries.sh   # enforces strict cross-module encapsulation
+sh scripts/check-asset-sync.sh          # ensures htdocs/ assets stay in sync with external/ & mods/
 ```
 
 ---
@@ -235,45 +238,52 @@ sh scripts/check-module-boundaries.sh   # enforces strict cross-module encapsula
 
 ### Core Web Platform (`mods/`)
 - **`/core`** — Bootstrap DAG, root router, module loader, and core redirects.
-- **`/auth`** — Session lifecycle, password authentication, and CSRF protection.
-- **`/common`** — Shared response helpers, layouts, and declarative UI builders (`site_ui_form_from_desc`, `site_ui_picker`).
+- **`/auth`** — Session lifecycle, password authentication, and CSRF protection (`ux/{login,register}.cx`).
+- **`/common`** — Shared response helpers, layouts, and declarative `.cx` UI builders (`site_ui_form_from_desc`, `site_ui_picker`, `ux/{site_chrome,site_forms,site_layout,site_media}.cx`).
 - **`/i18n`** — Internationalization dictionary registry and locale string resolution.
 - **`/source`** — Dataset registration and HTTP API transport over `libhyle-source`.
-- **`/index`** — Generic CRUD routes, list views, and picker option endpoints.
-- **`/poem`** — Poem upload, display, and listing.
-- **`/song`** — Song detail, chord charts, transposition, and media attachments.
-- **`/grp`** — Group repertoire management and format categories.
-- **`/gig`** — Gigs and setlists with transpose settings and format tags.
-- **`/software`** — Software catalog and Markdown project documentation viewer.
+- **`/index`** — Generic CRUD routes, list views (`ux/{home,list_filters,list_layout,list_render}.cx`), and picker option endpoints.
+- **`/poem`** — Poem upload, display (`ux/detail.cx`), and listing.
+- **`/song`** — Song detail (`ux/detail.cx`), chord charts, transposition, and media attachments.
+- **`/grp`** — Group repertoire management (`ux/detail.cx`) and format categories.
+- **`/gig`** — Gigs and setlists (`ux/{detail,edit}.cx`) with persistent transpose settings and format tags.
+- **`/software`** — Software catalog and Markdown project documentation viewer (`ux/detail.cx`).
 - **`/mpfd`** — Streaming multipart/form-data parser.
 - **`/redir`** — Legacy route redirection helpers.
-- **`/site_chrome`** — WASM client chrome enhancement (`htdocs/site_chrome.wasm`).
-- **`/auren`** — Local in-browser WebAssembly LLM inference sandbox (`mods/auren/ux/` $\rightarrow$ `auren.so` & `auren.wasm`).
-- **`/chat`** — Multi-session local LLM streaming chat workspace (`mods/chat/ux/` $\rightarrow$ `chat.so` & `chat.wasm`) backed by `axil-auren`.
-- **`/nd`** — Isomorphic frontend reactor for NeverDark MUCK (`mods/nd/ux/` $\rightarrow$ `nd.so` & `nd.wasm`) with pluggable TTY, Lamina 2D, and Seven 2.5D/3D toroidal planetary WebGL viewports.
+- **`/site_chrome`** — WASM client chrome enhancement (bundled into `htdocs/site.wasm`, also buildable standalone as `htdocs/site_chrome.wasm`).
+- **`/auren`** — Local in-browser WebAssembly LLM inference sandbox (`mods/auren/ux/auren_ui.cx` + `auren_fe.c` $\rightarrow$ `auren.so` & unified `htdocs/site.wasm`).
+- **`/chat`** — Multi-session local LLM streaming chat workspace (`mods/chat/ux/chat_ui.cx` + `chat_fe.c` $\rightarrow$ `chat.so` & unified `htdocs/site.wasm`) backed by `axil-auren`.
+- **`/nd`** — Isomorphic frontend reactor (`mods/nd/ux/*.cx`) and extracted Seven 2.5D/3D toroidal planetary WebGL2 engine (`mods/nd/seven/`) for NeverDark MUCK (`nd.so`, `htdocs/nd.wasm`, and native `apps/nd-native`) with pluggable TTY, Lamina 2D, and Seven 2.5D/3D viewports.
+
+### Native Desktop Client & Bridge Libraries (`apps/`, `lib/`)
+- **`apps/nd-native/`** — Standalone native desktop NeverDark client compiling unmodified `mods/nd/ux/` + `mods/nd/seven/` directly against OpenGL/GLFW and native WebSockets (`AXIL_WS_NATIVE`).
+- **`lib/bud-lamina/`** — Native runtime bridging `libbud` VDOM/CSS trees onto `liblamina` OpenGL/GLFW UI & WebGL2 surfaces, with native TLS WebSocket client (`axil_ws_native`), embedded ANSI terminal (`term_ansi`), SVG rasterization, and image decoding (`bl_img_decode`).
 
 ### Core Infrastructure Submodules & Libraries (`external/`)
-- **`axil`** — Single-port HTTP/WebSocket network daemon and transport multiplexer (`@tty-pt/axil`).
+- **`axil`** — Single-port HTTP/WebSocket network daemon, transport multiplexer, and cross-platform service definitions (`@tty-pt/axil`).
 - **`axil-auth`** — Authentication and session token management module for `axil`.
 - **`axil-hyle`** — Framework-neutral `axil`↔`hyle` REST CRUD connector.
 - **`axil-tty`** — WebSocket-to-PTY interactive browser terminal bridge (`@tty-pt/axil-tty`).
-- **`axil-auren`** — Pure-C local LLM inference, embedding, and classification server (`@tty-pt/axil-auren`).
+- **`axil-auren`** — Pure-C local LLM inference, embedding, classification server, and `ren` interactive CLI/agent (`@tty-pt/auren`).
+- **`axil-scribe`** — Pure-C handwritten document transcription, Domain Packs, extraction/validation engine, and SSR/WASM web service.
 - **`axil-resume-search`** — Pure-C PDF resume ingestion, vector embedding, and job candidate matching service.
+- **`libjarvis`** — Pure-C local voice assistant daemon (`jarvisd`) with Silero neural VAD, Parakeet-TDT & Whisper multi-backend STT, ONNX KWS, LocalAgreement-2 streaming, Edge-TTS/Kokoro TTS, and desktop/X11/AT-SPI2/Firefox/dwm adapters.
+- **`libmm`** — Pure-C two-tier federated memory & codebase symbol/call-graph engine (`@tty-pt/mm`, powering `.pi/extensions/pi-mm` and `ren-mm`).
 - **`libxylem`** — Zero-cost C function dispatch bus and region-isolated module loader (`@tty-pt/xylem`).
 - **`libcorm`** — In-memory key-value map store and multi-axis recall kernel (`@tty-pt/corm`).
 - **`libjoint`** — Temporal presence interval-tree engine (`@tty-pt/joint`, Time axis).
 - **`libislet`** — Multi-dimensional Morton code (Z-order) spatial index (`@tty-pt/islet`, Space axis).
 - **`liblemma`** — Accent-sensitive lexical tokenizer and inverted FTS index (`@tty-pt/lemma`, Text axis).
 - **`libsepal`** — Two-stage ANN semantic vector store (`@tty-pt/sepal`, Meaning axis).
-- **`libbud`** — Pure C virtual DOM tree builder, 5-field state binder, and VDOM diff engine (`@tty-pt/bud`).
+- **`libbud`** — Pure C virtual DOM tree builder, `.cx` transpiler, `cx-lsp`, `bud_arena`, JSX/TSX reconciler, and VDOM diff engine (`@tty-pt/bud`).
 - **`libhyle`** — Relational schema engine, query planner, and full-text search index (`@tty-pt/hyle`).
 - **`libhyle-source`** — Pluggable dataset persistence engine (`store_fs`, `store_mem`, DSV, JSON overlays, `@tty-pt/hyle-source`).
 - **`libhyle-bud`** — Bridge connecting Hyle schema hints to Bud UI binders (`@tty-pt/hyle-bud`).
 - **`libhyle-react`** — React 19 / Next.js components and `useSyncExternalStore` hooks for Hyle datasets (`@tty-pt/hyle-react`).
-- **`libstele`** — Universal system substrate (`<ttypt/stele.h>`, `<ttypt/iso.h>`) and single shared WebAssembly allocator (`@tty-pt/stele`).
+- **`libstele`** — Universal system substrate (`<ttypt/stele.h>`, `<ttypt/iso.h>`), portable IPC/process shims, lock-free workqueue, and single shared WebAssembly allocator (`@tty-pt/stele`).
 - **`libcorolla`** — Parametric 2-manifold surface geometry (torus, sphere, cylinder, plane), exact ray-surface self-occlusion, 3D Keplerian orbital ephemeris, and atmospheric climate model (`<ttypt/corolla.h>`).
-- **`libchaff`** & **`libareole`** — Pure-integer multi-scale 2D/3D/4D recursive 1/f noise (`@tty-pt/chaff`), periodic toroidal wrapping, and 16-level quadtree spatial LOD & 3D manifold frustum culling hierarchy (`@tty-pt/areole`).
-- **`liblamina`** — 2D software tile blitter and 2.5D/3D WebGL continuous heightfield, FBO cloud compositing, and Beer-Lambert water optics bridge (`@tty-pt/lamina`).
+- **`libchaff`** & **`libareole`** — Pure-integer multi-scale 2D/3D/4D recursive 1/f noise with 4-wide SIMD fast paths (`@tty-pt/chaff`), periodic toroidal wrapping, and 16-level quadtree spatial LOD, SAT frustum & 2D Hi-Z culling hierarchy (`@tty-pt/areole`).
+- **`liblamina`** — 2D software tile blitter, native OpenGL/GLFW WebGL2 & pure-C CSS/UI/JPEG/TTF renderer, and browser `webgl-cap.js` bridge (`@tty-pt/lamina`).
 - **`libpitch`** — Pure-C musical chord parser and key transposition library (`@tty-pt/pitch`).
 - **`axil-nd`** — NeverDark MUCK server engine with 4D spacetime universe simulation.
-- **`nd-*`** — Gameplay and content tenant modules (`nd-attr`, `nd-biome`, `nd-class`, `nd-drink`, `nd-equip`, `nd-fight`, `nd-level`, `nd-mob`, `nd-mortal`, `nd-other`, `nd-plant`, `nd-race`, `nd-region`, `nd-seat`, `nd-shop`, `nd-spell`, `nd-stone`, `nd-vanilla`, `nd-weather`, `nd-world`, `nd-wts`).
+- **`nd-*`** — Gameplay and content tenant modules (`nd-attr`, `nd-biome`, `nd-class`, `nd-drink`, `nd-equip`, `nd-fight`, `nd-level`, `nd-mcp`, `nd-mob`, `nd-mortal`, `nd-obj`, `nd-other`, `nd-plant`, `nd-race`, `nd-region`, `nd-seat`, `nd-seven`, `nd-shop`, `nd-spell`, `nd-stone`, `nd-vanilla`, `nd-view`, `nd-weather`, `nd-world`, `nd-wts`).

@@ -2,7 +2,7 @@
 
 `nd-mcp` for [axil-nd](../axil-nd), ported from SIC to libxylem.
 
-Implements the **Binary Client Protocol (BCP `#b`)** for real-time WebSocket communication between the NeverDark engine and pure-C isomorphic clients (`nd.wasm`).
+Implements the **Binary Client Protocol (BCP `#b`)** for real-time WebSocket communication between the NeverDark engine and pure-C isomorphic clients (`htdocs/nd.wasm` and `apps/nd-native`).
 
 ## Role & Subsystem
 
