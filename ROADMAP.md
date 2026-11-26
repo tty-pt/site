@@ -1,6 +1,6 @@
 # Architectural Roadmap: Hyle Ecosystem & Cross-Framework Convergence
 
-> Strategic roadmap detailing the expansion of Hyle into Next.js/React (`~/duna`), the architecture of `hyle-react`, server-side `hyle-source` integration via Node-API, and ecosystem-wide boundary standardization across all 13 `@tty-pt/*` libraries.
+> Strategic roadmap detailing the expansion of Hyle into Next.js/React (`~/duna`), the architecture of `@tty-pt/hyle-react`, server-side `@tty-pt/hyle-source` integration via Node-API/WASM, and ecosystem-wide boundary standardization across the `@tty-pt/*` libraries.
 
 ---
 
@@ -11,9 +11,9 @@ The architecture is built upon a deliberate **framework pair**:
 1. **`site` (Pure C Systems Web)**: Pure C on the server (Axil), isomorphic C on the client (Bud/Stele WASM), with SSR-first progressive enhancement and zero client-side JavaScript domain logic.
 2. **`~/duna` (Modern React Web)**: Next.js 16 (Turbopack), React 19, TypeScript, and Tailwind CSS.
 
-Currently, `~/duna` (`/home/quirinpa/duna/lib/cormStore.ts`) interacts directly with low-level C storage primitives via `@tty-pt/corm` (`CormDb`) and `@tty-pt/joint` (`JointTemporalAxis`) through Node-API native bindings. However, domain schemas, data validation, serialization, and filtering logic are implemented ad-hoc in TypeScript.
+`~/duna` already depends on `@tty-pt/corm`, `@tty-pt/joint`, `@tty-pt/islet`, `@tty-pt/lemma`, `@tty-pt/sepal`, `@tty-pt/stele`, `@tty-pt/hyle`, `@tty-pt/hyle-source`, and `@tty-pt/hyle-react`. Today, `<HyleTable>` and `<HylePagination>` from `@tty-pt/hyle-react` power Duna's manager and portal list views, while server persistence in `/home/quirinpa/duna/lib/cormStore.ts` still interacts directly with `@tty-pt/corm` (`CormDb`) and `@tty-pt/joint` (`JointTemporalAxis`) through Node-API native bindings.
 
-The objective of this roadmap is to bring the unified, declarative **Hyle data engine** into `~/duna`, establishing full parity between the pure-C and React environments.
+The objective of this roadmap is full parity between the pure-C and React environments across both UI bindings (`@tty-pt/hyle-react`) and declarative dataset persistence/caching (`@tty-pt/hyle-source`).
 
 ---
 
@@ -21,16 +21,16 @@ The objective of this roadmap is to bring the unified, declarative **Hyle data e
 
 | Conceptual Layer | `site` (Pure C + Bud) | `~/duna` (Next.js + React 19) |
 | :--- | :--- | :--- |
-| **Data Schema & Purification** | `external/libhyle` (`hyle_schema_desc_t`) | `@tty-pt/hyle` (TypeScript & Zod types via `hyle-to-ts`) |
-| **Dataset Storage & FTS Querying** | `external/libhyle-source` (`libhyle-source.so`) | `@tty-pt/hyle-source` (Node-API addon `.node` in Node server) |
-| **Presentation & Binder Bridge** | `external/libhyle-bud` (`hyle_bud_*` $\rightarrow$ `bud_node *`) | **`@tty-pt/hyle-react`** (React 19 Server/Client Components) |
+| **Data Schema & Purification** | `external/libhyle` (`hyle_schema_desc_t`) | `@tty-pt/hyle` (Node-API / WASM schema & query bindings) |
+| **Dataset Storage & FTS Querying** | `external/libhyle-source` (`libhyle-source.so`) | `@tty-pt/hyle-source` (Node-API `.node` + `hyle-source.wasm`) |
+| **Presentation & Binder Bridge** | `external/libhyle-bud` (`hyle_bud_*` $\rightarrow$ `bud_node *`) | **`@tty-pt/hyle-react`** (React 19 Components & Hooks) |
 | **Rendering Engine** | `external/libbud` (Pure-C VDOM Diff/Patch) | React 19 Concurrent / Fiber DOM Engine |
 
 ---
 
-## 3. Architecture of `hyle-react`
+## 3. Architecture of `@tty-pt/hyle-react`
 
-Just as `libhyle-bud` provides a pure bridge between Hyle data schemas and Bud virtual DOM nodes without database dependencies, **`hyle-react`** will be an independent, pure UI bridge binding Hyle schemas directly to React 19 components and hooks.
+Just as `libhyle-bud` provides a pure bridge between Hyle data schemas and Bud virtual DOM nodes without database dependencies, **`@tty-pt/hyle-react`** (`external/libhyle-react`, `v1.0.0`) is an independent UI bridge binding Hyle schemas and `@tty-pt/hyle-source`'s substrate cache to React 19 components and hooks.
 
 ```
 ┌─────────────────────────────────┐
@@ -39,19 +39,20 @@ Just as `libhyle-bud` provides a pure bridge between Hyle data schemas and Bud v
                  │
                  ▼
 ┌─────────────────────────────────┐
-│      TypeScript / Zod Bridge    │  (@tty-pt/hyle via hyle-to-ts)
+│      @tty-pt/hyle & source      │  (Node-API / WASM substrate + cache)
 └────────────────┬────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────┐
-│           hyle-react            │  (@tty-pt/hyle-react)
+│       @tty-pt/hyle-react        │  (external/libhyle-react)
 │  ┌───────────────────────────┐  │
-│  │ <HyleTable>               │  │  - Sortable column headers
-│  │ <HyleFilterBar>           │  │  - Omni/custom filter toggle
-│  │ <HyleSingleSelect>        │  │  - Searchable dropdown with "All" option
-│  │ <HyleMultiSelect>         │  │  - Faceted multiselect checkboxes
-│  │ <HylePagination>          │  │  - In-place paging slices
-│  │ useHyleQuery()            │  │  - Client-side cache hook
+│  │ <HyleTable>               │  │  - Schema/column-driven sortable table
+│  │ <HylePagination>          │  │  - Page stepper & per-page selector
+│  │ <HyleFilterBar>           │  │  - Search input & active filter badges
+│  │ <HyleForm> / <HyleField>  │  │  - Schema-driven form & field wrappers
+│  │ <HyleInput>               │  │  - Typed inputs (text/select/checkbox/...)
+│  │ useHyleDataset()          │  │  - useSyncExternalStore cache hook
+│  │ useHyleTable()            │  │  - Query/sort/page state hook
 │  └───────────────────────────┘  │
 └────────────────┬────────────────┘
                  │
@@ -61,57 +62,63 @@ Just as `libhyle-bud` provides a pure bridge between Hyle data schemas and Bud v
 └─────────────────────────────────┘
 ```
 
-### 3.1 Declarative Component Suite
+### 3.1 Implemented Component & Hook Suite (`@tty-pt/hyle-react@1.0.0`)
 
 1. **`<HyleTable<T>>`**:
-   - Accepts a schema descriptor and typed record rows.
-   - Automatically renders accessible semantic HTML `<table>` structures.
-   - Features column-type-aware rendering, sort toggle headers (asc/desc), and row action links.
-   - Matches the behavior of `hyle_bud_table_actions()`.
-
-2. **`<HyleFilterBar>`**:
-   - Replicates the omni/custom mode toggle (`?custom=1`).
-   - Automatically generates the appropriate input control per schema field type: text filters, boolean checkboxes, and reference dropdowns.
-   - Includes standard `<form method="GET">` fallback for full SSR operation.
-
-3. **`<HyleSingleSelect>` & `<HyleMultiSelect>`**:
-   - Progressive enhancement: renders standard `<details>` dropdowns with radio/checkbox panels.
-   - Includes a default `"All <label>s"` (`value=""`) option at the top for clean No-JS reset.
-   - Supports live search filtering within options and click-to-deselect toggling in interactive mode.
-
-4. **Hooks**:
-   - `useHyleQuery(datasetId, query)`: Fetches data slices from the server, maintaining an in-memory client LRU cache to eliminate redundant network round-trips.
-   - `useHyleFilter(schema)`: Manages URL query parameter synchronization with browser history.
+   - Accepts explicit `columns` or a Hyle `schema` (with `columnOverrides`) and typed `items`.
+   - Renders semantic HTML `<table>` structures with sortable column headers (`onSort`), row click handlers (`onRowClick`), and custom cell renderers.
+2. **`<HylePagination>`**:
+   - Unopinionated page stepper, record count summary, and per-page selector (`perPageOptions`, `onPageChange`, `onPerPageChange`).
+3. **`<HyleFilterBar>`**:
+   - Controlled search input (`searchQuery`, `onSearchChange`) and removable active filter badges (`activeFilters`, `onRemoveFilter`, `onReset`).
+4. **`<HyleForm>`, `<HyleField>`, `<HyleInput>`**:
+   - Schema-driven form and typed input primitives (`text`, `number`, `email`, `password`, `search`, `textarea`, `checkbox`, `select`) with error rendering and field overrides.
+5. **Hooks**:
+   - `useHyleDataset(datasetIdOrOptions, queryStr?, options?)`: React 19 `useSyncExternalStore` hook subscribed to `@tty-pt/hyle-source`'s substrate cache with Next.js SSR `initialData` hydration support.
+   - `useHyleTable(options?)`: Manages pagination, sort field/order, search query, and canonical `queryStr` serialization.
 
 ### 3.2 React 19 Server & Client Component Harmony
-- **React Server Components (RSC)**: Components render to static HTML on the Next.js server with zero client bundle footprint. Forms degrade gracefully to native HTTP GET submissions.
-- **Client Components (`'use client'`)**: Enhance the rendered HTML with debounced live option searching, optimistic in-place table updates, and keyboard navigation.
+- **React Server Components (RSC)**: Static table/pagination markup renders on the Next.js server with SSR `initialData` hydration.
+- **Client Components (`'use client'`)**: Enhance rendered views with interactive sorting, pagination, filter badges, and substrate-cache reactivity.
 
 ---
 
 ## 4. Next.js Server Integration: `@tty-pt/hyle-source`
 
-Next.js Server Components, Route Handlers (`app/api/...`), and Server Actions execute in the standard Node.js runtime. To allow Next.js to directly query and manage datasets, `external/libhyle-source` must be packaged for NPM with Node-API (N-API) bindings.
+Next.js Server Components, Route Handlers (`app/api/...`), and Server Actions execute in the standard Node.js runtime. `external/libhyle-source` (`@tty-pt/hyle-source@1.4.1`) ships both a compiled Node-API native addon and a browser/edge WebAssembly build.
 
-### 4.1 Node-API Native Addon Architecture
-Following the battle-tested pattern of `@tty-pt/corm` (`native/corm_napi.c`) and `@tty-pt/hyle` (`native/hyle_napi.c`), `@tty-pt/hyle-source` provides:
+### 4.1 Node-API Native Addon & WASM Architecture
+Following the same pattern as `@tty-pt/corm` (`native/corm_napi.c`) and `@tty-pt/hyle` (`native/hyle_napi.c`), `@tty-pt/hyle-source` provides:
 
-- `native/hyle_source_napi.c`: C module compiling against `node-api` headers to produce `build/Release/hyle_source_node.node`.
-- High-level JavaScript class wrapping C functions:
+- `npm/native/hyle_source_napi.c`: C module compiling against `node-api` headers to `hyle_source_node.node`.
+- `npm/wasm/hyle_source_wasm.c`: Browser/edge WebAssembly build (`npm/dist/hyle-source.wasm`) using `<ttypt/iso.h>`.
+- High-level `HyleSource` class and standalone functions (`npm/dist/index.d.ts`):
   ```typescript
   export class HyleSource {
-    constructor(storageDir?: string);
-    registerDataset(id: string, schema: HyleSchemaDef, options?: DatasetOptions): void;
-    query(datasetId: string, queryString: string): HyleQueryResult;
-    getItem(datasetId: string, id: string): Record<string, unknown> | null;
-    putItem(datasetId: string, id: string, record: Record<string, unknown>): void;
-    deleteItem(datasetId: string, id: string): void;
-    getField(datasetId: string, id: string, field: string): string | null;
+    constructor(options?: string | HyleSourceOptions);
+    static wasm(): HyleSource;
+    registerDataset(def: HyleDatasetDef | string): boolean;
+    query(datasetId: string, queryStr: string): HyleQueryResult;
+    putItem(datasetId: string, itemId: string, record: Record<string, any> | string): boolean;
+    updateItem(datasetId: string, itemId: string, record: Record<string, any> | string): boolean;
+    deleteItem(datasetId: string, itemId: string): boolean;
+    itemExists(datasetId: string, itemId: string): boolean;
+    getField(datasetId: string, itemId: string, fieldName: string): string | null;
+    normalizeQuery(queryStr: string): string;
+    cachePut(datasetId: string, queryStr: string, payload: string | Record<string, any>, opts?: HyleCachePutOpts): number;
+    cacheHydrate(datasetId: string, queryStr: string, payload: string | Record<string, any> | any[], opts?: HyleCachePutOpts): number;
+    cacheGet(datasetId: string, queryStr: string, opts?: HyleCacheGetOpts): string | HyleCacheStatusResult | null;
+    cacheInvalidate(datasetId: string): void;
+    entityPut(datasetId: string, itemId: string, payload: string | Record<string, any>): number;
+    entityGet(datasetId: string, itemId: string): string | null;
+    subscribe(datasetId: string, callback: HyleSubscriberCb): UnsubscribeFn;
+    optimisticUpdate(datasetId: string, itemId: string, patch: Record<string, any> | string): OptimisticHandle;
+    createStore(datasetId: string): HyleExternalStore;
   }
   ```
 
-### 4.2 Consumption in `~/duna`
-In Next.js, code instantiates `HyleSource` on the server:
+### 4.2 Target Consumption Pattern in `~/duna`
+In Next.js, server routes can instantiate `HyleSource` directly instead of hand-rolling CRUD/query glue over raw `CormDb`:
 
 ```typescript
 // duna/lib/hyleStore.ts
@@ -119,7 +126,7 @@ import { HyleSource } from "@tty-pt/hyle-source";
 import path from "node:path";
 
 export const hyleStore = new HyleSource(path.join(process.cwd(), "var/data"));
-hyleStore.registerDataset("members", memberSchema);
+hyleStore.registerDataset({ id: "members", fields: memberFields });
 ```
 
 ```typescript
@@ -137,66 +144,63 @@ export async function GET(request: Request) {
 
 ## 5. Ecosystem Audit: WASM & Node Boundary Consistency
 
-All 13 libraries in the `@tty-pt/*` ecosystem adhere to a universal dual-target architecture:
+Core libraries in the `@tty-pt/*` ecosystem adhere to a universal dual-target architecture:
 
 1. **The Two-Header Rule**:
    - Standalone C libraries include **only `<ttypt/iso.h>`** for compiler export primitives (`ISO_EXPORT`, `ISO_IMPORT`). They never touch `<ttypt/stele_wasm.h>`.
    - Interactive UI modules include `<ttypt/stele_wasm.h>`, which transitively includes `iso.h` and defines the UI slot ABI (`STL_WASM_MODULE`, `stl_slot_invalidate`).
 2. **Dual Node/WASM Target**:
    - In Node.js (Next.js server, unit tests): loads compiled native Node-API addon (`.node`).
-   - In browser / Edge: loads standalone WebAssembly binary (`.wasm`).
+   - In browser / Edge: loads WebAssembly binary (`.wasm`) on the shared Stele substrate.
 
-### Ecosystem Status Matrix
+### Ecosystem Status Matrix (Core Libraries)
 
-| Library Package | C Library | Node-API (`.node`) | Browser WASM (`.wasm`) | Two-Header Rule Compliance | NPM Status |
+| Library Package | C Library | Node-API (`npm/native/`) | Browser WASM (`npm/wasm/`) | Two-Header Rule Compliance | Version (`package.json`) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`@tty-pt/stele`** | `libstele.so` | N/A (Substrate) | `stele.wasm` | Declares `stele_wasm.h` | Published (1.5.2) |
-| **`@tty-pt/bud`** | `libbud.so` | `bud_node.node` | `bud.wasm` | `<ttypt/iso.h>` only | Published (1.2.2) |
-| **`@tty-pt/corm`** | `libcorm.so` | `corm_node.node` | `corm.wasm` | `<ttypt/iso.h>` only | Published (2.2.4) |
-| **`@tty-pt/joint`** | `libjoint.so` | `joint_node.node` | `joint.wasm` | `<ttypt/iso.h>` only | Published (1.6.3) |
-| **`@tty-pt/lemma`** | `liblemma.so` | `lemma_node.node` | `lemma.wasm` | `<ttypt/iso.h>` only | Published (1.2.2) |
-| **`@tty-pt/islet`** | `libislet.so` | `islet_node.node` | `islet.wasm` | `<ttypt/iso.h>` only | Published (1.3.2) |
-| **`@tty-pt/sepal`** | `libsepal.so` | `sepal_node.node` | `sepal.wasm` | `<ttypt/iso.h>` only | Published (1.3.2) |
-| **`@tty-pt/xylem`** | `libxylem.so` | `xylem_node.node` | `xylem.wasm` | `<ttypt/iso.h>` only | Published (1.7.2) |
-| **`@tty-pt/transp`** | `libtransp.so` | `transp_node.node` | `transp.wasm` | `<ttypt/iso.h>` only | Published (1.1.2) |
-| **`@tty-pt/lamina`** | `liblamina.so` | `lamina_node.node` | `lamina.wasm` | `<ttypt/iso.h>` only | Published (1.1.1) |
-| **`@tty-pt/hyle`** | `libhyle.so` | `hyle_node.node` | `hyle.wasm` | `<ttypt/iso.h>` only | Published (1.6.1) |
-| **`@tty-pt/hyle-bud`** | `libhyle-bud.so` | JS stub only | Compiled in `list.wasm` | `<ttypt/iso.h>` + `bud.h` | Published (1.1.1) |
-| **`@tty-pt/hyle-source`** | `libhyle-source.so` | `hyle_source_node.node` | `hyle-source.wasm` | `<ttypt/iso.h>` only | Standardized (1.3.1) |
+| **`@tty-pt/stele`** | `libstele.so` | `stele_napi.c` | `stele.wasm` | Declares `stele_wasm.h` | `1.7.1` |
+| **`@tty-pt/bud`** | `libbud.so` | `bud_napi.c` | `bud.wasm` | `<ttypt/iso.h>` only | `1.3.2` |
+| **`@tty-pt/corm`** | `libcorm.so` | `corm_napi.c` | `corm.wasm` | `<ttypt/iso.h>` only | `2.4.2` |
+| **`@tty-pt/joint`** | `libjoint.so` | `joint_napi.c` | `joint.wasm` | `<ttypt/iso.h>` only | `1.8.1` |
+| **`@tty-pt/lemma`** | `liblemma.so` | `lemma_napi.c` | `lemma.wasm` | `<ttypt/iso.h>` only | `1.4.2` |
+| **`@tty-pt/islet`** | `libislet.so` | `islet_napi.c` | `islet.wasm` | `<ttypt/iso.h>` only | `1.6.2` |
+| **`@tty-pt/sepal`** | `libsepal.so` | `sepal_napi.c` | `sepal.wasm` | `<ttypt/iso.h>` only | `1.5.2` |
+| **`@tty-pt/xylem`** | `libxylem.so` | `xylem_napi.c` | `xylem.wasm` | `<ttypt/iso.h>` only | `1.8.1` |
+| **`@tty-pt/pitch`** | `libpitch.so` | `pitch_napi.c` | `pitch_wasm.c` | `<ttypt/iso.h>` only | `1.0.1` |
+| **`@tty-pt/lamina`** | `liblamina.so` | `lamina_napi.c` | `lamina.wasm` | `<ttypt/iso.h>` only | `1.1.1` |
+| **`@tty-pt/chaff`** | `libchaff.so` | `chaff_napi.c` | `chaff_wasm.c` | `<ttypt/iso.h>` only | `1.1.0` |
+| **`@tty-pt/areole`** | `libareole.so` | `areole_napi.c` | `areole_wasm.c` | `<ttypt/iso.h>` only | `1.1.0` |
+| **`@tty-pt/hyle`** | `libhyle.so` | `hyle_napi.c` | `hyle.wasm` | `<ttypt/iso.h>` only | `1.7.4` |
+| **`@tty-pt/hyle-bud`** | `libhyle-bud.so` | JS stub only | Compiled in `site.wasm` / `list.wasm` | `<ttypt/iso.h>` + `bud.h` | `1.2.1` |
+| **`@tty-pt/hyle-source`** | `libhyle-source.so` | `hyle_source_napi.c` | `hyle-source.wasm` | `<ttypt/iso.h>` only | `1.4.1` |
+| **`@tty-pt/hyle-react`** | N/A (TS/React) | N/A (React UI) | Uses `@tty-pt/hyle-source` | Zero C/Bud deps | `1.0.0` |
+
+*(Additional sibling service/runtime packages in `external/*/npm/`: `@tty-pt/axil-auth` `1.3.4`, `@tty-pt/axil-hyle` `1.1.4`, `@tty-pt/auren` `1.5.3`, `@tty-pt/jarvis` `1.0.0`, `@tty-pt/mm` `1.0.0`, `@tty-pt/scribe` `0.1.0`.)*
 
 ---
 
 ## 6. Phased Implementation Roadmap
 
-### Phase 1: Bootstrap `@tty-pt/hyle-source` (Completed)
+### Phase 1: Bootstrap `@tty-pt/hyle-source` ✅ Completed
 - Scaffolded `external/libhyle-source/npm/` packaging with `package.json`, `hyle-source.pc`, and TypeScript definitions.
-- Implemented `native/hyle_source_napi.c` Node-API addon with dataset CRUD, querying, and query cache.
-- Implemented `npm/wasm/hyle_source_wasm.c` compiling to standalone `dist/hyle-source.wasm` using `<ttypt/iso.h>` and `-Wl,--import-memory -Wl,--global-base=2097152`.
-- Polymorphic Node/WASM loader in `dist/index.js` verified with 4/4 passing unit tests.
+- Implemented `native/hyle_source_napi.c` Node-API addon with dataset CRUD and querying.
+- Implemented `npm/wasm/hyle_source_wasm.c` compiling to `npm/dist/hyle-source.wasm` using `<ttypt/iso.h>` on the shared Stele memory substrate.
+- Published `@tty-pt/hyle-source` (`v1.4.1`).
 
-### Phase 2: Framework-Agnostic Substrate Caching & Reactive Event Bus (Current Focus)
-- Implement two-tier caching in `external/libhyle-source`:
-  1. Query Slice Cache: `(dataset_id, normalized_query) -> { total, ids }`.
-  2. Entity Record Cache: `(dataset_id, item_id) -> record_json`.
-- Add canonical query string normalizer (sorting query keys lexicographically).
-- Add automatic mutation invalidation: all `putItem`, `updateItem`, `deleteItem` writes automatically invalidate affected dataset query entries.
-- Add reactive subscription bus:
-  - C: `hyle_source_subscribe(dataset_id, cb, user)`
-  - Node-API & WASM: `subscribe(datasetId, cb) -> unsubscribe`
-- Implement thin UI adapters:
-  - Bud: triggers `stl_slot_invalidate(slot)`.
-  - React 19: `useHyleDataset()` hook using `useSyncExternalStore` (zero external dependencies).
+### Phase 2: Framework-Agnostic Substrate Caching & Reactive Event Bus ✅ Completed
+- Implemented two-tier caching in `external/libhyle-source/src/cache.c`:
+  1. Query Slice Cache with TTL & staleness (`hyle_source_cache_put_ttl`, `hyle_source_cache_hydrate`, `hyle_source_cache_get_status`).
+  2. Entity Record Cache (`hyle_source_entity_cache_put`, `hyle_source_entity_cache_get`, `hyle_source_entity_cache_invalidate`).
+- Added canonical query string normalization (`normalizeQuery`) and automatic mutation invalidation on `putItem`/`updateItem`/`deleteItem`, plus `optimisticUpdate` with rollback handles.
+- Added reactive subscription bus (`hyle_source_subscribe` in C; `subscribeDataset` / `createHyleStore` in Node-API & WASM) and React 19 `useSyncExternalStore` adapter (`useHyleDataset` in `@tty-pt/hyle-react`).
 
-### Phase 3: Develop `@tty-pt/hyle-react` Component Suite
-- Create `external/libhyle-react/` package.
-- Implement core React 19 component library (`<HyleTable>`, `<HyleFilterBar>`, `<HyleSingleSelect>`, `<HyleMultiSelect>`, `<HylePagination>`).
-- Progressive enhancement: RSC static HTML + client-side interactive enhancements.
+### Phase 3: Develop `@tty-pt/hyle-react` Component Suite ✅ Completed
+- Created `external/libhyle-react/` and published `@tty-pt/hyle-react@1.0.0`.
+- Implemented `<HyleTable>`, `<HylePagination>`, `<HyleFilterBar>`, `<HyleInput>`, `<HyleField>`, `<HyleForm>`, `useHyleDataset`, and `useHyleTable`.
 
-### Phase 4: Integration into `~/duna`
-- Add `@tty-pt/hyle`, `@tty-pt/hyle-source`, and `@tty-pt/hyle-react` to `/home/quirinpa/duna/package.json`.
-- Migrate `duna/lib/cormStore.ts` to structured Hyle dataset persistence.
-- Replace manual table and filter markup in Duna admin views with Hyle React components.
-- Run complete test verification in `duna` (`npm run test:unit`, `test:e2e`, and `audit_all_pages.py`).
+### Phase 4: Integration into `~/duna` (Partially Completed)
+- ✅ Added `@tty-pt/corm`, `@tty-pt/joint`, `@tty-pt/islet`, `@tty-pt/lemma`, `@tty-pt/sepal`, `@tty-pt/stele`, `@tty-pt/hyle`, `@tty-pt/hyle-source`, and `@tty-pt/hyle-react` to `/home/quirinpa/duna/package.json`.
+- ✅ Adopted `<HyleTable>` and `<HylePagination>` in `ManagerMemberDirectory.tsx`, `PortalActivityLedger.tsx`, and `ManagerEnquiriesSection.tsx`.
+- ⬜ Optional remaining work: migrate `/home/quirinpa/duna/lib/cormStore.ts` from direct `CormDb`/`JointTemporalAxis` calls to structured `@tty-pt/hyle-source` datasets (and adopt `<HyleFilterBar>` / `<HyleForm>` where helpful).
 
 ---
 

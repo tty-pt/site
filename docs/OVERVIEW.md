@@ -30,7 +30,7 @@ to wasm32-wasi for browser-side polish.
 | `external/liblamina` | 2D software tile blitter and 2.5D/3D WebGL continuous heightfield & Beer-Lambert water optics bridge |
 | `external/libpitch` | pure-C musical chord parser and key transposer |
 | `external/libjoint` / `libislet` / `libsepal` | temporal interval-tree (Time), Morton spatial index (Space), and 2-stage ANN vector store (Meaning) axes for `libcorm` |
-| `external/libhyle-react` | React/Next.js client bindings for Hyle schema and Bud state reconciliation |
+| `external/libhyle-react` | React 19 / Next.js components and `useSyncExternalStore` hooks for Hyle datasets (`@tty-pt/hyle-react`) |
 | `external/axil-tty` | WebSocket-to-PTY terminal streaming bridge |
 | `external/axil-nd` | modular NeverDark MUCK engine running in-process behind Axil |
 | `external/axil-auren` | local LLM inference, embedding, and classification engine |
@@ -54,8 +54,9 @@ the component layer interprets it. See `docs/ARCHITECTURE.md`.
    (or calls a shared C renderer), and responds through the common page
    helpers (`site_ui_respond_page`, …).
 4. If the page opts in (`data-modules="list"` etc.), the browser fetches
-   `/{module}.wasm`, hydrates via the Stele/Bud bridge, and enhances. No-JS pages
-   work identically minus the polish.
+   the unified `/site.wasm` bundle (or per-module `/{module}.wasm` fallback
+   such as `/nd.wasm`), hydrates via the Stele/Bud bridge, and enhances.
+   No-JS pages work identically minus the polish.
 
 ## The unbreakable rules
 

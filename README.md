@@ -7,7 +7,7 @@ Pure-C web platform and NeverDark MUCK universe built on the **axil** HTTP/WebSo
 > - 🛠️ **[Situation B: Clean / Unseeded Setup (In-Game Worldbuilding)](#situation-b-clean--unseeded-deployment-in-game-worldbuilding)** — Start with a bare database and build planets, rooms, and items in-game.
 > - 🎵 **[Situation C: Music Platform Only](#situation-c-lightweight-music-platform-only)** — Run just the music platform dev server (`poem`, `song`, `grp`, `gig`).
 > - 🧊 **[Showcase: The 3D WebGL World (Planet 2: Aethelgard)](#showcase-the-3d-webgl-world-planet-2-aethelgard)** — Explore the hardware-accelerated 3D multi-room bastion.
-> - 📚 **[Documentation Library](#documentation-index)** — 39 deep-dive architectural specifications and manuals.
+> - 📚 **[Documentation Library](#documentation-index)** — 50 deep-dive architectural specifications and manuals.
 > - 🧪 **[Testing & Quality Gates](#testing--quality-gates)** — Automated E2E universe testing and boundary audits.
 
 ---
@@ -95,7 +95,7 @@ make watch          # auto-rebuild + restart on :8080 (requires entr)
 
 ## Showcase: The 3D WebGL World (Planet 2: Aethelgard)
 
-NeverDark features an in-WASM hardware-accelerated 2.5D/3D Seven scene engine ([`mods/nd/ux/nd_seven.c`](./mods/nd/ux/nd_seven.c) and [`mods/nd/ux/nd_seven_gl.c`](./mods/nd/ux/nd_seven_gl.c)) running alongside the 2D tile blitter.
+NeverDark features an in-WASM hardware-accelerated 2.5D/3D Seven scene engine ([`mods/nd/seven/nd_seven.c`](./mods/nd/seven/nd_seven.c) and [`mods/nd/seven/nd_seven_gl.c`](./mods/nd/seven/nd_seven_gl.c)) running alongside the 2D tile blitter.
 
 When running Situation A (`./start.sh`), **Planet 2 ("Aethelgard")** is pre-configured as a multi-room 3D architectural showcase:
 - **(0, 0, 0, 2) — The High Crystal Sanctum**: Central hall with floating Crystal Core and open archways in all 4 cardinal directions.
@@ -135,6 +135,8 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/SIBLING_REPOS.md`](./docs/SIBLING_REPOS.md)** | Sibling repositories and auxiliary services (`axil-nd`, `axil-auren`, `axil-resume-search`). |
 | **[`AGENTS.md`](./AGENTS.md)** | Developer index, cross-module boundary rules, and development conventions. |
 | **[`ROADMAP.md`](./ROADMAP.md)** | Hyle ecosystem & cross-framework convergence roadmap (React/Next.js). |
+| **[`docs/CODEBASE_IMPROVEMENT_ROADMAP.md`](./docs/CODEBASE_IMPROVEMENT_ROADMAP.md)** | Completed codebase improvement roadmap (asset sync, WASM size/caching, `bud_arena`, Seven extraction, repo hygiene). |
+| **[`docs/ND_PERFORMANCE_ROADMAP.md`](./docs/ND_PERFORMANCE_ROADMAP.md)** | Completed NeverDark performance roadmap (profiler, JS bridge, CPU/GPU shader optimization, SIMD, instanced terrain). |
 
 ### Architecture & System Design
 | Document | Focus |
@@ -158,7 +160,6 @@ The repository maintains comprehensive architectural specifications and manuals 
 | **[`docs/VOLUMETRIC_CLOUDS_AND_4D_NOISE.md`](./docs/VOLUMETRIC_CLOUDS_AND_4D_NOISE.md)** | **4D spatiotemporal noise & volumetric clouds**: 3-deck atmospheric raymarching, sliding 2-octave cascade, half-res FBO, 1-tap CSM tower occlusion, and wind-coupled cloud evolution. |
 | **[`docs/OCCLUSION.md`](./docs/OCCLUSION.md)** | **3D planetary, ridge-line, cloud-shell & alt-planet occlusion**: front-to-back terrain sorting, 1D CPU horizon culling, `ar_cull_3d_fn` manifold normal-cone culling, and secondary body occlusion. |
 | **[`docs/OPTIMIZATION.md`](./docs/OPTIMIZATION.md)** | **GPU instancing, draw-call collapse & async workqueue roadmap**: `GL_TEXTURE_2D_ARRAY` batching, `glDrawArraysInstanced`, `row_sampler` scanlines, 4-corner noise cell caching, and `stele_wq` background chunk population. |
-| **[`docs/BIOME_DECORATION_ROADMAP.md`](./docs/BIOME_DECORATION_ROADMAP.md)** | **Biome decoration, flora scale & canopy roadmap (§7.1–§7.4)**: runtime room geometry (`ROOM_CELLS`), 1:1 slot isomorphism, procedural canopy competition, height-classified flora (`small`/`medium`/`big`), and 3D directional cast shadows. |
 | **[`docs/WORLD_MATH.md`](./docs/WORLD_MATH.md)** | **Planetary & atmospheric mathematics**: `libcorolla` 2-manifolds, 3D Keplerian orbits, insolation, 19-biome climate synthesis, and hydrology. |
 | **[`docs/WATER_REQUIREMENTS.md`](./docs/WATER_REQUIREMENTS.md)** | **Authoritative water specification**: Beer-Lambert volumetric optical absorption ($L = d / \cos\theta$) and physical parameters. |
 | **[`docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md`](./docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md)** | **Shallow water optical extinction for billboards**: submergence depth calibration and refractive billboard shading. |
@@ -268,7 +269,7 @@ sh scripts/check-module-boundaries.sh   # enforces strict cross-module encapsula
 - **`libhyle`** — Relational schema engine, query planner, and full-text search index (`@tty-pt/hyle`).
 - **`libhyle-source`** — Pluggable dataset persistence engine (`store_fs`, `store_mem`, DSV, JSON overlays, `@tty-pt/hyle-source`).
 - **`libhyle-bud`** — Bridge connecting Hyle schema hints to Bud UI binders (`@tty-pt/hyle-bud`).
-- **`libhyle-react`** — React/Next.js bindings for Hyle schemas and Bud state reconciliation (`@tty-pt/hyle-react`).
+- **`libhyle-react`** — React 19 / Next.js components and `useSyncExternalStore` hooks for Hyle datasets (`@tty-pt/hyle-react`).
 - **`libstele`** — Universal system substrate (`<ttypt/stele.h>`, `<ttypt/iso.h>`) and single shared WebAssembly allocator (`@tty-pt/stele`).
 - **`libcorolla`** — Parametric 2-manifold surface geometry (torus, sphere, cylinder, plane), exact ray-surface self-occlusion, 3D Keplerian orbital ephemeris, and atmospheric climate model (`<ttypt/corolla.h>`).
 - **`libchaff`** & **`libareole`** — Pure-integer multi-scale 2D/3D/4D recursive 1/f noise (`@tty-pt/chaff`), periodic toroidal wrapping, and 16-level quadtree spatial LOD & 3D manifold frustum culling hierarchy (`@tty-pt/areole`).
