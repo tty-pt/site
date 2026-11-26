@@ -1049,7 +1049,6 @@ static void gl_link_cloud_vol_pipe(gl_cloud_vol_pipe_t *cvp)
 	cvp->uTanHalfAspect  = glGetUniformLocation(p, "uTanHalfAspect", 14);
 	cvp->uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
 	cvp->uCloudJitter    = glGetUniformLocation(p, "uCloudJitter", 12);
-	cvp->uCloudPhase     = glGetUniformLocation(p, "uCloudPhase", 11);
 	cvp->uEast           = glGetUniformLocation(p, "uEast", 5);
 	cvp->uSouth          = glGetUniformLocation(p, "uSouth", 6);
 	cvp->uZenith         = glGetUniformLocation(p, "uZenith", 7);

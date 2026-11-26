@@ -539,7 +539,9 @@ void nd_seven_gl_flush_clouds(void)
 	float suvx = (s_gl.scene_w > 0u) ? ((float)rw / (float)s_gl.scene_w) : 1.0f;
 	float suvy = (s_gl.scene_h > 0u) ? ((float)rh / (float)s_gl.scene_h) : 1.0f;
 
-	bool use_temporal = (half_res && s_gl.cloud_temporal_ok &&
+	/* Volumetric clouds render directly to scaled cloud_fbo (zero 2x2 temporal flicker/zoom wipes);
+	 * keep 2x2 temporal checkerboard only for the legacy multi-mesh fallback path. */
+	bool use_temporal = (!use_vol && half_res && s_gl.cloud_temporal_ok &&
 	                     s_gl.cloud_reproj_pipe.prog != 0 &&
 	                     crw >= 4u && crh >= 4u);
 	uint32_t qrw = use_temporal ? (crw >> 1) : crw;
@@ -561,13 +563,8 @@ void nd_seven_gl_flush_clouds(void)
 			gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
 
 		if (half_res) {
-			if (use_temporal) {
-				glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_q_fbo);
-				glViewport(0, 0, (GLsizei)qrw, (GLsizei)qrh);
-			} else {
-				glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
-				glViewport(0, 0, (GLsizei)trw, (GLsizei)trh);
-			}
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
+			glViewport(0, 0, (GLsizei)trw, (GLsizei)trh);
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			glDisable(GL_BLEND);
 		} else {
@@ -627,7 +624,7 @@ void nd_seven_gl_flush_clouds(void)
 			torus_eye[2] = (float)dz;
 		}
 
-		float view_steps  = (cq <= ND_CLOUD_QUALITY_LOW) ? 12.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 20.0f : 32.0f);
+		float view_steps  = (cq <= ND_CLOUD_QUALITY_LOW) ? 14.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 22.0f : 30.0f);
 		float light_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f  : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f  : 4.0f);
 
 		if (cvp->uCamFwd >= 0)        glUniform3f(cvp->uCamFwd, s_gl.cur_cam_fwd[0], s_gl.cur_cam_fwd[1], s_gl.cur_cam_fwd[2]);
@@ -636,7 +633,6 @@ void nd_seven_gl_flush_clouds(void)
 		if (cvp->uTanHalfAspect >= 0) glUniform2f(cvp->uTanHalfAspect, s_gl.cur_tan_half, s_gl.cur_aspect);
 		if (cvp->uNearFar >= 0)       glUniform2f(cvp->uNearFar, s_gl.cur_near, s_gl.cur_far);
 		if (cvp->uCloudJitter >= 0)   glUniform2f(cvp->uCloudJitter, jx, jy);
-		if (cvp->uCloudPhase >= 0)    glUniform1i(cvp->uCloudPhase, (GLint)(s_gl.cloud_phase & 0xFFFFu));
 		if (cvp->uEast >= 0)          glUniform3f(cvp->uEast, s_gl.cur_E[0], s_gl.cur_E[1], s_gl.cur_E[2]);
 		if (cvp->uSouth >= 0)         glUniform3f(cvp->uSouth, s_gl.cur_S[0], s_gl.cur_S[1], s_gl.cur_S[2]);
 		if (cvp->uZenith >= 0)        glUniform3f(cvp->uZenith, s_gl.cur_N[0], s_gl.cur_N[1], s_gl.cur_N[2]);
@@ -646,7 +642,7 @@ void nd_seven_gl_flush_clouds(void)
 		if (cvp->uTorusEye >= 0)      glUniform3f(cvp->uTorusEye, torus_eye[0], torus_eye[1], torus_eye[2]);
 		if (cvp->uTorusRadii >= 0)    glUniform2f(cvp->uTorusRadii, major_r, minor_r);
 		if (cvp->uBodyRot >= 0)       glUniformMatrix4fv(cvp->uBodyRot, 1, GL_FALSE, body_rot);
-		if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 820.0f, 2820.0f, view_steps, light_steps);
+		if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 720.0f, 3100.0f, view_steps, light_steps);
 		if (cvp->uSceneUvScale >= 0)  glUniform2f(cvp->uSceneUvScale, suvx, suvy);
 		if (cvp->uSeaLevel >= 0)      glUniform1f(cvp->uSeaLevel, s_gl.cur_base_sea_level);
 
