@@ -139,3 +139,7 @@
 [submodule "external/axil-scribe"]
 	path = external/axil-scribe
 	url = git@github.com:tty-pt/axil-scribe.git
+[submodule ".business"]
+	path = .business
+	url = git@github.com:tty-pt/business.git
+	update = none
