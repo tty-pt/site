@@ -465,6 +465,7 @@ typedef struct {
 	int32_t span_w, span_h;
 	uint32_t tex_w, tex_h;
 	uint32_t alloc_w, alloc_h;
+	uint32_t river_alloc_w, river_alloc_h;
 	int alloc_mips;
 	uint32_t last_touch;
 	int16_t min_h_q12_4;

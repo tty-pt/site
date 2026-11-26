@@ -2359,8 +2359,12 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 			nd_seven_gl_bake_chunk_height_derived(height_i16, chunk_w, chunk_h,
 			                                      (float)span_w, (float)span_h,
 			                                      s_chunk_bake_rgba);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, chunk_w, chunk_h, 0,
-			             GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+			if (can_sub)
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, chunk_w, chunk_h,
+				                GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+			else
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, chunk_w, chunk_h, 0,
+				             GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
 		}
 
 		glActiveTexture(GL_TEXTURE1);
@@ -2434,8 +2438,15 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		nd_seven_gl_bake_chunk_river(height_i16, color_rgba, chunk_w, chunk_h,
 		                             terrain_sea_lvl, s_chunk_bake_rgba);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, chunk_w, chunk_h, 0,
-		             GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+		if (slot->river_alloc_w == chunk_w && slot->river_alloc_h == chunk_h) {
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, chunk_w, chunk_h,
+			                GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+		} else {
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, chunk_w, chunk_h, 0,
+			             GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+			slot->river_alloc_w = chunk_w;
+			slot->river_alloc_h = chunk_h;
+		}
 		slot->river_sea_level = terrain_sea_lvl;
 		s_gl.terrain_pass_river_tex = slot->river_tex;
 	}

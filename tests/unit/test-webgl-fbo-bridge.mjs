@@ -85,7 +85,9 @@ function makeGl(log) {
 			}
 			log.push(['texImage2D', a[0], a[1], a[2], a[3], a[4], px ? px.byteLength : 0, unpackAlignment]);
 		},
-		texSubImage2D: (...a) => log.push(['texSubImage2D', a[0], a[1], a[2], a[3], a[4], a[5], a[8] ? a[8].byteLength : 0]),
+		texSubImage2D: (...a) => log.push(['texSubImage2D', a[0], a[1], a[2], a[3], a[4], a[5], a[8] ? a[8].byteLength : 0, a[8] ? a[8].constructor.name : 'null']),
+		texImage3D: (...a) => log.push(['texImage3D', a[0], a[1], a[2], a[3], a[4], a[5], a[9] ? a[9].byteLength : 0, a[9] ? a[9].constructor.name : 'null']),
+		texSubImage3D: (...a) => log.push(['texSubImage3D', a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[10] ? a[10].byteLength : 0]),
 		renderbufferStorageMultisample: (t, s, f, w, h) => log.push(['rbStorageMS', s, f, w, h]),
 		framebufferRenderbuffer: (t, a, rt, r) => log.push(['fbRb', a, r ? r.n : null]),
 		framebufferTexture2D: (t, a, tt, tex, l) => log.push(['fbTex', a, tex ? tex.n : null, l]),
@@ -501,4 +503,56 @@ console.log('PASS: flat uint32 glCmdFlush command ring decoding & single-FFI bat
 	assert.ok(rLog.some((e) => e[0] === 'bufferData' && e[1] === 0x8892 && e[2] === 32 && e[3] === 0x88E4), 'GL_STATIC_DRAW subdata buffer replayed on context swap');
 	console.log('PASS: link-time scalar uniforms and GL_STATIC_DRAW subdata buffers replay across context swaps');
 }
+
+// GL_TEXTURE_3D isolation + context-swap replay and GL_FLOAT glTexSubImage2D mirror/upload.
+{
+	const gLog = [];
+	const gGl1 = makeGl(gLog);
+	const gGl2 = makeGl(gLog);
+	swapCanvas({ isConnected: true, getContext: () => gGl1 });
+	bridge.mount();
+
+	// Bind a 2D texture and a 3D texture on unit 14; 3D must not clobber 2D.
+	const tex2d14 = imp.glCreateTexture();
+	const tex3d14 = imp.glCreateTexture();
+	imp.glActiveTexture(0x84C0 + 14);
+	imp.glBindTexture(0x0DE1, tex2d14);
+	new Float32Array(memory.buffer, 1024, 16).fill(1.25);
+	imp.glTexImage2D(0x0DE1, 0, 0x881A, 2, 2, 0, 0x1908, 0x1406, 1024);
+	// Update via GL_FLOAT glTexSubImage2D (4 channels * 4 texels * 4 bytes = 64 bytes).
+	new Float32Array(memory.buffer, 1024, 16).fill(2.5);
+	imp.glTexSubImage2D(0x0DE1, 0, 0, 0, 2, 2, 0x1908, 0x1406, 1024);
+	assert.ok(
+		gLog.some((e) => e[0] === 'texSubImage2D' && e[1] === 0x0DE1 && e[7] === 64 && e[8] === 'Float32Array'),
+		'glTexSubImage2D passes Float32Array of 64 bytes for 2x2 RGBA GL_FLOAT'
+	);
+
+	// Upload 4x4x4 RGBA8 3D texture on unit 14 (256 bytes).
+	imp.glBindTexture(0x806F, tex3d14);
+	imp.glTexParameteri(0x806F, 0x2801, 0x2601);
+	new Uint8Array(memory.buffer, 2048, 256).fill(0x7F);
+	imp.glTexImage3D(0x806F, 0, 0x8058, 4, 4, 4, 0, 0x1908, 0x1401, 2048);
+	new Uint8Array(memory.buffer, 2048, 64).fill(0xA5);
+	imp.glTexSubImage3D(0x806F, 0, 0, 0, 1, 4, 4, 1, 0x1908, 0x1401, 2048);
+
+	// Context swap: verify 3D texture is rebuilt with texImage3D and re-bound to 0x806F on unit 14,
+	// while the 2D texture on unit 14 is also rebuilt via texImage2D with 64-byte Float32 data.
+	gLog.length = 0;
+	swapCanvas({ isConnected: true, getContext: () => gGl2 });
+	bridge.mount();
+	assert.ok(
+		gLog.some((e) => e[0] === 'texImage3D' && e[1] === 0x806F && e[4] === 4 && e[5] === 4 && e[6] === 4 && e[7] === 256 && e[8] === 'Uint8Array'),
+		'GL_TEXTURE_3D data replayed via texImage3D on context swap'
+	);
+	assert.ok(
+		gLog.some((e) => e[0] === 'bindTexture' && e[1] === 0x806F && e[2] !== null),
+		'GL_TEXTURE_3D binding replayed on context swap'
+	);
+	assert.ok(
+		gLog.some((e) => e[0] === 'texImage2D' && e[1] === 0x0DE1 && e[3] === 0x881A && e[4] === 2 && e[5] === 2 && e[6] === 64),
+		'GL_RGBA16F/GL_FLOAT 2D texture replayed with updated 64-byte mirror after glTexSubImage2D'
+	);
+	console.log('PASS: GL_TEXTURE_3D isolation/context-swap replay and GL_FLOAT glTexSubImage2D verified');
+}
+
 
