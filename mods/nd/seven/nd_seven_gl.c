@@ -627,6 +627,92 @@ static void gl_upload_frame_ubo(void)
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ubo), &ubo);
 }
 
+static void gl_downsample_rgba8_box(const uint8_t *src, int w, int h, uint8_t *dst)
+{
+	int dw = w >> 1, dh = h >> 1;
+	if (dw < 1) dw = 1;
+	if (dh < 1) dh = 1;
+	for (int y = 0; y < dh; y++) {
+		int sy0 = y * 2;
+		int sy1 = (sy0 + 1 < h) ? (sy0 + 1) : sy0;
+		const uint8_t *r0 = src + (size_t)sy0 * (size_t)w * 4u;
+		const uint8_t *r1 = src + (size_t)sy1 * (size_t)w * 4u;
+		uint8_t *out = dst + (size_t)y * (size_t)dw * 4u;
+		for (int x = 0; x < dw; x++) {
+			int sx0 = x * 2;
+			int sx1 = (sx0 + 1 < w) ? (sx0 + 1) : sx0;
+			const uint8_t *p00 = r0 + (size_t)sx0 * 4u;
+			const uint8_t *p10 = r0 + (size_t)sx1 * 4u;
+			const uint8_t *p01 = r1 + (size_t)sx0 * 4u;
+			const uint8_t *p11 = r1 + (size_t)sx1 * 4u;
+			out[0] = (uint8_t)((p00[0] + p10[0] + p01[0] + p11[0] + 2u) >> 2);
+			out[1] = (uint8_t)((p00[1] + p10[1] + p01[1] + p11[1] + 2u) >> 2);
+			out[2] = (uint8_t)((p00[2] + p10[2] + p01[2] + p11[2] + 2u) >> 2);
+			out[3] = (uint8_t)((p00[3] + p10[3] + p01[3] + p11[3] + 2u) >> 2);
+			out += 4;
+		}
+	}
+}
+
+static void gl_ensure_noise_luts(void)
+{
+	if (!s_gl.noise2d_tex) {
+		const int dim2 = 256;
+		const int mips = 9; /* 256 -> 128 -> ... -> 1 */
+		uint8_t *buf0 = (uint8_t *)malloc((size_t)dim2 * (size_t)dim2 * 4u);
+		uint8_t *buf1 = (uint8_t *)malloc((size_t)(dim2 >> 1) * (size_t)(dim2 >> 1) * 4u);
+		if (buf0 && buf1) {
+			nd_seven_gl_bake_noise2d_lut(buf0, (uint32_t)dim2, 32u);
+			s_gl.noise2d_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 13);
+			glBindTexture(GL_TEXTURE_2D, s_gl.noise2d_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mips - 1);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+			int cw = dim2, ch = dim2;
+			uint8_t *src = buf0, *dst = buf1;
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cw, ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, src);
+			for (int m = 1; m < mips; m++) {
+				int nw = cw >> 1, nh = ch >> 1;
+				gl_downsample_rgba8_box(src, cw, ch, dst);
+				glTexImage2D(GL_TEXTURE_2D, m, GL_RGBA8, nw, nh, 0, GL_RGBA, GL_UNSIGNED_BYTE, dst);
+				uint8_t *tmp = src;
+				src = dst;
+				dst = tmp;
+				cw = nw;
+				ch = nh;
+			}
+			/* Leave permanently bound on unit 13 (zero per-frame rebinds). */
+		}
+		free(buf0);
+		free(buf1);
+	}
+	if (!s_gl.noise3d_tex) {
+		const int dim3 = 64;
+		uint8_t *buf3 = (uint8_t *)malloc((size_t)dim3 * (size_t)dim3 * (size_t)dim3 * 4u);
+		if (buf3) {
+			nd_seven_gl_bake_noise3d_lut(buf3, (uint32_t)dim3, 8u);
+			s_gl.noise3d_tex = glCreateTexture();
+			glActiveTexture(GL_TEXTURE0 + 14);
+			glBindTexture(GL_TEXTURE_3D, s_gl.noise3d_tex);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+			glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, dim3, dim3, dim3, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf3);
+			/* Leave permanently bound on unit 14 (zero per-frame rebinds). */
+		}
+		free(buf3);
+	}
+	glActiveTexture(GL_TEXTURE0);
+}
+
 static void gl_init_mesh3d_pipe_locs(gl_mesh3d_pipe_t *pipe)
 {
 	if (!pipe->prog)
@@ -648,6 +734,9 @@ static void gl_init_mesh3d_pipe_locs(gl_mesh3d_pipe_t *pipe)
 	pipe->uBarkTex               = glGetUniformLocation(p, "uBarkTex", 8);
 	pipe->uBarkNorm              = glGetUniformLocation(p, "uBarkNorm", 9);
 	pipe->uTreeShadowTex         = glGetUniformLocation(p, "uTreeShadowTex", 14);
+	pipe->uNoise2DTex            = glGetUniformLocation(p, "uNoise2DTex", 11);
+	glUseProgram(p);
+	if (pipe->uNoise2DTex >= 0) glUniform1i(pipe->uNoise2DTex, 13);
 }
 
 static void gl_init_mesh3d_shadow_pipe_locs(gl_mesh3d_shadow_pipe_t *pipe)
@@ -666,9 +755,11 @@ static void gl_init_mesh3d_shadow_pipe_locs(gl_mesh3d_shadow_pipe_t *pipe)
 	pipe->uTreeShadowWriteVP     = glGetUniformLocation(p, "uTreeShadowWriteVP", 18);
 	pipe->uBranchletTex          = glGetUniformLocation(p, "uBranchletTex", 13);
 	pipe->uGrassTex              = glGetUniformLocation(p, "uGrassTex", 9);
+	pipe->uNoise2DTex            = glGetUniformLocation(p, "uNoise2DTex", 11);
 	glUseProgram(p);
 	if (pipe->uBranchletTex >= 0) glUniform1i(pipe->uBranchletTex, 3);
 	if (pipe->uGrassTex >= 0)     glUniform1i(pipe->uGrassTex, 5);
+	if (pipe->uNoise2DTex >= 0)   glUniform1i(pipe->uNoise2DTex, 13);
 }
 
 static void gl_link_terrain_pipe(gl_terrain_pipe_t *tp)
@@ -684,6 +775,7 @@ static void gl_link_terrain_pipe(gl_terrain_pipe_t *tp)
 	gl_bind_frame_ubo_prog(p);
 	tp->uHeightTex        = glGetUniformLocation(p, "uHeightTex", 10);
 	tp->uSubstrateTex     = glGetUniformLocation(p, "uSubstrateTex", 13);
+	tp->uRiverTex         = glGetUniformLocation(p, "uRiverTex", 9);
 	tp->uChunkOrigin      = glGetUniformLocation(p, "uChunkOrigin", 12);
 	tp->uChunkRelOrigin   = glGetUniformLocation(p, "uChunkRelOrigin", 15);
 	tp->uChunkSpan        = glGetUniformLocation(p, "uChunkSpan", 10);
@@ -703,16 +795,21 @@ static void gl_link_terrain_pipe(gl_terrain_pipe_t *tp)
 	tp->uTreeShadowTex    = glGetUniformLocation(p, "uTreeShadowTex", 14);
 	tp->uTerrDetailTex    = glGetUniformLocation(p, "uTerrDetailTex", 14);
 	tp->uTerrNormTex      = glGetUniformLocation(p, "uTerrNormTex", 12);
+	tp->uNoise2DTex       = glGetUniformLocation(p, "uNoise2DTex", 11);
+	tp->uNoise3DTex       = glGetUniformLocation(p, "uNoise3DTex", 11);
 	tp->aGridUV           = glGetAttribLocation(p, "a_grid_uv", 9);
 
 	/* Bind immutable sampler units and constant height scale once per program */
 	glUseProgram(p);
 	if (tp->uHeightTex >= 0)      glUniform1i(tp->uHeightTex, 0);
 	if (tp->uSubstrateTex >= 0)   glUniform1i(tp->uSubstrateTex, 1);
+	if (tp->uRiverTex >= 0)       glUniform1i(tp->uRiverTex, 2);
 	if (tp->uCloudShadowMap >= 0) glUniform1i(tp->uCloudShadowMap, 7);
 	if (tp->uTerrDetailTex >= 0)  glUniform1i(tp->uTerrDetailTex, 10);
 	if (tp->uTerrNormTex >= 0)    glUniform1i(tp->uTerrNormTex, 11);
 	if (tp->uTreeShadowTex >= 0)  glUniform1i(tp->uTreeShadowTex, 12);
+	if (tp->uNoise2DTex >= 0)     glUniform1i(tp->uNoise2DTex, 13);
+	if (tp->uNoise3DTex >= 0)     glUniform1i(tp->uNoise3DTex, 14);
 	if (tp->uHeightScale >= 0)    glUniform1f(tp->uHeightScale, 1.0f);
 }
 
@@ -745,6 +842,8 @@ static void gl_link_cloud_pipe(gl_cloud_pipe_t *cp)
 	cp->uClusterLightData     = glGetUniformLocation(p, "uClusterLightData", 17);
 	cp->uClusterLightListsTex = glGetUniformLocation(p, "uClusterLightListsTex", 21);
 	cp->uCloudResScale        = glGetUniformLocation(p, "uCloudResScale", 14);
+	cp->uNoise2DTex           = glGetUniformLocation(p, "uNoise2DTex", 11);
+	cp->uNoise3DTex           = glGetUniformLocation(p, "uNoise3DTex", 11);
 	cp->aGridUV               = glGetAttribLocation(p, "a_grid_uv", 9);
 
 	/* Bind constant sampler texture units once at link time */
@@ -754,6 +853,8 @@ static void gl_link_cloud_pipe(gl_cloud_pipe_t *cp)
 	if (cp->uCloudShadowMap >= 0)       glUniform1i(cp->uCloudShadowMap, 7);
 	if (cp->uClusterLightData >= 0)     glUniform1i(cp->uClusterLightData, 9);
 	if (cp->uClusterLightListsTex >= 0) glUniform1i(cp->uClusterLightListsTex, 10);
+	if (cp->uNoise2DTex >= 0)           glUniform1i(cp->uNoise2DTex, 13);
+	if (cp->uNoise3DTex >= 0)           glUniform1i(cp->uNoise3DTex, 14);
 }
 
 static void gl_link_cloud_comp_pipe(gl_cloud_comp_pipe_t *ccp)
@@ -823,6 +924,7 @@ static void init_pipelines(void)
 	 * queuing async shader compiles so large glBufferData uploads never
 	 * stall Chrome's GPU command buffer behind pending shader links. */
 	init_grid_buffers();
+	gl_ensure_noise_luts();
 
 	/* Tier A (13 boot-critical ground-level programs): share compiled VS handles across
 	 * variants and unblock frame 0 as soon as near-field shaders finish linking. */
@@ -1045,6 +1147,7 @@ static bool check_pipelines_ready(void)
 			gl_bind_frame_ubo_prog(p);
 			s_gl.water_pipe.uHeightTex      = glGetUniformLocation(p, "uHeightTex", 10);
 			s_gl.water_pipe.uSubstrateTex   = glGetUniformLocation(p, "uSubstrateTex", 13);
+			s_gl.water_pipe.uRiverTex       = glGetUniformLocation(p, "uRiverTex", 9);
 			s_gl.water_pipe.uChunkOrigin    = glGetUniformLocation(p, "uChunkOrigin", 12);
 			s_gl.water_pipe.uChunkRelOrigin = glGetUniformLocation(p, "uChunkRelOrigin", 15);
 			s_gl.water_pipe.uChunkSpan      = glGetUniformLocation(p, "uChunkSpan", 10);
@@ -1065,13 +1168,18 @@ static bool check_pipelines_ready(void)
 			s_gl.water_pipe.uSceneUvScale   = glGetUniformLocation(p, "uSceneUvScale", 13);
 			s_gl.water_pipe.uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
 			s_gl.water_pipe.uProjScale      = glGetUniformLocation(p, "uProjScale", 10);
+			s_gl.water_pipe.uNoise2DTex     = glGetUniformLocation(p, "uNoise2DTex", 11);
+			s_gl.water_pipe.uNoise3DTex     = glGetUniformLocation(p, "uNoise3DTex", 11);
 			s_gl.water_pipe.aGridUV         = glGetAttribLocation(p, "a_grid_uv", 9);
 			glUseProgram(p);
 			if (s_gl.water_pipe.uHeightTex >= 0)      glUniform1i(s_gl.water_pipe.uHeightTex, 0);
 			if (s_gl.water_pipe.uSubstrateTex >= 0)   glUniform1i(s_gl.water_pipe.uSubstrateTex, 1);
+			if (s_gl.water_pipe.uRiverTex >= 0)       glUniform1i(s_gl.water_pipe.uRiverTex, 2);
 			if (s_gl.water_pipe.uSceneColor >= 0)     glUniform1i(s_gl.water_pipe.uSceneColor, 4);
 			if (s_gl.water_pipe.uSceneDepth >= 0)     glUniform1i(s_gl.water_pipe.uSceneDepth, 5);
 			if (s_gl.water_pipe.uCloudShadowMap >= 0) glUniform1i(s_gl.water_pipe.uCloudShadowMap, 7);
+			if (s_gl.water_pipe.uNoise2DTex >= 0)     glUniform1i(s_gl.water_pipe.uNoise2DTex, 13);
+			if (s_gl.water_pipe.uNoise3DTex >= 0)     glUniform1i(s_gl.water_pipe.uNoise3DTex, 14);
 		}
 	}
 
@@ -1092,12 +1200,17 @@ static bool check_pipelines_ready(void)
 			s_gl.bb_pipe.uHiZTex         = glGetUniformLocation(p, "uHiZTex", 7);
 			s_gl.bb_pipe.uHiZActive      = glGetUniformLocation(p, "uHiZActive", 10);
 			s_gl.bb_pipe.uTreeShadowTex  = glGetUniformLocation(p, "uTreeShadowTex", 14);
+			s_gl.bb_pipe.uNoise2DTex     = glGetUniformLocation(p, "uNoise2DTex", 11);
+			s_gl.bb_pipe.uNoise3DTex     = glGetUniformLocation(p, "uNoise3DTex", 11);
 			s_gl.bb_pipe.aPos            = glGetAttribLocation(p, "a_pos", 5);
 			s_gl.bb_pipe.aUV             = glGetAttribLocation(p, "a_uv", 4);
 			s_gl.bb_pipe.aTint           = glGetAttribLocation(p, "a_tint", 6);
 			s_gl.bb_pipe.aLocalPos       = glGetAttribLocation(p, "a_local_pos", 11);
 			s_gl.bb_pipe.aQuadUV         = glGetAttribLocation(p, "a_quad_uv", 9);
 			s_gl.bb_pipe.aSpriteBounds   = glGetAttribLocation(p, "a_sprite_bounds", 15);
+			glUseProgram(p);
+			if (s_gl.bb_pipe.uNoise2DTex >= 0) glUniform1i(s_gl.bb_pipe.uNoise2DTex, 13);
+			if (s_gl.bb_pipe.uNoise3DTex >= 0) glUniform1i(s_gl.bb_pipe.uNoise3DTex, 14);
 		}
 	}
 
@@ -1182,6 +1295,23 @@ static bool check_pipelines_ready(void)
 	return true;
 }
 
+static GLuint gl_ensure_dummy_river_tex(void)
+{
+	if (!s_gl.dummy_river_tex) {
+		static const float k_zero_rgba[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		s_gl.dummy_river_tex = glCreateTexture();
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, s_gl.dummy_river_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 1, 1, 0, GL_RGBA, GL_FLOAT, k_zero_rgba);
+	}
+	return s_gl.dummy_river_tex;
+}
+
 /* Force driver backend (Mesa/ANGLE GEN12) shader compilation incrementally (1 linked variant per
  * frame after the first rendered frame) into the exact RGBA16F scene_fbo / cloud_fbo formats
  * with a 1x1 viewport right before glClear(), eliminating both monolithic startup freezes
@@ -1237,10 +1367,6 @@ static void gl_prewarm_pipelines(void)
 	if (pick < 0) {
 		if (s_gl.tier_b_done || !any_unwarmed_unlinked) {
 			s_gl.pipelines_prewarmed = true;
-			if (s_gl.prewarm_dummy_i16) {
-				glDeleteTexture(s_gl.prewarm_dummy_i16);
-				s_gl.prewarm_dummy_i16 = 0;
-			}
 			if (s_gl.prewarm_dummy_rgba) {
 				glDeleteTexture(s_gl.prewarm_dummy_rgba);
 				s_gl.prewarm_dummy_rgba = 0;
@@ -1251,35 +1377,20 @@ static void gl_prewarm_pipelines(void)
 
 	uint8_t idx = (uint8_t)pick;
 	gl_upload_frame_ubo();
-	if (!s_gl.prewarm_dummy_i16 || !s_gl.prewarm_dummy_rgba) {
-		int16_t dummy_h = 0;
+	GLuint dummy_f16 = gl_ensure_dummy_river_tex();
+	if (!s_gl.prewarm_dummy_rgba) {
 		uint8_t dummy_c[4] = { 128, 128, 128, 255 };
-		if (!s_gl.prewarm_dummy_i16) {
-			s_gl.prewarm_dummy_i16 = glCreateTexture();
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, s_gl.prewarm_dummy_i16);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, 1, 1, 0, GL_RED_INTEGER, GL_SHORT, &dummy_h);
-		}
-		if (!s_gl.prewarm_dummy_rgba) {
-			s_gl.prewarm_dummy_rgba = glCreateTexture();
-			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D, s_gl.prewarm_dummy_rgba);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, dummy_c);
-		}
+		s_gl.prewarm_dummy_rgba = glCreateTexture();
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, s_gl.prewarm_dummy_rgba);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, dummy_c);
 	}
 
-	GLuint dummy_i16 = s_gl.prewarm_dummy_i16;
 	GLuint dummy_rgba = s_gl.prewarm_dummy_rgba;
 
 	static const GLenum rgba_units[] = {
@@ -1304,9 +1415,11 @@ static void gl_prewarm_pipelines(void)
 		const gl_terrain_pipe_t *tp = &s_gl.terrain_pipes[idx];
 		if (tp->prog) {
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, dummy_i16);
+			glBindTexture(GL_TEXTURE_2D, dummy_f16);
 			glActiveTexture(GL_TEXTURE1);
 			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_2D, dummy_f16);
 			glActiveTexture(GL_TEXTURE0);
 			glEnable(GL_DEPTH_TEST);
 			glDepthFunc(GL_LEQUAL);
@@ -1320,9 +1433,11 @@ static void gl_prewarm_pipelines(void)
 		/* 2. Prewarm water pipeline into scene_fbo (exact color-mask & depth-mask state) */
 		if (s_gl.water_pipe.prog) {
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, dummy_i16);
+			glBindTexture(GL_TEXTURE_2D, dummy_f16);
 			glActiveTexture(GL_TEXTURE1);
 			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_2D, dummy_f16);
 			glActiveTexture(GL_TEXTURE0 + 4);
 			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
 			glActiveTexture(GL_TEXTURE0 + 5);
@@ -1350,7 +1465,7 @@ static void gl_prewarm_pipelines(void)
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
 			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D, dummy_i16);
+			glBindTexture(GL_TEXTURE_2D, dummy_f16);
 			glActiveTexture(GL_TEXTURE0);
 			glDisable(GL_DEPTH_TEST);
 			glDepthMask(GL_FALSE);
@@ -1373,6 +1488,8 @@ static void gl_prewarm_pipelines(void)
 	glDepthMask(GL_TRUE);
 	glEnable(GL_DEPTH_TEST);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0);
@@ -1391,10 +1508,6 @@ static void gl_prewarm_pipelines(void)
 		}
 		if ((s_gl.prewarmed_mask & all_linked) == all_linked) {
 			s_gl.pipelines_prewarmed = true;
-			if (s_gl.prewarm_dummy_i16) {
-				glDeleteTexture(s_gl.prewarm_dummy_i16);
-				s_gl.prewarm_dummy_i16 = 0;
-			}
 			if (s_gl.prewarm_dummy_rgba) {
 				glDeleteTexture(s_gl.prewarm_dummy_rgba);
 				s_gl.prewarm_dummy_rgba = 0;
@@ -1869,6 +1982,7 @@ static void gl_begin_terrain_pass(void)
 	}
 	gl_bind_csm(-1);
 	gl_bind_tree_shadow_read(-1);
+	(void)gl_ensure_dummy_river_tex();
 	glActiveTexture(GL_TEXTURE0);
 
 	glEnable(GL_CULL_FACE);
@@ -1884,6 +1998,7 @@ static void gl_begin_terrain_pass(void)
 	memset(s_gl.terrain_var_sea_valid, 0, sizeof(s_gl.terrain_var_sea_valid));
 	s_gl.terrain_full_wake_valid = false;
 	s_gl.terrain_pass_vbo = 0;
+	s_gl.terrain_pass_river_tex = 0;
 }
 
 static gl_grass_vbo_slot_t *gl_grass_get_or_build_chunk(
@@ -2161,16 +2276,19 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	bool needs_upload = (was_miss || !slot->active || slot->rev != rev ||
 	                     slot->tex_w != chunk_w || slot->tex_h != chunk_h);
+	bool needs_river_only = (!needs_upload && slot->has_river && span_w <= 40960 &&
+	                         terrain_sea_lvl > -900.0f &&
+	                         (!slot->river_tex || fabsf(terrain_sea_lvl - slot->river_sea_level) > 0.01f));
 
-	if (!slot->height_tex || !slot->substrate_tex || needs_upload)
+	if (!slot->height_tex || !slot->substrate_tex || needs_upload || needs_river_only)
 		gl_flush_cmd_ring();
 
 	if (!slot->height_tex) {
 		glActiveTexture(GL_TEXTURE0);
 		slot->height_tex = glCreateTexture();
 		glBindTexture(GL_TEXTURE_2D, slot->height_tex);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	}
@@ -2185,6 +2303,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 4);
 	}
 
+	static float s_chunk_bake_rgba[128 * 128 * 4];
 	if (needs_upload) {
 		slot->active = 1;
 		slot->world = world;
@@ -2235,11 +2354,14 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		                height_i16 != NULL && color_rgba != NULL);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, slot->height_tex);
-		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-		if (can_sub)
-			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, chunk_w, chunk_h, GL_RED_INTEGER, GL_SHORT, height_i16);
-		else
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I, chunk_w, chunk_h, 0, GL_RED_INTEGER, GL_SHORT, height_i16);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		if (chunk_w <= 128u && chunk_h <= 128u) {
+			nd_seven_gl_bake_chunk_height_derived(height_i16, chunk_w, chunk_h,
+			                                      (float)span_w, (float)span_h,
+			                                      s_chunk_bake_rgba);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, chunk_w, chunk_h, 0,
+			             GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+		}
 
 		glActiveTexture(GL_TEXTURE1);
 		glBindTexture(GL_TEXTURE_2D, slot->substrate_tex);
@@ -2295,6 +2417,27 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 				slot->alloc_mips = mip;
 			}
 		}
+	}
+	if ((needs_upload || needs_river_only) && slot->has_river && span_w <= 40960 &&
+	    terrain_sea_lvl > -900.0f && chunk_w <= 128u && chunk_h <= 128u) {
+		glActiveTexture(GL_TEXTURE2);
+		if (!slot->river_tex) {
+			slot->river_tex = glCreateTexture();
+			glBindTexture(GL_TEXTURE_2D, slot->river_tex);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		} else {
+			glBindTexture(GL_TEXTURE_2D, slot->river_tex);
+		}
+		nd_seven_gl_bake_chunk_river(height_i16, color_rgba, chunk_w, chunk_h,
+		                             terrain_sea_lvl, s_chunk_bake_rgba);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, chunk_w, chunk_h, 0,
+		             GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
+		slot->river_sea_level = terrain_sea_lvl;
+		s_gl.terrain_pass_river_tex = slot->river_tex;
 	}
 	slot->last_touch = s_gl.frame_count;
 
@@ -2481,6 +2624,16 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, slot->height_tex);
 	lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE1);
 	lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, slot->substrate_tex);
+	if (want_var == ND_TERR_VAR_SEABED_NEAR || want_var == ND_TERR_VAR_SEABED_MID ||
+	    want_var == ND_TERR_VAR_FULL) {
+		GLuint want_river_tex = (slot->has_river && slot->river_tex)
+		                        ? slot->river_tex : s_gl.dummy_river_tex;
+		if (want_river_tex != s_gl.terrain_pass_river_tex) {
+			lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE2);
+			lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, want_river_tex);
+			s_gl.terrain_pass_river_tex = want_river_tex;
+		}
+	}
 
 	lam_gl_cmd_uniform2f(&s_gl.cmd_buf, tp->uChunkOrigin, (float)ox, (float)oy);
 	lam_gl_cmd_uniform2f(&s_gl.cmd_buf, tp->uChunkRelOrigin,
@@ -2612,6 +2765,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		wq->sea_level = terrain_sea_lvl;
 		wq->height_tex = slot->height_tex;
 		wq->substrate_tex = slot->substrate_tex;
+		wq->river_tex = (slot->has_river && slot->river_tex) ? slot->river_tex : s_gl.dummy_river_tex;
 		wq->rel_center[0] = rel_center[0];
 		wq->rel_center[1] = rel_center[1];
 		wq->rel_center[2] = rel_center[2];
@@ -2744,6 +2898,7 @@ void nd_seven_gl_flush_water(void)
 
 	glUseProgram(s_gl.water_pipe.prog);
 	gl_bind_csm(s_gl.water_pipe.uCloudShadowMap);
+	(void)gl_ensure_dummy_river_tex();
 
 	glActiveTexture(GL_TEXTURE0 + 4);
 	glBindTexture(GL_TEXTURE_2D, s_gl.res_color_tex);
@@ -2754,6 +2909,8 @@ void nd_seven_gl_flush_water(void)
 	glActiveTexture(GL_TEXTURE0);
 	glUniform1i(s_gl.water_pipe.uHeightTex, 0);
 	glUniform1i(s_gl.water_pipe.uSubstrateTex, 1);
+	if (s_gl.water_pipe.uRiverTex >= 0)
+		glUniform1i(s_gl.water_pipe.uRiverTex, 2);
 	uint32_t rw = s_gl.render_w ? s_gl.render_w : s_gl.scene_w;
 	uint32_t rh = s_gl.render_h ? s_gl.render_h : s_gl.scene_h;
 	glUniform2f(s_gl.water_pipe.uViewport, (float)s_gl.scene_w, (float)s_gl.scene_h);
@@ -2797,6 +2954,7 @@ void nd_seven_gl_flush_water(void)
 	glEnableVertexAttribArray(0);
 
 	GLuint bound_w_vbo = 0;
+	GLuint bound_river_tex = 0;
 	for (uint32_t i = 0; i < s_gl.water_count; i++) {
 		const gl_water_chunk_t *chk = &s_gl.water_queue[i];
 		GLuint w_vbo = 0, w_ibo = 0;
@@ -2815,6 +2973,13 @@ void nd_seven_gl_flush_water(void)
 
 		lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE1);
 		lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, chk->substrate_tex);
+
+		GLuint want_rv = chk->river_tex ? chk->river_tex : s_gl.dummy_river_tex;
+		if (want_rv != bound_river_tex) {
+			lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE2);
+			lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, want_rv);
+			bound_river_tex = want_rv;
+		}
 
 		lam_gl_cmd_uniform3f(&s_gl.cmd_buf, s_gl.water_pipe.uPlanetCenter,
 		                     chk->rel_center[0], chk->rel_center[1], chk->rel_center[2]);

@@ -503,6 +503,409 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
 	}
 }
 
+static inline float chunk_h_extrap(const int16_t *h, int32_t x, int32_t y,
+                                   int32_t w, int32_t h_dim)
+{
+	int32_t cx = (x < 0) ? 0 : ((x >= w) ? (w - 1) : x);
+	int32_t cy = (y < 0) ? 0 : ((y >= h_dim) ? (h_dim - 1) : y);
+	float hc = (float)h[(size_t)cy * (size_t)w + (size_t)cx];
+	if (cx == x && cy == y)
+		return hc;
+	int32_t sx = (cx > x) ? 1 : ((cx < x) ? -1 : 0);
+	int32_t sy = (cy > y) ? 1 : ((cy < y) ? -1 : 0);
+	int32_t ix = cx + sx;
+	int32_t iy = cy + sy;
+	if (ix < 0) ix = 0; else if (ix >= w) ix = w - 1;
+	if (iy < 0) iy = 0; else if (iy >= h_dim) iy = h_dim - 1;
+	float hin = (float)h[(size_t)iy * (size_t)w + (size_t)ix];
+	return 2.0f * hc - hin;
+}
+
+void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
+                                           uint32_t tex_w, uint32_t tex_h,
+                                           float span_x, float span_y,
+                                           float *out_rgba)
+{
+	if (!out_rgba || tex_w == 0u || tex_h == 0u)
+		return;
+	size_t n = (size_t)tex_w * (size_t)tex_h;
+	if (!height_i16) {
+		memset(out_rgba, 0, n * 4u * sizeof(float));
+		return;
+	}
+	int32_t iw = (int32_t)tex_w;
+	int32_t ih = (int32_t)tex_h;
+	float max_x = (tex_w > 1u) ? (float)(tex_w - 1u) : 1.0f;
+	float max_y = (tex_h > 1u) ? (float)(tex_h - 1u) : 1.0f;
+	float t2w_x = max_x / fmaxf(1.0f, span_x);
+	float t2w_y = max_y / fmaxf(1.0f, span_y);
+	float gx_scale = 0.5f * 0.0625f * t2w_x;
+	float gy_scale = 0.5f * 0.0625f * t2w_y;
+	float lap_scale = 0.16f * (t2w_x + t2w_y);
+
+	for (int32_t y = 0; y < ih; y++) {
+		int32_t y_m = y - 1;
+		int32_t y_p = y + 1;
+		bool y_interior = (y > 0 && y < ih - 1);
+		const int16_t *row_c = height_i16 + (size_t)y * (size_t)iw;
+		const int16_t *row_m = y_interior ? (row_c - iw) : NULL;
+		const int16_t *row_p = y_interior ? (row_c + iw) : NULL;
+		float *dst = out_rgba + (size_t)y * (size_t)iw * 4u;
+		for (int32_t x = 0; x < iw; x++) {
+			float hc = (float)row_c[x];
+			float hl, hr, hd, hu;
+			if (y_interior && x > 0 && x < iw - 1) {
+				hl = (float)row_c[x - 1];
+				hr = (float)row_c[x + 1];
+				hd = (float)row_m[x];
+				hu = (float)row_p[x];
+			} else {
+				hl = chunk_h_extrap(height_i16, x - 1, y, iw, ih);
+				hr = chunk_h_extrap(height_i16, x + 1, y, iw, ih);
+				hd = chunk_h_extrap(height_i16, x, y_m, iw, ih);
+				hu = chunk_h_extrap(height_i16, x, y_p, iw, ih);
+			}
+			dst[0] = hc * 0.0625f;
+			dst[1] = (hr - hl) * gx_scale;
+			dst[2] = (hu - hd) * gy_scale;
+			dst[3] = (hl + hr + hd + hu - 4.0f * hc) * lap_scale;
+			dst += 4;
+		}
+	}
+}
+
+void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
+                                  const uint32_t *color_rgba,
+                                  uint32_t tex_w, uint32_t tex_h,
+                                  float base_sea_level,
+                                  float *out_rgba)
+{
+	if (!out_rgba || tex_w == 0u || tex_h == 0u)
+		return;
+	size_t n = (size_t)tex_w * (size_t)tex_h;
+	if (!height_i16 || !color_rgba || base_sea_level <= -900.0f) {
+		memset(out_rgba, 0, n * 4u * sizeof(float));
+		return;
+	}
+	const uint8_t *rgba_b = (const uint8_t *)color_rgba;
+	int32_t iw = (int32_t)tex_w;
+	int32_t ih = (int32_t)tex_h;
+	static const float k_w1[3] = { 0.5f, 1.5f, 0.5f };
+
+	for (int32_t y = 0; y < ih; y++) {
+		bool y_border = (y == 0 || y == ih - 1);
+		float *dst = out_rgba + (size_t)y * (size_t)iw * 4u;
+		for (int32_t x = 0; x < iw; x++) {
+			bool is_border = (y_border || x == 0 || x == iw - 1);
+			float sum_w = 0.0f;
+			float sum_z_rel = 0.0f;
+			float max_c_nb = 0.0f;
+			if (is_border) {
+				size_t idx = (size_t)y * (size_t)iw + (size_t)x;
+				uint8_t a_u8 = rgba_b[idx * 4u + 3u];
+				if (a_u8 < 254u) {
+					float c_i = (1.0f - (float)a_u8 * (1.0f / 255.0f)) * 15.9375f;
+					if (c_i > 0.05f) {
+						float h_i = (float)height_i16[idx] * 0.0625f;
+						float w_surf_i = fmaxf(base_sea_level, h_i + c_i - 3.0f);
+						sum_w = c_i;
+						sum_z_rel = c_i * (w_surf_i - base_sea_level);
+						max_c_nb = c_i * 0.75f;
+					}
+				}
+			} else {
+				for (int32_t dy = -1; dy <= 1; dy++) {
+					int32_t ty = y + dy;
+					float wy = k_w1[dy + 1];
+					const int16_t *h_row = height_i16 + (size_t)ty * (size_t)iw;
+					const uint8_t *c_row = rgba_b + (size_t)ty * (size_t)iw * 4u;
+					for (int32_t dx = -1; dx <= 1; dx++) {
+						int32_t tx = x + dx;
+						uint8_t a_u8 = c_row[(size_t)tx * 4u + 3u];
+						if (a_u8 >= 254u)
+							continue;
+						float c_i = (1.0f - (float)a_u8 * (1.0f / 255.0f)) * 15.9375f;
+						if (c_i <= 0.05f)
+							continue;
+						float wxy = k_w1[dx + 1] * wy;
+						float w = wxy * c_i;
+						float h_i = (float)h_row[tx] * 0.0625f;
+						float w_surf_i = fmaxf(base_sea_level, h_i + c_i - 3.0f);
+						sum_w += w;
+						sum_z_rel += w * (w_surf_i - base_sea_level);
+						float nb_scale = wxy * 0.75f;
+						if (nb_scale > 1.0f) nb_scale = 1.0f;
+						float c_nb = c_i * nb_scale;
+						if (c_nb > max_c_nb) max_c_nb = c_nb;
+					}
+				}
+			}
+			if (sum_w > 1e-4f) {
+				float r_z_rel = sum_z_rel / sum_w;
+				float r_w = sum_w * (1.0f / 16.0f);
+				if (r_w > 1.0f) r_w = 1.0f;
+				if (r_w < 0.01f) r_w = 0.01f;
+				dst[0] = r_z_rel * r_w;
+				dst[1] = r_w;
+				dst[2] = max_c_nb;
+				dst[3] = 0.0f;
+			} else {
+				dst[0] = 0.0f;
+				dst[1] = 0.0f;
+				dst[2] = 0.0f;
+				dst[3] = 0.0f;
+			}
+			dst += 4;
+		}
+	}
+}
+
+static inline uint8_t nd_lut_quant_u8(float v)
+{
+	if (v <= 0.0f) return 0u;
+	if (v >= 1.0f) return 255u;
+	int q = (int)(v * 255.0f + 0.5f);
+	return (uint8_t)(q < 0 ? 0 : (q > 255 ? 255 : q));
+}
+
+void nd_seven_gl_bake_noise2d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t period)
+{
+	if (!out_rgba || dim == 0u || period == 0u)
+		return;
+	size_t n_lat = (size_t)period * (size_t)period;
+	float *g1x = (float *)malloc(n_lat * 4u * sizeof(float));
+	float *tab = (float *)malloc((size_t)dim * 3u * sizeof(float));
+	uint32_t *idx_tab = (uint32_t *)malloc((size_t)dim * 2u * sizeof(uint32_t));
+	if (!g1x || !tab || !idx_tab) {
+		free(g1x);
+		free(tab);
+		free(idx_tab);
+		memset(out_rgba, 128, (size_t)dim * (size_t)dim * 4u);
+		return;
+	}
+	float *g1y = g1x + n_lat;
+	float *g2x = g1y + n_lat;
+	float *g2y = g2x + n_lat;
+
+	for (uint32_t iy = 0; iy < period; iy++) {
+		for (uint32_t ix = 0; ix < period; ix++) {
+			size_t k = (size_t)iy * (size_t)period + (size_t)ix;
+			gl_chaff_grad_dir((int32_t)ix, (int32_t)iy, 0x517CC1B7u, &g1x[k], &g1y[k]);
+			gl_chaff_grad_dir((int32_t)ix, (int32_t)iy, 0x9E3779B9u, &g2x[k], &g2y[k]);
+		}
+	}
+
+	float scale = (float)period / (float)dim;
+	for (uint32_t k = 0; k < dim; k++) {
+		float p = ((float)k + 0.5f) * scale;
+		float ip = floorf(p);
+		float f = p - ip;
+		uint32_t i0 = (uint32_t)((int32_t)ip) % period;
+		uint32_t i1 = (i0 + 1u) % period;
+		idx_tab[k * 2u]      = i0;
+		idx_tab[k * 2u + 1u] = i1;
+		tab[k * 3u]      = f;
+		tab[k * 3u + 1u] = f * f * f * (f * (f * 6.0f - 15.0f) + 10.0f);
+		tab[k * 3u + 2u] = 30.0f * f * f * (f * (f - 2.0f) + 1.0f);
+	}
+
+	const float gn = 0.70710678f;
+	uint8_t *dst = out_rgba;
+	for (uint32_t y = 0; y < dim; y++) {
+		uint32_t iy0 = idx_tab[y * 2u];
+		uint32_t iy1 = idx_tab[y * 2u + 1u];
+		float fy = tab[y * 3u];
+		float uy = tab[y * 3u + 1u];
+		float duy = tab[y * 3u + 2u];
+		size_t row0 = (size_t)iy0 * (size_t)period;
+		size_t row1 = (size_t)iy1 * (size_t)period;
+		for (uint32_t x = 0; x < dim; x++) {
+			uint32_t ix0 = idx_tab[x * 2u];
+			uint32_t ix1 = idx_tab[x * 2u + 1u];
+			float fx = tab[x * 3u];
+			float ux = tab[x * 3u + 1u];
+			float dux = tab[x * 3u + 2u];
+			size_t c00 = row0 + ix0;
+			size_t c10 = row0 + ix1;
+			size_t c01 = row1 + ix0;
+			size_t c11 = row1 + ix1;
+
+			float v00 = g1x[c00] * fx          + g1y[c00] * fy;
+			float v10 = g1x[c10] * (fx - 1.0f) + g1y[c10] * fy;
+			float v01 = g1x[c01] * fx          + g1y[c01] * (fy - 1.0f);
+			float v11 = g1x[c11] * (fx - 1.0f) + g1y[c11] * (fy - 1.0f);
+			float k0 = v10 - v00;
+			float k1 = v01 - v00;
+			float k2 = v11 - v01 - k0;
+			float v1 = 0.5f + gn * (v00 + k0 * ux + k1 * uy + k2 * ux * uy);
+			float gix = g1x[c00] + (g1x[c10] - g1x[c00]) * ux + (g1x[c01] - g1x[c00]) * uy
+			          + (g1x[c11] - g1x[c01] - g1x[c10] + g1x[c00]) * (ux * uy);
+			float giy = g1y[c00] + (g1y[c10] - g1y[c00]) * ux + (g1y[c01] - g1y[c00]) * uy
+			          + (g1y[c11] - g1y[c01] - g1y[c10] + g1y[c00]) * (ux * uy);
+			float dx1 = gn * (gix + dux * (k0 + k2 * uy));
+			float dy1 = gn * (giy + duy * (k1 + k2 * ux));
+
+			float w00 = g2x[c00] * fx          + g2y[c00] * fy;
+			float w10 = g2x[c10] * (fx - 1.0f) + g2y[c10] * fy;
+			float w01 = g2x[c01] * fx          + g2y[c01] * (fy - 1.0f);
+			float w11 = g2x[c11] * (fx - 1.0f) + g2y[c11] * (fy - 1.0f);
+			float j0 = w10 - w00;
+			float j1 = w01 - w00;
+			float j2 = w11 - w01 - j0;
+			float v2 = 0.5f + gn * (w00 + j0 * ux + j1 * uy + j2 * ux * uy);
+
+			dst[0] = nd_lut_quant_u8(v1);
+			dst[1] = nd_lut_quant_u8(dx1 * 0.25f + 0.5f);
+			dst[2] = nd_lut_quant_u8(dy1 * 0.25f + 0.5f);
+			dst[3] = nd_lut_quant_u8(v2);
+			dst += 4;
+		}
+	}
+
+	free(g1x);
+	free(tab);
+	free(idx_tab);
+}
+
+void nd_seven_gl_bake_noise3d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t period)
+{
+	if (!out_rgba || dim == 0u || period == 0u)
+		return;
+	size_t p2 = (size_t)period * (size_t)period;
+	size_t n_lat = p2 * (size_t)period;
+	float *gx_lat = (float *)malloc(n_lat * 3u * sizeof(float));
+	float *tab = (float *)malloc((size_t)dim * 3u * sizeof(float));
+	uint32_t *idx_tab = (uint32_t *)malloc((size_t)dim * 2u * sizeof(uint32_t));
+	if (!gx_lat || !tab || !idx_tab) {
+		free(gx_lat);
+		free(tab);
+		free(idx_tab);
+		memset(out_rgba, 128, (size_t)dim * (size_t)dim * (size_t)dim * 4u);
+		return;
+	}
+	float *gy_lat = gx_lat + n_lat;
+	float *gz_lat = gy_lat + n_lat;
+
+	for (uint32_t iz = 0; iz < period; iz++) {
+		for (uint32_t iy = 0; iy < period; iy++) {
+			for (uint32_t ix = 0; ix < period; ix++) {
+				uint32_t h1 = gl_chaff_hash3((int32_t)ix, (int32_t)iy, (int32_t)iz, 0x7A3D91E5u);
+				uint32_t h2 = gl_chaff_hash3((int32_t)ix, (int32_t)iy, (int32_t)iz, 0x7A3D91E5u ^ 0x9E3779B9u);
+				float x = (float)((int32_t)(h1 & 0xFFFFu) - 32768) * (1.0f / 32768.0f);
+				float y = (float)((int32_t)(h1 >> 16u)   - 32768) * (1.0f / 32768.0f);
+				float z = (float)((int32_t)(h2 & 0xFFFFu) - 32768) * (1.0f / 32768.0f);
+				float inv_l = 1.0f / sqrtf(x * x + y * y + z * z + 1e-6f);
+				size_t k = (size_t)iz * p2 + (size_t)iy * (size_t)period + (size_t)ix;
+				gx_lat[k] = x * inv_l;
+				gy_lat[k] = y * inv_l;
+				gz_lat[k] = z * inv_l;
+			}
+		}
+	}
+
+	float scale = (float)period / (float)dim;
+	for (uint32_t k = 0; k < dim; k++) {
+		float p = ((float)k + 0.5f) * scale;
+		float ip = floorf(p);
+		float f = p - ip;
+		uint32_t i0 = (uint32_t)((int32_t)ip) % period;
+		uint32_t i1 = (i0 + 1u) % period;
+		idx_tab[k * 2u]      = i0;
+		idx_tab[k * 2u + 1u] = i1;
+		tab[k * 3u]      = f;
+		tab[k * 3u + 1u] = f * f * f * (f * (f * 6.0f - 15.0f) + 10.0f);
+		tab[k * 3u + 2u] = 30.0f * f * f * (f * (f - 2.0f) + 1.0f);
+	}
+
+	const float gn = 0.72f;
+	uint8_t *dst = out_rgba;
+	for (uint32_t z = 0; z < dim; z++) {
+		size_t sl0 = (size_t)idx_tab[z * 2u]      * p2;
+		size_t sl1 = (size_t)idx_tab[z * 2u + 1u] * p2;
+		float fz = tab[z * 3u];
+		float uz = tab[z * 3u + 1u];
+		float duz = tab[z * 3u + 2u];
+		float fz1 = fz - 1.0f;
+		for (uint32_t y = 0; y < dim; y++) {
+			size_t r0 = (size_t)idx_tab[y * 2u]      * (size_t)period;
+			size_t r1 = (size_t)idx_tab[y * 2u + 1u] * (size_t)period;
+			float fy = tab[y * 3u];
+			float uy = tab[y * 3u + 1u];
+			float duy = tab[y * 3u + 2u];
+			float fy1 = fy - 1.0f;
+			size_t s00 = sl0 + r0;
+			size_t s01 = sl0 + r1;
+			size_t s10 = sl1 + r0;
+			size_t s11 = sl1 + r1;
+			for (uint32_t x = 0; x < dim; x++) {
+				uint32_t ix0 = idx_tab[x * 2u];
+				uint32_t ix1 = idx_tab[x * 2u + 1u];
+				float fx = tab[x * 3u];
+				float ux = tab[x * 3u + 1u];
+				float dux = tab[x * 3u + 2u];
+				float fx1 = fx - 1.0f;
+
+				size_t c000 = s00 + ix0, c100 = s00 + ix1;
+				size_t c010 = s01 + ix0, c110 = s01 + ix1;
+				size_t c001 = s10 + ix0, c101 = s10 + ix1;
+				size_t c011 = s11 + ix0, c111 = s11 + ix1;
+
+				float v000 = gx_lat[c000] * fx  + gy_lat[c000] * fy  + gz_lat[c000] * fz;
+				float v100 = gx_lat[c100] * fx1 + gy_lat[c100] * fy  + gz_lat[c100] * fz;
+				float v010 = gx_lat[c010] * fx  + gy_lat[c010] * fy1 + gz_lat[c010] * fz;
+				float v110 = gx_lat[c110] * fx1 + gy_lat[c110] * fy1 + gz_lat[c110] * fz;
+				float v001 = gx_lat[c001] * fx  + gy_lat[c001] * fy  + gz_lat[c001] * fz1;
+				float v101 = gx_lat[c101] * fx1 + gy_lat[c101] * fy  + gz_lat[c101] * fz1;
+				float v011 = gx_lat[c011] * fx  + gy_lat[c011] * fy1 + gz_lat[c011] * fz1;
+				float v111 = gx_lat[c111] * fx1 + gy_lat[c111] * fy1 + gz_lat[c111] * fz1;
+
+				float vx00 = v000 + (v100 - v000) * ux;
+				float vx10 = v010 + (v110 - v010) * ux;
+				float vx01 = v001 + (v101 - v001) * ux;
+				float vx11 = v011 + (v111 - v011) * ux;
+				float vxy0 = vx00 + (vx10 - vx00) * uy;
+				float vxy1 = vx01 + (vx11 - vx01) * uy;
+				float val  = 0.5f + gn * (vxy0 + (vxy1 - vxy0) * uz);
+
+				/* Exact analytical partial derivatives */
+				float gx00 = gx_lat[c000] + (gx_lat[c100] - gx_lat[c000]) * ux;
+				float gx10 = gx_lat[c010] + (gx_lat[c110] - gx_lat[c010]) * ux;
+				float gx01 = gx_lat[c001] + (gx_lat[c101] - gx_lat[c001]) * ux;
+				float gx11 = gx_lat[c011] + (gx_lat[c111] - gx_lat[c011]) * ux;
+				float gix  = (gx00 + (gx10 - gx00) * uy) + ((gx01 + (gx11 - gx01) * uy) - (gx00 + (gx10 - gx00) * uy)) * uz;
+
+				float gy00 = gy_lat[c000] + (gy_lat[c100] - gy_lat[c000]) * ux;
+				float gy10 = gy_lat[c010] + (gy_lat[c110] - gy_lat[c010]) * ux;
+				float gy01 = gy_lat[c001] + (gy_lat[c101] - gy_lat[c001]) * ux;
+				float gy11 = gy_lat[c011] + (gy_lat[c111] - gy_lat[c011]) * ux;
+				float giy  = (gy00 + (gy10 - gy00) * uy) + ((gy01 + (gy11 - gy01) * uy) - (gy00 + (gy10 - gy00) * uy)) * uz;
+
+				float gz00 = gz_lat[c000] + (gz_lat[c100] - gz_lat[c000]) * ux;
+				float gz10 = gz_lat[c010] + (gz_lat[c110] - gz_lat[c010]) * ux;
+				float gz01 = gz_lat[c001] + (gz_lat[c101] - gz_lat[c001]) * ux;
+				float gz11 = gz_lat[c011] + (gz_lat[c111] - gz_lat[c011]) * ux;
+				float giz  = (gz00 + (gz10 - gz00) * uy) + ((gz01 + (gz11 - gz01) * uy) - (gz00 + (gz10 - gz00) * uy)) * uz;
+
+				float dx_0 = (v100 - v000) + ((v110 - v010) - (v100 - v000)) * uy;
+				float dx_1 = (v101 - v001) + ((v111 - v011) - (v101 - v001)) * uy;
+				float dvx  = gn * (gix + dux * (dx_0 + (dx_1 - dx_0) * uz));
+				float dvy  = gn * (giy + duy * ((vx10 - vx00) + ((vx11 - vx01) - (vx10 - vx00)) * uz));
+				float dvz  = gn * (giz + duz * (vxy1 - vxy0));
+
+				dst[0] = nd_lut_quant_u8(val);
+				dst[1] = nd_lut_quant_u8(dvx * 0.25f + 0.5f);
+				dst[2] = nd_lut_quant_u8(dvy * 0.25f + 0.5f);
+				dst[3] = nd_lut_quant_u8(dvz * 0.25f + 0.5f);
+				dst += 4;
+			}
+		}
+	}
+
+	free(gx_lat);
+	free(tab);
+	free(idx_tab);
+}
+
 uint32_t nd_seven_gl_grid_quads_for_zoom(uint8_t level, float cam_dist)
 {
 	/* Single unified LOD system: the libareole quadtree determines chunk spatial scale

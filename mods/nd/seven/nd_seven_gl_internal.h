@@ -39,6 +39,12 @@
 #ifndef GL_SAMPLE_ALPHA_TO_COVERAGE
 #define GL_SAMPLE_ALPHA_TO_COVERAGE 0x809E
 #endif
+#ifndef GL_TEXTURE_3D
+#define GL_TEXTURE_3D 0x806F
+#endif
+#ifndef GL_TEXTURE_WRAP_R
+#define GL_TEXTURE_WRAP_R 0x8072
+#endif
 #define ND_TREE_SHADOW_RES 1024
 
 /* GPU pass IDs for EXT_disjoint_timer_query_webgl2 (non-nested, 1-based) */
@@ -157,6 +163,7 @@ typedef struct {
 	GLuint pending_prog;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
+	GLint uRiverTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
@@ -176,6 +183,8 @@ typedef struct {
 	GLint uTreeShadowTex;
 	GLint uTerrDetailTex;
 	GLint uTerrNormTex;
+	GLint uNoise2DTex;
+	GLint uNoise3DTex;
 	GLint aGridUV;
 } gl_terrain_pipe_t;
 
@@ -183,6 +192,7 @@ typedef struct {
 	GLuint prog;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
+	GLint uRiverTex;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
@@ -204,6 +214,8 @@ typedef struct {
 	GLint uSceneUvScale;
 	GLint uNearFar;
 	GLint uProjScale;
+	GLint uNoise2DTex;
+	GLint uNoise3DTex;
 } gl_water_pipe_t;
 
 typedef struct {
@@ -217,6 +229,8 @@ typedef struct {
 	GLint uHiZTex;
 	GLint uHiZActive;
 	GLint uTreeShadowTex;
+	GLint uNoise2DTex;
+	GLint uNoise3DTex;
 	GLint aPos;
 	GLint aUV;
 	GLint aTint;
@@ -272,6 +286,7 @@ typedef struct {
 	GLint uBarkTex;
 	GLint uBarkNorm;
 	GLint uTreeShadowTex;
+	GLint uNoise2DTex;
 } gl_mesh3d_pipe_t;
 
 typedef struct {
@@ -281,6 +296,7 @@ typedef struct {
 	GLint uTreeShadowWriteVP;
 	GLint uBranchletTex;
 	GLint uGrassTex;
+	GLint uNoise2DTex;
 } gl_mesh3d_shadow_pipe_t;
 
 #define MAX_GRASS_CHUNKS 32
@@ -360,6 +376,8 @@ typedef struct {
 	GLint uClusterLightData;
 	GLint uClusterLightListsTex;
 	GLint uCloudResScale;
+	GLint uNoise2DTex;
+	GLint uNoise3DTex;
 } gl_cloud_pipe_t;
 
 typedef struct {
@@ -452,8 +470,10 @@ typedef struct {
 	int16_t min_h_q12_4;
 	int16_t max_h_q12_4;
 	uint8_t has_river;
+	float river_sea_level;
 	GLuint height_tex;
 	GLuint substrate_tex;
+	GLuint river_tex;
 } gl_chunk_tex_t;
 
 typedef struct {
@@ -467,6 +487,7 @@ typedef struct {
 	float minor_r;
 	GLuint height_tex;
 	GLuint substrate_tex;
+	GLuint river_tex;
 } gl_water_chunk_t;
 
 typedef struct {
@@ -477,8 +498,10 @@ typedef struct {
 	bool tier_b_done;
 	bool prewarm_frame0_seen;
 	uint32_t prewarmed_mask;
-	GLuint prewarm_dummy_i16;
+	GLuint dummy_river_tex;
 	GLuint prewarm_dummy_rgba;
+	GLuint noise2d_tex;
+	GLuint noise3d_tex;
 	gl_terrain_pipe_t terrain_pipes[ND_TERR_VAR_COUNT];
 	gl_water_pipe_t water_pipe;
 	gl_billboard_pipe_t bb_pipe;
@@ -635,6 +658,7 @@ typedef struct {
 	float terrain_pass_rel_center[3];
 	float terrain_pass_rot_mat4[16];
 	GLuint terrain_pass_vbo;
+	GLuint terrain_pass_river_tex;
 
 	gl_water_chunk_t water_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t water_count;

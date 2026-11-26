@@ -2587,7 +2587,7 @@ int main(void)
 		 * - 3D wave slope hillshading
 		 * - s_fs_water is a pure air-water surface interface with zero fake opaque cSeabed */
 		assert(strstr(fs_t, "littoralSand") != NULL);
-		assert(strstr(fs_t, "hBicubic") != NULL);
+		assert(strstr(fs_t, "texture(uHeightTex,") != NULL);
 		assert(strstr(fs_t, "eval_shore_micro_relief") != NULL);
 		assert(strstr(fs_t, "wTropical") != NULL && strstr(fs_t, "wPolar") != NULL);
 		assert(strstr(fs_t, "shoreWetMoisture") != NULL);
@@ -2599,7 +2599,7 @@ int main(void)
 		assert(strstr(fs_w, "openSeaFactor") != NULL && strstr(fs_w, "windFetch") != NULL);
 		assert(strstr(fs_w, "specMicro") != NULL && strstr(fs_w, "specWavelet") != NULL && strstr(fs_w, "specBroad") != NULL);
 		assert(strstr(fs_w, "eval_zoom_water_waves") != NULL);
-		assert(strstr(fs_w, "hBicubic") != NULL);
+		assert(strstr(fs_w, "texture(uHeightTex,") != NULL);
 		assert(strstr(fs_w, "eval_shore_micro_relief") != NULL);
 		assert(strstr(fs_w, "shoreDist") != NULL);
 		assert(strstr(fs_w, "foamDistFade") != NULL);
@@ -3327,7 +3327,7 @@ int main(void)
 		assert(strstr(vs_c, "uCloudDeck") != NULL);
 		assert(strstr(fs_c, "chaff_hash4") != NULL);
 		assert(strstr(fs_c, "chaff_grad4") != NULL);
-		assert(strstr(fs_c, "chaff_grad_noise4d") != NULL);
+		assert(strstr(fs_c, "nd_lut_noise4d") != NULL);
 		assert(strstr(fs_c, "cloud_remap") != NULL);
 		assert(strstr(fs_c, "eval_recursive_wind") != NULL);
 		assert(strstr(fs_c, "eval_zoom_cloud_density") != NULL);
@@ -5273,6 +5273,329 @@ int main(void)
 		assert(buried_occ_hits == 8);
 		printf("PASS: 360-deg water occlusion verified (fg_false_occ=%d, buried_occ_hits=%d/8)\n",
 		       fg_false_occ, buried_occ_hits);
+	}
+
+	/* Phase 6B Piece 1: Pre-baked GL_RGBA16F height+derived & premultiplied river map parity tests */
+	{
+		enum { TW = 17, TH = 17 };
+		int16_t h_a[TW * TH], h_b[TW * TH];
+		float out_a[TW * TH * 4], out_b[TW * TH * 4];
+		const float span_x = 160.0f, span_y = 128.0f;
+
+		/* 1. Linear plane: exact h_wu, exact central-difference slope, zero Laplacian everywhere */
+		for (int y = 0; y < TH; y++) {
+			for (int x = 0; x < TW; x++) {
+				/* h_wu = 10.0 + 0.25 * wx - 0.5 * wy => h_q12_4 = 160 + 40*x - 64*y */
+				h_a[y * TW + x] = (int16_t)(160 + 40 * x - 64 * y);
+			}
+		}
+		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
+		for (int y = 0; y < TH; y++) {
+			for (int x = 0; x < TW; x++) {
+				const float *p = &out_a[(y * TW + x) * 4];
+				float exp_h = (float)h_a[y * TW + x] * 0.0625f;
+				assert(fabsf(p[0] - exp_h) < 1e-6f);
+				assert(fabsf(p[1] - 0.25f) < 1e-5f);
+				assert(fabsf(p[2] - (-0.50f)) < 1e-5f);
+				assert(fabsf(p[3]) < 1e-5f);
+			}
+		}
+
+		/* 2. Paraboloid curvature: h_q12_4 = 2*(x^2 + y^2) => interior lap = 8 => dst[3] = 8 * 0.16 * (t2w_x + t2w_y) */
+		for (int y = 0; y < TH; y++) {
+			for (int x = 0; x < TW; x++) {
+				h_a[y * TW + x] = (int16_t)(2 * (x * x + y * y));
+			}
+		}
+		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
+		float exp_lap = 8.0f * 0.16f * (16.0f / span_x + 16.0f / span_y);
+		for (int y = 1; y < TH - 1; y++) {
+			for (int x = 1; x < TW - 1; x++) {
+				const float *p = &out_a[(y * TW + x) * 4];
+				assert(fabsf(p[3] - exp_lap) < 1e-4f);
+			}
+		}
+
+		/* 3. Cross-chunk shoreline invariance (docs/SHORE.md): adjacent chunks with wildly different
+		 * interiors (+1000 mountain vs -1000 trench) sharing a border column MUST agree bit-exact on h_wu */
+		for (int y = 0; y < TH; y++) {
+			for (int x = 0; x < TW; x++) {
+				h_a[y * TW + x] = (x == TW - 1) ? (int16_t)(y * 3 - 24) : (int16_t)16000;
+				h_b[y * TW + x] = (x == 0)      ? (int16_t)(y * 3 - 24) : (int16_t)-16000;
+			}
+		}
+		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
+		nd_seven_gl_bake_chunk_height_derived(h_b, TW, TH, span_x, span_y, out_b);
+		for (int y = 0; y < TH; y++) {
+			float ha_edge = out_a[(y * TW + (TW - 1)) * 4 + 0];
+			float hb_edge = out_b[(y * TW + 0) * 4 + 0];
+			assert(ha_edge == hb_edge);
+		}
+
+		/* 4. Premultiplied river water-table bake:
+		 *    - Dry chunk yields all zeros
+		 *    - Mountain river (h=100 wu, carve=6 wu, base_sea=0 -> w_surf=103 wu) adjacent to dry bank
+		 *      yields exact horizontal water table 103.0 wu both on river texel AND across 50/50 dry blend
+		 *    - Border texels depend only on border data (cross-chunk river agreement) */
+		uint32_t col_a[TW * TH], col_b[TW * TH];
+		for (int i = 0; i < TW * TH; i++) {
+			h_a[i] = (int16_t)(100 * 16); /* 100.0 wu */
+			col_a[i] = 0xFF808080u;       /* alpha=255 (dry) */
+		}
+		nd_seven_gl_bake_chunk_river(h_a, col_a, TW, TH, 0.0f, out_a);
+		for (int i = 0; i < TW * TH * 4; i++)
+			assert(out_a[i] == 0.0f);
+
+		/* Place river texel at (8,8) with alpha=159 => c_i = (1 - 159/255)*15.9375 = 6.0 wu, w_surf = 103.0 wu */
+		col_a[8 * TW + 8] = (159u << 24) | 0x00808080u;
+		nd_seven_gl_bake_chunk_river(h_a, col_a, TW, TH, 0.0f, out_a);
+		const float *rv_c = &out_a[(8 * TW + 8) * 4];
+		const float *rv_dry = &out_a[(8 * TW + 10) * 4]; /* 2 texels away -> pure dry */
+		assert(rv_c[1] >= 0.01f && rv_c[1] <= 1.0f);
+		assert(rv_c[0] <= 2048.0f);
+		assert(fabsf(rv_c[0] / rv_c[1] - 103.0f) < 1e-3f);
+		assert(rv_dry[1] == 0.0f);
+		/* 50/50 bilinear blend between bank texel (8,9) and dry texel (8,10) stays flat at 103.0 wu */
+		const float *rv_bank = &out_a[(8 * TW + 9) * 4];
+		assert(rv_bank[1] > 0.0f);
+		float blend_x = 0.5f * rv_bank[0] + 0.5f * rv_dry[0];
+		float blend_y = 0.5f * rv_bank[1] + 0.5f * rv_dry[1];
+		assert(fabsf(blend_x / blend_y - 103.0f) < 1e-3f);
+
+		/* Cross-chunk border river invariance */
+		for (int i = 0; i < TW * TH; i++) {
+			h_a[i] = (int16_t)(80 * 16);
+			h_b[i] = (int16_t)(20 * 16);
+			col_a[i] = 0xFF808080u;
+			col_b[i] = (128u << 24) | 0x00808080u; /* interior river in B, dry interior in A */
+		}
+		for (int y = 0; y < TH; y++) {
+			h_a[y * TW + (TW - 1)] = (int16_t)(50 * 16);
+			h_b[y * TW + 0]        = (int16_t)(50 * 16);
+			col_a[y * TW + (TW - 1)] = (y == 8) ? ((159u << 24) | 0x00808080u) : 0xFF808080u;
+			col_b[y * TW + 0]        = col_a[y * TW + (TW - 1)];
+		}
+		nd_seven_gl_bake_chunk_river(h_a, col_a, TW, TH, 0.0f, out_a);
+		nd_seven_gl_bake_chunk_river(h_b, col_b, TW, TH, 0.0f, out_b);
+		for (int y = 0; y < TH; y++) {
+			for (int c = 0; c < 4; c++) {
+				assert(out_a[(y * TW + (TW - 1)) * 4 + c] == out_b[(y * TW + 0) * 4 + c]);
+			}
+		}
+
+		/* 5. Shader contract: zero integer isampler2D heightmap lookups anywhere; uRiverTex only in wet shaders */
+		assert(strstr(nd_seven_gl_vs_terrain(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_vs_water(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_fs_water(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_vs_terrain_shadow(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_fs_cloud(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "uRiverTex") != NULL);
+		assert(strstr(nd_seven_gl_vs_water(), "uRiverTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_water(), "uRiverTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain_dry_near(), "isampler2D") == NULL);
+		assert(strstr(nd_seven_gl_fs_terrain_dry_near(), "#define ND_TERRAIN_DRY_ONLY") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "#ifndef ND_TERRAIN_DRY_ONLY\nuniform sampler2D uRiverTex;") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain_seabed_near(), "uRiverTex") != NULL);
+
+		printf("PASS: Phase 6B Piece 1 pre-baked GL_RGBA16F height+derived & premultiplied river parity verified\n");
+	}
+
+	/* Phase 6B Piece 2: Tileable 2D (256^2, period 32) & 3D (64^3, period 8) gradient-noise LUTs */
+	{
+		/* 1. 2D periodic LUT (256x256, period 32) */
+		const uint32_t D2 = 256u, P2 = 32u;
+		uint8_t *buf2 = (uint8_t *)malloc((size_t)D2 * D2 * 4u);
+		assert(buf2 != NULL);
+		nd_seven_gl_bake_noise2d_lut(buf2, D2, P2);
+
+		double sum_r = 0.0, sum_a = 0.0, sum_ra = 0.0, sum_r2 = 0.0, sum_a2 = 0.0;
+		double dot_gx = 0.0, n_fx = 0.0, n_ax = 0.0;
+		double dot_gy = 0.0, n_fy = 0.0, n_ay = 0.0;
+		double step2 = (double)P2 / (double)D2; /* 0.125 lattice cells per texel */
+		int min_g = 255, max_g = 0, min_b = 255, max_b = 0;
+		double max_wrap_err2 = 0.0;
+		for (uint32_t y = 0; y < D2; y++) {
+			uint32_t ym = (y + D2 - 1u) & (D2 - 1u);
+			uint32_t yp = (y + 1u) & (D2 - 1u);
+			for (uint32_t x = 0; x < D2; x++) {
+				uint32_t xm = (x + D2 - 1u) & (D2 - 1u);
+				uint32_t xp = (x + 1u) & (D2 - 1u);
+				const uint8_t *px = &buf2[(y * D2 + x) * 4u];
+				double r = (double)px[0] / 255.0;
+				double a = (double)px[3] / 255.0;
+				sum_r += r; sum_a += a;
+				sum_ra += r * a; sum_r2 += r * r; sum_a2 += a * a;
+				if (px[1] < min_g) min_g = px[1];
+				if (px[1] > max_g) max_g = px[1];
+				if (px[2] < min_b) min_b = px[2];
+				if (px[2] > max_b) max_b = px[2];
+
+				double r_xp = (double)buf2[(y * D2 + xp) * 4u] / 255.0;
+				double r_xm = (double)buf2[(y * D2 + xm) * 4u] / 255.0;
+				double r_yp = (double)buf2[(yp * D2 + x) * 4u] / 255.0;
+				double r_ym = (double)buf2[(ym * D2 + x) * 4u] / 255.0;
+				double fd_x = (r_xp - r_xm) / (2.0 * step2);
+				double fd_y = (r_yp - r_ym) / (2.0 * step2);
+				double ag_x = ((double)px[1] / 255.0) * 4.0 - 2.0;
+				double ag_y = ((double)px[2] / 255.0) * 4.0 - 2.0;
+				dot_gx += fd_x * ag_x; n_fx += fd_x * fd_x; n_ax += ag_x * ag_x;
+				dot_gy += fd_y * ag_y; n_fy += fd_y * fd_y; n_ay += ag_y * ag_y;
+
+				if (x == 0u) {
+					double e = fabs(r - (double)buf2[(y * D2 + (D2 - 1u)) * 4u] / 255.0);
+					if (e > max_wrap_err2) max_wrap_err2 = e;
+				}
+				if (y == 0u) {
+					double e = fabs(r - (double)buf2[((D2 - 1u) * D2 + x) * 4u] / 255.0);
+					if (e > max_wrap_err2) max_wrap_err2 = e;
+				}
+			}
+		}
+		double N2 = (double)D2 * (double)D2;
+		double mean_r = sum_r / N2, mean_a = sum_a / N2;
+		double var_r = sum_r2 / N2 - mean_r * mean_r;
+		double var_a = sum_a2 / N2 - mean_a * mean_a;
+		double corr_ra = (sum_ra / N2 - mean_r * mean_a) / sqrt(var_r * var_a);
+		double corr_gx = dot_gx / sqrt(n_fx * n_ax);
+		double corr_gy = dot_gy / sqrt(n_fy * n_ay);
+		assert(fabs(mean_r - 0.5) < 0.03);
+		assert(fabs(mean_a - 0.5) < 0.03);
+		assert(fabs(corr_ra) < 0.15);
+		assert(corr_gx > 0.99);
+		assert(corr_gy > 0.99);
+		assert(min_g > 0 && max_g < 255);
+		assert(min_b > 0 && max_b < 255);
+		assert(max_wrap_err2 < 0.25);
+		free(buf2);
+
+		/* 2. 3D periodic LUT (64x64x64, period 8) */
+		const uint32_t D3 = 64u, P3 = 8u;
+		uint8_t *buf3 = (uint8_t *)malloc((size_t)D3 * D3 * D3 * 4u);
+		assert(buf3 != NULL);
+		nd_seven_gl_bake_noise3d_lut(buf3, D3, P3);
+
+		double sum3 = 0.0;
+		double dot3_x = 0.0, nf3_x = 0.0, na3_x = 0.0;
+		double dot3_y = 0.0, nf3_y = 0.0, na3_y = 0.0;
+		double dot3_z = 0.0, nf3_z = 0.0, na3_z = 0.0;
+		double step3 = (double)P3 / (double)D3;
+		int min3 = 255, max3 = 0;
+		double max_wrap_err3 = 0.0;
+		for (uint32_t z = 0; z < D3; z++) {
+			uint32_t zm = (z + D3 - 1u) & (D3 - 1u);
+			uint32_t zp = (z + 1u) & (D3 - 1u);
+			for (uint32_t y = 0; y < D3; y++) {
+				uint32_t ym = (y + D3 - 1u) & (D3 - 1u);
+				uint32_t yp = (y + 1u) & (D3 - 1u);
+				for (uint32_t x = 0; x < D3; x++) {
+					uint32_t xm = (x + D3 - 1u) & (D3 - 1u);
+					uint32_t xp = (x + 1u) & (D3 - 1u);
+					const uint8_t *px = &buf3[((z * D3 + y) * D3 + x) * 4u];
+					double v = (double)px[0] / 255.0;
+					sum3 += v;
+					for (int c = 1; c <= 3; c++) {
+						if (px[c] < min3) min3 = px[c];
+						if (px[c] > max3) max3 = px[c];
+					}
+					double vx_p = (double)buf3[((z * D3 + y) * D3 + xp) * 4u] / 255.0;
+					double vx_m = (double)buf3[((z * D3 + y) * D3 + xm) * 4u] / 255.0;
+					double vy_p = (double)buf3[((z * D3 + yp) * D3 + x) * 4u] / 255.0;
+					double vy_m = (double)buf3[((z * D3 + ym) * D3 + x) * 4u] / 255.0;
+					double vz_p = (double)buf3[((zp * D3 + y) * D3 + x) * 4u] / 255.0;
+					double vz_m = (double)buf3[((zm * D3 + y) * D3 + x) * 4u] / 255.0;
+					double fdx = (vx_p - vx_m) / (2.0 * step3);
+					double fdy = (vy_p - vy_m) / (2.0 * step3);
+					double fdz = (vz_p - vz_m) / (2.0 * step3);
+					double agx = ((double)px[1] / 255.0) * 4.0 - 2.0;
+					double agy = ((double)px[2] / 255.0) * 4.0 - 2.0;
+					double agz = ((double)px[3] / 255.0) * 4.0 - 2.0;
+					dot3_x += fdx * agx; nf3_x += fdx * fdx; na3_x += agx * agx;
+					dot3_y += fdy * agy; nf3_y += fdy * fdy; na3_y += agy * agy;
+					dot3_z += fdz * agz; nf3_z += fdz * fdz; na3_z += agz * agz;
+					if (x == 0u) {
+						double e = fabs(v - (double)buf3[((z * D3 + y) * D3 + (D3 - 1u)) * 4u] / 255.0);
+						if (e > max_wrap_err3) max_wrap_err3 = e;
+					}
+					if (y == 0u) {
+						double e = fabs(v - (double)buf3[((z * D3 + (D3 - 1u)) * D3 + x) * 4u] / 255.0);
+						if (e > max_wrap_err3) max_wrap_err3 = e;
+					}
+					if (z == 0u) {
+						double e = fabs(v - (double)buf3[(((D3 - 1u) * D3 + y) * D3 + x) * 4u] / 255.0);
+						if (e > max_wrap_err3) max_wrap_err3 = e;
+					}
+				}
+			}
+		}
+		double mean3 = sum3 / ((double)D3 * D3 * D3);
+		double corr3_x = dot3_x / sqrt(nf3_x * na3_x);
+		double corr3_y = dot3_y / sqrt(nf3_y * na3_y);
+		double corr3_z = dot3_z / sqrt(nf3_z * na3_z);
+		assert(fabs(mean3 - 0.5) < 0.03);
+		assert(corr3_x > 0.98);
+		assert(corr3_y > 0.98);
+		assert(corr3_z > 0.98);
+		assert(min3 > 0 && max3 < 255);
+		assert(max_wrap_err3 < 0.28);
+		free(buf3);
+
+		/* 3. GLSL shader contracts for 2D/3D hardware noise LUTs */
+		assert(strstr(nd_seven_gl_fs_terrain(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "nd_lut_noise2d") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "precision highp sampler3D;") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "uNoise3DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_water(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_water(), "nd_lut_noise2d") != NULL);
+		assert(strstr(nd_seven_gl_fs_water(), "precision highp sampler3D;") != NULL);
+		assert(strstr(nd_seven_gl_fs_billboard(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_billboard(), "nd_lut_noise2d") != NULL);
+		assert(strstr(nd_seven_gl_fs_billboard(), "precision highp sampler3D;") != NULL);
+		assert(strstr(nd_seven_gl_fs_mesh3d(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_mesh3d(), "nd_lut_noise2d") != NULL);
+		assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_mesh3d_shadow_alpha(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_mesh3d_shadow_alpha(), "chaff_grad_noise2d") == NULL);
+		assert(strstr(nd_seven_gl_fs_cloud(), "uNoise2DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_cloud(), "precision highp sampler3D;") != NULL);
+		assert(strstr(nd_seven_gl_fs_cloud(), "uNoise3DTex") != NULL);
+		assert(strstr(nd_seven_gl_fs_cloud(), "nd_lut_noise4d(") != NULL);
+		assert(strstr(nd_seven_gl_fs_cloud(), "vec4 n4 = nd_lut_noise4d(") != NULL);
+
+		printf("PASS: Phase 6B Piece 2 2D/3D periodic noise+gradient LUTs (2D gx=%.4f gy=%.4f, 3D gx=%.4f gy=%.4f gz=%.4f) verified\n",
+		       corr_gx, corr_gy, corr3_x, corr3_y, corr3_z);
+	}
+
+	/* Phase 6B Piece 3: Single-pass biome deduplication & VS climate/ecology hoisting */
+	{
+		const char *vs_terr = nd_seven_gl_vs_terrain();
+		const char *fs_terr = nd_seven_gl_fs_terrain();
+		const char *vs_wat  = nd_seven_gl_vs_water();
+		const char *fs_wat  = nd_seven_gl_fs_water();
+
+		/* Single-pass NdBiomeW struct replaces 3x redundant smoothstep classifier */
+		assert(strstr(fs_terr, "struct NdBiomeW") != NULL);
+		assert(strstr(fs_terr, "NdBiomeW nd_eval_biome_weights(") != NULL);
+		assert(strstr(fs_terr, "NdBiomeW bio = nd_eval_biome_weights(srgbBase);") != NULL);
+		assert(strstr(fs_terr, "nd_eval_tex_bio_humidity") == NULL);
+
+		/* Hoisted static latitude/climate transcendentals (no per-fragment latPhi/asin in terrain/water) */
+		assert(strstr(vs_terr, "out vec4 vLatClimate;") != NULL);
+		assert(strstr(fs_terr, "in vec4 vLatClimate;") != NULL);
+		assert(strstr(vs_wat,  "out vec4 vLatClimate;") != NULL);
+		assert(strstr(fs_wat,  "in vec4 vLatClimate;") != NULL);
+		assert(strstr(fs_terr, "latPhi") == NULL);
+		assert(strstr(fs_wat,  "latPhi") == NULL);
+		assert(strstr(fs_terr, " asin(") == NULL);
+		assert(strstr(fs_wat,  " asin(") == NULL);
+
+		/* Hoisted analytic grove/meadow ecology noise passed via vEcoBase */
+		assert(strstr(vs_terr, "out vec2 vEcoBase;") != NULL);
+		assert(strstr(fs_terr, "in vec2 vEcoBase;") != NULL);
+		assert(strstr(fs_terr, "nd_eval_grove_ecology_weight(vEcoBase.x") != NULL);
+		assert(strstr(fs_terr, "nd_eval_meadow_bed_weight(vEcoBase.y") != NULL);
+
+		printf("PASS: Phase 6B Piece 3 biome deduplication & VS climate/ecology hoisting verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

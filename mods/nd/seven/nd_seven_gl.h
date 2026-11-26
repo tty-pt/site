@@ -236,6 +236,34 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
                                     float r0, float sea_level,
                                     float *out_wz, float *out_water_depth);
 
+/* Pre-bake per-chunk RGBA16F height+derived map on CPU upload:
+ * R = exact Q12.4 elevation (val * 0.0625f), G = Catmull-Rom dh/dx (world units/wu),
+ * B = Catmull-Rom dh/dy (world units/wu), A = Laplacian curvature term.
+ * Pure function of height_i16 & span so adjacent chunks always agree at shared borders. */
+void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
+                                           uint32_t tex_w, uint32_t tex_h,
+                                           float span_x, float span_y,
+                                           float *out_rgba);
+
+/* Pre-bake per-chunk RGBA16F premultiplied river water-table map on CPU upload:
+ * R = r_z_rel * r_w (capped safely for fp16), G = r_w (0 on dry banks -> zero water-walls),
+ * B = maxC_nb (3x3 tent-weighted river carve proximity), A = 0. */
+void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
+                                  const uint32_t *color_rgba,
+                                  uint32_t tex_w, uint32_t tex_h,
+                                  float base_sea_level,
+                                  float *out_rgba);
+
+/* Startup-baked tileable 2D gradient-noise LUT (period-tileable RGBA8):
+ * R = val1 [0..1], G = gx1*0.25+0.5 ([-2..2]), B = gy1*0.25+0.5 ([-2..2]),
+ * A = val2 [0..1] (decorrelated second seed). Output holds dim*dim*4 bytes. */
+void nd_seven_gl_bake_noise2d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t period);
+
+/* Startup-baked tileable 3D gradient-noise LUT (period-tileable RGBA8):
+ * R = val [0..1], G = gx*0.25+0.5, B = gy*0.25+0.5, A = gz*0.25+0.5 ([-2..2]).
+ * Output holds dim*dim*dim*4 bytes in Z-major layout ((z*dim + y)*dim + x). */
+void nd_seven_gl_bake_noise3d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t period);
+
 /* 3D WebGL2 Frame & Pass Dispatchers */
 bool nd_seven_gl_pipelines_ready(void);
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity);
