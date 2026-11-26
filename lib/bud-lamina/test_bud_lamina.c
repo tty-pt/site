@@ -1173,6 +1173,79 @@ static void test_controlled_inputs_select_forms_and_autoscroll(void)
 	printf("  test_controlled_inputs_select_forms_and_autoscroll: PASS\n");
 }
 
+static bud_node *render_video_test(void *ctx)
+{
+	(void)ctx;
+	bud_node *root = bud_element("div");
+	bud_set_attr(root, "id", "vroot");
+	bud_node *vid = bud_element("video");
+	bud_set_attr(vid, "id", "screen-video");
+	bud_append(root, vid);
+	return root;
+}
+
+static void test_video_widget_layout_and_gl_draw(void)
+{
+	bud_lamina_t *bl = bud_lamina_create(640, 400);
+	assert(bl != NULL);
+	const char *css =
+		"#vroot { width: 400px; display: block; }\n"
+		"#screen-video { display: block; width: 100%; max-height: 300px; }\n";
+	assert(bud_lamina_load_css(bl, css, strlen(css)) > 0);
+	bud_lamina_set_render(bl, render_video_test, NULL);
+
+	/* 1. Even before any texture is bound, <video> must lay out with non-zero 16:9 height */
+	assert(bud_lamina_sync(bl) == 1);
+	lam_ui_div_t *vdiv = bud_lamina_find_by_id(bl, "screen-video");
+	assert(vdiv != NULL);
+	assert(lam_ui_get_width(vdiv) == 400);
+	assert(lam_ui_get_height(vdiv) >= 200 && lam_ui_get_height(vdiv) <= 240);
+
+	/* 2. Bind an amber GL texture under unprefixed "screen-video" (matching "i:screen-video") */
+	uint8_t pixels[16 * 16 * 4];
+	for (int i = 0; i < 16 * 16; i++) {
+		pixels[i * 4 + 0] = 240;
+		pixels[i * 4 + 1] = 160;
+		pixels[i * 4 + 2] = 32;
+		pixels[i * 4 + 3] = 255;
+	}
+	GLuint tex = glCreateTexture();
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	bud_lamina_set_video_tex(bl, "screen-video", tex, 320, 160);
+	assert(bud_lamina_is_dirty(bl) == 1);
+	assert(bud_lamina_sync(bl) == 1);
+	vdiv = bud_lamina_find_by_id(bl, "screen-video");
+	assert(vdiv != NULL);
+	int vw = lam_ui_get_width(vdiv);
+	int vh = lam_ui_get_height(vdiv);
+	assert(vw == 400 && vh == 200); /* 2:1 aspect preserved! */
+
+	lam_clear(0xFF000000u);
+	bud_lamina_render(bl);
+
+	uint32_t fbw = 0, fbh = 0;
+	lam_size(&fbw, &fbh);
+	if (fbw >= 400 && fbh >= 250) {
+		int cx = lam_ui_get_x(vdiv) + vw / 2;
+		int cy = (int)fbh - 1 - (lam_ui_get_y(vdiv) + vh / 2);
+		uint8_t px[4] = {0, 0, 0, 0};
+		glReadPixels(cx, cy, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+		assert(px[0] > 180 && px[1] > 120 && px[2] < 80);
+		printf("  test_video_widget_layout_and_gl_draw: PASS (%dx%d px=%u,%u,%u)\n",
+		       vw, vh, px[0], px[1], px[2]);
+	} else {
+		printf("  test_video_widget_layout_and_gl_draw: PASS (%dx%d)\n", vw, vh);
+	}
+
+	glDeleteTexture(tex);
+	bud_lamina_destroy(bl);
+}
+
 int main(void)
 {
 	printf("test_bud_lamina:\n");
@@ -1185,6 +1258,7 @@ int main(void)
 	test_webgl_redraw_in_click_preserves_blend();
 	test_data_uri_and_web_img_fetch();
 	test_controlled_inputs_select_forms_and_autoscroll();
+	test_video_widget_layout_and_gl_draw();
 
 	printf("test_bud_lamina: ALL TESTS PASSED\n");
 	return 0;

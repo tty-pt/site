@@ -654,6 +654,18 @@ static void draw_range_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 	                  (float)thumb_r, (float)thumb_r, (float)thumb_r, (float)thumb_r, 1.5f);
 }
 
+static const bl_video_slot_t *find_video_slot(const bud_lamina_t *bl, const char *key)
+{
+	if (!bl || !key || !key[0]) return NULL;
+	const char *bare = (key[0] == 'i' && key[1] == ':') ? key + 2 : key;
+	for (size_t i = 0; i < bl->n_videos; i++) {
+		if (strcmp(bl->videos[i].id, key) == 0 ||
+		    strcmp(bl->videos[i].id, bare) == 0)
+			return &bl->videos[i];
+	}
+	return NULL;
+}
+
 static void draw_video_widget(lam_ui_div_t *div, int32_t x, int32_t y,
                               int32_t w, int32_t h, void *user)
 {
@@ -661,15 +673,10 @@ static void draw_video_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 	bl_entry_t *e = entry_find_by_div(bl, div);
 	if (!e || w <= 0 || h <= 0) return;
 
-	uint32_t tex = 0, tw = 0, th = 0;
-	for (size_t i = 0; i < bl->n_videos; i++) {
-		if (strcmp(bl->videos[i].id, e->key) == 0) {
-			tex = bl->videos[i].gl_tex;
-			tw = bl->videos[i].w;
-			th = bl->videos[i].h;
-			break;
-		}
-	}
+	const bl_video_slot_t *vs = find_video_slot(bl, e->key);
+	uint32_t tex = vs ? vs->gl_tex : 0;
+	uint32_t tw  = vs ? vs->w : 0;
+	uint32_t th  = vs ? vs->h : 0;
 	lam_fill((uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h, LAM_RGB(0x0c, 0x0d, 0x10));
 	if (tex && tw > 0 && th > 0) {
 		double scale_x = (double)w / (double)tw;
@@ -1827,6 +1834,10 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 			lam_ui_set_custom_draw(div, draw_img_widget, bl);
 		} else if (ci_eq(tag, "video")) {
 			ent->kind = W_VIDEO;
+			const bl_video_slot_t *vs = find_video_slot(bl, key);
+			uint32_t vw = (vs && vs->w > 0 && vs->h > 0) ? vs->w : 320u;
+			uint32_t vh = (vs && vs->w > 0 && vs->h > 0) ? vs->h : 180u;
+			lam_ui_set_intrinsic_size(div, vw, vh);
 			lam_ui_set_custom_draw(div, draw_video_widget, bl);
 		} else if (ci_eq(tag, "textarea")) {
 			ent->kind = W_INPUT_TEXT;
@@ -2203,6 +2214,9 @@ void bud_lamina_set_video_tex(bud_lamina_t *bl, const char *id,
 	if (!bl || !id || !id[0]) return;
 	for (size_t i = 0; i < bl->n_videos; i++) {
 		if (strcmp(bl->videos[i].id, id) == 0) {
+			if (bl->videos[i].w != w || bl->videos[i].h != h ||
+			    (bl->videos[i].gl_tex != 0) != (gl_tex != 0))
+				bl->dirty = 1;
 			bl->videos[i].gl_tex = gl_tex;
 			bl->videos[i].w = w;
 			bl->videos[i].h = h;
@@ -2215,6 +2229,8 @@ void bud_lamina_set_video_tex(bud_lamina_t *bl, const char *id,
 		s->gl_tex = gl_tex;
 		s->w = w;
 		s->h = h;
+		if (gl_tex || (w && h))
+			bl->dirty = 1;
 	}
 }
 
