@@ -277,6 +277,7 @@ void nd_seven_gl_downsample_rgba8_3d(const uint8_t *src, uint32_t src_dim, uint8
  * principal-curvature torus slab intersection (exact match to GLSL cloud_vol_pipe). */
 const char *nd_seven_gl_vs_cloud_vol(void);
 const char *nd_seven_gl_fs_cloud_vol(void);
+const char *nd_seven_gl_fs_cloud_wth(void);
 bool nd_seven_gl_cloud_quadric_intersect(const float eye_l[3], const float ray_l[3],
                                          float kappa_e, float kappa_s,
                                          float z_bot, float z_top, float max_dist,

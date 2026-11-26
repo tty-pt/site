@@ -2750,6 +2750,7 @@ int main(void)
 				{ "cloud_wide",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide()          },
 				{ "cloud_wide_csm",      nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide_csm()      },
 				{ "cloud_vol",           nd_seven_gl_vs_cloud_vol(),      nd_seven_gl_fs_cloud_vol()           },
+				{ "cloud_wth",           nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_wth()           },
 				{ "cloud_comp",          nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_comp()          },
 				{ "cloud_reproj",        nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_reproj()        },
 				{ "csm",                 nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()                 },
@@ -5956,41 +5957,58 @@ int main(void)
 		printf("PASS: Cloud Phase 3 shared meteorological kernel (frontal shear, streets, marine Benard cells) & 1:1 sky/CSM/water parity verified\n");
 	}
 
-	/* Cloud Polish: Zero-flicker direct half-res, zoom continuity, 5-knot weather & 3D fly-through */
+	/* Cloud Polish: 2-ring world-snapped weather cache, exact torus alignment, zero-flicker stepping & 3D fly-through */
 	{
 		const char *fs_vol  = nd_seven_gl_fs_cloud_vol();
+		const char *fs_wth  = nd_seven_gl_fs_cloud_wth();
 		const char *fs_csm  = nd_seven_gl_fs_csm();
 		const char *fs_rp   = nd_seven_gl_fs_cloud_reproj();
 		const char *fs_comp = nd_seven_gl_fs_cloud_comp();
-		assert(fs_vol != NULL && fs_csm != NULL && fs_rp != NULL && fs_comp != NULL);
+		assert(fs_vol != NULL && fs_wth != NULL && fs_csm != NULL && fs_rp != NULL && fs_comp != NULL);
 
-		/* 1. Zero-flicker: no per-frame temporal phase jitter in cloud_vol, tent filter in cloud_comp, aligned idx stepping */
+		/* 1. Zero-flicker: no IGN jitter, no nearBoost cliff, no emptyRun 2x skip, no per-frame phase, world-locked + geometric stepping */
 		assert(strstr(fs_vol, "uCloudPhase") == NULL);
-		assert(strstr(fs_vol, "emptyRun") != NULL);
-		assert(strstr(fs_vol, "expK") != NULL);
+		assert(strstr(fs_vol, "gl_FragCoord") == NULL);
+		assert(strstr(fs_vol, "nearBoost") == NULL);
+		assert(strstr(fs_vol, "emptyRun") == NULL);
+		assert(strstr(fs_vol, "altDeriv") != NULL);
+		assert(strstr(fs_vol, "dtAlt") != NULL);
+		assert(strstr(fs_vol, "dtDist") != NULL);
+		assert(strstr(fs_vol, "gRate") != NULL);
 		assert(strstr(fs_comp, "0.44") != NULL);
+		assert(strstr(fs_vol, "0.999985") != NULL);
+		assert(strstr(fs_comp, "0.999985") != NULL);
 		assert(strstr(fs_rp, "skyLimb") == NULL);
 		assert(strstr(fs_rp, "hSize * pScale") != NULL);
 
-		/* 2. Coherent drift speed: synoptic 0.05x time scale synced across sky & CSM */
+		/* 2. Coherent drift speed: synoptic 0.05x time scale synced across sky, weather rings & CSM */
 		assert(strstr(fs_vol, "tSyn = anim_time * 0.05") != NULL);
+		assert(strstr(fs_wth, "tSyn = anim_time * 0.05") != NULL);
 		assert(strstr(fs_csm, "tSyn = anim_time * 0.05") != NULL);
 
-		/* 3. Zoom continuity: 5-knot ray weather + seamless RGBA8 CSM lookup + 110km 48-step torus SDF */
-		assert(strstr(fs_csm, "vec4(colDens, wCov, wTyp, wHum)") != NULL);
-		assert(strstr(fs_vol, "uCloudShadowMap") != NULL);
-		assert(strstr(fs_vol, "hasCsmWeather") != NULL);
-		assert(strstr(fs_vol, "vol_knot5") != NULL);
+		/* 3. Rotation/zoom continuity: 2-ring world-snapped weather cache decoupled from CSM + exact uInvTorusScale Jacobian */
+		assert(strstr(fs_wth, "uWthWin") != NULL);
+		assert(strstr(fs_wth, "uWthFw") != NULL);
+		assert(strstr(fs_wth, "vol_eval_weather") != NULL);
+		assert(strstr(fs_vol, "uCloudShadowMap") == NULL);
+		assert(strstr(fs_vol, "uCloudWthNear") != NULL);
+		assert(strstr(fs_vol, "uCloudWthFar") != NULL);
+		assert(strstr(fs_vol, "uWthNearWin") != NULL);
+		assert(strstr(fs_vol, "uWthFarWin") != NULL);
+		assert(strstr(fs_vol, "uInvTorusScale") != NULL);
+		assert(strstr(fs_vol, "vol_sample_weather_rings") != NULL);
 		assert(strstr(fs_vol, "110000.0") != NULL);
 		assert(strstr(fs_vol, "i < 48") != NULL);
 
-		/* 4. 3D fly-through & photographic polish: nearSculpt, nearWrap, crown curl & horizon fade */
+		/* 4. 3D fly-through & photographic polish: domeH, nearSculpt, nearWrap, crown curl, puff-scale lDet & horizFade */
+		assert(strstr(fs_vol, "domeH") != NULL);
 		assert(strstr(fs_vol, "nearSculpt") != NULL);
 		assert(strstr(fs_vol, "nearWrap") != NULL);
 		assert(strstr(fs_vol, "curlOff") != NULL);
+		assert(strstr(fs_vol, "bool lDet") != NULL);
 		assert(strstr(fs_vol, "horizFade") != NULL);
 
-		printf("PASS: Cloud zero-flicker direct half-res, zoom continuity, 5-knot weather & 3D fly-through verified\n");
+		printf("PASS: Cloud 2-ring weather cache, exact torus alignment, zero-flicker stepping & 3D fly-through verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

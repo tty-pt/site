@@ -1285,6 +1285,131 @@ void gl_render_cloud_shadow_map(void)
 	s_gl.csm_valid = true;
 }
 
+static bool gl_ensure_cloud_wth_targets(void)
+{
+	if (s_gl.cloud_wth_rings[0].fbo && s_gl.cloud_wth_rings[1].fbo)
+		return true;
+	if (s_gl.cloud_wth_failed)
+		return false;
+
+	glActiveTexture(GL_TEXTURE0);
+	for (int r = 0; r < ND_CLOUD_WTH_RINGS; r++) {
+		gl_cloud_wth_ring_t *ring = &s_gl.cloud_wth_rings[r];
+		ring->tex = glCreateTexture();
+		glBindTexture(GL_TEXTURE_2D, ring->tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ND_CLOUD_WTH_RES, ND_CLOUD_WTH_RES,
+		             0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		ring->fbo = glCreateFramebuffer();
+		glBindFramebuffer(GL_FRAMEBUFFER, ring->fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ring->tex, 0);
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glBindTexture(GL_TEXTURE_2D, 0);
+			for (int k = 0; k <= r; k++) {
+				if (s_gl.cloud_wth_rings[k].fbo) {
+					glDeleteFramebuffer(s_gl.cloud_wth_rings[k].fbo);
+					s_gl.cloud_wth_rings[k].fbo = 0;
+				}
+				if (s_gl.cloud_wth_rings[k].tex) {
+					glDeleteTexture(s_gl.cloud_wth_rings[k].tex);
+					s_gl.cloud_wth_rings[k].tex = 0;
+				}
+				s_gl.cloud_wth_rings[k].valid = false;
+			}
+			s_gl.cloud_wth_failed = true;
+			gl_bind_scene_target();
+			return false;
+		}
+		glViewport(0, 0, ND_CLOUD_WTH_RES, ND_CLOUD_WTH_RES);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glClearColor(0.0f, 0.42f, 0.0f, 0.5f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		ring->valid = false;
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
+	gl_bind_scene_target();
+	return true;
+}
+
+/* 2-ring world-snapped 256x256 GPU cloud weather cache (decoupled from camera yaw/pitch/zoom).
+ * Ring 0: +/-32,768 wu (256 wu/texel, fw=128) snapped to 8 texels (2,048 wu).
+ * Ring 1: +/-262,144 wu (2,048 wu/texel, fw=1024) snapped to 8 texels (16,384 wu). */
+void gl_render_cloud_weather_rings(void)
+{
+	int cq = nd_seven_get_cloud_quality();
+	if (cq == ND_CLOUD_QUALITY_OFF || !s_gl.cloud_wth_pipe.prog)
+		return;
+	if (!gl_ensure_cloud_wth_targets())
+		return;
+
+	static const float k_half[ND_CLOUD_WTH_RINGS] = { ND_CLOUD_WTH_HALF_0, ND_CLOUD_WTH_HALF_1 };
+	static const float k_fw[ND_CLOUD_WTH_RINGS]   = { 128.0f, 1024.0f };
+	float sea_wet = (s_gl.cur_base_sea_level > -900.0f) ? 1.0f : 0.0f;
+
+	bool need[ND_CLOUD_WTH_RINGS] = { false, false };
+	float target_cx[ND_CLOUD_WTH_RINGS];
+	float target_cy[ND_CLOUD_WTH_RINGS];
+	bool any = false;
+
+	for (int r = 0; r < ND_CLOUD_WTH_RINGS; r++) {
+		float half = k_half[r];
+		float snap = 8.0f * ((2.0f * half) / (float)ND_CLOUD_WTH_RES);
+		float cx = floorf(s_gl.cur_tx / snap + 0.5f) * snap;
+		float cy = floorf(s_gl.cur_ty / snap + 0.5f) * snap;
+		target_cx[r] = cx;
+		target_cy[r] = cy;
+
+		const gl_cloud_wth_ring_t *ring = &s_gl.cloud_wth_rings[r];
+		if (!ring->valid ||
+		    ring->cx != cx || ring->cy != cy ||
+		    ring->half != half ||
+		    ring->rendered_wet != sea_wet ||
+		    fabsf(s_gl.cur_anim_time - ring->rendered_time) >= 0.40f) {
+			need[r] = true;
+			any = true;
+		}
+	}
+	if (!any)
+		return;
+
+	gl_end_terrain_pass();
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glUseProgram(s_gl.cloud_wth_pipe.prog);
+	glViewport(0, 0, ND_CLOUD_WTH_RES, ND_CLOUD_WTH_RES);
+
+	for (int r = 0; r < ND_CLOUD_WTH_RINGS; r++) {
+		if (!need[r])
+			continue;
+		gl_cloud_wth_ring_t *ring = &s_gl.cloud_wth_rings[r];
+		glBindFramebuffer(GL_FRAMEBUFFER, ring->fbo);
+		if (s_gl.cloud_wth_pipe.uWthWin >= 0)
+			glUniform3f(s_gl.cloud_wth_pipe.uWthWin, target_cx[r], target_cy[r], k_half[r]);
+		if (s_gl.cloud_wth_pipe.uAnimTime >= 0)
+			glUniform1f(s_gl.cloud_wth_pipe.uAnimTime, s_gl.cur_anim_time);
+		if (s_gl.cloud_wth_pipe.uSeaWet >= 0)
+			glUniform1f(s_gl.cloud_wth_pipe.uSeaWet, sea_wet);
+		if (s_gl.cloud_wth_pipe.uWthFw >= 0)
+			glUniform1f(s_gl.cloud_wth_pipe.uWthFw, k_fw[r]);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+
+		ring->cx = target_cx[r];
+		ring->cy = target_cy[r];
+		ring->half = k_half[r];
+		ring->rendered_time = s_gl.cur_anim_time;
+		ring->rendered_wet = sea_wet;
+		ring->valid = true;
+	}
+
+	gl_bind_scene_target();
+	glEnable(GL_DEPTH_TEST);
+}
+
 /* Bind the cloud-shadow map (texture unit 7); uCsm window/clear-sky flag lives in NdFrameUBO. */
 void gl_bind_csm(GLint loc_tex)
 {

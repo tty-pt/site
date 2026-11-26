@@ -1043,36 +1043,59 @@ static void gl_link_cloud_vol_pipe(gl_cloud_vol_pipe_t *cvp)
 	}
 	GLuint p = cvp->prog;
 	gl_bind_frame_ubo_prog(p);
-	cvp->uCamFwd         = glGetUniformLocation(p, "uCamFwd", 7);
-	cvp->uCamRight       = glGetUniformLocation(p, "uCamRight", 9);
-	cvp->uCamUp          = glGetUniformLocation(p, "uCamUp", 6);
-	cvp->uTanHalfAspect  = glGetUniformLocation(p, "uTanHalfAspect", 14);
-	cvp->uNearFar        = glGetUniformLocation(p, "uNearFar", 8);
-	cvp->uCloudJitter    = glGetUniformLocation(p, "uCloudJitter", 12);
-	cvp->uEast           = glGetUniformLocation(p, "uEast", 5);
-	cvp->uSouth          = glGetUniformLocation(p, "uSouth", 6);
-	cvp->uZenith         = glGetUniformLocation(p, "uZenith", 7);
-	cvp->uEyeLocal       = glGetUniformLocation(p, "uEyeLocal", 9);
-	cvp->uRefWorldXY     = glGetUniformLocation(p, "uRefWorldXY", 11);
-	cvp->uCurvature      = glGetUniformLocation(p, "uCurvature", 10);
-	cvp->uTorusEye       = glGetUniformLocation(p, "uTorusEye", 9);
-	cvp->uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
-	cvp->uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
-	cvp->uCloudParams    = glGetUniformLocation(p, "uCloudParams", 12);
-	cvp->uSceneUvScale   = glGetUniformLocation(p, "uSceneUvScale", 13);
-	cvp->uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
-	cvp->uSceneDepthTex  = glGetUniformLocation(p, "uSceneDepthTex", 14);
-	cvp->uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
-	cvp->uNoise2DTex     = glGetUniformLocation(p, "uNoise2DTex", 11);
-	cvp->uCloudShape3D   = glGetUniformLocation(p, "uCloudShape3D", 13);
+	cvp->uCamFwd        = glGetUniformLocation(p, "uCamFwd", 7);
+	cvp->uCamRight      = glGetUniformLocation(p, "uCamRight", 9);
+	cvp->uCamUp         = glGetUniformLocation(p, "uCamUp", 6);
+	cvp->uTanHalfAspect = glGetUniformLocation(p, "uTanHalfAspect", 14);
+	cvp->uNearFar       = glGetUniformLocation(p, "uNearFar", 8);
+	cvp->uCloudJitter   = glGetUniformLocation(p, "uCloudJitter", 12);
+	cvp->uEast          = glGetUniformLocation(p, "uEast", 5);
+	cvp->uSouth         = glGetUniformLocation(p, "uSouth", 6);
+	cvp->uZenith        = glGetUniformLocation(p, "uZenith", 7);
+	cvp->uEyeLocal      = glGetUniformLocation(p, "uEyeLocal", 9);
+	cvp->uRefWorldXY    = glGetUniformLocation(p, "uRefWorldXY", 11);
+	cvp->uInvTorusScale = glGetUniformLocation(p, "uInvTorusScale", 14);
+	cvp->uCurvature     = glGetUniformLocation(p, "uCurvature", 10);
+	cvp->uTorusEye      = glGetUniformLocation(p, "uTorusEye", 9);
+	cvp->uTorusRadii    = glGetUniformLocation(p, "uTorusRadii", 11);
+	cvp->uBodyRot       = glGetUniformLocation(p, "uBodyRot", 8);
+	cvp->uCloudParams   = glGetUniformLocation(p, "uCloudParams", 12);
+	cvp->uWthNearWin    = glGetUniformLocation(p, "uWthNearWin", 11);
+	cvp->uWthFarWin     = glGetUniformLocation(p, "uWthFarWin", 10);
+	cvp->uCloudWindDir  = glGetUniformLocation(p, "uCloudWindDir", 13);
+	cvp->uSceneUvScale  = glGetUniformLocation(p, "uSceneUvScale", 13);
+	cvp->uSeaLevel      = glGetUniformLocation(p, "uSeaLevel", 9);
+	cvp->uSceneDepthTex = glGetUniformLocation(p, "uSceneDepthTex", 14);
+	cvp->uCloudWthNear  = glGetUniformLocation(p, "uCloudWthNear", 13);
+	cvp->uCloudWthFar   = glGetUniformLocation(p, "uCloudWthFar", 12);
+	cvp->uNoise2DTex    = glGetUniformLocation(p, "uNoise2DTex", 11);
+	cvp->uCloudShape3D  = glGetUniformLocation(p, "uCloudShape3D", 13);
 
 	/* Bind immutable sampler texture units once at link time */
 	glUseProgram(p);
-	if (cvp->uSceneDepthTex >= 0)  glUniform1i(cvp->uSceneDepthTex, 5);
-	if (cvp->uCloudShadowMap >= 0) glUniform1i(cvp->uCloudShadowMap, 7);
-	if (cvp->uNoise2DTex >= 0)     glUniform1i(cvp->uNoise2DTex, 13);
-	if (cvp->uCloudShape3D >= 0)   glUniform1i(cvp->uCloudShape3D, 15);
-	if (cvp->uCloudJitter >= 0)    glUniform2f(cvp->uCloudJitter, 0.0f, 0.0f);
+	if (cvp->uSceneDepthTex >= 0) glUniform1i(cvp->uSceneDepthTex, 5);
+	if (cvp->uCloudWthNear >= 0)  glUniform1i(cvp->uCloudWthNear, 7);
+	if (cvp->uCloudWthFar >= 0)   glUniform1i(cvp->uCloudWthFar, 8);
+	if (cvp->uNoise2DTex >= 0)    glUniform1i(cvp->uNoise2DTex, 13);
+	if (cvp->uCloudShape3D >= 0)  glUniform1i(cvp->uCloudShape3D, 15);
+	if (cvp->uCloudJitter >= 0)   glUniform2f(cvp->uCloudJitter, 0.0f, 0.0f);
+	if (cvp->uInvTorusScale >= 0) glUniform2f(cvp->uInvTorusScale, 1.0f, 1.0f);
+}
+
+static void gl_link_cloud_wth_pipe(gl_cloud_wth_pipe_t *cwp)
+{
+	if (!cwp->prog)
+		return;
+	if (!glGetProgramParameter(cwp->prog, GL_LINK_STATUS)) {
+		glDeleteProgram(cwp->prog);
+		cwp->prog = 0;
+		return;
+	}
+	GLuint p = cwp->prog;
+	cwp->uWthWin   = glGetUniformLocation(p, "uWthWin", 7);
+	cwp->uAnimTime = glGetUniformLocation(p, "uAnimTime", 9);
+	cwp->uSeaWet   = glGetUniformLocation(p, "uSeaWet", 7);
+	cwp->uWthFw    = glGetUniformLocation(p, "uWthFw", 6);
 }
 
 static void gl_link_ssao_pipe(gl_ssao_pipe_t *sp)
@@ -1398,6 +1421,8 @@ static void gl_queue_next_shader_stage(void)
 	case 7:
 		s_gl.cloud_vol_pipe.pending_prog =
 			create_program_async(nd_seven_gl_vs_cloud_vol(), nd_seven_gl_fs_cloud_vol());
+		s_gl.cloud_wth_pipe.pending_prog =
+			create_program_async(nd_seven_gl_vs_csm(), nd_seven_gl_fs_cloud_wth());
 		break;
 	case 8: {
 		GLuint vs_csm = compile_shader(GL_VERTEX_SHADER, nd_seven_gl_vs_csm());
@@ -1463,6 +1488,7 @@ static void poll_tier_b_pipelines(void)
 		GL_POLL_PIPE(&s_gl.cloud_pipes[v], gl_link_cloud_pipe, any_pending);
 
 	GL_POLL_PIPE(&s_gl.cloud_vol_pipe,    gl_link_cloud_vol_pipe,    any_pending);
+	GL_POLL_PIPE(&s_gl.cloud_wth_pipe,    gl_link_cloud_wth_pipe,    any_pending);
 	GL_POLL_PIPE(&s_gl.cloud_comp_pipe,   gl_link_cloud_comp_pipe,   any_pending);
 	GL_POLL_PIPE(&s_gl.cloud_reproj_pipe, gl_link_cloud_reproj_pipe, any_pending);
 	GL_POLL_PIPE(&s_gl.ssao_pipe,         gl_link_ssao_pipe,         any_pending);
@@ -1493,7 +1519,7 @@ static bool check_pipelines_ready(void)
 
 void nd_seven_gl_shader_progress(int *out_ready, int *out_total)
 {
-	int total = 22;
+	int total = 23;
 	int ready = 0;
 	if (s_gl.sky_pipe.prog) ready++;
 	if (s_gl.terrain_pipes[ND_TERR_VAR_DRY_NEAR].prog) ready++;
@@ -1513,6 +1539,7 @@ void nd_seven_gl_shader_progress(int *out_ready, int *out_total)
 	if (s_gl.mesh3d_shadow_alpha_pipe.prog) ready++;
 	if (s_gl.mesh3d_shadow_opaque_pipe.prog) ready++;
 	if (s_gl.cloud_vol_pipe.prog) ready++;
+	if (s_gl.cloud_wth_pipe.prog) ready++;
 	if (s_gl.cloud_comp_pipe.prog) ready++;
 	if (s_gl.cloud_reproj_pipe.prog) ready++;
 	if (s_gl.ssao_pipe.prog) ready++;
@@ -1757,6 +1784,10 @@ static void gl_prewarm_pipelines(void)
 				glBindFramebuffer(GL_FRAMEBUFFER, s_gl.cloud_fbo);
 			glActiveTexture(GL_TEXTURE0 + 5);
 			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0 + 7);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
+			glActiveTexture(GL_TEXTURE0 + 8);
+			glBindTexture(GL_TEXTURE_2D, dummy_rgba);
 			glActiveTexture(GL_TEXTURE0 + 13);
 			glBindTexture(GL_TEXTURE_2D, s_gl.noise2d_tex ? s_gl.noise2d_tex : dummy_rgba);
 			glActiveTexture(GL_TEXTURE0 + 15);
@@ -1772,9 +1803,17 @@ static void gl_prewarm_pipelines(void)
 			if (cvp->uCamUp >= 0)         glUniform3f(cvp->uCamUp, 0.0f, 1.0f, 0.0f);
 			if (cvp->uTanHalfAspect >= 0) glUniform2f(cvp->uTanHalfAspect, 0.5f, 1.333f);
 			if (cvp->uNearFar >= 0)       glUniform2f(cvp->uNearFar, 2.0f, 100000.0f);
-			if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 820.0f, 2820.0f, 6.0f, 2.0f);
+			if (cvp->uInvTorusScale >= 0) glUniform2f(cvp->uInvTorusScale, 1.0f, 1.0f);
+			if (cvp->uWthNearWin >= 0)    glUniform3f(cvp->uWthNearWin, 0.0f, 0.0f, -1.0f);
+			if (cvp->uWthFarWin >= 0)     glUniform3f(cvp->uWthFarWin, 0.0f, 0.0f, -1.0f);
+			if (cvp->uCloudWindDir >= 0)  glUniform2f(cvp->uCloudWindDir, 0.741f, -0.671f);
+			if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 720.0f, 3100.0f, 6.0f, 2.0f);
 			if (cvp->uSceneUvScale >= 0)  glUniform2f(cvp->uSceneUvScale, 1.0f, 1.0f);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
+			glActiveTexture(GL_TEXTURE0 + 8);
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glActiveTexture(GL_TEXTURE0 + 7);
+			glBindTexture(GL_TEXTURE_2D, 0);
 			glActiveTexture(GL_TEXTURE0 + 5);
 			glBindTexture(GL_TEXTURE_2D, 0);
 			glActiveTexture(GL_TEXTURE0);
@@ -2148,6 +2187,7 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 
 	if (s_gl.pipelines_ready) {
 		gl_render_cloud_shadow_map();
+		gl_render_cloud_weather_rings();
 		gl_prepare_tree_shadow_frame(tx, ty, tz, E, S, N);
 	} else {
 		s_gl.csm_valid = false;

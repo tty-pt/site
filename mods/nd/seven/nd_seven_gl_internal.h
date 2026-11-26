@@ -470,6 +470,30 @@ typedef struct {
 	GLint uHistoryValid;
 } gl_cloud_reproj_pipe_t;
 
+#define ND_CLOUD_WTH_RES    256
+#define ND_CLOUD_WTH_RINGS  2
+#define ND_CLOUD_WTH_HALF_0 32768.0f
+#define ND_CLOUD_WTH_HALF_1 262144.0f
+
+typedef struct {
+	GLuint prog;
+	GLuint pending_prog;
+	GLint uWthWin;
+	GLint uAnimTime;
+	GLint uSeaWet;
+	GLint uWthFw;
+} gl_cloud_wth_pipe_t;
+
+typedef struct {
+	GLuint tex;
+	GLuint fbo;
+	float cx, cy;
+	float half;
+	float rendered_time;
+	float rendered_wet;
+	bool valid;
+} gl_cloud_wth_ring_t;
+
 typedef struct {
 	GLuint prog;
 	GLuint pending_prog;
@@ -484,15 +508,20 @@ typedef struct {
 	GLint uZenith;
 	GLint uEyeLocal;
 	GLint uRefWorldXY;
+	GLint uInvTorusScale;
 	GLint uCurvature;
 	GLint uTorusEye;
 	GLint uTorusRadii;
 	GLint uBodyRot;
 	GLint uCloudParams;
+	GLint uWthNearWin;
+	GLint uWthFarWin;
+	GLint uCloudWindDir;
 	GLint uSceneUvScale;
 	GLint uSeaLevel;
 	GLint uSceneDepthTex;
-	GLint uCloudShadowMap;
+	GLint uCloudWthNear;
+	GLint uCloudWthFar;
 	GLint uNoise2DTex;
 	GLint uCloudShape3D;
 } gl_cloud_vol_pipe_t;
@@ -611,12 +640,15 @@ typedef struct {
 	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipes[ND_CLOUD_VAR_COUNT];
 	gl_cloud_vol_pipe_t cloud_vol_pipe;
+	gl_cloud_wth_pipe_t cloud_wth_pipe;
 	gl_cloud_comp_pipe_t cloud_comp_pipe;
 	gl_cloud_reproj_pipe_t cloud_reproj_pipe;
 	gl_csm_pipe_t csm_pipe;
 	gl_ssao_pipe_t ssao_pipe;
 	gl_bloom_pipe_t bloom_pipe;
 	gl_post_pipe_t post_pipe;
+	gl_cloud_wth_ring_t cloud_wth_rings[ND_CLOUD_WTH_RINGS];
+	bool cloud_wth_failed;
 	GLuint csm_tex;
 	GLuint csm_fbo;
 	bool csm_failed;
@@ -916,6 +948,7 @@ void gl_flush_terrain_shadows_to_fbo(void);
 GLuint gl_ensure_tree_shadow_dummy(void);
 void gl_bind_tree_shadow_read(GLint uTex);
 void gl_render_cloud_shadow_map(void);
+void gl_render_cloud_weather_rings(void);
 void gl_bind_csm(GLint loc_tex);
 void gl_reset_billboard_frame_state(void);
 bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,

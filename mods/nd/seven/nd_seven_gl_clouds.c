@@ -581,9 +581,14 @@ void nd_seven_gl_flush_clouds(void)
 		const gl_cloud_vol_pipe_t *cvp = &s_gl.cloud_vol_pipe;
 		glUseProgram(cvp->prog);
 
+		const gl_cloud_wth_ring_t *r0 = &s_gl.cloud_wth_rings[0];
+		const gl_cloud_wth_ring_t *r1 = &s_gl.cloud_wth_rings[1];
 		glActiveTexture(GL_TEXTURE0 + 5);
 		glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
-		gl_bind_csm(-1);
+		glActiveTexture(GL_TEXTURE0 + 7);
+		glBindTexture(GL_TEXTURE_2D, r0->valid ? r0->tex : 0);
+		glActiveTexture(GL_TEXTURE0 + 8);
+		glBindTexture(GL_TEXTURE_2D, r1->valid ? r1->tex : 0);
 		glActiveTexture(GL_TEXTURE0 + 13);
 		glBindTexture(GL_TEXTURE_2D, s_gl.noise2d_tex);
 		glActiveTexture(GL_TEXTURE0 + 15);
@@ -601,6 +606,27 @@ void nd_seven_gl_flush_clouds(void)
 		float cv0 = s_gl.cur_ref_trig[2];
 		float kappa_e = cv0 / fmaxf(1.0f, major_r + minor_r * cv0);
 		float kappa_s = 1.0f / fmaxf(1.0f, minor_r);
+		float torus_sx = (TWO_PI_F * fmaxf(1.0f, major_r + minor_r * cv0)) / (float)ND_SEVEN_WORLD_DIM_W;
+		float torus_sy = (TWO_PI_F * fmaxf(1.0f, minor_r)) / (float)ND_SEVEN_WORLD_DIM_H;
+		float inv_torus_sx = 1.0f / fmaxf(0.05f, torus_sx);
+		float inv_torus_sy = 1.0f / fmaxf(0.05f, torus_sy);
+
+		/* Evaluate exact synoptic wind direction once per frame (mirrors chaff_eval_synoptic_flow_2d) */
+		float t_flow_raw = s_gl.cur_anim_time * 0.005f;
+		float t_flow = t_flow_raw - 1024.0f * floorf(t_flow_raw / 1024.0f);
+		float psi0_v = 0.0f, psi0_gx = 0.0f, psi0_gy = 0.0f;
+		gl_chaff_grad_noise2d(s_gl.cur_tx * 0.00000042f - 0.741f * (t_flow * 0.40f),
+		                      s_gl.cur_ty * 0.00000042f + 0.671f * (t_flow * 0.40f),
+		                      0x4359434Cu, &psi0_v, &psi0_gx, &psi0_gy);
+		float psi1_v = 0.0f, psi1_gx = 0.0f, psi1_gy = 0.0f;
+		gl_chaff_grad_noise2d(s_gl.cur_tx * 0.00000180f - psi0_gy * 0.30f - 0.741f * t_flow,
+		                      s_gl.cur_ty * 0.00000180f + psi0_gx * 0.30f + 0.671f * t_flow,
+		                      0x5354524Du, &psi1_v, &psi1_gx, &psi1_gy);
+		float wd_x =  0.741f - psi0_gy * 0.48f - psi1_gy * 0.28f;
+		float wd_y = -0.671f + psi0_gx * 0.48f + psi1_gx * 0.28f;
+		float wd_inv = 1.0f / sqrtf(wd_x * wd_x + wd_y * wd_y + 1e-6f);
+		wd_x *= wd_inv;
+		wd_y *= wd_inv;
 
 		bool has_rot = (s_gl.cur_pdef.rot[0] != 0.0f || s_gl.cur_pdef.rot[4] != 0.0f || s_gl.cur_pdef.rot[8] != 0.0f);
 		float body_rot[16] = {
@@ -624,7 +650,7 @@ void nd_seven_gl_flush_clouds(void)
 			torus_eye[2] = (float)dz;
 		}
 
-		float view_steps  = (cq <= ND_CLOUD_QUALITY_LOW) ? 14.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 22.0f : 30.0f);
+		float view_steps  = (cq <= ND_CLOUD_QUALITY_LOW) ? 18.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 26.0f : 36.0f);
 		float light_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f  : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f  : 4.0f);
 
 		if (cvp->uCamFwd >= 0)        glUniform3f(cvp->uCamFwd, s_gl.cur_cam_fwd[0], s_gl.cur_cam_fwd[1], s_gl.cur_cam_fwd[2]);
@@ -638,16 +664,22 @@ void nd_seven_gl_flush_clouds(void)
 		if (cvp->uZenith >= 0)        glUniform3f(cvp->uZenith, s_gl.cur_N[0], s_gl.cur_N[1], s_gl.cur_N[2]);
 		if (cvp->uEyeLocal >= 0)      glUniform3f(cvp->uEyeLocal, eye_local[0], eye_local[1], eye_local[2]);
 		if (cvp->uRefWorldXY >= 0)    glUniform2f(cvp->uRefWorldXY, s_gl.cur_tx, s_gl.cur_ty);
+		if (cvp->uInvTorusScale >= 0) glUniform2f(cvp->uInvTorusScale, inv_torus_sx, inv_torus_sy);
 		if (cvp->uCurvature >= 0)     glUniform2f(cvp->uCurvature, kappa_e, kappa_s);
 		if (cvp->uTorusEye >= 0)      glUniform3f(cvp->uTorusEye, torus_eye[0], torus_eye[1], torus_eye[2]);
 		if (cvp->uTorusRadii >= 0)    glUniform2f(cvp->uTorusRadii, major_r, minor_r);
 		if (cvp->uBodyRot >= 0)       glUniformMatrix4fv(cvp->uBodyRot, 1, GL_FALSE, body_rot);
 		if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 720.0f, 3100.0f, view_steps, light_steps);
+		if (cvp->uWthNearWin >= 0)    glUniform3f(cvp->uWthNearWin, r0->cx, r0->cy, r0->valid ? r0->half : -1.0f);
+		if (cvp->uWthFarWin >= 0)     glUniform3f(cvp->uWthFarWin,  r1->cx, r1->cy, r1->valid ? r1->half : -1.0f);
+		if (cvp->uCloudWindDir >= 0)  glUniform2f(cvp->uCloudWindDir, wd_x, wd_y);
 		if (cvp->uSceneUvScale >= 0)  glUniform2f(cvp->uSceneUvScale, suvx, suvy);
 		if (cvp->uSeaLevel >= 0)      glUniform1f(cvp->uSeaLevel, s_gl.cur_base_sea_level);
 
 		glDrawArrays(GL_TRIANGLES, 0, 3);
 
+		glActiveTexture(GL_TEXTURE0 + 8);
+		glBindTexture(GL_TEXTURE_2D, 0);
 		glActiveTexture(GL_TEXTURE0 + 7);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glActiveTexture(GL_TEXTURE0 + 5);
