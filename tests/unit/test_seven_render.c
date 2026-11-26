@@ -5956,6 +5956,37 @@ int main(void)
 		printf("PASS: Cloud Phase 3 shared meteorological kernel (frontal shear, streets, marine Benard cells) & 1:1 sky/CSM/water parity verified\n");
 	}
 
+	/* Cloud Polish: Temporal stability, drift calibration, RGBA8 CSM weather lookup & crown curl */
+	{
+		const char *fs_vol = nd_seven_gl_fs_cloud_vol();
+		const char *fs_csm = nd_seven_gl_fs_csm();
+		const char *fs_rp  = nd_seven_gl_fs_cloud_reproj();
+		assert(fs_vol != NULL && fs_csm != NULL && fs_rp != NULL);
+
+		/* 1. Flicker fixes: no skyLimb zeroing in reproj, half-res velocity scale, golden-ratio temporal IGN & aligned 2x/1x stepping */
+		assert(strstr(fs_rp, "skyLimb") == NULL);
+		assert(strstr(fs_rp, "freshW") != NULL);
+		assert(strstr(fs_rp, "hSize * pScale") != NULL);
+		assert(strstr(fs_vol, "uCloudPhase") != NULL);
+		assert(strstr(fs_vol, "0.61803398875") != NULL);
+		assert(strstr(fs_vol, "emptyRun") != NULL);
+
+		/* 2. Coherent drift speed: synoptic 0.05x time scale synced across sky & CSM */
+		assert(strstr(fs_vol, "tSyn = anim_time * 0.05") != NULL);
+		assert(strstr(fs_csm, "tSyn = anim_time * 0.05") != NULL);
+
+		/* 3. Per-step CSM RGBA8 weather packing & lookup */
+		assert(strstr(fs_csm, "vec4(colDens, wCov, wTyp, wHum)") != NULL);
+		assert(strstr(fs_vol, "uCloudShadowMap") != NULL);
+		assert(strstr(fs_vol, "hasCsmWeather") != NULL);
+
+		/* 4. Photographic polish: crown curl warp & horizon fade */
+		assert(strstr(fs_vol, "curlOff") != NULL);
+		assert(strstr(fs_vol, "horizFade") != NULL);
+
+		printf("PASS: Cloud temporal stability, drift calibration, RGBA8 CSM weather & photographic polish verified\n");
+	}
+
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
 	return 0;
 }

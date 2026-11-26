@@ -586,6 +586,7 @@ void nd_seven_gl_flush_clouds(void)
 
 		glActiveTexture(GL_TEXTURE0 + 5);
 		glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);
+		gl_bind_csm(-1);
 		glActiveTexture(GL_TEXTURE0 + 13);
 		glBindTexture(GL_TEXTURE_2D, s_gl.noise2d_tex);
 		glActiveTexture(GL_TEXTURE0 + 15);
@@ -635,6 +636,7 @@ void nd_seven_gl_flush_clouds(void)
 		if (cvp->uTanHalfAspect >= 0) glUniform2f(cvp->uTanHalfAspect, s_gl.cur_tan_half, s_gl.cur_aspect);
 		if (cvp->uNearFar >= 0)       glUniform2f(cvp->uNearFar, s_gl.cur_near, s_gl.cur_far);
 		if (cvp->uCloudJitter >= 0)   glUniform2f(cvp->uCloudJitter, jx, jy);
+		if (cvp->uCloudPhase >= 0)    glUniform1i(cvp->uCloudPhase, (GLint)(s_gl.cloud_phase & 0xFFFFu));
 		if (cvp->uEast >= 0)          glUniform3f(cvp->uEast, s_gl.cur_E[0], s_gl.cur_E[1], s_gl.cur_E[2]);
 		if (cvp->uSouth >= 0)         glUniform3f(cvp->uSouth, s_gl.cur_S[0], s_gl.cur_S[1], s_gl.cur_S[2]);
 		if (cvp->uZenith >= 0)        glUniform3f(cvp->uZenith, s_gl.cur_N[0], s_gl.cur_N[1], s_gl.cur_N[2]);
@@ -650,6 +652,8 @@ void nd_seven_gl_flush_clouds(void)
 
 		glDrawArrays(GL_TRIANGLES, 0, 3);
 
+		glActiveTexture(GL_TEXTURE0 + 7);
+		glBindTexture(GL_TEXTURE_2D, 0);
 		glActiveTexture(GL_TEXTURE0 + 5);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		glActiveTexture(GL_TEXTURE0);

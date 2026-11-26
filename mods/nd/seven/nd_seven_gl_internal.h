@@ -479,6 +479,7 @@ typedef struct {
 	GLint uTanHalfAspect;
 	GLint uNearFar;
 	GLint uCloudJitter;
+	GLint uCloudPhase;
 	GLint uEast;
 	GLint uSouth;
 	GLint uZenith;

@@ -1073,7 +1073,7 @@ static bool gl_ensure_csm_target(void)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, ND_CSM_RES, ND_CSM_RES, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ND_CSM_RES, ND_CSM_RES, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	s_gl.csm_fbo = glCreateFramebuffer();
 	glBindFramebuffer(GL_FRAMEBUFFER, s_gl.csm_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_gl.csm_tex, 0);
@@ -1120,9 +1120,10 @@ static float gl_eval_synoptic_front_cpu(float wx, float wy, float anim_time, flo
 {
 	const float prevDirX = 0.741f, prevDirY = -0.671f;
 	const float prevPerpX = 0.671f, prevPerpY = 0.741f;
-	float tFlow = gl_wrap1024(anim_time * 0.005f);
-	float phase0 = gl_wrap1024(anim_time * 0.004f);
-	float phase1 = gl_wrap1024(anim_time * 0.008f);
+	float tSyn = anim_time * 0.05f;
+	float tFlow = gl_wrap1024(tSyn * 0.005f);
+	float phase0 = gl_wrap1024(tSyn * 0.004f);
+	float phase1 = gl_wrap1024(tSyn * 0.008f);
 
 	float psi0_v = 0.5f, psi0_gx = 0.0f, psi0_gy = 0.0f;
 	gl_chaff_grad_noise2d(wx * 0.00000042f - prevDirX * (tFlow * 0.40f),
@@ -1184,7 +1185,7 @@ bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,
 		return true;
 
 	if (wReg2 > 0.001f) {
-		float phase2 = gl_wrap1024(anim_time * 0.015f);
+		float phase2 = gl_wrap1024(anim_time * 0.05f * 0.015f);
 		float p2x =  0.28f * wx + 0.96f * wy + warp_x * 0.14f;
 		float p2y = -0.96f * wx + 0.28f * wy + warp_y * 0.14f;
 		float oct2_v = 0.5f, oct2_gx = 0.0f, oct2_gy = 0.0f;
