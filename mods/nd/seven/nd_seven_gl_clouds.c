@@ -592,6 +592,10 @@ void nd_seven_gl_flush_clouds(void)
 	glTimerBegin(ND_GPU_PASS_CLOUDS);
 
 	/* Bind shared textures once before command-ring chunk dispatch (sampler units bound at link time) */
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.substrate_array);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.height_array);
 	gl_bind_csm(-1);
 	if (s_gl.cur_dist < 6000.0f) {
 		glActiveTexture(GL_TEXTURE0 + 9);
@@ -706,11 +710,8 @@ void nd_seven_gl_flush_clouds(void)
 		}
 		GLsizei c_indices = want_hi ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES_MACRO;
 
-		lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE0);
-		lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, chk->substrate_tex);
-
-		lam_gl_cmd_active_texture(&s_gl.cmd_buf, GL_TEXTURE1);
-		lam_gl_cmd_bind_texture(&s_gl.cmd_buf, GL_TEXTURE_2D, chk->height_tex);
+		if (cp->uChunkLayer >= 0)
+			lam_gl_cmd_uniform1f(&s_gl.cmd_buf, cp->uChunkLayer, (float)chk->slot_layer);
 
 		/* Hoist per-planet transforms per cloud variant across chunks sharing the same celestial body */
 		if (!var_body_valid[want_var] ||

@@ -5397,7 +5397,9 @@ int main(void)
 		assert(strstr(nd_seven_gl_fs_water(), "uRiverTex") != NULL);
 		assert(strstr(nd_seven_gl_fs_terrain_dry_near(), "isampler2D") == NULL);
 		assert(strstr(nd_seven_gl_fs_terrain_dry_near(), "#define ND_TERRAIN_DRY_ONLY") != NULL);
-		assert(strstr(nd_seven_gl_fs_terrain(), "#ifndef ND_TERRAIN_DRY_ONLY\nuniform sampler2D uRiverTex;") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "uniform sampler2DArray uHeightTex;") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "uniform sampler2DArray uSubstrateTex;") != NULL);
+		assert(strstr(nd_seven_gl_fs_terrain(), "#ifndef ND_TERRAIN_DRY_ONLY\nuniform sampler2DArray uRiverTex;") != NULL);
 		assert(strstr(nd_seven_gl_fs_terrain_seabed_near(), "uRiverTex") != NULL);
 
 		printf("PASS: Phase 6B Piece 1 pre-baked GL_RGBA16F height+derived & premultiplied river parity verified\n");

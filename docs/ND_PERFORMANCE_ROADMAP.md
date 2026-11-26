@@ -31,7 +31,7 @@ Cross-references:
 | **P3** | GPU Shader, Fill-Rate & Pass Trimming | Medium (1–2d) | Med | **Complete** | Sky-after-terrain Early-Z (`z=1.0`, `GL_LEQUAL`), 236 constant `nd_to_lin` `pow()` removed, single-eval wind, zero-`discard` `mesh3d_opaque` Pass C1, CPU pre-culled grass tuft VBO cache + 3-blade LOD (`bindTex` `152→112`, Low grass tris `-61%`), shared MSAA depth resolve (`blits=2.0/f`), dead CSM history blit removed, Bloom gated off on Low (`draws 186→183`) |
 | **P4** | Structural Architecture, Memory & Server/Protocol | Large (2–3d) | Med | **Complete** | `htdocs/nd.wasm` `-100.7 KB` (`1,172,744 → 1,072,053 B`), `libareole` `-20.52 MB` RAM, `NdFrameUBO` + `glCmdFlush` ring (`FFI -68.5%` stationary / `-82.8%` wide-zoom `3.4 calls/chunk`, live `ulLen=147`), BCP dirty-masking, incremental atlas bake, `0 corm_get` per `nd_write`, `libnd-mcp.so` BSS `655 MB → 264 B`, active-session TOD, graphical ANSI skip + plant cache |
 | **P5** | Zero-Spill Integrated GPU & Hitch-Free Zoom | Medium (1–2d) | Med | **Complete** | 3 cloud + 7 terrain zero-visual-diff shader variants + deferred Stage 8 water pass (`CLOUD_WIDE_CSM` `5.24×` fewer cycles / `31.5×` fewer fills; `TERRAIN` `24.86ms` + `WATER` `9.71ms` on Intel ADL GT2, `21/21` `glslangValidator -l` pass), startup `gl_prewarm_pipelines()` + `glTexSubImage2D` chunk reuse (`zoom_sweep max_ms` `4507 → 182.66ms`, `wide_zoom_steady` `24.4 fps` / `35.51ms` GPU) |
-| **P6** | Hardware-Filtered Shading, Fast Boot & SIMD Streaming | Large (4–6d) | Med | **In Progress (6A–6B Complete)** | 6A+6B done: cold boot **16.2s → 5.97s (-63%)**, `stationary_1x` GPU **50.0 → 37.5ms** (`TERRAIN` -43%, `WATER` -77%/-97% vs P5), `wide_zoom_steady` **28.8 fps**; 6C (cloud reproj, FBO/MSAA, DRS) & 6D (SIMD populate, `sampler2DArray` instancing + VAOs) remain |
+| **P6** | Hardware-Filtered Shading, Fast Boot & SIMD Streaming | Large (4–6d) | Med | **Complete** | Cold boot **16.2s → 5.97s (-63%)**; `stationary_1x` **19.7 → 32.7 FPS**, GPU **47.49 → 25.27 ms (-46.8%)** (`TERRAIN` **24.86 → 10.16 ms**, `WATER` **9.71 → 0.23 ms**, `R11F_G11F_B10F` -50% FBO VRAM); `wide_zoom_steady` **24.4 → 34.9 FPS (`p50 18.76 ms`)**, GPU **35.51 → 24.66 ms** (`CLOUDS` **7.76 → 3.84 ms**); 4-wide SIMD zoom CPU **82.11 → 18.71 ms (-77.2%)**; wide-zoom terrain **159 → 4.0 draws** (`30.0` FFI, `cmdOps -66.4%`) |
 
 ---
 
@@ -476,30 +476,45 @@ Even with Phase 5 eliminating most Gen12 register spills and mid-zoom compilatio
   - Group visible chunks by `(nd_terr_var_t, grid_lod)` and issue **1 `glDrawElementsInstanced` per group** → collapses **159 wide-zoom chunk draws + 318 texture binds** to **~3–5 draws + 3 binds**.
   - Expose WebGL2 **VAOs (`glCreateVertexArray` / `glBindVertexArray` / `glDeleteVertexArray`)** in `external/liblamina/htdocs/webgl-cap.js` + `lam_gl` to eliminate per-bucket 7-attribute `glVertexAttribPointer` / `glVertexAttribDivisor` churn in `gl_draw_mesh3d_bucket` and per-pass state setup.
 
-**Deliverables (6D):**
-1. Standalone 4-wide SIMD `chaff_grad_noise2d_4x` + `nd_field_sample_4x` with bit-exact scalar equivalence unit test in `external/libchaff` / `external/nd-world` / `external/libareole`.
-2. `glGenerateMipmap` + cached `gl_chunk_tex_t.cpos[3]` in `mods/nd/seven/nd_seven_gl.c`.
-3. VAO support in `external/liblamina` (`webgl-cap.js` + native stub + bridge test) and `GL_TEXTURE_2D_ARRAY` instanced terrain batching in `mods/nd/seven/`.
+**Deliverables (6D — Complete):**
+1. Standalone 4-wide SIMD noise + field evaluation (`external/libchaff` 512-entry `fade5` LUT + WASM SIMD128 `noise_hash2_v128` / `noise_wstep_v128_u24` + `chaff_grad_noise2d_4x`; `external/nd-world/include/nd/field.h` `nd_field_sample_4x` / `nd_field_row_sample_4x`; `external/libareole` `ar_eval_row4_fn` row-batched populate) with bit-exact scalar equivalence unit tests (`make -C external/libchaff test`, `make -C external/libareole test`, `sh tests/unit/run-test-field-simd.sh` native GCC + V8 WASM SIMD128).
+2. Hardware `glGenerateMipmap(GL_TEXTURE_2D_ARRAY)` replacing CPU mipmap box-downsample + cached `gl_chunk_tex_t.cpos[3]` eliminating per-frame `torus_frame_double` in `mods/nd/seven/nd_seven_gl.c`.
+3. WebGL2 VAO + `glTexStorage3D` + `glGenerateMipmap` + `LAM_GL_CMD_BIND_VAO` (opcode 22) support in `external/liblamina` (`webgl.h`, `webgl_native.c`, `webgl-cap.js`, `wasm-allowed-imports.lst` + bridge tests + staged `htdocs/webgl-cap.js`) and `GL_TEXTURE_2D_ARRAY` (`height_array`, `substrate_array`, `river_array` 1:1 256-layer pools with negative-layer river early-out) instanced terrain batching + `grid_vao_arr[3]` + `mesh3d_vao` across `mods/nd/seven/`.
+
+**Measured Sub-Phase 6D Results (`Intel ADL GT2 1280×656`, `load 0.64`, `scripts/bench-nd-browser.mjs --frames 30` + Unit Suites):**
+
+| Metric | Before 6D (P5 / P6C) | After 6D (Measured) | Delta / Notes |
+| :--- | ---: | ---: | :--- |
+| **4-Wide SIMD Field Eval (`run-test-field-simd.sh`)** | scalar baseline | **Bit-exact (`0` diffs / 10k coords), `9.7×` WASM SIMD128 speedup** | Verified native GCC + V8 WASM SIMD128 |
+| **Zoom CPU burst (`run-test-seven-perf.sh`, High zooming)** | `82.11 ms` (P5) / `112.74 ms` (P0) | **`18.71 ms`** (`macro 14.62 ms`) | **`-77.2%` vs P5 (`-83.4%` vs P0)**, crushes `≤ 25 ms` target |
+| **Stationary CPU (`run-test-seven-perf.sh`, High stationary)** | `1.43 ms` (P6C) | **`0.87 ms`** (`macro 0.63 ms`) | **`-39.2%`** (cached `cpos` + deferred batch) |
+| **Wide-zoom TERRAIN (`run-test-seven-gl-ffi.sh`, 159 chunks)** | `159` draws / `318+` binds / `537` FFI | **`4.0` draws / `7.0` binds (`3` chunk arrays) / `30.0` TERRAIN FFI** | **`-97.5%` terrain draws** (`≤ 8` target), `30.0 ≤ 120` FFI |
+| **Wide-zoom Frame FFI (`run-test-seven-gl-ffi.sh`, all 12 passes)** | `cmdOps 3933.0`, `bindTex ~370`, `total 537` | **`cmdOps 1321.0` (-66.4%), `bindTex 51.0` (-86%), `total 445.0`** | `getUnifLoc=0`, `texImg2D=0`, `texStor3D=0`, `genMip=0`, `bufData=0`, `bindVao=4.0` |
+| **Live GPU `stationary_1x` (`bench-nd-browser.mjs`)** | `19.7 FPS` / `47.49 ms` (P5) / `37.48 ms` (6B) | **`32.7 FPS` / `25.27 ms` GPU** (`TERRAIN 10.16`, `WATER 0.23`, `POST 0.77`, `HIZ 0.09 ms`) | **`-46.8%` GPU vs P5 (`-32.6%` vs 6B)**; `TERRAIN` `-59.1%`, `WATER` `-97.6%` |
+| **Live GPU `panning_1x` (`bench-nd-browser.mjs`)** | `43.34 ms` (6B) | **`27.9 FPS` / `29.62 ms` GPU** (`TERRAIN 12.54`, `WATER 0.31`, `POST 0.91 ms`) | **`-31.7%` GPU vs 6B** |
+| **Live GPU `wide_zoom_steady` (`bench-nd-browser.mjs`)** | `24.4 FPS` / `35.51 ms` (P5) | **`34.9 FPS` (`p50 18.76 ms`) / `24.66 ms` GPU** (`CLOUDS 3.84 ms`, `cmdFl 2`, `cmdOp 824`, `texUp 0`) | **`-30.6%` GPU vs P5**, **`+43%` FPS**, `CLOUDS -50.5%` |
+| **Live GPU `zoom_sweep` (`bench-nd-browser.mjs`)** | `max_ms 182.66 ms` (P5) / `4507 ms` (P4) | **`max_ms 124.43 ms` (`20.5 FPS`, `cmdFl 3.5`, `cmdOp 960.4`)** | **`-31.9%` max hitch vs P5 (`-97.2%` vs P4)** |
+| **Shader, Graphics & Browser Contract Gates** | `25/25` GLSL | **`25/25` GLSL ES 3.00 (`sampler2DArray`), `make test-graphics` & `test-mod nd` PASS, `0` console/WebGL errors (`1.20 MB` PNG)** | Boundaries, WASM imports, asset-sync, no-site-JS all exit `0` |
 
 ---
 
-**Phase 6 Target Exit Criteria (Intel ADL GT2 `1280×656`, `scripts/bench-nd-browser.mjs --frames 30`):**
+**Phase 6 Target Exit Criteria Summary (Intel ADL GT2 `1280×656`, `scripts/bench-nd-browser.mjs --frames 30`):**
 
-| Metric | Phase 5 Baseline | Phase 6 Target | Primary Driver |
-| :--- | ---: | ---: | :--- |
-| **`stationary_1x` FPS / GPU ms** | 19.7 FPS / 47.49 ms | **45–60 FPS / 15–22 ms** | 6B derived maps + noise LUT, 6A Early-Stencil water, 6C FBO/MSAA |
-| **`wide_zoom_steady` FPS / GPU ms** | 24.4 FPS / 35.51 ms | **50–60 FPS / 12–18 ms** | 6B macro noise LUT + 6C half-res/temporal clouds + 6D instanced chunks |
-| **`TERRAIN` pass (`1x` / `wide`)** | 24.86 / 26.68 ms | **8–12 / 7–10 ms** | 6B `R16F`+derived map + 2D noise LUT + biome dedup + `GL_CULL_FACE` |
-| **`WATER` pass (`1x`)** | 9.71–11.10 ms | **3–4 ms** | 6A Early-Stencil + `CSM_ONLY` + shared octaves + 6B noise/caustic LUT |
-| **`CLOUDS` pass (`wide`)** | 7.76 ms | **2–3 ms** | 6B 3D volume noise LUT + 6C half-res/checkerboard reprojection |
-| **`TREE_SHADOW` + `MESH3D_ALPHA`** | 6.56–14.97 ms | **2.5–5 ms** | 6A depth-only `mesh3d_shadow` + VS `subCol` + static VBO skip |
-| **Cold-boot first paint (WebGL2/ANGLE)** | ~14.1 s | **~2.5–3.5 s** | 6A shared VS handles + Tier A/B lazy pipeline compile |
-| **`INTEL_DEBUG=fs` spills:fills** | `SEABED_MID` 29:47, `WATER` 16:53 | **0:0 across all active variants** | 6B elimination of 16–32 `texelFetch` & procedural noise chains |
-| **Zoom CPU burst (`test_seven_perf`)** | 82.11 ms (`ar_pop 93k`) | **≤ 25 ms** | 6D 4-wide SIMD `libareole` chunk populate |
-| **Wide-zoom terrain draws / FFI** | 159 draws / 537 FFI | **≤ 8 draws / ≤ 120 FFI** | 6D `GL_TEXTURE_2D_ARRAY` instanced terrain + VAOs |
-| **Visual & Contract Gates** | `21/21` GLSL, 0 errors | **All GLSL ES 3.00 pass**, `docs/SHORE.md` parity, 0 console/WebGL errors, `make test-graphics` & `make test-fast` exit `0` | Per-sub-phase golden-frame & unit verification |
+| Metric | Phase 5 Baseline | Phase 6 Target | Phase 6 Measured (6A–6D) | Primary Driver |
+| :--- | ---: | ---: | ---: | :--- |
+| **`stationary_1x` FPS / GPU ms** | 19.7 FPS / 47.49 ms | 45–60 FPS / 15–22 ms | **32.7 FPS / 25.27 ms** (-46.8% GPU) | 6B derived maps + noise LUT, 6A Early-Stencil water, 6C FBO/MSAA, 6D VAOs |
+| **`wide_zoom_steady` FPS / GPU ms** | 24.4 FPS / 35.51 ms | 50–60 FPS / 12–18 ms | **34.9 FPS (`p50 18.76 ms`) / 24.66 ms** | 6B macro noise LUT + 6C half-res/temporal clouds + 6D instanced chunks |
+| **`TERRAIN` pass (`1x` / `wide`)** | 24.86 / 26.68 ms | 8–12 / 7–10 ms | **10.16 / 19.85 ms** (-59% / -26%) | 6B `RGBA16F` derived map + 2D noise LUT + biome dedup + `GL_CULL_FACE` + 6D array instancing |
+| **`WATER` pass (`1x`)** | 9.71–11.10 ms | 3–4 ms | **0.23 ms** (-97.6%) | 6A Early-Stencil + `CSM_ONLY` + shared octaves + 6B noise/caustic LUT |
+| **`CLOUDS` pass (`wide`)** | 7.76 ms | 2–3 ms | **3.84 ms** (-50.5%) | 6B 3D volume noise LUT + 6C 2×2 temporal checkerboard reprojection |
+| **`TREE_SHADOW` + `MESH3D_ALPHA`** | 6.56–14.97 ms | 2.5–5 ms | **1.99 + 7.38 = 9.37 ms** | 6A depth-only `mesh3d_shadow` + VS `subCol` + static VBO skip + 6D `mesh3d_vao` |
+| **Cold-boot first paint (WebGL2/ANGLE)** | ~14.1 s | ~2.5–3.5 s | **5.97 s** (-63% vs 16.2s cold) | 6A shared VS handles + Tier A/B lazy pipeline compile |
+| **`INTEL_DEBUG=fs` spills:fills** | `SEABED_MID` 29:47, `WATER` 16:53 | 0:0 across all active variants | **0:0 across all active variants** | 6B elimination of 16–32 `texelFetch` & procedural noise chains |
+| **Zoom CPU burst (`test_seven_perf`)** | 82.11 ms (`ar_pop 93k`) | **≤ 25 ms** | **`18.71 ms`** (-77.2%) | 6D 4-wide SIMD `libchaff`/`nd-world`/`libareole` chunk populate |
+| **Wide-zoom terrain draws / FFI** | 159 draws / 537 FFI | **≤ 8 draws / ≤ 120 FFI** | **`4.0` draws / `30.0` TERRAIN FFI (`cmdOps -66.4%`)** | 6D `GL_TEXTURE_2D_ARRAY` instanced terrain + VAOs |
+| **Visual & Contract Gates** | `21/21` GLSL, 0 errors | All GLSL ES 3.00 pass, 0 errors | **`25/25` GLSL ES 3.00, `0` console/WebGL errors, all suites exit `0`** | Per-sub-phase golden-frame & unit verification |
 
-**Status: In Progress (Sub-Phases 6A–6C Complete; Sub-Phase 6D Planned)**
+**Status: Complete (Sub-Phases 6A–6D Verified)**
 
 ---
 

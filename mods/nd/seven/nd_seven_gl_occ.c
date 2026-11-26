@@ -486,12 +486,12 @@ bool gl_build_hiz_pyramid(void)
 		s_gl.hiz_prog_ready = true;
 	}
 
-	/* Resolve active terrain depth sub-rect into s_gl.res_depth_tex (level 0) */
+	/* Flush deferred terrain pass before resolving active depth sub-rect into s_gl.res_depth_tex (level 0) */
+	gl_end_terrain_pass();
 	uint32_t rw = (s_gl.render_w > 0 && s_gl.render_w <= s_gl.scene_w) ? s_gl.render_w : s_gl.scene_w;
 	uint32_t rh = (s_gl.render_h > 0 && s_gl.render_h <= s_gl.scene_h) ? s_gl.render_h : s_gl.scene_h;
 	gl_resolve_scene(GL_DEPTH_BUFFER_BIT);
 
-	gl_end_terrain_pass();
 	glTimerBegin(ND_GPU_PASS_HIZ);
 	glUseProgram(prog);
 	glDisable(GL_DEPTH_TEST);
@@ -873,10 +873,10 @@ void nd_seven_gl_end_frame(void)
 	float ssao_fade = (run_post && s_gl.ssao_pipe.prog && s_gl.ssao_fbo && s_gl.ssao_tex && s_gl.cur_dist <= 2200.0f)
 		? fminf(1.0f, fmaxf(0.0f, (2200.0f - s_gl.cur_dist) / 1000.0f))
 		: 0.0f;
+	gl_end_terrain_pass();
 	GLbitfield end_resolve_mask = GL_COLOR_BUFFER_BIT | ((ssao_fade > 0.001f) ? (GLbitfield)GL_DEPTH_BUFFER_BIT : 0u);
 	gl_resolve_scene(end_resolve_mask);
 	if (run_post) {
-		gl_end_terrain_pass();
 		glTimerBegin(ND_GPU_PASS_POST);
 		glDisableVertexAttribArray(0);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);

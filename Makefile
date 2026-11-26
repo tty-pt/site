@@ -361,7 +361,7 @@ GRAPHICS_UNIT_SCRIPTS = \
 	run-test-seven-gl-ffi.sh run-test-lod-zoom-consistency.sh \
 	run-test-ground-zoom-lod.sh run-test-viewport-registry.sh run-test-seven-stage-html.sh \
 	run-test-lamina-bridge.sh run-test-axil-ws-multiplex.sh run-test-torus-planetary-renderer.sh \
-	run-test-areole-chaff-occlusion.sh run-xylem-wasm.sh
+	run-test-areole-chaff-occlusion.sh run-test-field-simd.sh run-xylem-wasm.sh
 
 PAGES_TEST_SCRIPTS = \
 	10-pages-render.sh 20-song-search.sh 25-list-metadata.sh 26-binary-table-streaming.sh \

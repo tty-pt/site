@@ -1497,18 +1497,23 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		}
 	}
 
-	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO + instanced VBO (locations 3..9, divisor 1) */
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
-	for (GLuint a = 0; a < 3; a++) {
-		glEnableVertexAttribArray(a);
-		glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_mesh3d_vert_t), (size_t)(a * 16));
-		glVertexAttribDivisor(a, 0);
-	}
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
-	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
-	for (GLuint a = 3; a < 10; a++) {
-		glEnableVertexAttribArray(a);
-		glVertexAttribDivisor(a, 1);
+	/* Bind 3D Mega-VBO (locations 0..2, divisor 0) + Mega-IBO + instanced VBO (locations 3..10, divisor 1) */
+	if (s_gl.mesh3d_vao) {
+		glBindVertexArray(s_gl.mesh3d_vao);
+		glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
+	} else {
+		glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
+		for (GLuint a = 0; a < 3; a++) {
+			glEnableVertexAttribArray(a);
+			glVertexAttribPointer(a, 4, GL_FLOAT, GL_FALSE, sizeof(nd_mesh3d_vert_t), (size_t)(a * 16));
+			glVertexAttribDivisor(a, 0);
+		}
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
+		glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
+		for (GLuint a = 3; a < 10; a++) {
+			glEnableVertexAttribArray(a);
+			glVertexAttribDivisor(a, 1);
+		}
 	}
 
 	if (run_pass_a) {
@@ -1545,7 +1550,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 				if (!sl || sl->idx_count == 0) continue;
 
 				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(gl_mesh3d_inst_t);
-				for (GLuint a = 0; a < 7; a++) {
+				for (GLuint a = 0; a < 8; a++) {
 					lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
 					                             sizeof(gl_mesh3d_inst_t),
 					                             inst_base_bytes + (size_t)(a * 16));
@@ -1585,7 +1590,7 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 				if (!sl || sl->idx_count == 0) continue;
 
 				size_t inst_base_bytes = (size_t)s_mesh3d_offsets[m] * sizeof(gl_mesh3d_inst_t);
-				for (GLuint a = 0; a < 7; a++) {
+				for (GLuint a = 0; a < 8; a++) {
 					lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 3 + a, 4, GL_FLOAT, GL_FALSE,
 					                             sizeof(gl_mesh3d_inst_t),
 					                             inst_base_bytes + (size_t)(a * 16));
@@ -1601,9 +1606,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		gl_bind_scene_target();
 	}
 
-	/* Enable per-instance substrate RGB attribute (location 10) for main mesh3d VS (Pass B + Pass C) */
-	glEnableVertexAttribArray(10);
-	glVertexAttribDivisor(10, 1);
+	if (!s_gl.mesh3d_vao) {
+		/* Enable per-instance substrate RGB attribute (location 10) for main mesh3d VS (Pass B + Pass C) */
+		glEnableVertexAttribArray(10);
+		glVertexAttribDivisor(10, 1);
+	}
 
 	/* Bind main 3D mesh uniforms, foliage/bark textures, and read-side 3D directional shadow map */
 	gl_bind_mesh3d_pipe_uniforms(&s_gl.mesh3d_pipe, bb_sea_level, space_t, true);
@@ -1693,11 +1700,15 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 
 	glStencilMask(0xFF);
 	glDisable(GL_STENCIL_TEST);
-	for (GLuint a = 1; a < 11; a++) {
-		if (a >= 3) glVertexAttribDivisor(a, 0);
-		glDisableVertexAttribArray(a);
+	if (s_gl.mesh3d_vao) {
+		glBindVertexArray(0);
+	} else {
+		for (GLuint a = 1; a < 11; a++) {
+			if (a >= 3) glVertexAttribDivisor(a, 0);
+			glDisableVertexAttribArray(a);
+		}
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
 /* Single-pass frame staging accumulators: queue across all CPU scenery passes and flush ONCE/frame */

@@ -87,7 +87,12 @@ function makeGl(log) {
 		},
 		texSubImage2D: (...a) => log.push(['texSubImage2D', a[0], a[1], a[2], a[3], a[4], a[5], a[8] ? a[8].byteLength : 0, a[8] ? a[8].constructor.name : 'null']),
 		texImage3D: (...a) => log.push(['texImage3D', a[0], a[1], a[2], a[3], a[4], a[5], a[9] ? a[9].byteLength : 0, a[9] ? a[9].constructor.name : 'null']),
-		texSubImage3D: (...a) => log.push(['texSubImage3D', a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[10] ? a[10].byteLength : 0]),
+		texSubImage3D: (...a) => log.push(['texSubImage3D', a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[10] ? a[10].byteLength : 0, a[10] ? a[10].constructor.name : 'null']),
+		texStorage3D: (t, lvls, inf, w, h, d) => log.push(['texStorage3D', t, lvls, inf, w, h, d]),
+		generateMipmap: (t) => log.push(['generateMipmap', t]),
+		createVertexArray: () => mk('vao'),
+		deleteVertexArray: (v) => log.push(['deleteVao', v ? v.n : null]),
+		bindVertexArray: (v) => log.push(['bindVao', v ? v.n : null]),
 		renderbufferStorageMultisample: (t, s, f, w, h) => log.push(['rbStorageMS', s, f, w, h]),
 		framebufferRenderbuffer: (t, a, rt, r) => log.push(['fbRb', a, r ? r.n : null]),
 		framebufferTexture2D: (t, a, tt, tex, l) => log.push(['fbTex', a, tex ? tex.n : null, l]),
@@ -554,5 +559,85 @@ console.log('PASS: flat uint32 glCmdFlush command ring decoding & single-FFI bat
 	);
 	console.log('PASS: GL_TEXTURE_3D isolation/context-swap replay and GL_FLOAT glTexSubImage2D verified');
 }
+
+// WebGL2 VAOs (direct + ring opcode 22) + glTexStorage3D + glGenerateMipmap + context-swap replay.
+{
+	const vLog = [];
+	const vGl1 = makeGl(vLog);
+	const vGl2 = makeGl(vLog);
+	swapCanvas({ isConnected: true, getContext: () => vGl1 });
+	bridge.mount();
+
+	for (const name of ['glCreateVertexArray', 'glDeleteVertexArray', 'glBindVertexArray', 'glTexStorage3D', 'glGenerateMipmap']) {
+		assert.equal(typeof imp[name], 'function', name);
+	}
+
+	// Build a VAO with element buffer + per-vertex attrib 0 + instanced attrib 1.
+	const vbo = imp.glCreateBuffer();
+	const ibo = imp.glCreateBuffer();
+	const ivbo = imp.glCreateBuffer();
+	const vao = imp.glCreateVertexArray();
+	assert.ok(vao > 0, 'glCreateVertexArray returns positive handle');
+	imp.glBindVertexArray(vao);
+	imp.glBindBuffer(0x8893, ibo);
+	imp.glBufferData(0x8893, 0, 16, 0x88E4);
+	imp.glBindBuffer(0x8892, vbo);
+	imp.glBufferData(0x8892, 0, 32, 0x88E4);
+	imp.glEnableVertexAttribArray(0);
+	imp.glVertexAttribPointer(0, 2, 0x1406, 0, 8, 0);
+	imp.glBindBuffer(0x8892, ivbo);
+	imp.glBufferData(0x8892, 0, 48, 0x88E8);
+	imp.glEnableVertexAttribArray(1);
+	imp.glVertexAttribPointer(1, 4, 0x1406, 0, 48, 0);
+	imp.glVertexAttribDivisor(1, 1);
+	imp.glBindVertexArray(0);
+
+	// Test LAM_GL_CMD_BIND_VAO (opcode 22) via glCmdFlush ring buffer.
+	const cmdPtr = 4096;
+	const cmdU32 = new Uint32Array(memory.buffer, cmdPtr, 4);
+	cmdU32[0] = 22; cmdU32[1] = vao;
+	cmdU32[2] = 22; cmdU32[3] = 0;
+	vLog.length = 0;
+	imp.glCmdFlush(cmdPtr, 4);
+	assert.equal(vLog.filter((e) => e[0] === 'bindVao').length, 2, 'ring opcode 22 emits two bindVertexArray calls');
+	assert.ok(vLog[0][1] !== null && vLog[1][1] === null, 'ring opcode 22 binds VAO then unbinds to null');
+
+	// Allocate immutable GL_TEXTURE_2D_ARRAY via glTexStorage3D, upload layer 2, and generate mipmaps.
+	const arrTex = imp.glCreateTexture();
+	imp.glActiveTexture(0x84C0);
+	imp.glBindTexture(0x8C1A, arrTex);
+	imp.glTexStorage3D(0x8C1A, 4, 0x8058, 8, 8, 16);
+	new Uint8Array(memory.buffer, 5120, 256).fill(0xCC);
+	imp.glTexSubImage3D(0x8C1A, 0, 0, 0, 2, 8, 8, 1, 0x1908, 0x1401, 5120);
+	imp.glGenerateMipmap(0x8C1A);
+
+	// Also verify GL_HALF_FLOAT (0x140B) glTexSubImage3D passes Uint16Array.
+	const hfTex = imp.glCreateTexture();
+	imp.glBindTexture(0x8C1A, hfTex);
+	imp.glTexStorage3D(0x8C1A, 1, 0x822D, 4, 4, 8);
+	new Uint16Array(memory.buffer, 6144, 16).fill(0x3C00);
+	vLog.length = 0;
+	imp.glTexSubImage3D(0x8C1A, 0, 0, 0, 1, 4, 4, 1, 0x1903, 0x140B, 6144);
+	assert.ok(
+		vLog.some((e) => e[0] === 'texSubImage3D' && e[1] === 0x8C1A && e[9] === 32 && e[10] === 'Uint16Array'),
+		'GL_HALF_FLOAT glTexSubImage3D passes Uint16Array'
+	);
+
+	// Context swap: verify VAO state, glTexStorage3D + layer uploads, and glGenerateMipmap replay.
+	vLog.length = 0;
+	swapCanvas({ isConnected: true, getContext: () => vGl2 });
+	bridge.mount();
+	assert.ok(vLog.some((e) => e[0] === 'vap' && e[1] === 1 && e[2] === 4 && e[5] === 48), 'VAO attrib 1 replayed on context swap');
+	assert.ok(vLog.some((e) => e[0] === 'vad' && e[1] === 1 && e[2] === 1), 'VAO attrib 1 divisor replayed on context swap');
+	assert.ok(vLog.some((e) => e[0] === 'texStorage3D' && e[1] === 0x8C1A && e[2] === 4 && e[4] === 8 && e[6] === 16), 'glTexStorage3D replayed on context swap');
+	assert.ok(vLog.some((e) => e[0] === 'texSubImage3D' && e[1] === 0x8C1A && e[5] === 2 && e[9] === 256), 'glTexStorage3D layer 2 replayed on context swap');
+	assert.ok(vLog.some((e) => e[0] === 'generateMipmap' && e[1] === 0x8C1A), 'glGenerateMipmap replayed on context swap');
+
+	// Clean delete VAO.
+	imp.glDeleteVertexArray(vao);
+	assert.ok(vLog.some((e) => e[0] === 'deleteVao'), 'glDeleteVertexArray forwarded to GL');
+	console.log('PASS: WebGL2 VAOs (direct + ring opcode 22), glTexStorage3D, and glGenerateMipmap replay verified');
+}
+
 
 

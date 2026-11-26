@@ -205,6 +205,17 @@ static void seven_macro_chunk_row_sampler(void *user_ctx, uint16_t world, uint8_
 	}
 }
 
+static void seven_macro_chunk_eval_row4(void *user_ctx, uint16_t world, uint8_t level,
+                                        const int32_t wx[4], int32_t wy, ar_sample_t out[4])
+{
+	(void)user_ctx;
+	int16_t base_wl = nd_field_water_level(world);
+	nd_field_sample_t fs[4];
+	nd_field_sample_4x(world, 0, wx, wy, fs);
+	for (int k = 0; k < 4; k++)
+		seven_pack_field_sample(world, level, wx[k], wy, base_wl, &fs[k], &out[k]);
+}
+
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
@@ -215,6 +226,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.grid_dim = 48;
 		cfg.sampler = seven_macro_chunk_sampler;
 		cfg.row_sampler = seven_macro_chunk_row_sampler;
+		cfg.eval_row4 = seven_macro_chunk_eval_row4;
 		cfg.max_active = 160;
 		cfg.pool_capacity = 512;
 		cfg.max_levels = 17;

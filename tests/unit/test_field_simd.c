@@ -1,0 +1,164 @@
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <nd/field.h>
+
+static uint32_t s_rng = 0xD1B54A35u;
+static uint32_t next_u32(void)
+{
+	uint32_t x = s_rng;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	s_rng = x;
+	return x;
+}
+
+static void assert_sample_eq(const nd_field_sample_t *a, const nd_field_sample_t *b,
+                             const char *ctx, uint16_t world, int32_t step_q16,
+                             int32_t wx, int32_t wy)
+{
+	if (a->elevation != b->elevation ||
+	    a->elevation_q12_4 != b->elevation_q12_4 ||
+	    a->coarse_elev != b->coarse_elev ||
+	    a->fine_elev != b->fine_elev ||
+	    a->water_level != b->water_level ||
+	    a->depth != b->depth ||
+	    a->is_water != b->is_water ||
+	    a->temp != b->temp ||
+	    a->climate_temp != b->climate_temp ||
+	    a->rain != b->rain ||
+	    a->bio != b->bio ||
+	    a->bio2 != b->bio2 ||
+	    a->blend != b->blend ||
+	    a->river_carve_q4 != b->river_carve_q4) {
+		fprintf(stderr,
+		        "MISMATCH [%s] world=%u step=%d wx=%d wy=%d\n"
+		        "  scalar: elev=%d q12_4=%d coarse=%d fine=%d wl=%d depth=%d w=%u temp=%d ctemp=%d rain=%u bio=%u/%u blend=%u rv=%u\n"
+		        "  simd4x: elev=%d q12_4=%d coarse=%d fine=%d wl=%d depth=%d w=%u temp=%d ctemp=%d rain=%u bio=%u/%u blend=%u rv=%u\n",
+		        ctx, world, step_q16, wx, wy,
+		        a->elevation, a->elevation_q12_4, a->coarse_elev, a->fine_elev,
+		        a->water_level, a->depth, a->is_water, a->temp, a->climate_temp,
+		        a->rain, a->bio, a->bio2, a->blend, a->river_carve_q4,
+		        b->elevation, b->elevation_q12_4, b->coarse_elev, b->fine_elev,
+		        b->water_level, b->depth, b->is_water, b->temp, b->climate_temp,
+		        b->rain, b->bio, b->bio2, b->blend, b->river_carve_q4);
+		abort();
+	}
+}
+
+int main(void)
+{
+	printf("=== Testing nd/field.h 4-Wide SIMD Bit-Exactness ===\n");
+
+	/* 1. 10,000 random coordinates across multiple worlds, steps, negative coords, and torus seams */
+	const int32_t steps[] = {
+		0,
+		16 << 16,
+		128 << 16,
+		512 << 16,
+		2048 << 16,
+		8192 << 16
+	};
+	int water_hits = 0, river_hits = 0, high_hits = 0, seam_hits = 0;
+
+	for (int iter = 0; iter < 2500; iter++) {
+		uint16_t world = (uint16_t)(iter % 5);
+		int32_t step_q16 = steps[iter % (int)(sizeof(steps) / sizeof(steps[0]))];
+		int32_t wy;
+		int32_t wx[4];
+
+		if (iter < 200) {
+			/* Torus seam band: rx/ry near 32512..33023 (world units ~5,201,920..5,283,680) */
+			int32_t base_rx = 32500 + (int32_t)(next_u32() % 540u);
+			int32_t base_ry = 32500 + (int32_t)(next_u32() % 540u);
+			wy = (64 - base_ry * 128) + (int32_t)(next_u32() % 128u) - 64;
+			for (int k = 0; k < 4; k++) {
+				wx[k] = (base_rx + k) * 160 + (int32_t)(next_u32() % 160u);
+			}
+			seam_hits += 4;
+		} else if (iter < 1000) {
+			/* Coherent row stride (chunk vertices) */
+			wy = (int32_t)(next_u32() % 400000u) - 200000;
+			int32_t ox = (int32_t)(next_u32() % 400000u) - 200000;
+			int32_t dx = 1 + (int32_t)(next_u32() % 512u);
+			for (int k = 0; k < 4; k++)
+				wx[k] = ox + k * dx;
+		} else {
+			/* Fully random scattered X on same row (including negative & wrap extremes) */
+			wy = (int32_t)next_u32() >> 9;
+			for (int k = 0; k < 4; k++)
+				wx[k] = (int32_t)next_u32() >> 9;
+		}
+
+		nd_field_sample_t got[4];
+		nd_field_sample_4x(world, step_q16, wx, wy, got);
+
+		for (int k = 0; k < 4; k++) {
+			nd_field_sample_t ref = nd_field_sample_step(world, step_q16, wx[k], wy);
+			assert_sample_eq(&ref, &got[k], "nd_field_sample_4x", world, step_q16, wx[k], wy);
+			if (ref.is_water) water_hits++;
+			if (ref.river_carve_q4 > 0) river_hits++;
+			if (ref.elevation > 400) high_hits++;
+		}
+	}
+	assert(water_hits > 100);
+	assert(seam_hits == 800);
+	printf("PASS: nd_field_sample_4x bit-exact across 10,000 coords (water=%d river=%d high=%d seam=%d)\n",
+	       water_hits, river_hits, high_hits, seam_hits);
+
+	/* 2. Row stepper bit-exactness across near, mid, wide, and coarse_direct spans */
+	const int32_t spans[] = { 160, 640, 2560, 10240, 163840 };
+	for (int s = 0; s < (int)(sizeof(spans) / sizeof(spans[0])); s++) {
+		int32_t span = spans[s];
+		uint32_t count = (s & 1) ? 49u : 35u;
+		int32_t gdim = (int32_t)(count - 1u);
+		int32_t ox = -12345 + s * 7777;
+		int32_t wy = 54321 - s * 9999;
+		int32_t step_q16 = (s == 4) ? (4096 << 16) : 0;
+		nd_field_sample_t row[64];
+		nd_field_sample_row_step((uint16_t)(s % 3), step_q16, wy, ox, span, count, row);
+		for (uint32_t c = 0; c < count; c++) {
+			int32_t wx = ox + (int32_t)(((int64_t)c * span) / gdim);
+			nd_field_sample_t ref = nd_field_sample_step((uint16_t)(s % 3), step_q16, wx, wy);
+			assert_sample_eq(&ref, &row[c], "nd_field_sample_row_step",
+			                 (uint16_t)(s % 3), step_q16, wx, wy);
+		}
+	}
+	printf("PASS: nd_field_sample_row_step bit-exact across 5 spans (35 & 49 cols)\n");
+
+	/* 3. Direct primitive parity: ruggedness_4x, fine_4x (with mixed pre-computed rug), coarse_quad */
+	for (int iter = 0; iter < 500; iter++) {
+		uint16_t world = (uint16_t)(iter % 4);
+		int32_t wx[4], wy[4], rug_in[4], fine_out[4];
+		uint16_t rug_out[4];
+		for (int k = 0; k < 4; k++) {
+			wx[k] = (int32_t)next_u32() >> 10;
+			wy[k] = (int32_t)next_u32() >> 10;
+			rug_in[k] = ((iter + k) & 1) ? (int32_t)nd_field_ruggedness_q8(world, wx[k], wy[k]) : -1;
+		}
+		nd_field_ruggedness_q8_4x(world, wx, wy, rug_out);
+		nd_field_elevation_fine_step_q12_4_4x(world, 0, wx, wy, rug_in, fine_out);
+		for (int k = 0; k < 4; k++) {
+			uint16_t rref = nd_field_ruggedness_q8(world, wx[k], wy[k]);
+			assert(rug_out[k] == rref);
+			assert(rug_in[k] == (int32_t)rref);
+			int32_t rtmp = -1;
+			int32_t fref = nd_field_elevation_fine_step_q12_4(world, 0, wx[k], wy[k], &rtmp);
+			assert(fine_out[k] == fref);
+		}
+		int16_t rx = (int16_t)(next_u32() & 0xFFFFu);
+		int16_t ry = (int16_t)(next_u32() & 0xFFFFu);
+		int16_t q[4];
+		nd_field_room_hyp_coarse_quad(world, rx, ry, q);
+		assert(q[0] == nd_field_room_hyp_coarse(world, rx, ry));
+		assert(q[1] == nd_field_room_hyp_coarse(world, (int16_t)(rx + 1), ry));
+		assert(q[2] == nd_field_room_hyp_coarse(world, rx, (int16_t)(ry + 1)));
+		assert(q[3] == nd_field_room_hyp_coarse(world, (int16_t)(rx + 1), (int16_t)(ry + 1)));
+	}
+	printf("PASS: ruggedness_4x, fine_4x (mixed rug cache), and coarse_quad bit-exact (2,000 samples)\n");
+	printf("=== ALL ND FIELD SIMD TESTS PASSED ===\n");
+	return 0;
+}

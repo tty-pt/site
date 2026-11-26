@@ -100,7 +100,9 @@ typedef enum {
 #define GL_TOTAL_VERTS_HI (GL_GRID_VERTS_HI * GL_GRID_VERTS_HI)
 #define GL_TOTAL_INDICES_HI (GL_GRID_QUADS_HI * GL_GRID_QUADS_HI * 6)
 
-#define MAX_CHUNK_TEXTURES 384
+#define MAX_CHUNK_TEXTURES 256
+#define MAX_TERR_DRAW_QUEUE MAX_CHUNK_TEXTURES
+#define MAX_TERR_BODIES 8
 #define CHUNK_CACHE_HASH_SIZE 1024
 #define MAX_WATER_QUEUE_BASE 192
 #define MAX_BB_VERTS 65536
@@ -173,17 +175,38 @@ typedef struct {
 
 _Static_assert(sizeof(nd_frame_ubo_t) == 272, "nd_frame_ubo_t must match std140 layout (272 bytes)");
 
+/* 48-byte (3 x vec4) per-chunk terrain instance descriptor (attribs 1..3, divisor 1) */
+typedef struct {
+	float orig_span[4];  /* loc 1: ox, oy, span_w, span_h */
+	float rel_layers[4]; /* loc 2: rel_ox, rel_oy, slot_layer, river_layer */
+	float meta[4];       /* loc 3: sea_level, 0.0f, 0.0f, 0.0f */
+} gl_chunk_inst_t;
+_Static_assert(sizeof(gl_chunk_inst_t) == 48, "gl_chunk_inst_t must be 48 bytes");
+
+typedef struct {
+	uint16_t world;
+	int32_t sea_offset_q12_4;
+	nd_planet_def_t pdef;
+	float rel_center[3];
+	float rot_mat4[16];
+} gl_terr_body_t;
+
+typedef struct {
+	gl_chunk_inst_t inst;
+	uint16_t sort_key;  /* (body_idx << 8) | (variant << 3) | (seabed_st << 2) | grid_lod */
+	uint8_t body_idx;
+	uint8_t variant;
+	uint8_t grid_lod;   /* 0 = macro (16x16), 1 = lo (24x24), 2 = hi (48x48) */
+	uint8_t seabed_st;  /* 0 or 1 */
+} gl_terr_draw_item_t;
+
 typedef struct {
 	GLuint prog;
 	GLuint pending_prog;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uRiverTex;
-	GLint uChunkOrigin;
-	GLint uChunkRelOrigin;
-	GLint uChunkSpan;
 	GLint uHeightScale;
-	GLint uSeaLevel;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
 	GLint uTorusRadii;
@@ -211,6 +234,7 @@ typedef struct {
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
+	GLint uChunkLayers;
 	GLint uHeightScale;
 	GLint uSeaLevel;
 	GLint uPlanetCenter;
@@ -260,6 +284,7 @@ typedef struct {
 	GLint uHeightTex;
 	GLint uChunkOrigin;
 	GLint uChunkSpan;
+	GLint uChunkLayer;
 	GLint uHeightScale;
 	GLint uTreeShadowWriteOrigin;
 	GLint uTreeShadowWriteVP;
@@ -267,7 +292,7 @@ typedef struct {
 } gl_terrain_shadow_pipe_t;
 
 typedef struct {
-	GLuint height_tex;
+	uint16_t slot_layer;
 	float ox;
 	float oy;
 	float span_w;
@@ -378,6 +403,7 @@ typedef struct {
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
+	GLint uChunkLayer;
 	GLint uSeaLevel;
 	GLint uPlanetCenter;
 	GLint uBodyRot;
@@ -495,17 +521,16 @@ typedef struct {
 	int32_t ox, oy;
 	int32_t span_w, span_h;
 	uint32_t tex_w, tex_h;
-	uint32_t alloc_w, alloc_h;
-	uint32_t river_alloc_w, river_alloc_h;
-	int alloc_mips;
 	uint32_t last_touch;
 	int16_t min_h_q12_4;
 	int16_t max_h_q12_4;
 	uint8_t has_river;
+	uint8_t has_cpos;
+	uint8_t river_baked; /* 1 = river_array layer slot_idx has valid baked data */
 	float river_sea_level;
-	GLuint height_tex;
-	GLuint substrate_tex;
-	GLuint river_tex;
+	double cpos[3];
+	float cpos_center[3];
+	float cpos_rot[9];
 } gl_chunk_tex_t;
 
 typedef struct {
@@ -517,9 +542,8 @@ typedef struct {
 	float rot_mat4[16];
 	float major_r;
 	float minor_r;
-	GLuint height_tex;
-	GLuint substrate_tex;
-	GLuint river_tex;
+	uint16_t slot_layer;
+	int16_t river_layer; /* -1 = no river; 0..MAX_CHUNK_TEXTURES-1 = layer */
 } gl_water_chunk_t;
 
 typedef struct {
@@ -530,7 +554,6 @@ typedef struct {
 	bool tier_b_done;
 	bool prewarm_frame0_seen;
 	uint32_t prewarmed_mask;
-	GLuint dummy_river_tex;
 	GLuint prewarm_dummy_rgba;
 	GLuint noise2d_tex;
 	GLuint noise3d_tex;
@@ -642,11 +665,14 @@ typedef struct {
 	GLuint grid_ibo;
 	GLuint grid_vbo_hi;
 	GLuint grid_ibo_hi;
+	GLuint grid_vao_arr[3]; /* 0 = macro (16x16), 1 = lo (24x24), 2 = hi (48x48) */
+	GLuint terr_inst_vbo;
 
 	GLuint bb_vbo;
 	GLuint mesh3d_vbo;
 	GLuint mesh3d_ibo;
 	GLuint mesh3d_inst_vbo;
+	GLuint mesh3d_vao;
 	GLuint fol_atlas_tex;
 	GLuint fol_atlas_norm_tex;
 	GLuint fol_grass_tex;
@@ -689,27 +715,25 @@ typedef struct {
 	GLuint atlas_norm_tex;
 	uint32_t atlas_ver;
 
+	/* Shared GL_TEXTURE_2D_ARRAY chunk texture pools (Sub-Phase 6D) */
+	GLuint height_array;
+	GLuint substrate_array;
+	GLuint river_array;
+	uint32_t chunk_array_w;
+	uint32_t chunk_array_h;
+	int chunk_array_mips;
+	bool substrate_array_mip_dirty;
+
 	gl_chunk_tex_t chunk_cache[MAX_CHUNK_TEXTURES];
 	uint16_t chunk_hash[CHUNK_CACHE_HASH_SIZE]; /* 0 = empty, slot_idx + 1 = occupied */
 	uint32_t chunk_cache_used;
 	uint32_t frame_count;
 
-	/* Hoisted terrain pass state (reset on begin_frame and non-terrain passes) */
-	bool terrain_pass_active;
-	bool terrain_pass_has_body;
-	int terrain_pass_variant;
-	int terrain_pass_seabed_stencil;
-	bool terrain_var_body_valid[ND_TERR_VAR_COUNT];
-	bool terrain_var_sea_valid[ND_TERR_VAR_COUNT];
-	float terrain_var_sea_level[ND_TERR_VAR_COUNT];
-	bool terrain_full_wake_valid;
-	int32_t terrain_pass_sea_offset_q12_4;
-	uint16_t terrain_pass_world;
-	nd_planet_def_t terrain_pass_pdef;
-	float terrain_pass_rel_center[3];
-	float terrain_pass_rot_mat4[16];
-	GLuint terrain_pass_vbo;
-	GLuint terrain_pass_river_tex;
+	/* Deferred instanced terrain draw queue (flushed once in gl_end_terrain_pass) */
+	gl_terr_draw_item_t terr_draw_q[MAX_TERR_DRAW_QUEUE];
+	uint32_t terr_draw_count;
+	gl_terr_body_t terr_bodies[MAX_TERR_BODIES];
+	uint32_t terr_body_count;
 
 	gl_water_chunk_t water_queue[MAX_WATER_QUEUE_BASE];
 	uint32_t water_count;
@@ -849,6 +873,8 @@ bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,
                                        float sea_wet, float fw,
                                        bool want_cirrus, float margin);
 
+void gl_flush_terrain_queue(void);
+
 static inline void gl_flush_cmd_ring(void)
 {
 	lam_gl_cmd_flush(&s_gl.cmd_buf);
@@ -856,15 +882,9 @@ static inline void gl_flush_cmd_ring(void)
 
 static inline void gl_end_terrain_pass(void)
 {
+	if (s_gl.terr_draw_count > 0)
+		gl_flush_terrain_queue();
 	gl_flush_cmd_ring();
-	if (s_gl.terrain_pass_active) {
-		glDisable(GL_CULL_FACE);
-		glDisable(GL_STENCIL_TEST);
-		glStencilMask(0xFF);
-		glTimerEnd(ND_GPU_PASS_TERRAIN);
-		s_gl.terrain_pass_active = false;
-		s_gl.terrain_pass_seabed_stencil = -1;
-	}
 }
 
 int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius);
