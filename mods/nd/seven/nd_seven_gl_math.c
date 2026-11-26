@@ -2175,5 +2175,130 @@ float nd_seven_gl_eval_lamb_wake(float frag_wx, float frag_wy,
 	return total_h;
 }
 
+void nd_seven_gl_cloud_subpixel(uint32_t phase, uint32_t qrw, uint32_t qrh,
+                                int *out_px, int *out_py,
+                                float *out_jx, float *out_jy)
+{
+	/* Diagonal 2x2 Bayer sequence spreads samples maximally over every 2-frame window */
+	static const int k_px[4] = { 0, 1, 1, 0 };
+	static const int k_py[4] = { 0, 1, 0, 1 };
+	uint32_t idx = phase & 3u;
+	int px = k_px[idx];
+	int py = k_py[idx];
+	if (out_px) *out_px = px;
+	if (out_py) *out_py = py;
+	if (out_jx) *out_jx = (qrw > 0u) ? ((0.5f - (float)px) / (float)qrw) : 0.0f;
+	if (out_jy) *out_jy = (qrh > 0u) ? ((0.5f - (float)py) / (float)qrh) : 0.0f;
+}
 
+static bool gl_invert_mat4_d(const double m[16], double inv_out[16])
+{
+	/* Column-major 4x4 Gauss-Jordan inversion with partial pivoting */
+	double aug[4][8];
+	for (int r = 0; r < 4; r++) {
+		for (int c = 0; c < 4; c++) {
+			aug[r][c] = m[c * 4 + r];
+			aug[r][c + 4] = (r == c) ? 1.0 : 0.0;
+		}
+	}
+	for (int col = 0; col < 4; col++) {
+		int piv = col;
+		double best = fabs(aug[col][col]);
+		for (int r = col + 1; r < 4; r++) {
+			double v = fabs(aug[r][col]);
+			if (v > best) {
+				best = v;
+				piv = r;
+			}
+		}
+		if (best < 1e-24 || !isfinite(best))
+			return false;
+		if (piv != col) {
+			for (int j = 0; j < 8; j++) {
+				double tmp = aug[col][j];
+				aug[col][j] = aug[piv][j];
+				aug[piv][j] = tmp;
+			}
+		}
+		double inv_p = 1.0 / aug[col][col];
+		for (int j = 0; j < 8; j++)
+			aug[col][j] *= inv_p;
+		for (int r = 0; r < 4; r++) {
+			if (r == col)
+				continue;
+			double f = aug[r][col];
+			if (f == 0.0)
+				continue;
+			for (int j = 0; j < 8; j++)
+				aug[r][j] -= f * aug[col][j];
+		}
+	}
+	for (int r = 0; r < 4; r++) {
+		for (int c = 0; c < 4; c++) {
+			double v = aug[r][c + 4];
+			if (!isfinite(v))
+				return false;
+			inv_out[c * 4 + r] = v;
+		}
+	}
+	return true;
+}
 
+static void gl_mul_mat4_d(const double a[16], const double b[16], double out[16])
+{
+	for (int c = 0; c < 4; c++) {
+		for (int r = 0; r < 4; r++) {
+			out[c * 4 + r] =
+				a[0 * 4 + r] * b[c * 4 + 0] +
+				a[1 * 4 + r] * b[c * 4 + 1] +
+				a[2 * 4 + r] * b[c * 4 + 2] +
+				a[3 * 4 + r] * b[c * 4 + 3];
+		}
+	}
+}
+
+bool nd_seven_gl_compute_reproj_mat(const float cur_mvp[16], const double cur_origin[3],
+                                    const float prev_mvp[16], const double prev_origin[3],
+                                    float out_reproj[16])
+{
+	if (!cur_mvp || !prev_mvp || !out_reproj)
+		return false;
+
+	/* Fast exact identity path when camera and origin are completely stationary */
+	double dx = (cur_origin && prev_origin) ? (cur_origin[0] - prev_origin[0]) : 0.0;
+	double dy = (cur_origin && prev_origin) ? (cur_origin[1] - prev_origin[1]) : 0.0;
+	double dz = (cur_origin && prev_origin) ? (cur_origin[2] - prev_origin[2]) : 0.0;
+	if (dx == 0.0 && dy == 0.0 && dz == 0.0 &&
+	    memcmp(cur_mvp, prev_mvp, 16 * sizeof(float)) == 0) {
+		for (int i = 0; i < 16; i++)
+			out_reproj[i] = ((i % 5) == 0) ? 1.0f : 0.0f;
+		return true;
+	}
+
+	double cur_d[16], prev_d[16], inv_cur[16], trans[16], tmp[16], reproj_d[16];
+	for (int i = 0; i < 16; i++) {
+		cur_d[i] = (double)cur_mvp[i];
+		prev_d[i] = (double)prev_mvp[i];
+		trans[i] = ((i % 5) == 0) ? 1.0 : 0.0;
+	}
+	trans[12] = dx;
+	trans[13] = dy;
+	trans[14] = dz;
+
+	if (!gl_invert_mat4_d(cur_d, inv_cur)) {
+		for (int i = 0; i < 16; i++)
+			out_reproj[i] = ((i % 5) == 0) ? 1.0f : 0.0f;
+		return false;
+	}
+	gl_mul_mat4_d(prev_d, trans, tmp);
+	gl_mul_mat4_d(tmp, inv_cur, reproj_d);
+	for (int i = 0; i < 16; i++) {
+		if (!isfinite(reproj_d[i])) {
+			for (int j = 0; j < 16; j++)
+				out_reproj[j] = ((j % 5) == 0) ? 1.0f : 0.0f;
+			return false;
+		}
+		out_reproj[i] = (float)reproj_d[i];
+	}
+	return true;
+}

@@ -432,20 +432,34 @@ Even with Phase 5 eliminating most Gen12 register spills and mid-zoom compilatio
 ### Sub-Phase 6C — Cloud Reprojection, FBO Bandwidth & Adaptive Scaling (Polish & Scaling: 1–2d, Low–Med Risk)
 
 **Data Layout & Invariants:**
-- **Half-Res / 2×2 Temporal Checkerboard Clouds (`cloud_tex_prev`, `cloud_tex_curr`)**:
-  - `gl_cloud_alloc_dims()` (`nd_seven_gl_occ.c:62`): Default High clouds to `0.50×–0.67×` paired with the **existing depth-aware bilateral upsampler** in `cloud_comp_pipe` (`nd_seven_gl_clouds.c:720`), OR enable 2×2 interleaved temporal reprojection (`gl_FragCoord` sub-pixel phase `frame_idx & 3`, reprojecting prior cloud pixels via `prev_vp * inv_curr_vp` with depth/disocclusion clamp).
-  - Hoist per-body uniforms (`uPlanetCenter`, `uBodyRot`, `uTorusRadii`) outside the per-chunk loop in `nd_seven_gl_flush_clouds` (`L670-680`).
-- **FBO Bandwidth Reduction (`gl_alloc_scene_targets`, `nd_seven_gl_occ.c:134-140`)**:
-  - **Configurable MSAA (`0× + FXAA`, `2×`, `4×`)**: Default integrated-GPU/Medium/Low profiles to `0×` (relying on existing `post_pipe` FXAA) or `2×` MSAA, keeping `4×` as an explicit High/Ultra option — cuts ROP + resolve bandwidth **2×–4×** and eliminates `glBlitFramebuffer` MSAA resolve cost entirely at `0×`.
-  - **HDR `GL_R11F_G11F_B10F` (4 B/px vs 8 B/px `RGBA16F`)**: Once the 3-state seabed/sprite alpha contract moves to **2 stencil bits** (`0x08` seabed, `0x10` submerged sprite), scene HDR color no longer needs an alpha channel, halving color attachment memory & resolve bandwidth!
-  - **Dynamic `far_z` & `GL_DEPTH24_STENCIL8` option**: Tighten near-field `far_z` from fixed `80,000,000` at `d = 300` to dynamic horizon distance `max(d * 60.0f, 45000.0f)` (expanding smoothly to `8e7` above `d > 2000`), dramatically improving near/mid depth precision and enabling `GL_DEPTH24_STENCIL8` (4 B/px vs 8 B/px `DEPTH32F_STENCIL8`) when in surface/mid regimes.
-- **Closed-Loop Dynamic Resolution Scaling (DRS)**:
-  - Feed rolling GPU frame time (or `rAF` frame delta when timer queries unavailable) into a damped hysteresis controller driving existing `nd_seven_gl_set_render_scales(eff_res_scale, eff_cloud_scale)` (`nd_seven_gl.c:1216`) between `0.75–1.00` during active camera motion/zoom, snapping smoothly back to `1.00` within ~200 ms once settled. Zero FBO reallocation.
+- **2×2 Interleaved Temporal Checkerboard Clouds (`cloud_q_fbo`, `cloud_hist_fbo[2]`, `cloud_reproj_pipe`)**:
+  - `nd_seven_gl_cloud_subpixel()` (`nd_seven_gl_math.c`): diagonal 2×2 Bayer sequence `(0,0),(1,1),(1,0),(0,1)` computing exact NDC sub-pixel jitter `uCloudJitter = ((0.5 - px)/qrw, (0.5 - py)/qrh)` applied in `s_parts_vs_cloud`.
+  - `nd_seven_gl_compute_reproj_mat()` (`nd_seven_gl_math.c`): double-precision 4×4 Gauss-Jordan inversion + origin-relative NDC reprojection matrix `prev_mvp * Translate(cur_origin - prev_origin) * inv(cur_mvp)` (stationary identity fast path; verified `err_x = 6.52e-8`, `err_y = 3.65e-7` NDC error across `near = 2.0, far = 8e7`).
+  - Quarter-area cloud raymarch into `cloud_q_fbo` (`qrw × qrh = (trw/2) × (trh/2)`, `GL_RGBA16F`), reconstructed to `trw × trh` into ping-pong color-only `cloud_hist_fbo[0..1]` via Tier-B async `cloud_reproj_pipe` (`s_fs_cloud_reproj`, scalar `uCloudSubpixel`, 3×3 quarter-res AABB neighborhood clamp, `uHistoryValid` invalidation on teleport/resize/`cloud_count == 0`, soft fallback to direct `cloud_fbo`).
+  - Per-variant hoisted cloud body uniforms (`uPlanetCenter`, `uBodyRot`, `uTorusRadii`) outside the per-chunk draw loop in `nd_seven_gl_flush_clouds()`.
+- **FBO Bandwidth Halving & Stencil-Backed Water Contract (`gl_alloc_scene_targets`, `nd_seven_gl_occ.c` & `nd_seven_gl.c`)**:
+  - **Hardware Stencil Water Contract**: `ND_TERRAIN_SEABED_ONLY` emits alpha `1.0` and writes stencil bit `0x08`; submerged meshes/billboards write `0x01` (clearing `0x08`); dry terrain/grass clear `0x09`. `nd_seven_gl_flush_water()` executes two stencil-filtered passes (`stencil & 0x09 == 0x08` with `uWaterMode = 0` for seabed optics; `stencil & 0x09 == 0x01` with `uWaterMode = 1` for submerged sprites) with hoisted per-body/sea-level uniforms and depth-validated refraction lookups — eliminating all scene alpha dependency.
+  - **50% Smaller Scene Targets (`GL_R11F_G11F_B10F` + `GL_DEPTH24_STENCIL8`)**: 4 + 4 = **8 B/px/sample** vs 8 + 8 = **16 B/px/sample** (`GL_RGBA16F` + `GL_DEPTH32F_STENCIL8`), halving scene MSAA VRAM and resolve bandwidth (`33.6 MB → 16.8 MB` at `1280×656×4× MSAA`) with full fallback chain (`R11F+D24 → RGBA16F+D24 → RGBA16F+D32F → RGBA8+D24` for `want_samples` then `0`), retaining `GL_RGBA16F` for cloud FBOs. `far_z` stays intact to preserve companion planets at orbital distances in sky views.
+  - **Selectable `0× / 2× / 4×` MSAA**: Added `nd_seven_set_msaa_samples(int)` / `nd_seven_get_msaa_samples(void)` while keeping `nd_seven_get_msaa()` (`0/1`) and `nd_seven_toggle_msaa()` (`0↔4`) backward-compatible.
+- **Closed-Loop Dynamic Resolution Scaling (DRS, `nd_seven_drs_t`)**:
+  - Opt-in (`enabled = 0` default) EMA frame-time hysteresis controller (`hi_ms = 18.0`, `lo_ms = 13.0`, `min_scale = 0.75`, `max_scale = 1.00`, `step = 0.05`) in `nd_seven_ground.c`, fed wall-clock `raw_dt` and camera pose (`x, y, dist, yaw, pitch`) in `nd_seven_tick()` (`nd_seven_motion.c`), with immediate fast-motion downscale and smooth recovery to `1.00×` within `250 ms` of settle. Multiplies `alt_prof.eff_res_scale` in `nd_seven.c` driving `nd_seven_gl_set_render_scales()` with zero FBO reallocation.
 
 **Deliverables (6C):**
-1. Half-res / temporal checkerboard cloud mode + hoisted body uniforms in `nd_seven_gl_clouds.c` & `nd_seven_gl_occ.c`.
-2. Stencil-backed water/sprite state contract allowing `GL_R11F_G11F_B10F` scene color + selectable `0×/2×/4×` MSAA + dynamic horizon `far_z` in `nd_seven_gl_occ.c` & `nd_seven_gl.c`.
-3. Closed-loop DRS controller wired into `nd_seven_eval_alt_profile()` (opt-in / Auto quality preset).
+1. 2×2 interleaved temporal checkerboard cloud raymarch + double-precision origin-relative reprojection pass (`cloud_q_fbo`, `cloud_hist_fbo[2]`, `cloud_reproj_pipe`, `nd_seven_gl_cloud_subpixel`, `nd_seven_gl_compute_reproj_mat`) + per-variant hoisted cloud body uniforms in `nd_seven_gl_clouds.c`, `nd_seven_gl_math.c`, `nd_seven_gl_occ.c`, `nd_seven_gl_shaders.c`, and `nd_seven_gl.c`.
+2. Hardware stencil-backed two-mode water contract (`uWaterMode`, zero scene alpha dependency) enabling `GL_R11F_G11F_B10F` + `GL_DEPTH24_STENCIL8` (8 B/px/sample, -50% FBO/resolve bandwidth) + hoisted water body uniforms + selectable `0×/2×/4×` MSAA (`nd_seven_set_msaa_samples`/`nd_seven_get_msaa_samples`).
+3. Closed-loop DRS controller (`nd_seven_drs_t`, opt-in default off) wired through `nd_seven_tick()` → `nd_seven_gl_set_render_scales()` with zero FBO reallocation and 6 unit tests in `tests/unit/test_alt_profile.c`.
+
+**Status (6C): Complete** — Audited and verified on Intel ADL GT2 (Mesa OpenGL ES 3.2 / ANGLE WebGL2, `1280×656`, `?stage=lamina-seven`, `EXT_disjoint_timer_query_webgl2`), `25/25` GLSL ES 3.00 programs validated via `glslangValidator -l`, `0` console/WebGL errors:
+
+| Metric / Phase (`1280×656`) | Phase 6B Baseline | Phase 6C Measured | Notes |
+| :--- | ---: | ---: | :--- |
+| **Scene FBO + MSAA Format (ANGLE WebGL2 probe)** | `RGBA16F + D32FS8` (16 B/px/sample, `33.6 MB` @ 4×) | **`R11F_G11F_B10F + D24S8` (8 B/px/sample, `16.8 MB` @ 4×)** | **-50% FBO VRAM & MSAA resolve bandwidth**; `0×`, `2×`, and `4×` MSAA all `GL_FRAMEBUFFER_COMPLETE`, `gl.getError() == 0` (`errs=[0,0,0,0,0]`) |
+| **`wide_zoom_steady` `CLOUDS / TERRAIN` ratio (clock-invariant)** | `CLOUDS 7.49 ms / TERRAIN 19.99 ms` (**`37.5%`**) | **`19.4%–22.1%`** (`8.18 / 42.08 ms`, `10.00 / 49.40 ms`, settled `11.65 / 52.60 ms` under `load 5.57` / `300 MHz` host throttle) | **-41% to -48% relative cloud GPU time** (clock-normalized to 6B `TERRAIN 19.99 ms`: **`7.49 → 3.89–4.43 ms`**) via 2×2 quarter-area raymarch + temporal reprojection; zero checkerboard/ghosting artifacts on visual inspection |
+| **Settled `1x` & `panning_1x` (under host `load 5.57` / `300 MHz`)** | `GPU 37.48 / 43.34 ms` (idle turbo) | `GPU 58.38 / 58.72 ms` (`WATER 0.66 / 0.71 ms`, `POST 1.55 / 1.84 ms`, `HIZ 0.18 / 0.26 ms`) | Host running competing `daxil` (`189% CPU`) throttled GT2 clock ~1.6×–2.6×; `WATER` & `POST` remain `< 2 ms` even throttled |
+| **WebGL FFI (`run-test-seven-gl-ffi.sh`, High wide-zoom)** | `unif=1583.0`, `cmdOps=4214.0` | **`unif=1308.0` (-17.4%)**, **`cmdOps=3933.0` (-6.7%)** (`getUnifLoc=0`, `texImg2D=0`, `bufData=0`) | Hoisted water & cloud per-body transforms; `High stationary`: `521.9` FFI/f (`cmdFlushes=5.0`) |
+| **CPU perf (`run-test-seven-perf.sh`, High stationary)** | `1.41 ms` | **`1.43 ms`** (`scen 0.33 ms`) | Parity; double-precision reprojection matrix adds `< 1 µs/frame` |
+| **DRS controller (`test_alt_profile.c`, 6 sub-tests)** | N/A | **ALL PASSED** (disabled=`1.00×`, deadband `[13..18 ms]`, downscale→`0.75×`, recovery→`1.00×` within `250 ms`) | Opt-in (`enabled=0` default); zero FBO reallocation via `uSceneUvScale` |
+| **GLSL, Reprojection & ABI gates** | `23/23` GLSL | **`25/25` GLSL ES 3.00** (+`cloud_comp`, +`cloud_reproj`), reproj NDC err **`6.52e-8 / 3.65e-7`**, `make test-graphics: PASS`, `wasm-audit: PASS`, **`0` console/WebGL errors** | Zero JS changes; pure-C & asset-sync boundaries PASS |
 
 ---
 
@@ -485,7 +499,7 @@ Even with Phase 5 eliminating most Gen12 register spills and mid-zoom compilatio
 | **Wide-zoom terrain draws / FFI** | 159 draws / 537 FFI | **≤ 8 draws / ≤ 120 FFI** | 6D `GL_TEXTURE_2D_ARRAY` instanced terrain + VAOs |
 | **Visual & Contract Gates** | `21/21` GLSL, 0 errors | **All GLSL ES 3.00 pass**, `docs/SHORE.md` parity, 0 console/WebGL errors, `make test-graphics` & `make test-fast` exit `0` | Per-sub-phase golden-frame & unit verification |
 
-**Status: In Progress (Sub-Phases 6A & 6B Complete; Sub-Phases 6C–6D Planned)**
+**Status: In Progress (Sub-Phases 6A–6C Complete; Sub-Phase 6D Planned)**
 
 ---
 

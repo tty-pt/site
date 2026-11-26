@@ -118,6 +118,8 @@ void nd_seven_cycle_cloud_quality(void);
 
 void nd_seven_set_msaa(int enabled);
 int  nd_seven_get_msaa(void);
+void nd_seven_set_msaa_samples(int samples);
+int  nd_seven_get_msaa_samples(void);
 void nd_seven_toggle_msaa(void);
 
 void nd_seven_set_fps_cap(int fps);
@@ -147,5 +149,40 @@ void nd_seven_eval_alt_profile(float cam_dist, float detail_scale,
 
 void nd_seven_ground_perf_set(int enabled);
 uint32_t nd_seven_ground_perf_take_probes(void);
+
+/* Phase 6C Piece 3: Closed-loop Dynamic Resolution Scaling (DRS) controller.
+ * Scales render_w/h sub-rect (zero FBO realloc via uSceneUvScale) between [min_scale, max_scale]
+ * using frame-time EMA hysteresis + immediate fast-motion downscale + 250 ms settle recovery.
+ * Opt-in (enabled = 0 by default) so fixed quality presets and deterministic tests stay exact. */
+typedef struct {
+	int     enabled;        /* 0 = off (1.00x multiplier), 1 = active */
+	float   target_ms;      /* nominal budget (default 16.67 ms) */
+	float   hi_ms;          /* downscale threshold (default 18.0 ms) */
+	float   lo_ms;          /* upscale threshold (default 13.0 ms) */
+	float   min_scale;      /* floor multiplier (default 0.75) */
+	float   max_scale;      /* ceiling multiplier (default 1.00) */
+	float   step;           /* hysteresis step (default 0.05) */
+	float   cur_scale;      /* active output scale in [min_scale, max_scale] */
+	float   ema_ms;         /* frame time EMA (ms) */
+	float   cooldown_s;     /* holdoff between steady-state steps (s) */
+	float   settle_s;       /* continuous stationary time since camera motion (s) */
+	float   last_cam_x;
+	float   last_cam_y;
+	float   last_cam_dist;
+	float   last_cam_yaw;
+	float   last_cam_pitch;
+	uint8_t has_pose;
+	uint8_t in_motion;
+} nd_seven_drs_t;
+
+void  nd_seven_drs_init(nd_seven_drs_t *drs);
+float nd_seven_drs_update(nd_seven_drs_t *drs, float dt_s,
+                          float cam_x, float cam_y, float cam_dist,
+                          float cam_yaw, float cam_pitch);
+void  nd_seven_set_drs(int enabled);
+int   nd_seven_get_drs(void);
+float nd_seven_get_drs_scale(void);
+void  nd_seven_drs_feed_frame(float dt_s, float cam_x, float cam_y,
+                              float cam_dist, float cam_yaw, float cam_pitch);
 
 #endif /* ND_SEVEN_GROUND_H */

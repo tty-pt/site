@@ -137,6 +137,8 @@ void nd_seven_cycle_cloud_quality(void);
 
 void nd_seven_set_msaa(int enabled);
 int nd_seven_get_msaa(void);
+void nd_seven_set_msaa_samples(int samples);
+int nd_seven_get_msaa_samples(void);
 void nd_seven_toggle_msaa(void);
 
 void nd_seven_set_fps_cap(int fps);
@@ -146,6 +148,11 @@ void nd_seven_cycle_fps_cap(void);
 void nd_seven_apply_quality_preset(int preset);
 int nd_seven_get_quality_preset(void);
 void nd_seven_cycle_quality_preset(void);
+
+/* Closed-loop Dynamic Resolution Scaling (DRS, opt-in default 0) */
+void nd_seven_set_drs(int enabled);
+int nd_seven_get_drs(void);
+float nd_seven_get_drs_scale(void);
 
 /* Diorama 2.5D & camera rendering constants (zero magic numbers) */
 #define ND_SEVEN_SCALE              2

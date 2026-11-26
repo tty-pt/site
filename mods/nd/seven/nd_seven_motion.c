@@ -1148,6 +1148,7 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 
 	s_anim++;
 	nd_seven_sync_origin(st);
+	float raw_dt = dt;
 	if (dt < 0.0f)
 		dt = 0.0f;
 	if (dt > 0.1f)
@@ -1157,6 +1158,13 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 	float anim_dt = (dt > 0.033f) ? 0.033f : ((dt > 0.0f) ? dt : (1.0f / 60.0f));
 	s_anim_sec += anim_dt * 1.4f;
 	nd_seven_step_cam(dt > 0.0f ? dt : 0.016f);
+	if (raw_dt > 0.0f) {
+		float drs_x = (float)((int64_t)s_pos[0] * NDW_TILE_W + s_lx);
+		float drs_y = (float)((int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly);
+		nd_seven_drs_feed_frame(raw_dt, drs_x, drs_y,
+		                        ND_SEVEN_CAM_DIST / fmaxf(ND_SEVEN_ZOOM_MIN, nd_seven_get_zoom()),
+		                        nd_seven_get_yaw_deg(), nd_seven_get_pitch_deg());
+	}
 
 	if (s_teleport_pending_t > 0.0f) {
 		s_teleport_pending_t -= dt;

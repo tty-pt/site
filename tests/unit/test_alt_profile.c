@@ -51,6 +51,80 @@ int main(void)
 	assert(nd_seven_meadow_lattice_step(1300.0f, 1800.0f) == 56);
 	assert(nd_seven_meadow_lattice_step(1850.0f, 1800.0f) == 0);
 
+	/* 5. Phase 6C Piece 3: Closed-loop Dynamic Resolution Scaling (DRS) controller */
+	{
+		nd_seven_drs_t drs;
+		nd_seven_drs_init(&drs);
+		assert(drs.enabled == 0);
+		assert(fabsf(drs.cur_scale - 1.00f) < 1e-6f);
+
+		/* 5a. Disabled DRS is strictly invariant (always 1.00x) */
+		for (int i = 0; i < 30; i++) {
+			float s = nd_seven_drs_update(&drs, 0.040f, (float)i * 20.0f, 0.0f, 280.0f, (float)i * 5.0f, 55.0f);
+			assert(fabsf(s - 1.00f) < 1e-6f);
+		}
+
+		/* 5b. Deadband [13ms .. 18ms]: zero oscillation when stationary */
+		nd_seven_drs_init(&drs);
+		drs.enabled = 1;
+		for (int i = 0; i < 60; i++) {
+			float s = nd_seven_drs_update(&drs, 0.016f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+			assert(fabsf(s - 1.00f) < 1e-6f);
+		}
+
+		/* 5c. Sustained over-budget (24ms) steps down cleanly to min_scale (0.75) */
+		float s_last = 1.00f;
+		for (int i = 0; i < 60; i++) {
+			float s = nd_seven_drs_update(&drs, 0.024f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+			assert(s <= s_last + 1e-6f);
+			assert(s >= 0.75f - 1e-6f);
+			s_last = s;
+		}
+		assert(fabsf(s_last - 0.75f) < 1e-4f);
+
+		/* 5d. Sustained under-budget (10ms) recovers smoothly back to max_scale (1.00) */
+		for (int i = 0; i < 80; i++) {
+			float s = nd_seven_drs_update(&drs, 0.010f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+			assert(s >= s_last - 1e-6f);
+			assert(s <= 1.00f + 1e-6f);
+			s_last = s;
+		}
+		assert(fabsf(s_last - 1.00f) < 1e-4f);
+
+		/* 5e. Fast camera motion triggers immediate downscale, then rapid recovery to 1.00x
+		 *     within 250 ms of camera settle */
+		nd_seven_drs_init(&drs);
+		drs.enabled = 1;
+		(void)nd_seven_drs_update(&drs, 0.016f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+		float s_pan = 1.00f;
+		for (int i = 1; i <= 6; i++) {
+			s_pan = nd_seven_drs_update(&drs, 0.022f, (float)i * 12.0f, 0.0f, 280.0f, (float)i * 2.0f, 55.0f);
+		}
+		assert(s_pan <= 0.80f + 1e-4f);
+		assert(drs.in_motion == 1u);
+
+		/* Camera settles at 15ms/frame: must recover to 1.00x within 250ms (17 frames @ 15ms = 255ms) */
+		float s_rec = s_pan;
+		for (int i = 0; i < 17; i++) {
+			s_rec = nd_seven_drs_update(&drs, 0.015f, 72.0f, 0.0f, 280.0f, 12.0f, 55.0f);
+		}
+		assert(fabsf(s_rec - 1.00f) < 1e-4f);
+		assert(drs.in_motion == 0u);
+
+		/* 5f. Global opt-in API defaults to 0 and resets to 1.00 on disable */
+		assert(nd_seven_get_drs() == 0);
+		assert(fabsf(nd_seven_get_drs_scale() - 1.00f) < 1e-6f);
+		nd_seven_set_drs(1);
+		assert(nd_seven_get_drs() == 1);
+		nd_seven_drs_feed_frame(0.016f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+		for (int i = 1; i <= 5; i++)
+			nd_seven_drs_feed_frame(0.025f, (float)i * 10.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+		assert(nd_seven_get_drs_scale() < 0.99f);
+		nd_seven_set_drs(0);
+		assert(nd_seven_get_drs() == 0);
+		assert(fabsf(nd_seven_get_drs_scale() - 1.00f) < 1e-6f);
+	}
+
 	printf("test_alt_profile: ALL PASSED\n");
 	return 0;
 }

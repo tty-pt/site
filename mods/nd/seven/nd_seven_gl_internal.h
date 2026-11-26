@@ -45,6 +45,21 @@
 #ifndef GL_TEXTURE_WRAP_R
 #define GL_TEXTURE_WRAP_R 0x8072
 #endif
+#ifndef GL_RGB
+#define GL_RGB 0x1907
+#endif
+#ifndef GL_R11F_G11F_B10F
+#define GL_R11F_G11F_B10F 0x8C3A
+#endif
+#ifndef GL_UNSIGNED_INT_10F_11F_11F_REV
+#define GL_UNSIGNED_INT_10F_11F_11F_REV 0x8C3B
+#endif
+#ifndef GL_DEPTH24_STENCIL8
+#define GL_DEPTH24_STENCIL8 0x88F0
+#endif
+#ifndef GL_UNSIGNED_INT_24_8
+#define GL_UNSIGNED_INT_24_8 0x84FA
+#endif
 #define ND_TREE_SHADOW_RES 1024
 
 /* GPU pass IDs for EXT_disjoint_timer_query_webgl2 (non-nested, 1-based) */
@@ -216,6 +231,7 @@ typedef struct {
 	GLint uProjScale;
 	GLint uNoise2DTex;
 	GLint uNoise3DTex;
+	GLint uWaterMode;
 } gl_water_pipe_t;
 
 typedef struct {
@@ -378,6 +394,7 @@ typedef struct {
 	GLint uCloudResScale;
 	GLint uNoise2DTex;
 	GLint uNoise3DTex;
+	GLint uCloudJitter;
 } gl_cloud_pipe_t;
 
 typedef struct {
@@ -402,6 +419,20 @@ typedef struct {
 	GLint uSceneDepthTex;
 	GLint uBilateralActive;
 } gl_cloud_comp_pipe_t;
+
+typedef struct {
+	GLuint prog;
+	GLuint pending_prog;
+	GLint uCloudQuarterTex;
+	GLint uCloudHistTex;
+	GLint uCloudDepthTex;
+	GLint uReprojMat;
+	GLint uQuarterUvScale;
+	GLint uPrevUvScale;
+	GLint uCloudUvScale;
+	GLint uCloudSubpixel;
+	GLint uHistoryValid;
+} gl_cloud_reproj_pipe_t;
 
 typedef struct {
 	GLuint prog;
@@ -514,6 +545,7 @@ typedef struct {
 	gl_sky_pipe_t sky_pipe;
 	gl_cloud_pipe_t cloud_pipes[ND_CLOUD_VAR_COUNT];
 	gl_cloud_comp_pipe_t cloud_comp_pipe;
+	gl_cloud_reproj_pipe_t cloud_reproj_pipe;
 	gl_csm_pipe_t csm_pipe;
 	gl_ssao_pipe_t ssao_pipe;
 	gl_bloom_pipe_t bloom_pipe;
@@ -554,6 +586,23 @@ typedef struct {
 	GLuint cloud_fbo;
 	GLuint cloud_tex;
 	GLuint cloud_depth_tex;
+	/* Phase 6C Piece 2: 2x2 interleaved temporal checkerboard cloud targets & history */
+	GLuint cloud_q_fbo;
+	GLuint cloud_q_tex;
+	GLuint cloud_q_depth_tex;
+	GLuint cloud_hist_fbo[2];
+	GLuint cloud_hist_tex[2];
+	uint32_t cloud_qw;
+	uint32_t cloud_qh;
+	bool cloud_temporal_ok;
+	float cloud_prev_mvp[16];
+	double cloud_prev_origin[3];
+	float cloud_prev_uv_scale[2];
+	uint32_t cloud_prev_trw;
+	uint32_t cloud_prev_trh;
+	uint32_t cloud_phase;
+	int cloud_hist_idx;
+	bool cloud_hist_valid;
 	GLuint ssao_fbo;
 	GLuint ssao_tex;
 	GLuint bloom_fbo[2];
@@ -563,6 +612,8 @@ typedef struct {
 	uint32_t post_rw;
 	uint32_t post_rh;
 	bool scene_hdr;
+	bool scene_hdr_r11f;
+	bool scene_depth24;
 	bool post_targets_ok;
 	uint32_t cloud_w;
 	uint32_t cloud_h;

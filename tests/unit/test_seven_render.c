@@ -2749,6 +2749,8 @@ int main(void)
 				{ "cloud",               nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud()               },
 				{ "cloud_wide",          nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide()          },
 				{ "cloud_wide_csm",      nd_seven_gl_vs_cloud(),          nd_seven_gl_fs_cloud_wide_csm()      },
+				{ "cloud_comp",          nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_comp()          },
+				{ "cloud_reproj",        nd_seven_gl_vs_csm(),            nd_seven_gl_fs_cloud_reproj()        },
 				{ "csm",                 nd_seven_gl_vs_csm(),            nd_seven_gl_fs_csm()                 },
 				{ "sky",                 nd_seven_gl_vs_sky(),            nd_seven_gl_fs_sky()                 },
 				{ "ssao",                nd_seven_gl_vs_csm(),            nd_seven_gl_fs_ssao()                },
@@ -5596,6 +5598,111 @@ int main(void)
 		assert(strstr(fs_terr, "nd_eval_meadow_bed_weight(vEcoBase.y") != NULL);
 
 		printf("PASS: Phase 6B Piece 3 biome deduplication & VS climate/ecology hoisting verified\n");
+	}
+
+	/* Phase 6C Piece 1: Selectable 0x/2x/4x MSAA + stencil-backed R11F_G11F_B10F water contract */
+	{
+		int orig_samples = nd_seven_get_msaa_samples();
+		nd_seven_set_msaa_samples(0);
+		assert(nd_seven_get_msaa_samples() == 0 && nd_seven_get_msaa() == 0);
+		nd_seven_set_msaa_samples(2);
+		assert(nd_seven_get_msaa_samples() == 2 && nd_seven_get_msaa() == 1);
+		nd_seven_set_msaa_samples(4);
+		assert(nd_seven_get_msaa_samples() == 4 && nd_seven_get_msaa() == 1);
+		nd_seven_toggle_msaa();
+		assert(nd_seven_get_msaa_samples() == 0 && nd_seven_get_msaa() == 0);
+		nd_seven_toggle_msaa();
+		assert(nd_seven_get_msaa_samples() == 4 && nd_seven_get_msaa() == 1);
+		nd_seven_set_msaa(2);
+		assert(nd_seven_get_msaa_samples() == 2 && nd_seven_get_msaa() == 1);
+		nd_seven_set_msaa_samples(orig_samples);
+
+		/* Water shader must classify seabed vs submerged sprites via uWaterMode + hardware stencil,
+		 * never reading scene color alpha (required for 4 B/px GL_R11F_G11F_B10F scene buffer). */
+		const char *fs_wat = nd_seven_gl_fs_water();
+		const char *fs_sb  = nd_seven_gl_fs_terrain_seabed_near();
+		assert(strstr(fs_wat, "uniform int uWaterMode;") != NULL);
+		assert(strstr(fs_wat, "bool isSeabed = (uWaterMode == 0);") != NULL);
+		assert(strstr(fs_wat, "scene0.a") == NULL);
+		assert(strstr(fs_wat, "sceneR.a") == NULL);
+		assert(strstr(fs_wat, "sceneS.a") == NULL);
+		assert(strstr(fs_sb,  "vec4(outRgb, 0.5)") == NULL);
+
+		printf("PASS: Phase 6C Piece 1 selectable 0x/2x/4x MSAA & stencil-backed R11F water contract verified\n");
+	}
+
+	/* Phase 6C Piece 2: 2x2 interleaved temporal checkerboard cloud reprojection */
+	{
+		/* 1. Bayer 2x2 subpixel sequence covers all 4 subpixels with exact NDC jitter */
+		int seen = 0;
+		for (uint32_t ph = 0; ph < 4u; ph++) {
+			int px = -1, py = -1;
+			float jx = 0.0f, jy = 0.0f;
+			nd_seven_gl_cloud_subpixel(ph, 480u, 270u, &px, &py, &jx, &jy);
+			assert(px >= 0 && px <= 1 && py >= 0 && py <= 1);
+			seen |= 1 << (px | (py << 1));
+			assert(fabsf(jx - ((0.5f - (float)px) / 480.0f)) < 1e-7f);
+			assert(fabsf(jy - ((0.5f - (float)py) / 270.0f)) < 1e-7f);
+		}
+		assert(seen == 0xF);
+
+		/* 2. Origin-relative NDC reprojection matrix: exact identity when stationary,
+		 *    and < 1e-4 NDC error under simultaneous perspective rotation + origin shift (far=8e7) */
+		nd_planet_def_t pdef = {0};
+		pdef.major_r = 2000000.0f;
+		pdef.minor_r = 1335000.0f;
+		float mvp_prev[16], mvp_cur[16], reproj[16];
+		double orig_prev[3], orig_cur[3];
+		float eye_prev[3], eye_cur[3], abs_prev[3], abs_cur[3];
+		nd_seven_gl_compute_mvp_rel_ex(1280, 720, 0.0f, 0.0f, 0.0f, 20000.0f, 15.0f, 45.0f, 60.0f,
+		                               &pdef, mvp_prev, orig_prev, eye_prev, abs_prev);
+		nd_seven_gl_compute_mvp_rel_ex(1280, 720, 120.0f, -85.0f, 0.0f, 20500.0f, 18.0f, 46.0f, 60.0f,
+		                               &pdef, mvp_cur, orig_cur, eye_cur, abs_cur);
+
+		/* Stationary fast path -> exact identity */
+		assert(nd_seven_gl_compute_reproj_mat(mvp_cur, orig_cur, mvp_cur, orig_cur, reproj) == true);
+		for (int i = 0; i < 16; i++) {
+			float want = ((i % 5) == 0) ? 1.0f : 0.0f;
+			assert(fabsf(reproj[i] - want) < 1e-7f);
+		}
+
+		/* Moving camera + shifted origin: project an absolute 3D point into cur & prev NDC,
+		 * then verify reproj * cur_ndc matches prev_ndc to < 1e-4! */
+		assert(nd_seven_gl_compute_reproj_mat(mvp_cur, orig_cur, mvp_prev, orig_prev, reproj) == true);
+		double pt_abs[3] = { orig_cur[0] + 450.0, orig_cur[1] - 320.0, orig_cur[2] + 1620.0 };
+		float p_cur[3] = { (float)(pt_abs[0] - orig_cur[0]), (float)(pt_abs[1] - orig_cur[1]), (float)(pt_abs[2] - orig_cur[2]) };
+		float p_prv[3] = { (float)(pt_abs[0] - orig_prev[0]), (float)(pt_abs[1] - orig_prev[1]), (float)(pt_abs[2] - orig_prev[2]) };
+		float c_cur[4], c_prv[4], c_rep[4];
+		for (int r = 0; r < 4; r++) {
+			c_cur[r] = mvp_cur[0*4+r]*p_cur[0] + mvp_cur[1*4+r]*p_cur[1] + mvp_cur[2*4+r]*p_cur[2] + mvp_cur[3*4+r];
+			c_prv[r] = mvp_prev[0*4+r]*p_prv[0] + mvp_prev[1*4+r]*p_prv[1] + mvp_prev[2*4+r]*p_prv[2] + mvp_prev[3*4+r];
+		}
+		float ndc_cur[3] = { c_cur[0]/c_cur[3], c_cur[1]/c_cur[3], c_cur[2]/c_cur[3] };
+		float ndc_prv[3] = { c_prv[0]/c_prv[3], c_prv[1]/c_prv[3], c_prv[2]/c_prv[3] };
+		for (int r = 0; r < 4; r++)
+			c_rep[r] = reproj[0*4+r]*ndc_cur[0] + reproj[1*4+r]*ndc_cur[1] + reproj[2*4+r]*ndc_cur[2] + reproj[3*4+r];
+		float rep_x = c_rep[0] / c_rep[3];
+		float rep_y = c_rep[1] / c_rep[3];
+		float err_x = fabsf(rep_x - ndc_prv[0]);
+		float err_y = fabsf(rep_y - ndc_prv[1]);
+		assert(err_x < 1e-4f && err_y < 1e-4f);
+
+		/* Singular matrix rejection */
+		float zero_m[16] = {0};
+		assert(nd_seven_gl_compute_reproj_mat(zero_m, orig_cur, mvp_prev, orig_prev, reproj) == false);
+
+		/* 3. Shader contracts */
+		assert(strstr(nd_seven_gl_vs_cloud(), "uniform vec2 uCloudJitter;") != NULL);
+		assert(strstr(nd_seven_gl_vs_cloud(), "uCloudJitter * gl_Position.w") != NULL);
+		const char *fs_rp = nd_seven_gl_fs_cloud_reproj();
+		assert(strstr(fs_rp, "uCloudQuarterTex") != NULL);
+		assert(strstr(fs_rp, "uCloudHistTex") != NULL);
+		assert(strstr(fs_rp, "uReprojMat") != NULL);
+		assert(strstr(fs_rp, "uCloudSubpixel") != NULL);
+		assert(strstr(fs_rp, "clamp(hist, cMin, cMax)") != NULL);
+
+		printf("PASS: Phase 6C Piece 2 2x2 temporal checkerboard cloud reprojection (err_x=%.2e err_y=%.2e) verified\n",
+		       err_x, err_y);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

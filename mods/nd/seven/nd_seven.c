@@ -862,10 +862,13 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	nd_seven_eval_alt_profile(dist, s_frame_detail_scale,
 	                          nd_seven_get_res_scale(),
 	                          nd_seven_get_cloud_quality(), &alt_prof);
-	nd_seven_gl_set_render_scales(alt_prof.eff_res_scale, alt_prof.eff_cloud_scale);
+	float eff_res = alt_prof.eff_res_scale * nd_seven_get_drs_scale();
+	if (eff_res < ND_SEVEN_RES_MIN) eff_res = ND_SEVEN_RES_MIN;
+	if (eff_res > ND_SEVEN_RES_MAX) eff_res = ND_SEVEN_RES_MAX;
+	nd_seven_gl_set_render_scales(eff_res, alt_prof.eff_cloud_scale);
 	float target_quad_px = alt_prof.target_quad_px;
-	float ar_vp_w = fmaxf(1.0f, (float)w * alt_prof.eff_res_scale);
-	float ar_vp_h = fmaxf(1.0f, (float)h * alt_prof.eff_res_scale);
+	float ar_vp_w = fmaxf(1.0f, (float)w * eff_res);
+	float ar_vp_h = fmaxf(1.0f, (float)h * eff_res);
 	size_t max_leaves = SEVEN_MAX_VISIBLE_LEAVES;
 	uint8_t min_lvl = alt_prof.min_level;
 

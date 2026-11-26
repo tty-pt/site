@@ -264,6 +264,23 @@ void nd_seven_gl_bake_noise2d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t peri
  * Output holds dim*dim*dim*4 bytes in Z-major layout ((z*dim + y)*dim + x). */
 void nd_seven_gl_bake_noise3d_lut(uint8_t *out_rgba, uint32_t dim, uint32_t period);
 
+/* Phase 6C Piece 2: 2x2 interleaved temporal checkerboard cloud reprojection helpers.
+ * Bayer phase (phase & 3) maps to subpixel (px, py) in {0,1}^2 and exact NDC jitter
+ * ((0.5 - px) / qrw, (0.5 - py) / qrh) for the quarter-area cloud render target. */
+void nd_seven_gl_cloud_subpixel(uint32_t phase, uint32_t qrw, uint32_t qrh,
+                                int *out_px, int *out_py,
+                                float *out_jx, float *out_jy);
+
+/* Compute column-major 4x4 NDC reprojection matrix:
+ *   out_reproj = prev_mvp * Translate(cur_origin - prev_origin) * inv(cur_mvp)
+ * Evaluated in double precision so far=8e7 perspective inversion stays accurate. */
+bool nd_seven_gl_compute_reproj_mat(const float cur_mvp[16], const double cur_origin[3],
+                                    const float prev_mvp[16], const double prev_origin[3],
+                                    float out_reproj[16]);
+
+const char *nd_seven_gl_fs_cloud_comp(void);
+const char *nd_seven_gl_fs_cloud_reproj(void);
+
 /* 3D WebGL2 Frame & Pass Dispatchers */
 bool nd_seven_gl_pipelines_ready(void);
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity);

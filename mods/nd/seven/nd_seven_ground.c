@@ -433,9 +433,35 @@ void nd_seven_cycle_cloud_quality(void)
 	s_cloud_quality = (s_cloud_quality + 1) % 4;
 }
 
+static int s_msaa_samples = 4;
+
+void nd_seven_set_msaa_samples(int samples)
+{
+	if (samples <= 0) {
+		s_msaa_samples = 0;
+		s_msaa_enabled = 0;
+	} else if (samples <= 2) {
+		s_msaa_samples = 2;
+		s_msaa_enabled = 1;
+	} else {
+		s_msaa_samples = 4;
+		s_msaa_enabled = 1;
+	}
+}
+
+int nd_seven_get_msaa_samples(void)
+{
+	return s_msaa_samples;
+}
+
 void nd_seven_set_msaa(int enabled)
 {
-	s_msaa_enabled = enabled ? 1 : 0;
+	if (enabled <= 0)
+		nd_seven_set_msaa_samples(0);
+	else if (enabled == 2)
+		nd_seven_set_msaa_samples(2);
+	else
+		nd_seven_set_msaa_samples(4);
 }
 
 int nd_seven_get_msaa(void)
@@ -445,7 +471,7 @@ int nd_seven_get_msaa(void)
 
 void nd_seven_toggle_msaa(void)
 {
-	s_msaa_enabled = !s_msaa_enabled;
+	nd_seven_set_msaa_samples(s_msaa_enabled ? 0 : 4);
 }
 
 void nd_seven_set_fps_cap(int fps)
@@ -704,3 +730,144 @@ void nd_seven_eval_alt_profile(float cam_dist, float detail_scale,
 	out->min_level       = 0u;
 	out->chunk_budget    = 8u;
 }
+
+void nd_seven_drs_init(nd_seven_drs_t *drs)
+{
+	if (!drs)
+		return;
+	memset(drs, 0, sizeof(*drs));
+	drs->enabled    = 0;
+	drs->target_ms  = 16.67f;
+	drs->hi_ms      = 18.0f;
+	drs->lo_ms      = 13.0f;
+	drs->min_scale  = 0.75f;
+	drs->max_scale  = 1.00f;
+	drs->step       = 0.05f;
+	drs->cur_scale  = 1.00f;
+	drs->ema_ms     = 16.67f;
+}
+
+float nd_seven_drs_update(nd_seven_drs_t *drs, float dt_s,
+                          float cam_x, float cam_y, float cam_dist,
+                          float cam_yaw, float cam_pitch)
+{
+	if (!drs)
+		return 1.00f;
+	if (!drs->enabled) {
+		drs->cur_scale = (drs->max_scale > 0.0f) ? drs->max_scale : 1.00f;
+		drs->in_motion = 0u;
+		drs->settle_s = 0.0f;
+		drs->cooldown_s = 0.0f;
+		return drs->cur_scale;
+	}
+
+	if (dt_s < 0.001f) dt_s = 0.001f;
+	if (dt_s > 0.250f) dt_s = 0.250f;
+	float frame_ms = dt_s * 1000.0f;
+	drs->ema_ms += 0.20f * (frame_ms - drs->ema_ms);
+
+	bool fast_motion = false;
+	if (drs->has_pose) {
+		float dx = cam_x - drs->last_cam_x;
+		float dy = cam_y - drs->last_cam_y;
+		float d_pos = sqrtf(dx * dx + dy * dy);
+		float rel_zoom = fabsf(cam_dist - drs->last_cam_dist) / fmaxf(1.0f, fabsf(drs->last_cam_dist));
+		float d_ang = fabsf(cam_yaw - drs->last_cam_yaw) + fabsf(cam_pitch - drs->last_cam_pitch);
+		fast_motion = (d_pos > 1.5f || rel_zoom > 0.02f || d_ang > 0.35f);
+	}
+	drs->last_cam_x     = cam_x;
+	drs->last_cam_y     = cam_y;
+	drs->last_cam_dist  = cam_dist;
+	drs->last_cam_yaw   = cam_yaw;
+	drs->last_cam_pitch = cam_pitch;
+	drs->has_pose       = 1u;
+
+	if (fast_motion) {
+		drs->in_motion = 1u;
+		drs->settle_s = 0.0f;
+		if (frame_ms > drs->hi_ms || drs->ema_ms > drs->hi_ms) {
+			/* Immediate downscale during fast camera motion when over budget */
+			drs->cur_scale -= drs->step;
+			drs->cooldown_s = 0.10f;
+		}
+	} else {
+		drs->settle_s += dt_s;
+		if (drs->in_motion) {
+			/* Rapid recovery back to max_scale within ~250 ms of camera settle */
+			if (drs->ema_ms <= drs->hi_ms) {
+				float ramp_rate = (drs->max_scale - drs->min_scale) / 0.20f;
+				drs->cur_scale += ramp_rate * dt_s;
+			}
+			if (drs->settle_s >= 0.25f) {
+				if (drs->ema_ms <= drs->hi_ms)
+					drs->cur_scale = drs->max_scale;
+				drs->in_motion = 0u;
+				drs->cooldown_s = 0.15f;
+			}
+		} else {
+			if (drs->cooldown_s > 0.0f) {
+				drs->cooldown_s -= dt_s;
+				if (drs->cooldown_s < 0.0f)
+					drs->cooldown_s = 0.0f;
+			}
+			if (drs->cooldown_s <= 0.0f) {
+				if (drs->ema_ms > drs->hi_ms) {
+					drs->cur_scale -= drs->step;
+					drs->cooldown_s = 0.15f;
+				} else if (drs->ema_ms < drs->lo_ms) {
+					drs->cur_scale += drs->step;
+					drs->cooldown_s = 0.15f;
+				}
+			}
+		}
+	}
+
+	if (drs->cur_scale < drs->min_scale) drs->cur_scale = drs->min_scale;
+	if (drs->cur_scale > drs->max_scale) drs->cur_scale = drs->max_scale;
+	return drs->cur_scale;
+}
+
+static nd_seven_drs_t s_drs;
+static int s_drs_inited = 0;
+
+static nd_seven_drs_t *gl_drs_state(void)
+{
+	if (!s_drs_inited) {
+		nd_seven_drs_init(&s_drs);
+		s_drs_inited = 1;
+	}
+	return &s_drs;
+}
+
+void nd_seven_set_drs(int enabled)
+{
+	nd_seven_drs_t *d = gl_drs_state();
+	d->enabled = enabled ? 1 : 0;
+	if (!d->enabled) {
+		d->cur_scale = d->max_scale;
+		d->in_motion = 0u;
+		d->settle_s = 0.0f;
+		d->cooldown_s = 0.0f;
+	}
+}
+
+int nd_seven_get_drs(void)
+{
+	return gl_drs_state()->enabled;
+}
+
+float nd_seven_get_drs_scale(void)
+{
+	nd_seven_drs_t *d = gl_drs_state();
+	return d->enabled ? d->cur_scale : 1.00f;
+}
+
+void nd_seven_drs_feed_frame(float dt_s, float cam_x, float cam_y,
+                             float cam_dist, float cam_yaw, float cam_pitch)
+{
+	nd_seven_drs_t *d = gl_drs_state();
+	if (!d->enabled)
+		return;
+	(void)nd_seven_drs_update(d, dt_s, cam_x, cam_y, cam_dist, cam_yaw, cam_pitch);
+}
+
