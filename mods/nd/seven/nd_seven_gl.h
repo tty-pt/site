@@ -283,6 +283,7 @@ const char *nd_seven_gl_fs_cloud_reproj(void);
 
 /* 3D WebGL2 Frame & Pass Dispatchers */
 bool nd_seven_gl_pipelines_ready(void);
+void nd_seven_gl_shader_progress(int *out_ready, int *out_total);
 void nd_seven_gl_set_lamb_light(float wx, float wy, float wz, float intensity);
 float nd_seven_gl_eval_lamb_light(float frag_wx, float frag_wy, float frag_wz,
                                   float lamb_wx, float lamb_wy, float lamb_wz,
@@ -304,6 +305,7 @@ uint32_t nd_seven_gl_get_frame_count(void);
 
 void nd_seven_gl_set_focal_water(float water_level);
 void nd_seven_gl_set_render_scales(float res_scale, float cloud_scale);
+void nd_seven_gl_set_lod_morph_params(float px_scale, float torus_sx, float torus_sy);
 void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
                                 float tx, float ty, float tz,
                                 float dist, float yaw_deg, float pitch_deg, float fov_deg,

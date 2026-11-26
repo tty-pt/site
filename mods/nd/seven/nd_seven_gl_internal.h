@@ -179,7 +179,7 @@ _Static_assert(sizeof(nd_frame_ubo_t) == 272, "nd_frame_ubo_t must match std140 
 typedef struct {
 	float orig_span[4];  /* loc 1: ox, oy, span_w, span_h */
 	float rel_layers[4]; /* loc 2: rel_ox, rel_oy, slot_layer, river_layer */
-	float meta[4];       /* loc 3: sea_level, 0.0f, 0.0f, 0.0f */
+	float meta[4];       /* loc 3: sea_level, morph_start_dist, morph_inv_range, grid_quads + reveal_morph */
 } gl_chunk_inst_t;
 _Static_assert(sizeof(gl_chunk_inst_t) == 48, "gl_chunk_inst_t must be 48 bytes");
 
@@ -228,6 +228,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uHeightTex;
 	GLint uSubstrateTex;
 	GLint uRiverTex;
@@ -260,6 +261,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uAtlasTex;
 	GLint uAtlasNormTex;
 	GLint uSeaLevel;
@@ -281,6 +283,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uHeightTex;
 	GLint uChunkOrigin;
 	GLint uChunkSpan;
@@ -303,6 +306,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uCamFwd;
 	GLint uCamRight;
 	GLint uCamUp;
@@ -317,6 +321,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uSeaLevel;
 	GLint uCloudShadowMap;
 	GLint uShadowPass;
@@ -332,6 +337,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uSeaLevel;
 	GLint uTreeShadowWriteOrigin;
 	GLint uTreeShadowWriteVP;
@@ -369,6 +375,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uChunkOrigin;
 	GLint uChunkRelOrigin;
 	GLint uChunkSpan;
@@ -430,6 +437,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uCsm;
 	GLint uAnimTime;
 	GLint uSeaWet;
@@ -482,6 +490,7 @@ typedef struct {
 
 typedef struct {
 	GLuint prog;
+	GLuint pending_prog;
 	GLint uSceneTex;
 	GLint uBloomTex;
 	GLint uSsaoTex;
@@ -527,7 +536,9 @@ typedef struct {
 	uint8_t has_river;
 	uint8_t has_cpos;
 	uint8_t river_baked; /* 1 = river_array layer slot_idx has valid baked data */
+	uint8_t last_grid_lod; /* 0..2 or 0xFF unset (hysteresis band for grid_lod selection) */
 	float river_sea_level;
+	float reveal_start_time; /* anim_time when chunk uploaded/upgraded for smooth CDLOD reveal */
 	double cpos[3];
 	float cpos_center[3];
 	float cpos_rot[9];
@@ -553,6 +564,8 @@ typedef struct {
 	bool tier_b_queued;
 	bool tier_b_done;
 	bool prewarm_frame0_seen;
+	uint8_t shader_queue_stage;
+	uint8_t noise_lut_stage;
 	uint32_t prewarmed_mask;
 	GLuint prewarm_dummy_rgba;
 	GLuint noise2d_tex;
@@ -728,6 +741,9 @@ typedef struct {
 	uint16_t chunk_hash[CHUNK_CACHE_HASH_SIZE]; /* 0 = empty, slot_idx + 1 = occupied */
 	uint32_t chunk_cache_used;
 	uint32_t frame_count;
+	float lod_px_scale;
+	float lod_torus_sx;
+	float lod_torus_sy;
 
 	/* Deferred instanced terrain draw queue (flushed once in gl_end_terrain_pass) */
 	gl_terr_draw_item_t terr_draw_q[MAX_TERR_DRAW_QUEUE];

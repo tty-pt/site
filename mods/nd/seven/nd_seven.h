@@ -30,6 +30,7 @@ int nd_seven_shaders_ready(void);
 
 /* Forget remembered tile glyphs (new session or world). */
 void nd_seven_forget(void);
+void nd_seven_drain_async(void);
 
 /*
  * The objects Seven places in map tile (col, row) of md, in tile-local units

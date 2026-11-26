@@ -7,7 +7,7 @@
 #include <string.h>
 
 #ifdef ND_FIELD_MEMO_EXTERN
-nd_field_room_memo_t g_nd_field_room_memo[4096];
+_CHAFF_TLS nd_field_room_memo_t g_nd_field_room_memo[4096];
 #endif
 
 __attribute__((weak)) ar_system_t *nd_seven_get_chunk_sys(void) { return NULL; }

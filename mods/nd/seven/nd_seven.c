@@ -216,9 +216,17 @@ static void seven_macro_chunk_eval_row4(void *user_ctx, uint16_t world, uint8_t 
 		seven_pack_field_sample(world, level, wx[k], wy, base_wl, &fs[k], &out[k]);
 }
 
+void nd_seven_drain_async(void)
+{
+	if (s_seven_wq)
+		stl_wq_drain(s_seven_wq);
+}
+
 ar_system_t *nd_seven_get_chunk_sys(void)
 {
 	if (!s_seven_chunk_sys) {
+		if (!s_seven_wq)
+			s_seven_wq = stl_wq_create("seven", 0, 256);
 		ar_config_t cfg;
 		memset(&cfg, 0, sizeof(cfg));
 		cfg.base_w = NDW_TILE_W;
@@ -228,14 +236,14 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.row_sampler = seven_macro_chunk_row_sampler;
 		cfg.eval_row4 = seven_macro_chunk_eval_row4;
 		cfg.max_active = 160;
-		cfg.pool_capacity = 512;
+		cfg.pool_capacity = 768;
 		cfg.max_levels = 17;
 		cfg.default_rgba = 0xFF3C804Eu;
 		cfg.period_x = (int32_t)ND_SEVEN_WORLD_DIM_W;
 		cfg.period_y = (int32_t)ND_SEVEN_WORLD_DIM_H;
-		cfg.max_populates_per_frame = 0;
-		cfg.wq = NULL;
-		cfg.samples_pool_capacity = 64;
+		cfg.max_populates_per_frame = 2;
+		cfg.wq = s_seven_wq;
+		cfg.samples_pool_capacity = 256;
 		cfg.samples_max_level = 2;
 		s_seven_chunk_sys = ar_system_create_ex(&cfg);
 		if (s_seven_chunk_sys && nd_seven_perf_get_enabled())
@@ -753,6 +761,8 @@ static float s_cam_focal_y = 0.0f;
 static float s_cam_focal_z = 0.0f;
 static float s_cam_dist = ND_SEVEN_CAM_DIST;
 static float s_frame_detail_scale = 1.0f;
+static float s_frame_anim_time = 0.0f;
+static uint32_t s_frame_dispatch_count = 0u;
 
 static inline float seven_max_eff_bb_size(void)
 {
@@ -816,6 +826,8 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	nd_seven_world_pos(st, &lwx, &lwy);
 	uint16_t world = (uint16_t)(st ? st->map_data.pos[3] : 0);
 	float anim_t = nd_seven_get_anim_time();
+	s_frame_anim_time = anim_t;
+	s_frame_dispatch_count++;
 
 	nd_planet_def_t cur_pdef;
 	nd_seven_eval_planet_at_time(world, world, anim_t, &cur_pdef);
@@ -881,6 +893,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	float target_quad_px = alt_prof.target_quad_px;
 	float ar_vp_w = fmaxf(1.0f, (float)w * eff_res);
 	float ar_vp_h = fmaxf(1.0f, (float)h * eff_res);
+	float focal_px = (0.5f * ar_vp_h) / tanf(ND_SEVEN_CAM_FOV * 0.5f * (3.14159265358979323846f / 180.0f));
+	float split_thresh = target_quad_px * 48.0f;
+	float lod_px_scale = (split_thresh > 1e-4f) ? (focal_px / split_thresh) : 0.0f;
+	nd_seven_gl_set_lod_morph_params(lod_px_scale, torus_sx, torus_sy);
 	size_t max_leaves = SEVEN_MAX_VISIBLE_LEAVES;
 	uint8_t min_lvl = alt_prof.min_level;
 
@@ -949,7 +965,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.max_level = 14,
 		.view_id = 0,
 		.max_populates_per_query = max_pops_query,
-		.split_hysteresis = 0.15f,
+		.split_hysteresis = 0.25f,
 		.occluder = occ,
 		.occluder_z_bias = 1.5f,
 		.occluder_texel_bias = 0.0f,
@@ -1627,6 +1643,7 @@ typedef struct {
 	uint64_t      arena_seq;
 	uint32_t      arena_off;
 	float         max_dim;
+	float         fade_start_t;
 	uint16_t      count;
 	int16_t       world, rz, w_level;
 	uint8_t       node_level, valid;
@@ -1748,10 +1765,21 @@ static void seven_async_block_bb_worker(void *ctx)
 	s_block_bb_staging_max_dim[slot->staging_idx] = max_dim;
 }
 
-static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb)
+static inline float seven_block_fade_alpha(float fade_start_t)
+{
+	if (s_frame_anim_time <= 0.0f || fade_start_t < 0.0f)
+		return 1.0f;
+	float age = s_frame_anim_time - fade_start_t;
+	if (age < 0.0f || age >= 0.18f)
+		return 1.0f;
+	float t = age / 0.18f;
+	return t * t * (3.0f - 2.0f * t);
+}
+
+static inline int seven_stream_faded_billboard(const lam_billboard_gpu_t *src_bb, float fade_scale)
 {
 	float alpha = seven_eval_billboard_alpha(src_bb->x, src_bb->y, src_bb->z,
-	                                         src_bb->width, src_bb->height);
+	                                         src_bb->width, src_bb->height) * fade_scale;
 	uint32_t alpha_pack = seven_pack_white_alpha(alpha);
 	if (alpha_pack == 0)
 		return 0;
@@ -1889,7 +1917,7 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 				}
 			}
 		} else {
-			emitted += seven_stream_faded_billboard(&bb);
+			emitted += seven_stream_faded_billboard(&bb, 1.0f);
 		}
 	}
 	return emitted;
@@ -4387,6 +4415,8 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 								slot->node_rev = node->rev;
 								slot->atlas_ver = cur_atlas_ver;
 								slot->forget_seq = cur_forget_seq;
+								slot->fade_start_t = (s_frame_anim_time > 0.0f && s_frame_dispatch_count > 1u)
+								                     ? s_frame_anim_time : -10.0f;
 								slot->valid = 1;
 							}
 							atomic_store_explicit(&slot->async_task.state, (uint8_t)STL_WQ_IDLE, memory_order_release);
@@ -4406,6 +4436,9 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 						    (s_block_bb_arena_cursor - slot->arena_seq) <= BLOCK_BB_ARENA_CAP) {
 							if (slot->max_dim <= min_vis_sz)
 								continue;
+							float blk_fade = seven_block_fade_alpha(slot->fade_start_t);
+							if (blk_fade <= 0.0f)
+								continue;
 							const lam_billboard_gpu_t *cached = &s_block_bb_arena[slot->arena_off];
 							uint16_t cnt = slot->count;
 							for (uint16_t ci = 0; ci < cnt; ci++) {
@@ -4423,7 +4456,7 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 									                           (float)lwx, (float)lwy, nz_min, nz_max))
 										continue;
 								}
-								seven_stream_faded_billboard(&cached[ci]);
+								seven_stream_faded_billboard(&cached[ci], blk_fade);
 							}
 							continue;
 						}
@@ -4478,7 +4511,14 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 						}
 
 						nd_seven_sort_billboards_by_size(arena_dst, arena_cnt);
-						if (arena_max_dim > min_vis_sz) {
+						bool same_blk = (slot->valid && slot->bx0 == bx0 && slot->by0 == by0 &&
+						                 slot->world == (int16_t)world);
+						float fade_start_t = same_blk
+							? slot->fade_start_t
+							: ((s_frame_anim_time > 0.0f && s_frame_dispatch_count > 1u)
+							   ? s_frame_anim_time : -10.0f);
+						float blk_fade = seven_block_fade_alpha(fade_start_t);
+						if (arena_max_dim > min_vis_sz && blk_fade > 0.0f) {
 							for (uint16_t ci = 0; ci < arena_cnt; ci++) {
 								float bsz = (arena_dst[ci].width > arena_dst[ci].height)
 									? arena_dst[ci].width : arena_dst[ci].height;
@@ -4495,7 +4535,7 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 									                           (float)lwx, (float)lwy, nz_min, nz_max))
 										continue;
 								}
-								seven_stream_faded_billboard(&arena_dst[ci]);
+								seven_stream_faded_billboard(&arena_dst[ci], blk_fade);
 							}
 						}
 						s_block_bb_arena_cursor += (uint64_t)arena_cnt;
@@ -4511,6 +4551,7 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 						slot->arena_seq = start_seq + (uint64_t)arena_cnt;
 						slot->arena_off = cur_off;
 						slot->max_dim = arena_max_dim;
+						slot->fade_start_t = fade_start_t;
 						slot->count = arena_cnt;
 						slot->world = (int16_t)world;
 						slot->rz = base_rz;

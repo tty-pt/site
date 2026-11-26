@@ -3706,6 +3706,7 @@ int main(void)
 			                                 : (((upland_wx - NDW_TILE_W + 1) / NDW_TILE_W) * NDW_TILE_W);
 			int32_t ch_oy = (upland_wy >= 0) ? ((upland_wy / NDW_TILE_H) * NDW_TILE_H)
 			                                 : (((upland_wy - NDW_TILE_H + 1) / NDW_TILE_H) * NDW_TILE_H);
+			ar_system_begin_frame(cs_north);
 			const ar_node_t *riv_node = ar_system_ensure(cs_north, 0, 0, ch_ox, ch_oy);
 			assert(riv_node != NULL && riv_node->samples != NULL && riv_node->rgba != NULL);
 			int found_packed_carve = 0;
@@ -3796,7 +3797,11 @@ int main(void)
 
 			/* At detail = 0.35f (max_cull = 2,856 < 3,500), all billboards cull */
 			nd_seven_set_detail_scale(0.35f);
-			nd_seven_render(fb, 1280, 720, &st);
+			for (int wave = 0; wave < 3; wave++) {
+				nd_seven_render(fb, 1280, 720, &st);
+				if (wave < 2)
+					nd_seven_drain_async();
+			}
 			assert(nd_seven_last_mid_billboard_count() == 0);
 
 			/* At detail = 0.85f, near-focal large trees are emitted */
@@ -4398,7 +4403,9 @@ int main(void)
 				for (size_t zi = 0; zi < sizeof(zoom_steps) / sizeof(zoom_steps[0]); zi++) {
 					nd_seven_set_zoom(zoom_steps[zi]);
 					nd_seven_render(fb, 640, 480, &st);
+					nd_seven_drain_async();
 				}
+				nd_seven_render(fb, 640, 480, &st);
 				size_t act_cnt = ar_system_get_active_count(cs);
 				assert(act_cnt > 0);
 				size_t lvl0_real_count = 0;
@@ -4455,12 +4462,14 @@ int main(void)
 						int32_t span_h = NDW_TILE_H << lvl;
 						int32_t a_ox = (ox0 >= 0) ? ((ox0 / span_w) * span_w) : (-(((-ox0 + span_w - 1) / span_w) * span_w));
 						int32_t a_oy = (oy0 >= 0) ? ((oy0 / span_h) * span_h) : (-(((-oy0 + span_h - 1) / span_h) * span_h));
+						ar_system_begin_frame(cs);
 						const ar_node_t *anc = ar_system_ensure(cs, 0, (uint8_t)lvl, a_ox, a_oy);
 						assert(anc != NULL);
 						assert((anc->flags & AR_NODE_FLAG_DEFERRED) == 0);
 					}
 
 					/* Now populate Level 0 child and verify every single vertex against canonical nd_field_sample */
+					ar_system_begin_frame(cs);
 					const ar_node_t *leaf0 = ar_system_ensure(cs, 0, 0, ox0, oy0);
 					assert(leaf0 != NULL);
 					assert((leaf0->flags & AR_NODE_FLAG_DEFERRED) == 0);
@@ -4491,8 +4500,22 @@ int main(void)
 
 					for (size_t zi = 0; zi < sizeof(test_zooms) / sizeof(test_zooms[0]); zi++) {
 						nd_seven_set_zoom(test_zooms[zi]);
-						nd_seven_render(fb, 640, 480, &st);
-						size_t act_cnt = ar_system_get_active_count(cs);
+						size_t act_cnt = 0;
+						for (int wave = 0; wave < 16; wave++) {
+							nd_seven_render(fb, 640, 480, &st);
+							act_cnt = ar_system_get_active_count(cs);
+							bool any_deferred = false;
+							for (size_t li = 0; li < act_cnt; li++) {
+								const ar_node_t *ln = ar_system_get_active_node(cs, li);
+								if (ln && (ln->flags & AR_NODE_FLAG_DEFERRED)) {
+									any_deferred = true;
+									break;
+								}
+							}
+							if (!any_deferred && wave > 0)
+								break;
+							nd_seven_drain_async();
+						}
 						assert(act_cnt > 0);
 						bool focal_covered = false;
 						int32_t max_relief_q12_4 = 0;
@@ -5256,7 +5279,11 @@ int main(void)
 		for (int yi = 0; yi < 8; yi++) {
 			nd_seven_set_cam_angles((float)yi * 45.0f, 45.0f);
 			for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
-			nd_seven_render(fb, 1280, 720, &st);
+			for (int wave = 0; wave < 6; wave++) {
+				nd_seven_render(fb, 1280, 720, &st);
+				if (wave < 5)
+					nd_seven_drain_async();
+			}
 
 			/* Water surface at/above local ground right at focal chunk must NEVER be falsely occluded */
 			if (nd_seven_is_water_occluded_at((int32_t)lwx_w - 80, (int32_t)lwy_w - 64, 160, 128,

@@ -35,7 +35,7 @@ REPO_CKSUM != pwd | cksum | cut -d' ' -f1
 MOD_DIRS != for f in mods/*/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 CLIENT_DIRS != for f in mods/*/client/Makefile; do [ -f "$$f" ] && dirname "$$f"; done | sort
 
-all: stage-assets stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib chaff-lib areole-lib sepal-lib hyle-lib pitch-lib bud-lib hyle-source hyle-bud axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm
+all: stage-assets stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib chaff-lib areole-lib sepal-lib hyle-lib pitch-lib bud-lib lamina-lib hyle-source hyle-bud axil-lib axil-auth-lib axil-hyle axil-tty-lib axil-nd-lib nd-libs mods clients site-wasm nd-native
 .MAIN: all
 
 .PHONY: check
@@ -201,7 +201,7 @@ SANITIZE_ARG != [ -n "$(SANITIZE)" ] && printf 'SANITIZE=%s' "$(SANITIZE)" || tr
 LIB_MAKE_ARGS = $(EXT_MAKE_ARGS) PREFIX="$(PREFIX)" PROFILE="$(PROFILE)" $(SANITIZE_ARG)
 
 LIB_STD_TARGETS = stele-lib corm-lib xylem-lib lemma-lib joint-lib islet-lib \
-	chaff-lib areole-lib corolla-lib sepal-lib hyle-lib pitch-lib bud-lib jarvis-lib
+	chaff-lib areole-lib corolla-lib sepal-lib hyle-lib pitch-lib bud-lib lamina-lib jarvis-lib
 LIB_AXIL_TARGETS = axil-lib axil-auth-lib axil-tty-lib axil-nd-lib
 
 corm-lib:       stele-lib
@@ -216,6 +216,7 @@ sepal-lib:      stele-lib corm-lib
 hyle-lib:       lemma-lib corm-lib
 pitch-lib:      stele-lib
 bud-lib:        stele-lib
+lamina-lib:     stele-lib corm-lib
 hyle-source:    hyle-lib corm-lib lemma-lib stele-lib
 hyle-bud:       hyle-lib bud-lib hyle-source
 axil-lib:       stele-lib corm-lib xylem-lib
@@ -224,6 +225,10 @@ axil-hyle:      axil-lib hyle-source axil-auth-lib
 axil-tty-lib:   axil-lib corm-lib xylem-lib
 axil-nd-lib:    axil-tty-lib axil-lib corm-lib xylem-lib islet-lib stele-lib
 jarvis-lib:     stele-lib corm-lib xylem-lib
+
+nd-native: lamina-lib bud-lib hyle-bud corm-lib stele-lib xylem-lib mods
+	$(ECHO_V) "  APP     apps/nd-native"
+	$(Q)$(MAKE) $(SUB_MAKE_FLAGS) -C apps/nd-native
 
 $(LIB_STD_TARGETS):
 	$(ECHO_V) "  LIB     $(@:%-lib=lib%)"
@@ -465,6 +470,8 @@ clean:
 		if [ -f "external/$$p/Makefile" ]; then $(MAKE) -C external/$$p wasmtarget= clean; fi; \
 	done
 	@for d in $(MOD_DIRS) $(CLIENT_DIRS); do $(MAKE) -C $$d clean; done
+	@$(MAKE) -C apps/nd-native clean
+	@$(MAKE) -C lib/bud-lamina clean
 	rm -rf $(SITE_WASM_BUILD_DIR) /tmp/site_wasm_build /tmp/site_unit_cache_$(REPO_CKSUM) htdocs/site.wasm
 
 distclean: clean
@@ -575,4 +582,4 @@ run-universe:
 run-sector32:
 	@$(MAKE) run-universe ND_PLANETS=32 ND_DB=var/nd/sector32.db
 
-.PHONY: all mods clients site-wasm run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm $(LIB_STD_TARGETS) $(LIB_AXIL_TARGETS) hyle-source hyle-bud axil-hyle qsys-lib noise-lib chunk-lib transp-lib pi-mm-zip nd-libs install install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-integration test-wasm test-graphics test-nd-harvest test-e2e restart npm-build-all npm-test-all stage-assets assets-sync seed-universe test-universe run-universe run-sector32
+.PHONY: all mods clients site-wasm nd-native run dev clean distclean format lint test unit-c-tests unit-tests standalone-unit-tests pages-test integration-tests e2e-tests hyle-tests test-data-dirs build-capture test-capture test-single-capture debug-logs debug-clean deploy-wasm $(LIB_STD_TARGETS) $(LIB_AXIL_TARGETS) hyle-source hyle-bud axil-hyle qsys-lib noise-lib chunk-lib transp-lib pi-mm-zip nd-libs install install-libs install-jail print-prefix boundary-check doctor compile_commands.json new-mod test-mod test-fast test-integration test-wasm test-graphics test-nd-harvest test-e2e restart npm-build-all npm-test-all stage-assets assets-sync seed-universe test-universe run-universe run-sector32

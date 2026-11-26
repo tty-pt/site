@@ -11,6 +11,7 @@
 #include <nd/bcp-types.h>
 #include <nd/seven-world.h>
 #include "nd_seven.h"
+#include "nd_seven_gl.h"
 #include "nd_seven_motion.h"
 
 typedef struct {
@@ -227,9 +228,15 @@ int main(void)
 	nd_seven_set_zoom(1.0f);
 	nd_seven_perf_set_enabled(1);
 
-	/* Warm up shaders, FBOs, chunk cache, grass tuft VBOs, and Hi-Z cached uniform locations */
-	for (int i = 0; i < 4; i++)
+	/* Warm up progressive shaders, noise LUTs, FBOs, chunk cache, grass tuft VBOs, and Hi-Z cached uniform locations */
+	for (int i = 0; i < 20; i++) {
 		nd_seven_render(1280, 720, &s_st);
+		nd_seven_drain_async();
+		int s_rdy = 0, s_tot = 0;
+		nd_seven_gl_shader_progress(&s_rdy, &s_tot);
+		if (i >= 14 && s_tot > 0 && s_rdy >= s_tot)
+			break;
+	}
 
 	/* Steady-state High stationary (10 frames) */
 	gl_counts_reset();
@@ -286,8 +293,10 @@ int main(void)
 	/* High wide-zoom steady-state (100+ terrain chunks cached, clouds visible) */
 	nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 	nd_seven_set_zoom(0.10f);
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < 4; i++) {
 		nd_seven_render(1280, 720, &s_st);
+		nd_seven_drain_async();
+	}
 	gl_counts_reset();
 	uint64_t chunks_wide = 0, clouds_wide = 0;
 	for (int i = 0; i < 5; i++) {

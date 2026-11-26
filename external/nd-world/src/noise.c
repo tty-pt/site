@@ -5,7 +5,7 @@
 #include <nd/field.h>
 
 #ifdef ND_FIELD_MEMO_EXTERN
-nd_field_room_memo_t g_nd_field_room_memo[4096];
+_CHAFF_TLS nd_field_room_memo_t g_nd_field_room_memo[4096];
 #endif
 
 #define CHUNK_Y 5

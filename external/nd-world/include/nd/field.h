@@ -377,7 +377,7 @@ nd_field_world_to_corolla_uv(double wx, double wy, double *out_u, double *out_v)
 static inline const corolla_climate_model_t *
 nd_field_world_climate_model(uint16_t world)
 {
-	static nd_field_world_memo_t s_world_memo[16];
+	static _CHAFF_TLS nd_field_world_memo_t s_world_memo[16];
 	nd_field_world_memo_t *slot = &s_world_memo[world & 15u];
 	if (!slot->valid || slot->world != world) {
 		corolla_body_t body;
@@ -958,7 +958,7 @@ nd_field_eval_coarse_oct_q16(int32_t ry_q16, int32_t rx_q16, unsigned x, unsigne
 		uint32_t v[4];
 		uint8_t valid;
 	} nd_coarse_oct_slot_t;
-	static nd_coarse_oct_slot_t s_slots[64];
+	static _CHAFF_TLS nd_coarse_oct_slot_t s_slots[64];
 	uint32_t slot_idx = ((uint32_t)(uint16_t)s[0] * 0x9E3779B1u ^
 	                     (uint32_t)(uint16_t)s[1] * 0x85EBCA77u ^
 	                     ((uint32_t)x << 8) ^ seed) & 63u;
@@ -1571,7 +1571,7 @@ typedef struct {
 } nd_field_room_memo_t;
 
 #ifdef ND_FIELD_MEMO_EXTERN
-extern nd_field_room_memo_t g_nd_field_room_memo[4096];
+extern _CHAFF_TLS nd_field_room_memo_t g_nd_field_room_memo[4096];
 #endif
 
 static inline nd_field_room_memo_t *
@@ -1580,7 +1580,7 @@ nd_field_room_memo_table(void)
 #ifdef ND_FIELD_MEMO_EXTERN
 	return g_nd_field_room_memo;
 #else
-	static nd_field_room_memo_t s_memo[4096];
+	static _CHAFF_TLS nd_field_room_memo_t s_memo[4096];
 	return s_memo;
 #endif
 }
@@ -1888,7 +1888,7 @@ nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, i
 		int16_t lake_water_lvl;
 		uint8_t state; /* 0 = empty, 1 = rejected, 2 = active */
 	} nd_lake_cell_memo_t;
-	static nd_lake_cell_memo_t s_lake_memo[256];
+	static _CHAFF_TLS nd_lake_cell_memo_t s_lake_memo[256];
 	uint32_t l_idx = (((uint32_t)(uint16_t)bx * 0x9E3779B1u) ^
 	                  ((uint32_t)(uint16_t)by * 0x85EBCA77u) ^
 	                  (uint32_t)world) & 255u;
