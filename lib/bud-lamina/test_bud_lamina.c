@@ -912,6 +912,267 @@ static void test_data_uri_and_web_img_fetch(void)
 	printf("  test_data_uri_and_web_img_fetch: PASS\n");
 }
 
+typedef struct {
+	char draft[256];
+	char name_val[128];
+	char last_sent[256];
+	char last_kd[128];
+	char sel_val[64];
+	int  form_submits;
+	int  log_items;
+} ctrl_state_t;
+
+static ctrl_state_t g_cs;
+
+static int on_cs_ta_input(bud_event *ev)
+{
+	const char *v = ev ? (const char *)ev->user : "";
+	snprintf(g_cs.draft, sizeof(g_cs.draft), "%s", v ? v : "");
+	return 0;
+}
+
+static int on_cs_ta_keydown(bud_event *ev)
+{
+	const char *v = ev ? (const char *)ev->user : "";
+	snprintf(g_cs.last_kd, sizeof(g_cs.last_kd), "%s", v ? v : "");
+	if (strstr(g_cs.last_kd, "\"key\":\"Enter\"") &&
+	    strstr(g_cs.last_kd, "\"shift\":false")) {
+		snprintf(g_cs.last_sent, sizeof(g_cs.last_sent), "%s", g_cs.draft);
+		g_cs.draft[0] = '\0';
+		g_cs.log_items++;
+		bud_app_set_state();
+	}
+	return 0;
+}
+
+static int on_cs_name_input(bud_event *ev)
+{
+	const char *v = ev ? (const char *)ev->user : "";
+	snprintf(g_cs.name_val, sizeof(g_cs.name_val), "%s", v ? v : "");
+	return 0;
+}
+
+static int on_cs_form_submit(bud_event *ev)
+{
+	(void)ev;
+	g_cs.form_submits++;
+	return 0;
+}
+
+static int on_cs_sel_change(bud_event *ev)
+{
+	const char *v = ev ? (const char *)ev->user : "";
+	snprintf(g_cs.sel_val, sizeof(g_cs.sel_val), "%s", v ? v : "");
+	bud_app_set_state();
+	return 0;
+}
+
+static bud_node *render_ctrl_test(void *ctx)
+{
+	ctrl_state_t *cs = (ctrl_state_t *)ctx;
+	bud_node *root = bud_element("div");
+	bud_set_attr(root, "id", "ctrl-root");
+
+	bud_node *log = bud_element("ol");
+	bud_set_attr(log, "id", "chat-log");
+	bud_set_attr(log, "class", "log");
+	for (int i = 0; i < cs->log_items; i++) {
+		bud_node *li = bud_element("li");
+		bud_set_attr(li, "class", "log-item");
+		bud_append(li, bud_textf("Msg %d", i));
+		bud_append(log, li);
+	}
+	bud_append(root, log);
+
+	bud_node *ta = bud_element("textarea");
+	bud_set_attr(ta, "id", "composer");
+	bud_set_attr(ta, "value", cs->draft);
+	bud_bind(ta, "input", 0, on_cs_ta_input);
+	bud_bind(ta, "keydown", 0, on_cs_ta_keydown);
+	bud_append(root, ta);
+
+	bud_node *form = bud_element("form");
+	bud_set_attr(form, "id", "rename-form");
+	bud_bind(form, "submit", 0, on_cs_form_submit);
+
+	bud_node *inp = bud_element("input");
+	bud_set_attr(inp, "id", "rename-in");
+	bud_set_attr(inp, "type", "text");
+	bud_set_attr(inp, "value", cs->name_val);
+	bud_bind(inp, "input", 0, on_cs_name_input);
+	bud_append(form, inp);
+
+	bud_node *sub = bud_element("button");
+	bud_set_attr(sub, "id", "rename-sub");
+	bud_set_attr(sub, "type", "submit");
+	bud_set_attr(sub, "title", "Guardar nome");
+	bud_append(sub, bud_text("Guardar"));
+	bud_append(form, sub);
+	bud_append(root, form);
+
+	bud_node *sel = bud_element("select");
+	bud_set_attr(sel, "id", "mic-sel");
+	bud_set_attr(sel, "value", cs->sel_val);
+	bud_bind(sel, "change", 0, on_cs_sel_change);
+	bud_node *o1 = bud_element("option");
+	bud_set_attr(o1, "value", "def");
+	bud_append(o1, bud_text("Predefinido"));
+	bud_append(sel, o1);
+	bud_node *o2 = bud_element("option");
+	bud_set_attr(o2, "value", "usb-mic");
+	bud_append(o2, bud_text("Microfone USB"));
+	bud_append(sel, o2);
+	bud_append(root, sel);
+
+	return root;
+}
+
+static void test_controlled_inputs_select_forms_and_autoscroll(void)
+{
+	memset(&g_cs, 0, sizeof(g_cs));
+	snprintf(g_cs.sel_val, sizeof(g_cs.sel_val), "def");
+	g_cs.log_items = 20;
+
+	bud_lamina_t *bl = bud_lamina_create(800, 600);
+	assert(bl != NULL);
+	bud_lamina_set_active_global(bl);
+	bud_lamina_set_render(bl, render_ctrl_test, &g_cs);
+	const char *css =
+		"#ctrl-root { position: relative; width: 800px; height: 600px; display: block; }\n"
+		"#chat-log { position: absolute; left: 10px; top: 10px; width: 300px; height: 120px; overflow-y: auto; display: block; }\n"
+		".log-item { height: 30px; display: block; }\n"
+		"#composer { position: absolute; left: 10px; top: 150px; width: 300px; height: 48px; }\n"
+		"#rename-form { position: absolute; left: 10px; top: 220px; width: 300px; height: 80px; display: block; }\n"
+		"#rename-in { position: absolute; left: 0px; top: 0px; width: 180px; height: 30px; }\n"
+		"#rename-sub { position: absolute; left: 190px; top: 0px; width: 90px; height: 30px; }\n"
+		"#mic-sel { position: absolute; left: 10px; top: 320px; width: 200px; height: 30px; }\n";
+	bud_lamina_load_css(bl, css, strlen(css));
+	bud_lamina_sync(bl);
+
+	/* 1. Auto-scroll pins <ol class="log"> to bottom on initial layout */
+	lam_ui_div_t *log_div = bud_lamina_find_by_id(bl, "chat-log");
+	assert(log_div != NULL);
+	int32_t sx = 0, sy = 0;
+	lam_ui_get_scroll(log_div, &sx, &sy);
+	int32_t ch = (int32_t)lam_ui_get_content_height(log_div);
+	assert(ch > 120 && sy == ch - 120);
+
+	/* 2. Controlled textarea: type Portuguese UTF-8 ("olá!"), move left 1 codepoint,
+	 *    Delete '!', Enter -> onKeyDown clears draft -> sync clears internal buffer! */
+	lam_event_t ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_MOUSE_BTN; ev.code = 0; ev.action = 1; ev.x = 50; ev.y = 170;
+	bud_lamina_handle_event(bl, &ev);
+	ev.action = 0;
+	bud_lamina_handle_event(bl, &ev);
+
+	const uint32_t cps[] = { 'o', 'l', 0x00E1, '!' }; /* "olá!" */
+	for (size_t i = 0; i < 4; i++) {
+		memset(&ev, 0, sizeof(ev));
+		ev.type = LAM_EV_CHAR; ev.code = cps[i];
+		bud_lamina_handle_event(bl, &ev);
+	}
+	assert(strcmp(g_cs.draft, "ol\xc3\xa1!") == 0);
+
+	/* Left over '!', Left over 'á' (2-byte UTF-8), Right over 'á', Delete '!' */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_KEY; ev.action = 1; ev.code = 263; /* K_LEFT */
+	bud_lamina_handle_event(bl, &ev);
+	bud_lamina_handle_event(bl, &ev);
+	ev.code = 262; /* K_RIGHT */
+	bud_lamina_handle_event(bl, &ev);
+	ev.code = 261; /* K_DELETE */
+	bud_lamina_handle_event(bl, &ev);
+	assert(strcmp(g_cs.draft, "ol\xc3\xa1") == 0);
+
+	/* Enter sends via onKeyDown JSON and clears controlled draft */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_KEY; ev.action = 1; ev.code = 257; /* K_ENTER */
+	bud_lamina_handle_event(bl, &ev);
+	assert(strcmp(g_cs.last_sent, "ol\xc3\xa1") == 0);
+	assert(g_cs.draft[0] == '\0');
+	assert(bud_lamina_sync(bl) == 1);
+
+	/* Auto-scroll stayed pinned to new bottom after item appended */
+	log_div = bud_lamina_find_by_id(bl, "chat-log");
+	lam_ui_get_scroll(log_div, &sx, &sy);
+	int32_t ch2 = (int32_t)lam_ui_get_content_height(log_div);
+	assert(ch2 > ch && sy == ch2 - 120);
+
+	/* Scroll UP pauses auto-scroll even after more items arrive */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_SCROLL; ev.x = 50; ev.y = 50; ev.dy = 3.0f;
+	bud_lamina_handle_event(bl, &ev);
+	lam_ui_get_scroll(log_div, &sx, &sy);
+	int32_t scrolled_up_sy = sy;
+	assert(scrolled_up_sy < ch2 - 120);
+	g_cs.log_items++;
+	bud_lamina_mark_dirty(bl);
+	bud_lamina_sync(bl);
+	log_div = bud_lamina_find_by_id(bl, "chat-log");
+	lam_ui_get_scroll(log_div, &sx, &sy);
+	assert(sy == scrolled_up_sy);
+
+	/* Typing again into cleared composer starts clean (not appending to stale "olá") */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_CHAR; ev.code = 'x';
+	bud_lamina_handle_event(bl, &ev);
+	assert(strcmp(g_cs.draft, "x") == 0);
+
+	/* 3. Form submit via <button type="submit"> AND via Enter in <input> */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_MOUSE_BTN; ev.code = 0; ev.action = 1; ev.x = 220; ev.y = 235;
+	bud_lamina_handle_event(bl, &ev);
+	ev.action = 0;
+	bud_lamina_handle_event(bl, &ev);
+	assert(g_cs.form_submits == 1);
+
+	/* Click #rename-in, type "Ana", Ctrl+A, type "Rui", Enter -> submits enclosing <form> */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_MOUSE_BTN; ev.code = 0; ev.action = 1; ev.x = 40; ev.y = 235;
+	bud_lamina_handle_event(bl, &ev);
+	ev.action = 0;
+	bud_lamina_handle_event(bl, &ev);
+	const char *ana = "Ana";
+	for (int i = 0; ana[i]; i++) {
+		memset(&ev, 0, sizeof(ev));
+		ev.type = LAM_EV_CHAR; ev.code = (uint32_t)ana[i];
+		bud_lamina_handle_event(bl, &ev);
+	}
+	assert(strcmp(g_cs.name_val, "Ana") == 0);
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_KEY; ev.action = 1; ev.code = 'A'; ev.mods = 2; /* Ctrl+A */
+	bud_lamina_handle_event(bl, &ev);
+	const char *rui = "Rui";
+	for (int i = 0; rui[i]; i++) {
+		memset(&ev, 0, sizeof(ev));
+		ev.type = LAM_EV_CHAR; ev.code = (uint32_t)rui[i];
+		bud_lamina_handle_event(bl, &ev);
+	}
+	assert(strcmp(g_cs.name_val, "Rui") == 0);
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_KEY; ev.action = 1; ev.code = 257; /* K_ENTER */
+	bud_lamina_handle_event(bl, &ev);
+	assert(g_cs.form_submits == 2);
+
+	/* 4. <select> click opens dropdown popup, ArrowDown + Enter selects second option */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_MOUSE_BTN; ev.code = 0; ev.action = 1; ev.x = 60; ev.y = 335;
+	bud_lamina_handle_event(bl, &ev);
+	ev.action = 0;
+	bud_lamina_handle_event(bl, &ev);
+	bud_lamina_render(bl); /* exercises select overlay render */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = LAM_EV_KEY; ev.action = 1; ev.code = 264; /* K_DOWN */
+	bud_lamina_handle_event(bl, &ev);
+	ev.code = 257; /* K_ENTER */
+	bud_lamina_handle_event(bl, &ev);
+	assert(strcmp(g_cs.sel_val, "usb-mic") == 0);
+
+	bud_lamina_destroy(bl);
+	printf("  test_controlled_inputs_select_forms_and_autoscroll: PASS\n");
+}
+
 int main(void)
 {
 	printf("test_bud_lamina:\n");
@@ -923,6 +1184,7 @@ int main(void)
 	test_modal_escape_term_wrap_and_dpi();
 	test_webgl_redraw_in_click_preserves_blend();
 	test_data_uri_and_web_img_fetch();
+	test_controlled_inputs_select_forms_and_autoscroll();
 
 	printf("test_bud_lamina: ALL TESTS PASSED\n");
 	return 0;

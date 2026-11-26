@@ -64,9 +64,10 @@
 #define MOD_CTRL     2
 #define MOD_ALT      4
 
-#define BL_KEY_MAX    96
-#define BL_INPUT_MAX  512
-#define BL_VIDEO_MAX  16
+#define BL_KEY_MAX         96
+#define BL_INPUT_MAX       1024
+#define BL_VIDEO_MAX       16
+#define BL_SELECT_MAX_OPTS 32
 
 typedef enum {
 	W_NONE = 0,
@@ -95,12 +96,21 @@ typedef struct {
 	char     key[BL_KEY_MAX];
 	int32_t  scroll_x;
 	int32_t  scroll_y;
+	int      scroll_pinned; /* 0 = unset, 1 = pinned to bottom, -1 = scrolled up */
+	int32_t  last_content_h;
 	char     text[BL_INPUT_MAX];
+	char     last_val_attr[BL_INPUT_MAX];
 	int      cursor;
+	int      sel_anchor;    /* -1 = no selection, >= 0 = selection anchor byte */
 	int      has_text;
 	double   range_val;
 	int      has_range;
 } bl_state_t;
+
+typedef struct {
+	char value[128];
+	char label[96];
+} bl_select_opt_t;
 
 typedef struct {
 	lam_ui_div_t    *div;
@@ -203,6 +213,22 @@ struct bud_lamina {
 	int           press_dragged;
 	int           term_focused;
 
+	/* Open <select> dropdown overlay */
+	char            open_select_key[BL_KEY_MAX];
+	bl_select_opt_t select_opts[BL_SELECT_MAX_OPTS];
+	int             select_opt_count;
+	int             select_opt_idx;
+	int             select_hover_idx;
+	int32_t         select_x;
+	int32_t         select_y;
+	int32_t         select_w;
+	int32_t         select_h;
+
+	/* Hover tooltip for title="..." */
+	char            hover_title_key[BL_KEY_MAX];
+	char            tooltip_text[256];
+	uint64_t        hover_since_ms;
+
 	int          mouse_x;
 	int          mouse_y;
 	int          has_mouse;
@@ -214,6 +240,7 @@ struct bud_lamina {
 };
 
 static bud_lamina_t *g_active_bl = NULL;
+static int node_has_listener(const bud_node *node, const char *ev_name);
 
 /* Strong definition overriding BUD_WEAK bud_app_set_state() in libbud. */
 void bud_app_set_state(void)
@@ -260,6 +287,7 @@ static bl_state_t *state_find(bud_lamina_t *bl, const char *key, int create)
 	}
 	bl_state_t *st = &bl->states[bl->n_states++];
 	memset(st, 0, sizeof(*st));
+	st->sel_anchor = -1;
 	snprintf(st->key, sizeof(st->key), "%s", key);
 	return st;
 }
@@ -746,6 +774,184 @@ static void draw_select_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 	lam_tint(0xFFFFFFFFu);
 }
 
+/* ── UTF-8 Text Editing & Caret Helpers ────────────────────────────────── */
+
+static int utf8_prev(const char *s, int pos)
+{
+	if (!s || pos <= 0) return 0;
+	pos--;
+	while (pos > 0 && (((unsigned char)s[pos]) & 0xC0) == 0x80)
+		pos--;
+	return pos;
+}
+
+static int utf8_next(const char *s, int pos, int len)
+{
+	if (!s || pos >= len) return len;
+	pos++;
+	while (pos < len && (((unsigned char)s[pos]) & 0xC0) == 0x80)
+		pos++;
+	return pos;
+}
+
+static int utf8_is_word(unsigned char c)
+{
+	return isalnum(c) || c == '_' || c >= 0x80;
+}
+
+static int utf8_word_prev(const char *s, int pos)
+{
+	if (!s || pos <= 0) return 0;
+	while (pos > 0) {
+		int p = utf8_prev(s, pos);
+		if (utf8_is_word((unsigned char)s[p])) break;
+		pos = p;
+	}
+	while (pos > 0) {
+		int p = utf8_prev(s, pos);
+		if (!utf8_is_word((unsigned char)s[p])) break;
+		pos = p;
+	}
+	return pos;
+}
+
+static int utf8_word_next(const char *s, int pos, int len)
+{
+	if (!s || pos >= len) return len;
+	while (pos < len && utf8_is_word((unsigned char)s[pos]))
+		pos = utf8_next(s, pos, len);
+	while (pos < len && !utf8_is_word((unsigned char)s[pos]))
+		pos = utf8_next(s, pos, len);
+	return pos;
+}
+
+static int text_get_sel(const bl_state_t *st, int *lo, int *hi)
+{
+	if (!st || st->sel_anchor < 0 || st->sel_anchor == st->cursor)
+		return 0;
+	int len = (int)strlen(st->text);
+	int a = st->sel_anchor < 0 ? 0 : (st->sel_anchor > len ? len : st->sel_anchor);
+	int b = st->cursor < 0 ? 0 : (st->cursor > len ? len : st->cursor);
+	if (a == b) return 0;
+	if (lo) *lo = (a < b) ? a : b;
+	if (hi) *hi = (a < b) ? b : a;
+	return 1;
+}
+
+static int text_delete_sel(bl_state_t *st)
+{
+	int lo = 0, hi = 0;
+	if (!text_get_sel(st, &lo, &hi)) return 0;
+	int len = (int)strlen(st->text);
+	memmove(st->text + lo, st->text + hi, (size_t)(len - hi + 1));
+	st->cursor = lo;
+	st->sel_anchor = -1;
+	st->has_text = 1;
+	return 1;
+}
+
+static int text_measure_slice(uint32_t font, uint32_t fpx, const char *s, int n)
+{
+	if (font == UINT32_MAX || !s || n <= 0) return 0;
+	char buf[BL_INPUT_MAX];
+	if (n >= BL_INPUT_MAX) n = BL_INPUT_MAX - 1;
+	memcpy(buf, s, (size_t)n);
+	buf[n] = '\0';
+	uint32_t pw = 0, ph = 0;
+	lam_font_measure_px(&pw, &ph, font, buf, 0, 0, 100000, 1000, fpx,
+	                    LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
+	return (int)pw;
+}
+
+static void text_offset_to_xy(uint32_t font, uint32_t fpx, uint32_t lh,
+                              const char *disp, int is_multiline, int pos,
+                              int *ox, int *oy)
+{
+	int len = (int)strlen(disp);
+	if (pos < 0) pos = 0;
+	if (pos > len) pos = len;
+	int line_start = 0;
+	int line_idx = 0;
+	if (is_multiline) {
+		for (int i = 0; i < pos; i++) {
+			if (disp[i] == '\n') {
+				line_idx++;
+				line_start = i + 1;
+			}
+		}
+	}
+	*ox = text_measure_slice(font, fpx, disp + line_start, pos - line_start);
+	*oy = line_idx * (int)lh;
+}
+
+static int text_hit_caret(bud_lamina_t *bl, bl_entry_t *e, bl_state_t *st,
+                          int mx, int my)
+{
+	if (!bl || !e || !e->div || !st) return 0;
+	const char *txt = st->has_text ? st->text : "";
+	int len = (int)strlen(txt);
+	if (len == 0) return 0;
+
+	uint32_t font = (bl->font_sans != UINT32_MAX) ? bl->font_sans : bl->font_mono;
+	if (font == UINT32_MAX) return len;
+
+	const lam_ui_style_t *cs = lam_ui_get_style(e->div);
+	uint32_t fpx = (cs && cs->font_size_is_px && cs->font_size > 0) ? cs->font_size : 14;
+	uint32_t lh = lam_font_line_height(font, fpx);
+	int dx = lam_ui_get_x(e->div);
+	int dy = lam_ui_get_y(e->div);
+	int dw = lam_ui_get_width(e->div);
+	int dh = lam_ui_get_height(e->div);
+	int pad_l = (cs && cs->padding_left > 0) ? (int)cs->padding_left : 8;
+	if (pad_l > dw / 3) pad_l = 6;
+	int ty = (e->is_multiline && dh > (int)lh + 16) ? (dy + 8) : (dy + (dh - (int)lh) / 2);
+	if (ty < dy + 2) ty = dy + 2;
+
+	int target_line = 0;
+	if (e->is_multiline && lh > 0) {
+		target_line = (my - ty) / (int)lh;
+		if (target_line < 0) target_line = 0;
+	}
+
+	int line_start = 0, line_end = len, cur_line = 0;
+	if (e->is_multiline) {
+		for (int i = 0; i <= len; i++) {
+			if (i == len || txt[i] == '\n') {
+				if (cur_line == target_line || i == len) {
+					line_end = i;
+					break;
+				}
+				cur_line++;
+				line_start = i + 1;
+			}
+		}
+	}
+
+	char masked[BL_INPUT_MAX];
+	const char *disp = txt;
+	if (e->is_password) {
+		int n = len < BL_INPUT_MAX - 1 ? len : BL_INPUT_MAX - 1;
+		memset(masked, '*', (size_t)n);
+		masked[n] = '\0';
+		disp = masked;
+	}
+
+	int rel_x = mx - (dx + pad_l);
+	if (rel_x <= 0) return line_start;
+	int prev_pos = line_start;
+	int prev_w = 0;
+	for (int p = utf8_next(txt, line_start, line_end); ; ) {
+		int w = text_measure_slice(font, fpx, disp + line_start, p - line_start);
+		if (rel_x <= (prev_w + w) / 2)
+			return prev_pos;
+		prev_pos = p;
+		prev_w = w;
+		if (p >= line_end) break;
+		p = utf8_next(txt, p, line_end);
+	}
+	return line_end;
+}
+
 static void draw_text_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
                                    int32_t w, int32_t h, void *user)
 {
@@ -790,6 +996,28 @@ static void draw_text_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 	uint32_t x1 = (uint32_t)(x + w - 4 > (int)x0 ? x + w - 4 : (int)x0);
 	uint32_t y1 = (uint32_t)(y + h > (int)y0 ? y + h : (int)y0);
 
+	/* Selection highlight (when focused and non-empty selection) */
+	int slo = 0, shi = 0;
+	if (focused && disp[0] && text_get_sel(st, &slo, &shi)) {
+		int sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
+		text_offset_to_xy(font, fpx, lh, disp, e->is_multiline, slo, &sx0, &sy0);
+		text_offset_to_xy(font, fpx, lh, disp, e->is_multiline, shi, &sx1, &sy1);
+		if (sy0 == sy1) {
+			int rx = x + pad_l + sx0;
+			int rw = sx1 - sx0;
+			if (rx + rw > (int)x1) rw = (int)x1 - rx;
+			if (rw > 0)
+				lam_fill(rx, ty + sy0, rw, (int)lh, LAM_RGBA(226, 182, 87, 76));
+		} else {
+			int rx = x + pad_l;
+			int rw = (int)x1 - rx;
+			int rh = (sy1 - sy0) + (int)lh;
+			if (ty + sy0 + rh > (int)y1) rh = (int)y1 - (ty + sy0);
+			if (rw > 0 && rh > 0)
+				lam_fill(rx, ty + sy0, rw, rh, LAM_RGBA(226, 182, 87, 76));
+		}
+	}
+
 	if (disp[0]) {
 		lam_tint(fg);
 		lam_font_draw_px(font, disp, x0, y0, x1, y1, fpx,
@@ -803,20 +1031,13 @@ static void draw_text_input_widget(lam_ui_div_t *div, int32_t x, int32_t y,
 
 	if (focused) {
 		int cur = st ? st->cursor : 0;
-		int tlen = (int)strlen(txt);
-		if (cur < 0) cur = 0;
-		if (cur > tlen) cur = tlen;
-		if (cur >= BL_INPUT_MAX) cur = BL_INPUT_MAX - 1;
-		char pre[BL_INPUT_MAX];
-		if (cur > 0)
-			memcpy(pre, txt, (size_t)cur);
-		pre[cur] = '\0';
-		uint32_t pw = 0, ph = 0;
-		if (cur > 0) {
-			lam_font_measure_px(&pw, &ph, font, pre, 0, 0, 100000, 1000, fpx,
-			                    LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
-		}
-		lam_fill(x + pad_l + (int)pw, ty, 2, (int)lh, LAM_RGB(0xe2, 0xb6, 0x57));
+		int cx = 0, cy = 0;
+		text_offset_to_xy(font, fpx, lh, disp, e->is_multiline, cur, &cx, &cy);
+		int draw_x = x + pad_l + cx;
+		int draw_y = ty + cy;
+		if (draw_x > (int)x1 - 2) draw_x = (int)x1 - 2;
+		if (draw_y + (int)lh <= y + h)
+			lam_fill(draw_x, draw_y, 2, (int)lh, LAM_RGB(0xe2, 0xb6, 0x57));
 	}
 	lam_tint(0xFFFFFFFFu);
 }
@@ -1613,18 +1834,25 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 			if (ph_attr)
 				snprintf(ent->placeholder, sizeof(ent->placeholder), "%s", ph_attr);
 			bl_state_t *ist = state_find(bl, key, 1);
-			if (ist && !ist->has_text) {
-				if (val_attr) {
-					snprintf(ist->text, sizeof(ist->text), "%s", val_attr);
-					ist->cursor = (int)strlen(ist->text);
-					ist->has_text = 1;
-				} else if (bud_node_child_count(bnode) > 0) {
-					const bud_node *ch0 = bud_node_child(bnode, 0);
-					const char *ct = bud_node_text(ch0);
-					if (ct && ct[0]) {
-						snprintf(ist->text, sizeof(ist->text), "%s", ct);
+			if (ist) {
+				const char *src_val_t = val_attr;
+				if (!src_val_t && bud_node_child_count(bnode) > 0)
+					src_val_t = bud_node_text(bud_node_child(bnode, 0));
+				if (src_val_t) {
+					int controlled = node_has_listener(bnode, "input");
+					if (!ist->has_text) {
+						snprintf(ist->text, sizeof(ist->text), "%s", src_val_t);
+						snprintf(ist->last_val_attr, sizeof(ist->last_val_attr), "%s", src_val_t);
 						ist->cursor = (int)strlen(ist->text);
+						ist->sel_anchor = -1;
 						ist->has_text = 1;
+					} else if (controlled || strcmp(src_val_t, ist->last_val_attr) != 0) {
+						snprintf(ist->last_val_attr, sizeof(ist->last_val_attr), "%s", src_val_t);
+						if (strcmp(src_val_t, ist->text) != 0) {
+							snprintf(ist->text, sizeof(ist->text), "%s", src_val_t);
+							ist->cursor = (int)strlen(ist->text);
+							ist->sel_anchor = -1;
+						}
 					}
 				}
 			}
@@ -1709,10 +1937,22 @@ static void reconcile_node(bud_lamina_t *bl, const bud_node *bnode,
 				if (ph_attr)
 					snprintf(ent->placeholder, sizeof(ent->placeholder), "%s", ph_attr);
 				bl_state_t *ist = state_find(bl, key, 1);
-				if (ist && !ist->has_text && val_attr) {
-					snprintf(ist->text, sizeof(ist->text), "%s", val_attr);
-					ist->cursor = (int)strlen(ist->text);
-					ist->has_text = 1;
+				if (ist && val_attr) {
+					int controlled = node_has_listener(bnode, "input");
+					if (!ist->has_text) {
+						snprintf(ist->text, sizeof(ist->text), "%s", val_attr);
+						snprintf(ist->last_val_attr, sizeof(ist->last_val_attr), "%s", val_attr);
+						ist->cursor = (int)strlen(ist->text);
+						ist->sel_anchor = -1;
+						ist->has_text = 1;
+					} else if (controlled || strcmp(val_attr, ist->last_val_attr) != 0) {
+						snprintf(ist->last_val_attr, sizeof(ist->last_val_attr), "%s", val_attr);
+						if (strcmp(val_attr, ist->text) != 0) {
+							snprintf(ist->text, sizeof(ist->text), "%s", val_attr);
+							ist->cursor = (int)strlen(ist->text);
+							ist->sel_anchor = -1;
+						}
+					}
 				}
 				lam_ui_set_intrinsic_size(div, 160, 30);
 				lam_ui_set_custom_draw(div, draw_text_input_widget, bl);
@@ -1824,6 +2064,7 @@ bud_lamina_t *bud_lamina_create(int vw, int vh)
 	bl->dirty = 1;
 	bl->dark_mode = 1;
 	bl->press_btn = -1;
+	bl->select_hover_idx = -1;
 	bl->last_cursor = LAM_CURSOR_DEFAULT;
 	snprintf(bl->asset_root, sizeof(bl->asset_root), "htdocs");
 
@@ -1837,6 +2078,77 @@ bud_lamina_t *bud_lamina_create(int vw, int vh)
 
 static int set_pseudo_chain(lam_ui_div_t *old_leaf, lam_ui_div_t *new_leaf, uint32_t bit);
 static lam_ui_div_t *update_hover_state(bud_lamina_t *bl, int x, int y);
+
+static int div_is_rendered(const lam_ui_div_t *div)
+{
+	if (!div) return 0;
+	if (lam_ui_get_width(div) <= 0 || lam_ui_get_height(div) <= 0)
+		return 0;
+	for (const lam_ui_div_t *c = div; c; c = lam_ui_parent(c)) {
+		const lam_ui_style_t *st = lam_ui_get_style(c);
+		if (st && (st->display == LAM_UI_DISPLAY_NONE ||
+		           st->visibility == LAM_UI_VIS_HIDDEN))
+			return 0;
+	}
+	return 1;
+}
+
+static int div_wants_autoscroll(const lam_ui_div_t *div)
+{
+	if (!div) return 0;
+	const char *tag = lam_ui_get_tag(div);
+	if (tag && ci_eq(tag, "ol")) return 1;
+	const char *role = lam_ui_get_attr(div, "role");
+	if (role && ci_eq(role, "log")) return 1;
+	const char *as = lam_ui_get_attr(div, "data-autoscroll");
+	if (as && as[0] && strcmp(as, "0") != 0) return 1;
+	const char *cls = lam_ui_get_class(div);
+	if (cls) {
+		const char *p = cls;
+		while (*p) {
+			while (*p == ' ' || *p == '\t') p++;
+			const char *e = p;
+			while (*e && *e != ' ' && *e != '\t') e++;
+			if ((e - p) == 3 && memcmp(p, "log", 3) == 0)
+				return 1;
+			p = e;
+		}
+	}
+	return 0;
+}
+
+static void sync_scroll_containers(bud_lamina_t *bl)
+{
+	if (!bl) return;
+	for (size_t i = 0; i < bl->n_entries; i++) {
+		lam_ui_div_t *div = bl->entries[i].div;
+		if (!div || !div_is_rendered(div)) continue;
+		const lam_ui_style_t *st = lam_ui_get_style(div);
+		if (!st || (st->overflow_y != LAM_UI_OVERFLOW_AUTO &&
+		            st->overflow_y != LAM_UI_OVERFLOW_SCROLL))
+			continue;
+		int32_t ch = (int32_t)lam_ui_get_content_height(div);
+		int32_t h  = lam_ui_get_height(div);
+		int32_t max_sy = (ch > h) ? (ch - h) : 0;
+		int want_auto = div_wants_autoscroll(div);
+		bl_state_t *ps = state_find(bl, bl->entries[i].key, want_auto ? 1 : 0);
+		if (!ps) continue;
+		if (want_auto) {
+			if (ps->scroll_pinned == 0)
+				ps->scroll_pinned = 1;
+			if (ps->scroll_pinned == 1) {
+				ps->scroll_y = max_sy;
+			} else if (ps->scroll_y > max_sy) {
+				ps->scroll_y = max_sy;
+			}
+			ps->last_content_h = ch;
+		} else {
+			if (ps->scroll_y > max_sy) ps->scroll_y = max_sy;
+			if (ps->scroll_y < 0) ps->scroll_y = 0;
+		}
+		lam_ui_set_scroll(div, ps->scroll_x, ps->scroll_y);
+	}
+}
 
 void bud_lamina_destroy(bud_lamina_t *bl)
 {
@@ -1977,11 +2289,13 @@ void bud_lamina_resize(bud_lamina_t *bl, int vw, int vh)
 	if (bl->vw == vw && bl->vh == vh) return;
 	bl->vw = vw;
 	bl->vh = vh;
+	bl->open_select_key[0] = '\0';
 	lam_ui_resize((uint32_t)vw, (uint32_t)vh);
 	if (bl->ui_root) {
 		lam_ui_set_size(bl->ui_root, vw, vh);
 		lam_ui_apply_styles(bl->ui_root, bl->ss);
 		lam_ui_layout(bl->ui_root);
+		sync_scroll_containers(bl);
 		if (bl->has_mouse)
 			update_hover_state(bl, bl->mouse_x, bl->mouse_y);
 	}
@@ -2047,6 +2361,11 @@ int bud_lamina_sync(bud_lamina_t *bl)
 
 	lam_ui_apply_styles(bl->ui_root, bl->ss);
 	lam_ui_layout(bl->ui_root);
+	sync_scroll_containers(bl);
+
+	/* Close <select> overlay if its backing element disappeared */
+	if (bl->open_select_key[0] && !entry_find_by_key(bl, bl->open_select_key))
+		bl->open_select_key[0] = '\0';
 
 	/* Re-apply live :hover ancestor chain & OS cursor across DOM rebuilds */
 	if (bl->has_mouse) {
@@ -2063,11 +2382,125 @@ int bud_lamina_sync(bud_lamina_t *bl)
 	return 1;
 }
 
+static void render_scrollbars_overlay(bud_lamina_t *bl)
+{
+	for (size_t i = 0; i < bl->n_entries; i++) {
+		lam_ui_div_t *div = bl->entries[i].div;
+		if (!div || !div_is_rendered(div)) continue;
+		const lam_ui_style_t *st = lam_ui_get_style(div);
+		if (!st || (st->overflow_y != LAM_UI_OVERFLOW_AUTO &&
+		            st->overflow_y != LAM_UI_OVERFLOW_SCROLL))
+			continue;
+		int32_t x = lam_ui_get_x(div);
+		int32_t y = lam_ui_get_y(div);
+		int32_t w = lam_ui_get_width(div);
+		int32_t h = lam_ui_get_height(div);
+		int32_t ch = (int32_t)lam_ui_get_content_height(div);
+		if (w < 16 || h < 28 || ch <= h + 4) continue;
+		int32_t sx = 0, sy = 0;
+		lam_ui_get_scroll(div, &sx, &sy);
+		int32_t max_sy = ch - h;
+		if (max_sy <= 0) continue;
+		if (sy < 0) sy = 0;
+		if (sy > max_sy) sy = max_sy;
+		int32_t track_h = h - 8;
+		int32_t thumb_h = (int32_t)((int64_t)track_h * h / ch);
+		if (thumb_h < 22) thumb_h = 22;
+		if (thumb_h > track_h) thumb_h = track_h;
+		int32_t thumb_y = y + 4 + (int32_t)((int64_t)(track_h - thumb_h) * sy / max_sy);
+		int hovered = (bl->has_mouse && bl->mouse_x >= x && bl->mouse_x <= x + w &&
+		               bl->mouse_y >= y && bl->mouse_y <= y + h);
+		uint32_t col = hovered ? LAM_RGBA(220, 205, 240, 128)
+		                       : LAM_RGBA(200, 185, 220, 64);
+		lam_border_radius(col, 0, x + w - 6, thumb_y, 3, (uint32_t)thumb_h,
+		                  1.5f, 1.5f, 1.5f, 1.5f, 0.0f);
+	}
+}
+
+static void render_select_overlay(bud_lamina_t *bl)
+{
+	if (!bl->open_select_key[0] || bl->select_opt_count <= 0)
+		return;
+	uint32_t font = (bl->font_sans != UINT32_MAX) ? bl->font_sans : bl->font_mono;
+	if (font == UINT32_MAX) return;
+	int32_t x = bl->select_x, y = bl->select_y;
+	int32_t w = bl->select_w, h = bl->select_h;
+	if (w < 40 || h < 20) return;
+
+	lam_border_radius(LAM_RGBA(20, 14, 34, 248), LAM_RGBA(226, 182, 87, 180),
+	                  x, y, (uint32_t)w, (uint32_t)h, 6.0f, 6.0f, 6.0f, 6.0f, 1.0f);
+	const uint32_t fpx = 13;
+	const uint32_t lh = lam_font_line_height(font, fpx);
+	const int32_t row_h = 28;
+	for (int i = 0; i < bl->select_opt_count; i++) {
+		int32_t ry = y + 4 + i * row_h;
+		if (ry + row_h > y + h) break;
+		if (i == bl->select_hover_idx) {
+			lam_border_radius(LAM_RGBA(226, 182, 87, 56), 0,
+			                  x + 3, ry, (uint32_t)(w - 6), (uint32_t)row_h,
+			                  4.0f, 4.0f, 4.0f, 4.0f, 0.0f);
+		} else if (i == bl->select_opt_idx) {
+			lam_border_radius(LAM_RGBA(255, 255, 255, 22), 0,
+			                  x + 3, ry, (uint32_t)(w - 6), (uint32_t)row_h,
+			                  4.0f, 4.0f, 4.0f, 4.0f, 0.0f);
+		}
+		uint32_t col = (i == bl->select_opt_idx) ? LAM_RGB(0xe2, 0xb6, 0x57)
+		                                         : LAM_RGB(0xf0, 0xf2, 0xf8);
+		int ty = ry + (row_h - (int)lh) / 2;
+		if (ty < ry + 2) ty = ry + 2;
+		lam_tint(col);
+		lam_font_draw_px(font, bl->select_opts[i].label,
+		                 (uint32_t)(x + 10), (uint32_t)ty,
+		                 (uint32_t)(x + w - 8), (uint32_t)(ry + row_h),
+		                 fpx, LAM_UI_WS_NOWRAP, LAM_UI_WB_NORMAL);
+	}
+	lam_tint(0xFFFFFFFFu);
+}
+
+static void render_tooltip_overlay(bud_lamina_t *bl)
+{
+	if (!bl->has_mouse || !bl->tooltip_text[0] || bl->open_select_key[0] || bl->mouse_buttons)
+		return;
+	if (now_ms() - bl->hover_since_ms < 450)
+		return;
+	uint32_t font = (bl->font_sans != UINT32_MAX) ? bl->font_sans : bl->font_mono;
+	if (font == UINT32_MAX) return;
+
+	const uint32_t fpx = 12;
+	const uint32_t max_w = 270;
+	uint32_t tw = 0, th = 0;
+	lam_font_measure_px(&tw, &th, font, bl->tooltip_text, 0, 0, max_w, 200, fpx,
+	                    LAM_UI_WS_NORMAL, LAM_UI_WB_NORMAL);
+	if (tw == 0 || th == 0) return;
+
+	int32_t box_w = (int32_t)tw + 16;
+	int32_t box_h = (int32_t)th + 10;
+	int32_t bx = bl->mouse_x + 12;
+	int32_t by = bl->mouse_y + 18;
+	if (bx + box_w > bl->vw - 6) bx = bl->vw - box_w - 6;
+	if (by + box_h > bl->vh - 6) by = bl->mouse_y - box_h - 8;
+	if (bx < 6) bx = 6;
+	if (by < 6) by = 6;
+
+	lam_border_radius(LAM_RGBA(16, 10, 28, 244), LAM_RGBA(226, 182, 87, 130),
+	                  bx, by, (uint32_t)box_w, (uint32_t)box_h,
+	                  5.0f, 5.0f, 5.0f, 5.0f, 1.0f);
+	lam_tint(LAM_RGB(0xea, 0xe0, 0xf5));
+	lam_font_draw_px(font, bl->tooltip_text,
+	                 (uint32_t)(bx + 8), (uint32_t)(by + 5),
+	                 (uint32_t)(bx + box_w - 6), (uint32_t)(by + box_h - 3),
+	                 fpx, LAM_UI_WS_NORMAL, LAM_UI_WB_NORMAL);
+	lam_tint(0xFFFFFFFFu);
+}
+
 void bud_lamina_render(bud_lamina_t *bl)
 {
 	if (!bl || !bl->ui_root)
 		return;
 	lam_ui_render(bl->ui_root);
+	render_scrollbars_overlay(bl);
+	render_select_overlay(bl);
+	render_tooltip_overlay(bl);
 }
 
 /* ── WebGL2 Stage Surface Bridge ────────────────────────────────────────── */
@@ -2404,7 +2837,8 @@ static lam_cursor_t resolve_cursor_for_div(bud_lamina_t *bl, const lam_ui_div_t 
 		if (e) {
 			if (e->kind == W_INPUT_TEXT || e->kind == W_TERM)
 				return LAM_CURSOR_TEXT;
-			if (e->kind == W_INPUT_RANGE)
+			if (e->kind == W_INPUT_RANGE || e->kind == W_SELECT ||
+			    e->kind == W_INPUT_CHECKBOX || e->kind == W_SWITCH_TRACK)
 				return LAM_CURSOR_POINTER;
 		}
 		const char *tag = lam_ui_get_tag(cur);
@@ -2443,6 +2877,30 @@ static lam_ui_div_t *update_hover_state(bud_lamina_t *bl, int x, int y)
 			lam_ui_layout(bl->ui_root);
 			hit = hit2;
 		}
+	}
+
+	/* Track nearest ancestor title="..." for delayed hover tooltip */
+	const char *found_title = NULL;
+	const char *found_tkey = "";
+	for (const lam_ui_div_t *cur = hit; cur; cur = lam_ui_parent(cur)) {
+		const char *t = lam_ui_get_attr(cur, "title");
+		if (t && t[0]) {
+			found_title = t;
+			bl_entry_t *te = entry_find_by_div(bl, cur);
+			found_tkey = te ? te->key : t;
+			break;
+		}
+	}
+	if (found_title) {
+		if (strcmp(bl->hover_title_key, found_tkey) != 0 ||
+		    strcmp(bl->tooltip_text, found_title) != 0) {
+			snprintf(bl->hover_title_key, sizeof(bl->hover_title_key), "%s", found_tkey);
+			snprintf(bl->tooltip_text, sizeof(bl->tooltip_text), "%s", found_title);
+			bl->hover_since_ms = now_ms();
+		}
+	} else {
+		bl->hover_title_key[0] = '\0';
+		bl->tooltip_text[0] = '\0';
 	}
 
 	lam_cursor_t cur = resolve_cursor_for_div(bl, hit);
@@ -2485,6 +2943,140 @@ static int div_in_win_drag_handle(const lam_ui_div_t *div)
 	return 0;
 }
 
+static bud_node *find_ancestor_form_bud(lam_ui_div_t *div)
+{
+	for (lam_ui_div_t *cur = div; cur; cur = lam_ui_parent(cur)) {
+		const char *tag = lam_ui_get_tag(cur);
+		if (tag && ci_eq(tag, "form"))
+			return (bud_node *)lam_ui_get_user_data(cur);
+	}
+	return NULL;
+}
+
+static void open_select_popup(bud_lamina_t *bl, bl_entry_t *se)
+{
+	if (!bl || !se || !se->bud || !se->div) return;
+	if (strcmp(bl->open_select_key, se->key) == 0) {
+		bl->open_select_key[0] = '\0';
+		return;
+	}
+	const char *cur_val = bud_get_attr(se->bud, "value");
+	bl->select_opt_count = 0;
+	bl->select_opt_idx = 0;
+	size_t nc = bud_node_child_count(se->bud);
+	for (size_t i = 0; i < nc && bl->select_opt_count < BL_SELECT_MAX_OPTS; i++) {
+		const bud_node *opt = bud_node_child(se->bud, i);
+		if (bud_node_kind_of(opt) != BUD_NODE_ELEMENT) continue;
+		const char *ot = bud_node_tag(opt);
+		if (!ot || !ci_eq(ot, "option")) continue;
+		const char *ov = bud_get_attr(opt, "value");
+		const char *ol = (bud_node_child_count(opt) > 0)
+		               ? bud_node_text(bud_node_child(opt, 0)) : NULL;
+		if (!ol || !ol[0]) ol = ov;
+		if (!ov) ov = ol ? ol : "";
+		if (!ol) ol = "";
+		int idx = bl->select_opt_count++;
+		snprintf(bl->select_opts[idx].value, sizeof(bl->select_opts[idx].value), "%s", ov);
+		snprintf(bl->select_opts[idx].label, sizeof(bl->select_opts[idx].label), "%s", ol);
+		if (bud_get_attr(opt, "selected") != NULL ||
+		    (cur_val && strcmp(ov, cur_val) == 0)) {
+			bl->select_opt_idx = idx;
+		}
+	}
+	if (bl->select_opt_count <= 0) {
+		bl->open_select_key[0] = '\0';
+		return;
+	}
+	int32_t sx = lam_ui_get_x(se->div);
+	int32_t sy = lam_ui_get_y(se->div);
+	int32_t sw = lam_ui_get_width(se->div);
+	int32_t sh = lam_ui_get_height(se->div);
+	int32_t ph = bl->select_opt_count * 28 + 8;
+	if (ph > bl->vh - 16) ph = bl->vh - 16;
+	int32_t pw = sw < 160 ? 160 : sw;
+	int32_t py = sy + sh + 2;
+	if (py + ph > bl->vh - 6 && sy - ph - 2 >= 6)
+		py = sy - ph - 2;
+	if (sx + pw > bl->vw - 6) sx = bl->vw - pw - 6;
+	if (sx < 6) sx = 6;
+
+	snprintf(bl->open_select_key, sizeof(bl->open_select_key), "%s", se->key);
+	bl->select_hover_idx = bl->select_opt_idx;
+	bl->select_x = sx;
+	bl->select_y = py;
+	bl->select_w = pw;
+	bl->select_h = ph;
+}
+
+static void commit_select_choice(bud_lamina_t *bl, int idx)
+{
+	if (!bl || !bl->open_select_key[0]) return;
+	if (idx < 0 || idx >= bl->select_opt_count) {
+		bl->open_select_key[0] = '\0';
+		return;
+	}
+	char val[128], lbl[96], key[BL_KEY_MAX];
+	snprintf(val, sizeof(val), "%s", bl->select_opts[idx].value);
+	snprintf(lbl, sizeof(lbl), "%s", bl->select_opts[idx].label);
+	snprintf(key, sizeof(key), "%s", bl->open_select_key);
+	bl->open_select_key[0] = '\0';
+
+	bl_entry_t *se = entry_find_by_key(bl, key);
+	if (se) {
+		snprintf(se->select_label, sizeof(se->select_label), "%s", lbl);
+		if (bl->rt && se->bud) {
+			bl_dispatch_bud(bl, se->bud, "change", (void *)val);
+			if (bl->rt && se->bud && node_has_listener(se->bud, "input"))
+				bl_dispatch_bud(bl, se->bud, "input", (void *)val);
+		}
+	}
+}
+
+static void cycle_input_focus(bud_lamina_t *bl, int dir)
+{
+	if (!bl || bl->n_entries == 0) return;
+	bl_entry_t *cands[64];
+	int n = 0;
+	int cur_idx = -1;
+	for (size_t i = 0; i < bl->n_entries && n < 64; i++) {
+		bl_entry_t *e = &bl->entries[i];
+		if (e->kind != W_INPUT_TEXT || !e->div || !div_is_rendered(e->div))
+			continue;
+		if (bl->focus_key[0] && strcmp(bl->focus_key, e->key) == 0)
+			cur_idx = n;
+		cands[n++] = e;
+	}
+	if (n == 0) return;
+	int next = (cur_idx < 0) ? (dir >= 0 ? 0 : n - 1)
+	                         : (cur_idx + (dir >= 0 ? 1 : n - 1)) % n;
+	char prev_foc[BL_KEY_MAX];
+	snprintf(prev_foc, sizeof(prev_foc), "%s", bl->focus_key);
+	snprintf(bl->focus_key, sizeof(bl->focus_key), "%s", cands[next]->key);
+	bl->term_focused = 0;
+	set_pseudo_by_key(bl, prev_foc, bl->focus_key, LAM_PSEUDO_FOCUS, 1);
+	bl_state_t *st = state_find(bl, cands[next]->key, 1);
+	if (st) {
+		st->cursor = (int)strlen(st->text);
+		st->sel_anchor = -1;
+	}
+}
+
+static void format_keydown_json(char *out, size_t cap, const char *w3c_key, int mods)
+{
+	char esc[32];
+	size_t o = 0;
+	for (const char *p = w3c_key ? w3c_key : ""; *p && o + 2 < sizeof(esc); p++) {
+		if (*p == '"' || *p == '\\') esc[o++] = '\\';
+		esc[o++] = *p;
+	}
+	esc[o] = '\0';
+	snprintf(out, cap, "{\"key\":\"%s\",\"shift\":%s,\"ctrl\":%s,\"alt\":%s}",
+	         esc,
+	         (mods & MOD_SHIFT) ? "true" : "false",
+	         (mods & MOD_CTRL)  ? "true" : "false",
+	         (mods & MOD_ALT)   ? "true" : "false");
+}
+
 /* ── Main Input Event Handler ───────────────────────────────────────────── */
 
 void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
@@ -2500,6 +3092,19 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 		bl->mouse_x = ev->x;
 		bl->mouse_y = ev->y;
 		bl->has_mouse = 1;
+
+		if (bl->open_select_key[0] &&
+		    ev->x >= bl->select_x && ev->x <= bl->select_x + bl->select_w &&
+		    ev->y >= bl->select_y && ev->y <= bl->select_y + bl->select_h) {
+			int idx = (ev->y - (bl->select_y + 4)) / 28;
+			if (idx >= 0 && idx < bl->select_opt_count)
+				bl->select_hover_idx = idx;
+			if (bl->last_cursor != LAM_CURSOR_POINTER) {
+				bl->last_cursor = LAM_CURSOR_POINTER;
+				lam_set_cursor(LAM_CURSOR_POINTER);
+			}
+			return;
+		}
 
 		if (bl->mouse_buttons != 0 &&
 		    (abs(ev->x - bl->press_x) > 6 || abs(ev->y - bl->press_y) > 6)) {
@@ -2533,6 +3138,23 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 		/* GLFW 0=left(1), 1=right(2), 2=middle(4) already matches W3C buttons mask. */
 		if (down) bl->mouse_buttons |= (1u << (raw_btn & 7));
 		else      bl->mouse_buttons &= ~(1u << (raw_btn & 7));
+
+		/* Handle open <select> dropdown popup before passing through to UI */
+		if (bl->open_select_key[0] && down) {
+			if (ev->x >= bl->select_x && ev->x <= bl->select_x + bl->select_w &&
+			    ev->y >= bl->select_y && ev->y <= bl->select_y + bl->select_h) {
+				int idx = (ev->y - (bl->select_y + 4)) / 28;
+				commit_select_choice(bl, idx);
+				return;
+			}
+			char prev_sel[BL_KEY_MAX];
+			snprintf(prev_sel, sizeof(prev_sel), "%s", bl->open_select_key);
+			bl->open_select_key[0] = '\0';
+			lam_ui_div_t *sh = bl->ui_root ? lam_ui_hit_test(bl->ui_root, ev->x, ev->y) : NULL;
+			bl_entry_t *she = entry_find_by_div(bl, sh);
+			if (she && strcmp(she->key, prev_sel) == 0)
+				return;
+		}
 
 		/* Ensure hover chain is live before hit-testing (e.g. click without move). */
 		if (down)
@@ -2584,6 +3206,13 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 			if (he && (he->kind == W_INPUT_TEXT || he->kind == W_TERM)) {
 				snprintf(bl->focus_key, sizeof(bl->focus_key), "%s", hk);
 				bl->term_focused = (he->kind == W_TERM);
+				if (he->kind == W_INPUT_TEXT && w3c_btn == 0) {
+					bl_state_t *ist = state_find(bl, hk, 1);
+					if (ist) {
+						ist->cursor = text_hit_caret(bl, he, ist, ev->x, ev->y);
+						ist->sel_anchor = -1;
+					}
+				}
 			} else {
 				bl->focus_key[0] = '\0';
 				bl->term_focused = 0;
@@ -2651,7 +3280,9 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 						}
 						idiv = lam_ui_parent(idiv);
 					}
-					if (pe && pe == he && pe->kind == W_INPUT_CHECKBOX) {
+					if (pe && pe == he && pe->kind == W_SELECT) {
+						open_select_popup(bl, pe);
+					} else if (pe && pe == he && pe->kind == W_INPUT_CHECKBOX) {
 						pe->is_checked = !pe->is_checked;
 						bl_dispatch_bud(bl, click_bud, "change",
 						                (void *)(pe->is_checked ? "1" : "0"));
@@ -2678,10 +3309,35 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 					}
 					bl_dispatch_bud(bl, click_bud, "click", (void *)click_payload);
 
+					/* Clicking <button type="submit"> without its own onClick submits its enclosing <form> */
+					lam_ui_div_t *bdiv = cd;
+					while (bdiv) {
+						const char *btag = lam_ui_get_tag(bdiv);
+						if (btag && ci_eq(btag, "button")) {
+							const char *btype = lam_ui_get_attr(bdiv, "type");
+							bud_node *bbud = (bud_node *)lam_ui_get_user_data(bdiv);
+							if (btype && ci_eq(btype, "submit") &&
+							    (!bbud || !node_has_listener(bbud, "click"))) {
+								bud_node *fnode = find_ancestor_form_bud(bdiv);
+								if (fnode && bl->rt)
+									bl_dispatch_bud(bl, fnode, "submit", (void *)"");
+							}
+							break;
+						}
+						bdiv = lam_ui_parent(bdiv);
+					}
+
 					uint64_t tnow = now_ms();
 					if (tnow - bl->last_click_ms <= 350 &&
 					    abs(ev->x - bl->last_click_x) <= 6 &&
 					    abs(ev->y - bl->last_click_y) <= 6) {
+						if (he && he->kind == W_INPUT_TEXT) {
+							bl_state_t *ist = state_find(bl, he->key, 1);
+							if (ist && ist->text[0]) {
+								ist->sel_anchor = 0;
+								ist->cursor = (int)strlen(ist->text);
+							}
+						}
 						if (bl->rt && click_bud)
 							bl_dispatch_bud(bl, click_bud, "dblclick", payload);
 						bl->last_click_ms = 0;
@@ -2751,7 +3407,11 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 				bl_entry_t *e = entry_find_by_div(bl, cur);
 				if (e) {
 					bl_state_t *ps = state_find(bl, e->key, 1);
-					if (ps) { ps->scroll_x = sx; ps->scroll_y = sy; }
+					if (ps) {
+						ps->scroll_x = sx;
+						ps->scroll_y = sy;
+						ps->scroll_pinned = (max_sy <= 0 || sy >= max_sy - 8) ? 1 : -1;
+					}
 				}
 				return;
 			}
@@ -2790,17 +3450,21 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 					utf8[3] = (char)(0x80 | (cp & 0x3F));
 					ulen = 4;
 				}
-				if (st && ulen > 0 && (int)strlen(st->text) + ulen + 1 < BL_INPUT_MAX) {
+				if (st && ulen > 0) {
+					text_delete_sel(st);
 					int len = (int)strlen(st->text);
-					if (st->cursor > len) st->cursor = len;
-					memmove(st->text + st->cursor + ulen,
-					        st->text + st->cursor,
-					        (size_t)(len - st->cursor + 1));
-					memcpy(st->text + st->cursor, utf8, (size_t)ulen);
-					st->cursor += ulen;
-					st->has_text = 1;
-					if (bl->rt && fe->bud)
-						bl_dispatch_bud(bl, fe->bud, "input", st->text);
+					if (len + ulen + 1 < BL_INPUT_MAX) {
+						if (st->cursor > len) st->cursor = len;
+						memmove(st->text + st->cursor + ulen,
+						        st->text + st->cursor,
+						        (size_t)(len - st->cursor + 1));
+						memcpy(st->text + st->cursor, utf8, (size_t)ulen);
+						st->cursor += ulen;
+						st->sel_anchor = -1;
+						st->has_text = 1;
+						if (bl->rt && fe->bud)
+							bl_dispatch_bud(bl, fe->bud, "input", st->text);
+					}
 				}
 			}
 		}
@@ -2810,6 +3474,24 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 	case LAM_EV_KEY: {
 		int down = (ev->action == 1 || ev->action == 2);
 		int up   = (ev->action == 0);
+
+		/* Keyboard navigation inside an open <select> dropdown */
+		if (bl->open_select_key[0] && down) {
+			if (ev->code == K_ESCAPE) {
+				bl->open_select_key[0] = '\0';
+				return;
+			} else if (ev->code == K_DOWN && bl->select_opt_count > 0) {
+				bl->select_hover_idx = (bl->select_hover_idx + 1) % bl->select_opt_count;
+				return;
+			} else if (ev->code == K_UP && bl->select_opt_count > 0) {
+				bl->select_hover_idx = (bl->select_hover_idx + bl->select_opt_count - 1) % bl->select_opt_count;
+				return;
+			} else if (ev->code == K_ENTER || ev->code == K_KP_ENTER || ev->code == K_SPACE) {
+				int idx = bl->select_hover_idx >= 0 ? bl->select_hover_idx : bl->select_opt_idx;
+				commit_select_choice(bl, idx);
+				return;
+			}
+		}
 
 		/* Escape blurs #term or focused <input> AND dispatches to window (closes modals) */
 		if (down && ev->code == K_ESCAPE) {
@@ -2842,12 +3524,28 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 			bl_entry_t *fe = entry_find_by_key(bl, bl->focus_key);
 			if (fe && fe->kind == W_INPUT_TEXT) {
 				if (down) {
+					int has_keydown = (bl->rt && fe->bud && node_has_listener(fe->bud, "keydown"));
+					if (has_keydown) {
+						char kbuf[4];
+						const char *w3c = glfw_key_to_w3c(ev->code, ev->mods, kbuf);
+						if (w3c) {
+							char kd_json[96];
+							format_keydown_json(kd_json, sizeof(kd_json), w3c, ev->mods);
+							bl_dispatch_bud(bl, fe->bud, "keydown", kd_json);
+						}
+					}
 					bl_state_t *st = state_find(bl, fe->key, 1);
 					if (st) {
 						int len = (int)strlen(st->text);
-						if ((ev->mods & MOD_CTRL) && ev->code == 'V') {
+						if (st->cursor > len) st->cursor = len;
+						if ((ev->mods & MOD_CTRL) && ev->code == 'A') {
+							st->sel_anchor = 0;
+							st->cursor = len;
+						} else if ((ev->mods & MOD_CTRL) && ev->code == 'V') {
 							const char *clip = lam_clipboard_get_text();
 							if (clip && clip[0]) {
+								text_delete_sel(st);
+								len = (int)strlen(st->text);
 								int clen = (int)strlen(clip);
 								int avail = BL_INPUT_MAX - 1 - len;
 								if (clen > avail) clen = avail;
@@ -2867,61 +3565,154 @@ void bud_lamina_handle_event(bud_lamina_t *bl, const lam_event_t *ev)
 										        (size_t)(len - st->cursor + 1));
 										memcpy(st->text + st->cursor, tmp, (size_t)inserted);
 										st->cursor += inserted;
+										st->sel_anchor = -1;
 										st->has_text = 1;
 										if (bl->rt && fe->bud)
 											bl_dispatch_bud(bl, fe->bud, "input", st->text);
 									}
 								}
 							}
-						} else if ((ev->mods & MOD_CTRL) && ev->code == 'C') {
-							if (st->text[0])
+						} else if ((ev->mods & MOD_CTRL) && (ev->code == 'C' || ev->code == 'X')) {
+							int lo = 0, hi = 0;
+							if (text_get_sel(st, &lo, &hi)) {
+								char selbuf[BL_INPUT_MAX];
+								int slen = hi - lo;
+								if (slen >= BL_INPUT_MAX) slen = BL_INPUT_MAX - 1;
+								memcpy(selbuf, st->text + lo, (size_t)slen);
+								selbuf[slen] = '\0';
+								lam_clipboard_set_text(selbuf);
+								if (ev->code == 'X') {
+									text_delete_sel(st);
+									if (bl->rt && fe->bud)
+										bl_dispatch_bud(bl, fe->bud, "input", st->text);
+								}
+							} else if (st->text[0]) {
 								lam_clipboard_set_text(st->text);
+								if (ev->code == 'X') {
+									st->text[0] = '\0';
+									st->cursor = 0;
+									st->sel_anchor = -1;
+									st->has_text = 1;
+									if (bl->rt && fe->bud)
+										bl_dispatch_bud(bl, fe->bud, "input", st->text);
+								}
+							}
 						} else if ((ev->mods & MOD_CTRL) && ev->code == 'U') {
 							st->text[0] = '\0';
 							st->cursor = 0;
+							st->sel_anchor = -1;
 							st->has_text = 1;
 							if (bl->rt && fe->bud)
 								bl_dispatch_bud(bl, fe->bud, "input", st->text);
-						} else if (ev->code == K_BACKSPACE && st->cursor > 0) {
-							int del = 1;
-							while (st->cursor - del > 0 &&
-							       (((unsigned char)st->text[st->cursor - del]) & 0xC0) == 0x80)
-								del++;
-							memmove(st->text + st->cursor - del,
-							        st->text + st->cursor,
-							        (size_t)(len - st->cursor + 1));
-							st->cursor -= del;
-							st->has_text = 1;
-							if (bl->rt && fe->bud)
-								bl_dispatch_bud(bl, fe->bud, "input", st->text);
-						} else if (ev->code == K_LEFT && st->cursor > 0) {
-							st->cursor--;
-						} else if (ev->code == K_RIGHT && st->cursor < len) {
-							st->cursor++;
+						} else if (ev->code == K_BACKSPACE) {
+							if (text_delete_sel(st)) {
+								if (bl->rt && fe->bud)
+									bl_dispatch_bud(bl, fe->bud, "input", st->text);
+							} else if (st->cursor > 0) {
+								int prev = utf8_prev(st->text, st->cursor);
+								memmove(st->text + prev,
+								        st->text + st->cursor,
+								        (size_t)(len - st->cursor + 1));
+								st->cursor = prev;
+								st->sel_anchor = -1;
+								st->has_text = 1;
+								if (bl->rt && fe->bud)
+									bl_dispatch_bud(bl, fe->bud, "input", st->text);
+							}
+						} else if (ev->code == K_DELETE) {
+							if (text_delete_sel(st)) {
+								if (bl->rt && fe->bud)
+									bl_dispatch_bud(bl, fe->bud, "input", st->text);
+							} else if (st->cursor < len) {
+								int nxt = utf8_next(st->text, st->cursor, len);
+								memmove(st->text + st->cursor,
+								        st->text + nxt,
+								        (size_t)(len - nxt + 1));
+								st->sel_anchor = -1;
+								st->has_text = 1;
+								if (bl->rt && fe->bud)
+									bl_dispatch_bud(bl, fe->bud, "input", st->text);
+							}
+						} else if (ev->code == K_LEFT) {
+							int lo = 0, hi = 0;
+							if (ev->mods & MOD_SHIFT) {
+								if (st->sel_anchor < 0) st->sel_anchor = st->cursor;
+								st->cursor = (ev->mods & MOD_CTRL)
+								           ? utf8_word_prev(st->text, st->cursor)
+								           : utf8_prev(st->text, st->cursor);
+							} else if (text_get_sel(st, &lo, &hi)) {
+								st->cursor = lo;
+								st->sel_anchor = -1;
+							} else {
+								st->cursor = (ev->mods & MOD_CTRL)
+								           ? utf8_word_prev(st->text, st->cursor)
+								           : utf8_prev(st->text, st->cursor);
+							}
+						} else if (ev->code == K_RIGHT) {
+							int lo = 0, hi = 0;
+							if (ev->mods & MOD_SHIFT) {
+								if (st->sel_anchor < 0) st->sel_anchor = st->cursor;
+								st->cursor = (ev->mods & MOD_CTRL)
+								           ? utf8_word_next(st->text, st->cursor, len)
+								           : utf8_next(st->text, st->cursor, len);
+							} else if (text_get_sel(st, &lo, &hi)) {
+								st->cursor = hi;
+								st->sel_anchor = -1;
+							} else {
+								st->cursor = (ev->mods & MOD_CTRL)
+								           ? utf8_word_next(st->text, st->cursor, len)
+								           : utf8_next(st->text, st->cursor, len);
+							}
 						} else if (ev->code == K_HOME) {
+							if (ev->mods & MOD_SHIFT) {
+								if (st->sel_anchor < 0) st->sel_anchor = st->cursor;
+							} else {
+								st->sel_anchor = -1;
+							}
 							st->cursor = 0;
 						} else if (ev->code == K_END) {
+							if (ev->mods & MOD_SHIFT) {
+								if (st->sel_anchor < 0) st->sel_anchor = st->cursor;
+							} else {
+								st->sel_anchor = -1;
+							}
 							st->cursor = len;
+						} else if (ev->code == K_TAB) {
+							if (!(fe->is_multiline && has_keydown))
+								cycle_input_focus(bl, (ev->mods & MOD_SHIFT) ? -1 : 1);
 						} else if (ev->code == K_ENTER || ev->code == K_KP_ENTER) {
 							if (fe->is_multiline && (ev->mods & MOD_SHIFT)) {
+								text_delete_sel(st);
+								len = (int)strlen(st->text);
 								if (len + 2 < BL_INPUT_MAX) {
 									memmove(st->text + st->cursor + 1,
 									        st->text + st->cursor,
 									        (size_t)(len - st->cursor + 1));
 									st->text[st->cursor++] = '\n';
+									st->sel_anchor = -1;
 									st->has_text = 1;
 									if (bl->rt && fe->bud)
 										bl_dispatch_bud(bl, fe->bud, "input", st->text);
 								}
-							} else if (bl->rt && fe->bud) {
+							} else if (!has_keydown && bl->rt && fe->bud) {
 								bl_dispatch_bud(bl, fe->bud, "change", st->text);
-								bl_dispatch_bud(bl, fe->bud, "submit", st->text);
+								bud_node *fnode = find_ancestor_form_bud(fe->div);
+								if (fnode && bl->rt)
+									bl_dispatch_bud(bl, fnode, "submit", st->text);
+								else if (bl->rt && fe->bud)
+									bl_dispatch_bud(bl, fe->bud, "submit", st->text);
 							}
 						}
 					}
 				}
 				return;
 			}
+		}
+
+		/* Tab cycles focus across visible text inputs when none is focused */
+		if (down && ev->code == K_TAB) {
+			cycle_input_focus(bl, (ev->mods & MOD_SHIFT) ? -1 : 1);
+			return;
 		}
 
 		/* Global window keyboard dispatch (WASD, arrows, Q/E/R, +/-/0, etc.) */
