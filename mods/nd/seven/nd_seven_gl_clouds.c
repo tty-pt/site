@@ -650,7 +650,7 @@ void nd_seven_gl_flush_clouds(void)
 			torus_eye[2] = (float)dz;
 		}
 
-		float view_steps  = (cq <= ND_CLOUD_QUALITY_LOW) ? 18.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 26.0f : 36.0f);
+		float view_steps  = (cq <= ND_CLOUD_QUALITY_LOW) ? 22.0f : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 30.0f : 40.0f);
 		float light_steps = (cq <= ND_CLOUD_QUALITY_LOW) ? 2.0f  : ((cq == ND_CLOUD_QUALITY_MEDIUM) ? 3.0f  : 4.0f);
 
 		if (cvp->uCamFwd >= 0)        glUniform3f(cvp->uCamFwd, s_gl.cur_cam_fwd[0], s_gl.cur_cam_fwd[1], s_gl.cur_cam_fwd[2]);
@@ -982,8 +982,8 @@ void nd_seven_gl_flush_clouds(void)
 			glUniform2f(s_gl.cloud_comp_pipe.uCloudUvScale, cuvx, cuvy);
 		if (s_gl.cloud_comp_pipe.uSceneUvScale >= 0)
 			glUniform2f(s_gl.cloud_comp_pipe.uSceneUvScale, suvx, suvy);
-		bool use_bilateral = (s_gl.res_depth_tex != 0 && (use_vol || s_gl.cloud_depth_tex != 0) &&
-		                      (trw < rw || trh < rh));
+		bool use_bilateral = (s_gl.res_depth_tex != 0 &&
+		                      (use_vol || (s_gl.cloud_depth_tex != 0 && (trw < rw || trh < rh))));
 		if (s_gl.cloud_comp_pipe.uSceneDepthTex >= 0) {
 			glActiveTexture(GL_TEXTURE0 + 5);
 			glBindTexture(GL_TEXTURE_2D, s_gl.res_depth_tex);

@@ -5957,7 +5957,8 @@ int main(void)
 		printf("PASS: Cloud Phase 3 shared meteorological kernel (frontal shear, streets, marine Benard cells) & 1:1 sky/CSM/water parity verified\n");
 	}
 
-	/* Cloud Polish: 2-ring world-snapped weather cache, exact torus alignment, zero-flicker stepping & 3D fly-through */
+	/* Cloud Polish: cohesive 3D volumetric clouds from all perspectives (static 2x2 Bayer + matched 4-tap filter,
+	 * coverage-coupled 3D dome, isotropic world-space noise, two-gear stepping & 3D upward sky occlusion) */
 	{
 		const char *fs_vol  = nd_seven_gl_fs_cloud_vol();
 		const char *fs_wth  = nd_seven_gl_fs_cloud_wth();
@@ -5966,16 +5967,19 @@ int main(void)
 		const char *fs_comp = nd_seven_gl_fs_cloud_comp();
 		assert(fs_vol != NULL && fs_wth != NULL && fs_csm != NULL && fs_rp != NULL && fs_comp != NULL);
 
-		/* 1. Zero-flicker: no IGN jitter, no nearBoost cliff, no emptyRun 2x skip, no per-frame phase, world-locked + geometric stepping */
+		/* 1. Zero-flicker + zero-layering: static 2x2 Bayer cell quadrature + exact Fourier-matched 4-tap +-0.5 filter,
+		 * no per-frame phase, no random IGN hash, no nearBoost cliff, no emptyRun 2x skip, smooth two-gear cloudGear */
 		assert(strstr(fs_vol, "uCloudPhase") == NULL);
-		assert(strstr(fs_vol, "gl_FragCoord") == NULL);
+		assert(strstr(fs_vol, "52.9829189") == NULL);
 		assert(strstr(fs_vol, "nearBoost") == NULL);
 		assert(strstr(fs_vol, "emptyRun") == NULL);
-		assert(strstr(fs_vol, "altDeriv") != NULL);
-		assert(strstr(fs_vol, "dtAlt") != NULL);
-		assert(strstr(fs_vol, "dtDist") != NULL);
-		assert(strstr(fs_vol, "gRate") != NULL);
-		assert(strstr(fs_comp, "0.44") != NULL);
+		assert(strstr(fs_vol, "ivec2(gl_FragCoord.xy) & 1") != NULL);
+		assert(strstr(fs_vol, "tCell + bayer * stepDt") != NULL);
+		assert(strstr(fs_vol, "dtCoarse") != NULL);
+		assert(strstr(fs_vol, "dtFine") != NULL);
+		assert(strstr(fs_vol, "cloudGear") != NULL);
+		assert(strstr(fs_comp, "texel * 0.5") != NULL);
+		assert(strstr(fs_comp, "* 0.25") != NULL);
 		assert(strstr(fs_vol, "0.999985") != NULL);
 		assert(strstr(fs_comp, "0.999985") != NULL);
 		assert(strstr(fs_rp, "skyLimb") == NULL);
@@ -6000,15 +6004,19 @@ int main(void)
 		assert(strstr(fs_vol, "110000.0") != NULL);
 		assert(strstr(fs_vol, "i < 48") != NULL);
 
-		/* 4. 3D fly-through & photographic polish: domeH, nearSculpt, nearWrap, crown curl, puff-scale lDet & horizFade */
-		assert(strstr(fs_vol, "domeH") != NULL);
-		assert(strstr(fs_vol, "nearSculpt") != NULL);
-		assert(strstr(fs_vol, "nearWrap") != NULL);
-		assert(strstr(fs_vol, "curlOff") != NULL);
-		assert(strstr(fs_vol, "bool lDet") != NULL);
-		assert(strstr(fs_vol, "horizFade") != NULL);
+		/* 4. Cohesive 3D volume from all perspectives: strictly monotonic coverage dome (no domeH/anvil shelves),
+		 * isotropic world-space 3D sampling (zWorld), cross-cloud light-march (lsW), 3D upward AO (upDens/skyOpen) */
+		assert(strstr(fs_vol, "domeH") == NULL);
+		assert(strstr(fs_vol, "float anvil") == NULL);
+		assert(strstr(fs_vol, "coreT") != NULL);
+		assert(strstr(fs_vol, "zWorld") != NULL);
+		assert(strstr(fs_vol, "erodeW") != NULL);
+		assert(strstr(fs_vol, "vec4 lsW") != NULL);
+		assert(strstr(fs_vol, "upDens") != NULL);
+		assert(strstr(fs_vol, "skyOpen") != NULL);
+		assert(strstr(fs_vol, "cirNearFade") != NULL);
 
-		printf("PASS: Cloud 2-ring weather cache, exact torus alignment, zero-flicker stepping & 3D fly-through verified\n");
+		printf("PASS: Cloud cohesive 3D volume (all perspectives), 2x2 Bayer + matched 4-tap filter & 2-ring weather cache verified\n");
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
