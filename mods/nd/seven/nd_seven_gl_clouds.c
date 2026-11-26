@@ -770,8 +770,7 @@ void nd_seven_gl_flush_clouds(void)
 			float reproj_mat[16] = {
 				1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1
 			};
-			bool hist_ok = (s_gl.cloud_hist_valid &&
-			                s_gl.cloud_prev_trw > 0u && s_gl.cloud_prev_trh > 0u);
+			bool hist_ok = s_gl.cloud_hist_valid;
 			if (hist_ok) {
 				double odx = s_gl.cur_origin[0] - s_gl.cloud_prev_origin[0];
 				double ody = s_gl.cur_origin[1] - s_gl.cloud_prev_origin[1];
@@ -826,8 +825,6 @@ void nd_seven_gl_flush_clouds(void)
 			memcpy(s_gl.cloud_prev_origin, s_gl.cur_origin, sizeof(s_gl.cloud_prev_origin));
 			s_gl.cloud_prev_uv_scale[0] = cuvx;
 			s_gl.cloud_prev_uv_scale[1] = cuvy;
-			s_gl.cloud_prev_trw = trw;
-			s_gl.cloud_prev_trh = trh;
 			s_gl.cloud_hist_valid = true;
 			s_gl.cloud_hist_idx = write_idx ^ 1;
 			s_gl.cloud_phase++;

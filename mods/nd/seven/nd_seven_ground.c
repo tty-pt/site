@@ -772,7 +772,9 @@ float nd_seven_drs_update(nd_seven_drs_t *drs, float dt_s,
 		float dy = cam_y - drs->last_cam_y;
 		float d_pos = sqrtf(dx * dx + dy * dy);
 		float rel_zoom = fabsf(cam_dist - drs->last_cam_dist) / fmaxf(1.0f, fabsf(drs->last_cam_dist));
-		float d_ang = fabsf(cam_yaw - drs->last_cam_yaw) + fabsf(cam_pitch - drs->last_cam_pitch);
+		float d_yaw = fabsf(cam_yaw - drs->last_cam_yaw);
+		if (d_yaw > 180.0f) d_yaw = fabsf(360.0f - d_yaw);
+		float d_ang = d_yaw + fabsf(cam_pitch - drs->last_cam_pitch);
 		fast_motion = (d_pos > 1.5f || rel_zoom > 0.02f || d_ang > 0.35f);
 	}
 	drs->last_cam_x     = cam_x;
@@ -817,6 +819,14 @@ float nd_seven_drs_update(nd_seven_drs_t *drs, float dt_s,
 				} else if (drs->ema_ms < drs->lo_ms) {
 					drs->cur_scale += drs->step;
 					drs->cooldown_s = 0.15f;
+				} else if (drs->cur_scale < drs->max_scale &&
+				           drs->target_ms > 0.0f &&
+				           drs->ema_ms <= drs->target_ms + 0.5f &&
+				           drs->settle_s >= 0.50f) {
+					/* VSync-locked displays (e.g. 60 Hz = 16.67 ms) never drop below lo_ms:
+					 * gently probe back up when steadily meeting target_ms with zero drops. */
+					drs->cur_scale += drs->step;
+					drs->cooldown_s = 0.50f;
 				}
 			}
 		}
@@ -868,6 +878,14 @@ void nd_seven_drs_feed_frame(float dt_s, float cam_x, float cam_y,
 	nd_seven_drs_t *d = gl_drs_state();
 	if (!d->enabled)
 		return;
+	int cap = nd_seven_get_fps_cap();
+	float want_target = (cap == 30) ? 33.33f : 16.67f;
+	if (fabsf(d->target_ms - want_target) > 0.1f) {
+		d->target_ms = want_target;
+		d->hi_ms     = (cap == 30) ? 36.0f : 18.0f;
+		d->lo_ms     = (cap == 30) ? 26.0f : 13.0f;
+		d->ema_ms    = want_target;
+	}
 	(void)nd_seven_drs_update(d, dt_s, cam_x, cam_y, cam_dist, cam_yaw, cam_pitch);
 }
 

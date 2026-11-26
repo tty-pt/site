@@ -598,8 +598,6 @@ typedef struct {
 	float cloud_prev_mvp[16];
 	double cloud_prev_origin[3];
 	float cloud_prev_uv_scale[2];
-	uint32_t cloud_prev_trw;
-	uint32_t cloud_prev_trh;
 	uint32_t cloud_phase;
 	int cloud_hist_idx;
 	bool cloud_hist_valid;
@@ -627,6 +625,7 @@ typedef struct {
 	float cur_cloud_scale;
 	bool render_scales_set;
 	int scene_samples;
+	int scene_want_samples;
 	bool scene_ok;
 	bool scene_failed;
 	bool frame_open;

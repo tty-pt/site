@@ -5699,6 +5699,7 @@ int main(void)
 		assert(strstr(fs_rp, "uCloudHistTex") != NULL);
 		assert(strstr(fs_rp, "uReprojMat") != NULL);
 		assert(strstr(fs_rp, "uCloudSubpixel") != NULL);
+		assert(strstr(fs_rp, "vUv * qScale - subOff") != NULL);
 		assert(strstr(fs_rp, "clamp(hist, cMin, cMax)") != NULL);
 
 		printf("PASS: Phase 6C Piece 2 2x2 temporal checkerboard cloud reprojection (err_x=%.2e err_y=%.2e) verified\n",

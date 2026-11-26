@@ -132,8 +132,8 @@ static void gl_free_scene_targets(void)
 	s_gl.cloud_temporal_ok = false;
 	s_gl.cloud_hist_valid = false;
 	s_gl.cloud_hist_idx = 0;
-	s_gl.cloud_prev_trw = s_gl.cloud_prev_trh = 0;
 	s_gl.post_half_w = s_gl.post_half_h = 0;
+	s_gl.scene_want_samples = -1;
 	s_gl.scene_hdr = false;
 	s_gl.scene_hdr_r11f = false;
 	s_gl.scene_depth24 = false;
@@ -247,8 +247,6 @@ static bool gl_alloc_scene_targets(uint32_t w, uint32_t h, int samples, int hdr_
 	s_gl.cloud_temporal_ok = false;
 	s_gl.cloud_hist_valid = false;
 	s_gl.cloud_hist_idx = 0;
-	s_gl.cloud_prev_trw = 0;
-	s_gl.cloud_prev_trh = 0;
 	if (cw >= 4u && ch >= 4u) {
 		bool temp_ok = true;
 		s_gl.cloud_q_tex = glCreateTexture();
@@ -428,18 +426,22 @@ void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 	uint32_t want_cw = 1u, want_ch = 1u;
 	gl_cloud_alloc_dims(w, h, cq, &want_cw, &want_ch);
 	if (s_gl.scene_ok && s_gl.scene_w == w && s_gl.scene_h == h &&
-	    s_gl.scene_samples == want_samples &&
+	    s_gl.scene_want_samples == want_samples &&
 	    s_gl.cloud_w == want_cw && s_gl.cloud_h == want_ch)
 		return;
 	if (s_gl.scene_fbo || s_gl.res_fbo) gl_free_scene_targets();
 	typedef struct { int samples; int hdr_mode; bool d24; } gl_target_try_t;
-	gl_target_try_t tries[8];
+	gl_target_try_t tries[10];
 	int num_tries = 0;
 	if (want_samples > 0) {
 		tries[num_tries++] = (gl_target_try_t){ want_samples, 2, true  };
 		tries[num_tries++] = (gl_target_try_t){ want_samples, 1, true  };
 		tries[num_tries++] = (gl_target_try_t){ want_samples, 1, false };
 		tries[num_tries++] = (gl_target_try_t){ want_samples, 0, true  };
+		if (want_samples > 2) {
+			tries[num_tries++] = (gl_target_try_t){ 2, 2, true  };
+			tries[num_tries++] = (gl_target_try_t){ 2, 1, true  };
+		}
 	}
 	tries[num_tries++] = (gl_target_try_t){ 0, 2, true  };
 	tries[num_tries++] = (gl_target_try_t){ 0, 1, true  };
@@ -451,6 +453,7 @@ void gl_ensure_scene_targets(uint32_t w, uint32_t h)
 			s_gl.scene_w = w;
 			s_gl.scene_h = h;
 			s_gl.scene_samples = tries[i].samples;
+			s_gl.scene_want_samples = want_samples;
 			s_gl.scene_hdr = (tries[i].hdr_mode > 0);
 			s_gl.scene_hdr_r11f = (tries[i].hdr_mode == 2);
 			s_gl.scene_depth24 = tries[i].d24;

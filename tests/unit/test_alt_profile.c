@@ -123,6 +123,35 @@ int main(void)
 		nd_seven_set_drs(0);
 		assert(nd_seven_get_drs() == 0);
 		assert(fabsf(nd_seven_get_drs_scale() - 1.00f) < 1e-6f);
+
+		/* 5g. 60 Hz VSync recovery: stationary spike drops scale, then steady 16.67 ms frames
+		 *     must probe back up to 1.00x (must NOT stay stuck below 1.00x forever) */
+		nd_seven_drs_init(&drs);
+		drs.enabled = 1;
+		for (int i = 0; i < 40; i++)
+			(void)nd_seven_drs_update(&drs, 0.026f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+		assert(drs.cur_scale < 0.90f);
+		float s_vsync = drs.cur_scale;
+		for (int i = 0; i < 240; i++)
+			s_vsync = nd_seven_drs_update(&drs, 1.0f / 60.0f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+		assert(fabsf(s_vsync - 1.00f) < 1e-4f);
+
+		/* 5h. 30 FPS cap budget sync: steady 33.33 ms frames stay at 1.00x */
+		int orig_cap = nd_seven_get_fps_cap();
+		nd_seven_set_fps_cap(30);
+		nd_seven_set_drs(1);
+		for (int i = 0; i < 45; i++)
+			nd_seven_drs_feed_frame(1.0f / 30.0f, 0.0f, 0.0f, 280.0f, 0.0f, 55.0f);
+		assert(fabsf(nd_seven_get_drs_scale() - 1.00f) < 1e-6f);
+		nd_seven_set_drs(0);
+		nd_seven_set_fps_cap(orig_cap);
+
+		/* 5i. Yaw wraparound (359.9 -> 0.1 deg) is a 0.2 deg delta, NOT fast motion */
+		nd_seven_drs_init(&drs);
+		drs.enabled = 1;
+		(void)nd_seven_drs_update(&drs, 0.016f, 0.0f, 0.0f, 280.0f, 359.9f, 55.0f);
+		(void)nd_seven_drs_update(&drs, 0.024f, 0.0f, 0.0f, 280.0f, 0.1f, 55.0f);
+		assert(drs.in_motion == 0u);
 	}
 
 	printf("test_alt_profile: ALL PASSED\n");
