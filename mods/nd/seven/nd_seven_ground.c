@@ -474,6 +474,16 @@ void nd_seven_toggle_msaa(void)
 	nd_seven_set_msaa_samples(s_msaa_enabled ? 0 : 4);
 }
 
+void nd_seven_cycle_msaa(void)
+{
+	if (s_msaa_samples == 0)
+		nd_seven_set_msaa_samples(2);
+	else if (s_msaa_samples == 2)
+		nd_seven_set_msaa_samples(4);
+	else
+		nd_seven_set_msaa_samples(0);
+}
+
 void nd_seven_set_fps_cap(int fps)
 {
 	if (fps <= 0)
@@ -533,15 +543,15 @@ int nd_seven_get_quality_preset(void)
 	int det_pct = (int)(s_detail_scale * 100.0f + 0.5f);
 	if (res_pct == 100 && det_pct == 100 &&
 	    s_cloud_quality == ND_CLOUD_QUALITY_HIGH &&
-	    s_msaa_enabled == 1 && s_fps_cap == 0)
+	    s_msaa_samples == 4 && s_fps_cap == 0)
 		return ND_QUALITY_HIGH;
 	if (res_pct == 75 && det_pct == 75 &&
 	    s_cloud_quality == ND_CLOUD_QUALITY_MEDIUM &&
-	    s_msaa_enabled == 0 && s_fps_cap == 60)
+	    s_msaa_samples == 0 && s_fps_cap == 60)
 		return ND_QUALITY_MEDIUM;
 	if (res_pct == 67 && det_pct == 72 &&
 	    s_cloud_quality == ND_CLOUD_QUALITY_LOW &&
-	    s_msaa_enabled == 0 && s_fps_cap == 30)
+	    s_msaa_samples == 0 && s_fps_cap == 30)
 		return ND_QUALITY_LOW;
 	return ND_QUALITY_CUSTOM;
 }
@@ -864,6 +874,11 @@ void nd_seven_set_drs(int enabled)
 int nd_seven_get_drs(void)
 {
 	return gl_drs_state()->enabled;
+}
+
+void nd_seven_toggle_drs(void)
+{
+	nd_seven_set_drs(!nd_seven_get_drs());
 }
 
 float nd_seven_get_drs_scale(void)

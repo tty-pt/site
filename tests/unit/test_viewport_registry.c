@@ -349,12 +349,14 @@ int main(void)
 		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
 		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa_samples() == 4);
+		assert(nd_seven_get_drs() == 0);
 		assert(nd_seven_get_fps_cap() == 0);
 		bud_node *settings_card = find_by_attr(root, "id", "settings");
 		assert(settings_card != NULL);
 		const char *init_style = bud_get_attr(settings_card, "style");
 		assert(init_style != NULL);
-		assert(strcmp(init_style, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") == 0);
+		assert(strcmp(init_style, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:4;--nd-drs:0;--nd-fps:0;--nd-zoom:100;") == 0);
 		html = bud_render_html(root);
 		assert(strstr(html, "✨ High") != NULL);
 		bud_free_string(html);
@@ -369,13 +371,14 @@ int main(void)
 		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 72);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_LOW);
 		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_msaa_samples() == 0);
 		assert(nd_seven_get_fps_cap() == 30);
 		free(rt);
 
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
 		assert(strstr(html, "🔋 Low (Fastest)") != NULL);
-		assert(strstr(html, "--nd-res:67;--nd-det:72;--nd-cloud:1;--nd-msaa:0;--nd-fps:30;--nd-zoom:100;") != NULL);
+		assert(strstr(html, "--nd-res:67;--nd-det:72;--nd-cloud:1;--nd-msaa:0;--nd-drs:0;--nd-fps:30;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
 		rt = bud_runtime_new(root);
@@ -386,13 +389,14 @@ int main(void)
 		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 75);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
 		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_msaa_samples() == 0);
 		assert(nd_seven_get_fps_cap() == 60);
 		free(rt);
 
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
 		assert(strstr(html, "⚖️ Medium (Default)") != NULL);
-		assert(strstr(html, "--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:100;") != NULL);
+		assert(strstr(html, "--nd-res:75;--nd-det:75;--nd-cloud:2;--nd-msaa:0;--nd-drs:0;--nd-fps:60;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
 		rt = bud_runtime_new(root);
@@ -403,13 +407,14 @@ int main(void)
 		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 100);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_HIGH);
 		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa_samples() == 4);
 		assert(nd_seven_get_fps_cap() == 0);
 		free(rt);
 
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
 		assert(strstr(html, "✨ High") != NULL);
-		assert(strstr(html, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;") != NULL);
+		assert(strstr(html, "--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:4;--nd-drs:0;--nd-fps:0;--nd-zoom:100;") != NULL);
 		bud_free_string(html);
 
 		/* 8c. Render Resolution Scale: slider input/change, - (#settings-res-out), + (#settings-res-in) */
@@ -517,28 +522,70 @@ int main(void)
 		assert(strstr(html, "☁️ High (1/2 Res + CSM)") != NULL);
 		bud_free_string(html);
 
-		/* 8f. Anti-Aliasing (4x MSAA) toggle: On (1) -> Off (0) -> On (1) */
+		/* 8f. Anti-Aliasing (0x/2x/4x MSAA) cycle: 4x -> Off (1x) -> 2x MSAA -> 4x MSAA */
 		rt = bud_runtime_new(root);
 		bud_node *msaa_btn = find_by_attr(root, "id", "settings-msaa-toggle");
 		assert(msaa_btn != NULL);
 		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa_samples() == 4);
 
 		bud_runtime_dispatch(rt, msaa_btn, "click", "");
 		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_msaa_samples() == 0);
 		free(rt);
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
 		assert(strstr(html, "Off (1x)") != NULL);
+		assert(strstr(html, "--nd-msaa:0;") != NULL);
 		bud_free_string(html);
 
 		rt = bud_runtime_new(root);
 		msaa_btn = find_by_attr(root, "id", "settings-msaa-toggle");
 		bud_runtime_dispatch(rt, msaa_btn, "click", "");
 		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa_samples() == 2);
 		free(rt);
 		root = nd_ui_render(&client_state);
 		html = bud_render_html(root);
-		assert(strstr(html, "4x MSAA (On)") != NULL);
+		assert(strstr(html, "2x MSAA") != NULL);
+		assert(strstr(html, "--nd-msaa:2;") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		msaa_btn = find_by_attr(root, "id", "settings-msaa-toggle");
+		bud_runtime_dispatch(rt, msaa_btn, "click", "");
+		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa_samples() == 4);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "4x MSAA") != NULL);
+		assert(strstr(html, "--nd-msaa:4;") != NULL);
+		bud_free_string(html);
+
+		/* 8f2. Dynamic Resolution (DRS) toggle: Off (0) -> Auto (1) -> Off (0) */
+		rt = bud_runtime_new(root);
+		bud_node *drs_btn = find_by_attr(root, "id", "settings-drs-toggle");
+		assert(drs_btn != NULL);
+		assert(nd_seven_get_drs() == 0);
+
+		bud_runtime_dispatch(rt, drs_btn, "click", "");
+		assert(nd_seven_get_drs() == 1);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "Auto (75–100%)") != NULL);
+		assert(strstr(html, "--nd-drs:1;") != NULL);
+		bud_free_string(html);
+
+		rt = bud_runtime_new(root);
+		drs_btn = find_by_attr(root, "id", "settings-drs-toggle");
+		bud_runtime_dispatch(rt, drs_btn, "click", "");
+		assert(nd_seven_get_drs() == 0);
+		free(rt);
+		root = nd_ui_render(&client_state);
+		html = bud_render_html(root);
+		assert(strstr(html, "--nd-drs:0;") != NULL);
 		bud_free_string(html);
 
 		/* 8g. Frame Rate Cap cycling: Uncapped (0) -> 30 FPS -> 60 FPS -> Uncapped (0) + wasm_tick pacing verification */
@@ -658,13 +705,22 @@ int main(void)
 		/* 8j. Persistence restore-persist in Terminal Mode AND Seven 3D Mode */
 		rt = bud_runtime_new(root);
 		bud_runtime_dispatch(rt, root, "restore-persist",
-		                     "nd-settings-quality|--nd-res:65;--nd-det:120;--nd-cloud:2;--nd-msaa:0;--nd-fps:60;--nd-zoom:140;|rpg-modal-card");
+		                     "nd-settings-quality|--nd-res:65;--nd-det:120;--nd-cloud:2;--nd-msaa:2;--nd-drs:1;--nd-fps:60;--nd-zoom:140;|rpg-modal-card");
 		assert((int)(nd_seven_get_res_scale() * 100.0f + 0.5f) == 65);
 		assert((int)(nd_seven_get_detail_scale() * 100.0f + 0.5f) == 120);
 		assert(nd_seven_get_cloud_quality() == ND_CLOUD_QUALITY_MEDIUM);
-		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa_samples() == 2);
+		assert(nd_seven_get_drs() == 1);
 		assert(nd_seven_get_fps_cap() == 60);
 		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 140);
+		assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
+
+		/* High + 2x MSAA must classify as Custom (not High) */
+		bud_runtime_dispatch(rt, root, "restore-persist",
+		                     "nd-settings-quality|--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:2;--nd-drs:0;--nd-fps:0;--nd-zoom:100;|rpg-modal-card");
+		assert(nd_seven_get_msaa_samples() == 2);
+		assert(nd_seven_get_drs() == 0);
 		assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
 
 		/* Switch back to Seven 3D via #settings-viewport-toggle */
@@ -675,11 +731,13 @@ int main(void)
 		assert(client_state.layout_mode == ND_LAYOUT_GAME_2D);
 		free(rt);
 
-		/* Verify restore-persist in Seven 3D mode back to High (Default) */
+		/* Verify legacy restore-persist (--nd-msaa:1 without --nd-drs) maps cleanly to 4x MSAA / High (Default) */
 		root = nd_ui_render(&client_state);
 		rt = bud_runtime_new(root);
 		bud_runtime_dispatch(rt, root, "restore-persist",
 		                     "nd-settings-quality|--nd-res:100;--nd-det:100;--nd-cloud:3;--nd-msaa:1;--nd-fps:0;--nd-zoom:100;|rpg-modal-card");
+		assert(nd_seven_get_msaa_samples() == 4);
+		assert(nd_seven_get_drs() == 0);
 		assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
 		assert((int)(nd_seven_get_zoom() * 100.0f + 0.5f) == 100);
 
@@ -694,7 +752,7 @@ int main(void)
 		modal_overlay = find_by_attr(root, "id", "settings-modal");
 		assert(strcmp(bud_get_attr(modal_overlay, "class"), "hidden") == 0);
 
-		/* 8l. Regression test: Open Settings, drop down settings (res slider input+change, detail slider input+change, cloud quality), and click Anti-Aliasing button (#settings-msaa-toggle) during active 3D rendering */
+		/* 8l. Regression test: Open Settings, drop down settings (res slider input+change, detail slider input+change, cloud quality), and cycle Anti-Aliasing button (#settings-msaa-toggle) during active 3D rendering */
 		rt = bud_runtime_new(root);
 		dock_settings_btn = find_by_attr(root, "id", "dock-settings-btn");
 		assert(dock_settings_btn != NULL);
@@ -728,19 +786,24 @@ int main(void)
 		bud_runtime_dispatch(rt, det_slider, "change", "70");
 		assert(nd_seven_gl_get_frame_count() == fc_after_det_input);
 
-		/* Click Anti-Aliasing button (#settings-msaa-toggle): must cleanly toggle 4x MSAA -> 1x Off in a single pass and reallocate FBO targets */
+		/* Click Anti-Aliasing button (#settings-msaa-toggle): must cleanly cycle 4x -> 1x Off -> 2x MSAA -> 4x MSAA and reallocate FBO targets */
 		bud_runtime_dispatch(rt, msaa_btn, "click", "");
-		assert(nd_seven_get_msaa() == 0);
+		assert(nd_seven_get_msaa() == 0 && nd_seven_get_msaa_samples() == 0);
 		nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 		assert(sc_samples == 0);
 
-		/* Click Anti-Aliasing button again: must cleanly toggle 1x Off -> 4x MSAA */
 		bud_runtime_dispatch(rt, msaa_btn, "click", "");
-		assert(nd_seven_get_msaa() == 1);
+		assert(nd_seven_get_msaa() == 1 && nd_seven_get_msaa_samples() == 2);
+		nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+		assert(sc_samples == 2);
+
+		bud_runtime_dispatch(rt, msaa_btn, "click", "");
+		assert(nd_seven_get_msaa() == 1 && nd_seven_get_msaa_samples() == 4);
 		nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 		assert(sc_samples == 4);
 		free(rt);
 
+		nd_seven_set_drs(0);
 		nd_seven_apply_quality_preset(ND_QUALITY_HIGH);
 		nd_ui_set_active_modal("");
 		printf("PASS: all Settings modal controls, presets, sliders, buttons, keyboard shortcuts, and persistence verified\n");

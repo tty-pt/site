@@ -299,6 +299,7 @@ void nd_ui_restore_persist(const char *key, const char *val)
 		int det_pct = parse_style_px(val, "--nd-det:", -1);
 		int cq = parse_style_px(val, "--nd-cloud:", -1);
 		int msaa = parse_style_px(val, "--nd-msaa:", -1);
+		int drs = parse_style_px(val, "--nd-drs:", -1);
 		int fps = parse_style_px(val, "--nd-fps:", -1);
 		int zoom_pct = parse_style_px(val, "--nd-zoom:", -1);
 		if (res_pct >= 25 && res_pct <= 100)
@@ -307,8 +308,10 @@ void nd_ui_restore_persist(const char *key, const char *val)
 			nd_seven_set_detail_scale((float)det_pct * 0.01f);
 		if (cq >= ND_CLOUD_QUALITY_OFF && cq <= ND_CLOUD_QUALITY_HIGH)
 			nd_seven_set_cloud_quality(cq);
-		if (msaa == 0 || msaa == 1)
+		if (msaa == 0 || msaa == 1 || msaa == 2 || msaa == 4)
 			nd_seven_set_msaa(msaa);
+		if (drs == 0 || drs == 1)
+			nd_seven_set_drs(drs);
 		if (fps >= 0)
 			nd_seven_set_fps_cap(fps);
 		if (zoom_pct >= 10 && zoom_pct <= 250)

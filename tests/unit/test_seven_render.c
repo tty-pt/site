@@ -5617,7 +5617,22 @@ int main(void)
 		assert(nd_seven_get_msaa_samples() == 4 && nd_seven_get_msaa() == 1);
 		nd_seven_set_msaa(2);
 		assert(nd_seven_get_msaa_samples() == 2 && nd_seven_get_msaa() == 1);
+		nd_seven_cycle_msaa();
+		assert(nd_seven_get_msaa_samples() == 4 && nd_seven_get_msaa() == 1);
+		nd_seven_cycle_msaa();
+		assert(nd_seven_get_msaa_samples() == 0 && nd_seven_get_msaa() == 0);
+		nd_seven_cycle_msaa();
+		assert(nd_seven_get_msaa_samples() == 2 && nd_seven_get_msaa() == 1);
 		nd_seven_set_msaa_samples(orig_samples);
+
+		int orig_drs = nd_seven_get_drs();
+		nd_seven_set_drs(0);
+		assert(nd_seven_get_drs() == 0);
+		nd_seven_toggle_drs();
+		assert(nd_seven_get_drs() == 1);
+		nd_seven_toggle_drs();
+		assert(nd_seven_get_drs() == 0);
+		nd_seven_set_drs(orig_drs);
 
 		/* Water shader must classify seabed vs submerged sprites via uWaterMode + hardware stencil,
 		 * never reading scene color alpha (required for 4 B/px GL_R11F_G11F_B10F scene buffer). */

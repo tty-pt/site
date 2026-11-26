@@ -140,6 +140,7 @@ int nd_seven_get_msaa(void);
 void nd_seven_set_msaa_samples(int samples);
 int nd_seven_get_msaa_samples(void);
 void nd_seven_toggle_msaa(void);
+void nd_seven_cycle_msaa(void);
 
 void nd_seven_set_fps_cap(int fps);
 int nd_seven_get_fps_cap(void);
@@ -152,6 +153,7 @@ void nd_seven_cycle_quality_preset(void);
 /* Closed-loop Dynamic Resolution Scaling (DRS, opt-in default 0) */
 void nd_seven_set_drs(int enabled);
 int nd_seven_get_drs(void);
+void nd_seven_toggle_drs(void);
 float nd_seven_get_drs_scale(void);
 
 /* Diorama 2.5D & camera rendering constants (zero magic numbers) */

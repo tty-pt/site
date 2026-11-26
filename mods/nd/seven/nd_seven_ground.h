@@ -121,6 +121,7 @@ int  nd_seven_get_msaa(void);
 void nd_seven_set_msaa_samples(int samples);
 int  nd_seven_get_msaa_samples(void);
 void nd_seven_toggle_msaa(void);
+void nd_seven_cycle_msaa(void);
 
 void nd_seven_set_fps_cap(int fps);
 int  nd_seven_get_fps_cap(void);
@@ -181,6 +182,7 @@ float nd_seven_drs_update(nd_seven_drs_t *drs, float dt_s,
                           float cam_yaw, float cam_pitch);
 void  nd_seven_set_drs(int enabled);
 int   nd_seven_get_drs(void);
+void  nd_seven_toggle_drs(void);
 float nd_seven_get_drs_scale(void);
 void  nd_seven_drs_feed_frame(float dt_s, float cam_x, float cam_y,
                               float cam_dist, float cam_yaw, float cam_pitch);

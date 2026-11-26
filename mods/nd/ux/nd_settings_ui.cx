@@ -87,7 +87,16 @@ static int on_settings_cloud_cycle(bud_event *ev)
 static int on_settings_msaa_toggle(bud_event *ev)
 {
 	if (ev) bud_event_stop_propagation(ev);
-	nd_seven_toggle_msaa();
+	nd_seven_cycle_msaa();
+	nd_ui_seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
+static int on_settings_drs_toggle(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_toggle_drs();
 	nd_ui_seven_stage_redraw();
 	bud_app_set_state();
 	return 0;
@@ -248,14 +257,15 @@ bud_node *render_settings_modal(const nd_client_state_t *st)
 	int raw_res_pct = (int)(nd_seven_get_res_scale() * 100.0f + 0.5f);
 	int raw_det_pct = (int)(nd_seven_get_detail_scale() * 100.0f + 0.5f);
 	int cq = nd_seven_get_cloud_quality();
-	int msaa = nd_seven_get_msaa();
+	int msaa_samples = nd_seven_get_msaa_samples();
+	int drs = nd_seven_get_drs();
 	int fps = nd_seven_get_fps_cap();
 	int raw_zoom_pct = (int)(nd_seven_get_zoom() * 100.0f + 0.5f);
 
-	char qstyle[160];
+	char qstyle[192];
 	snprintf(qstyle, sizeof(qstyle),
-	         "--nd-res:%d;--nd-det:%d;--nd-cloud:%d;--nd-msaa:%d;--nd-fps:%d;--nd-zoom:%d;",
-	         raw_res_pct, raw_det_pct, cq, msaa, fps, raw_zoom_pct);
+	         "--nd-res:%d;--nd-det:%d;--nd-cloud:%d;--nd-msaa:%d;--nd-drs:%d;--nd-fps:%d;--nd-zoom:%d;",
+	         raw_res_pct, raw_det_pct, cq, msaa_samples, drs, fps, raw_zoom_pct);
 
 	int preset = nd_seven_get_quality_preset();
 	const char *preset_label = "✨ High";
@@ -277,6 +287,12 @@ bud_node *render_settings_modal(const nd_client_state_t *st)
 	if (cq == ND_CLOUD_QUALITY_OFF) cq_label = "🚫 Off";
 	else if (cq == ND_CLOUD_QUALITY_LOW) cq_label = "💨 Low (1/4 Res, No CSM)";
 	else if (cq == ND_CLOUD_QUALITY_MEDIUM) cq_label = "⛅ Medium (1/3 Res + CSM)";
+
+	const char *msaa_label = "Off (1x)";
+	if (msaa_samples == 2) msaa_label = "2x MSAA";
+	else if (msaa_samples >= 4) msaa_label = "4x MSAA";
+
+	const char *drs_label = drs ? "Auto (75–100%)" : "Off";
 
 	const char *fps_label = "Uncapped (VSync)";
 	if (fps == 30) fps_label = "30 FPS (Battery)";
@@ -320,6 +336,9 @@ bud_node *render_settings_modal(const nd_client_state_t *st)
 					                     "settings-res-slider", "25", "100", res_num, on_settings_res_slider,
 					                     "settings-res-in", "Higher Render Resolution", on_settings_res_in,
 					                     NULL)}
+					{settings_toggle_row("🎯 Dynamic Resolution", "settings-drs-toggle",
+					                     "Auto-scale render resolution (75–100%) to keep frame rate smooth",
+					                     drs_label, on_settings_drs_toggle)}
 					{settings_slider_row("🌿 Scenery Detail", "settings-detail-value", det_val,
 					                     "settings-detail-out", "Less Scenery Detail (,)", on_settings_detail_out,
 					                     "settings-detail-slider", "20", "250", det_num, on_settings_detail_slider,
@@ -329,8 +348,8 @@ bud_node *render_settings_modal(const nd_client_state_t *st)
 					                     "Cycle volumetric cloud & shadow map quality",
 					                     cq_label, on_settings_cloud_cycle)}
 					{settings_toggle_row("✨ Anti-Aliasing", "settings-msaa-toggle",
-					                     "Toggle 4x MSAA multisample anti-aliasing",
-					                     msaa ? "4x MSAA (On)" : "Off (1x)", on_settings_msaa_toggle)}
+					                     "Cycle multisample anti-aliasing (Off / 2x / 4x)",
+					                     msaa_label, on_settings_msaa_toggle)}
 					{settings_toggle_row("⏱️ Frame Rate Cap", "settings-fps-toggle",
 					                     "Cycle 3D rendering frame rate cap",
 					                     fps_label, on_settings_fps_cycle)}
