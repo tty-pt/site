@@ -1808,10 +1808,10 @@ static void gl_fill_mob_frame(float bb_sea_level, nd_mob_frame_t *out)
 	out->south[0] = s_gl.cur_S[0]; out->south[1] = s_gl.cur_S[1]; out->south[2] = s_gl.cur_S[2];
 	out->up[0]    = s_gl.cur_N[0]; out->up[1]    = s_gl.cur_N[1]; out->up[2]    = s_gl.cur_N[2];
 
-	out->lamb_light[0] = s_gl.cur_lamb_light[0];
-	out->lamb_light[1] = s_gl.cur_lamb_light[1];
-	out->lamb_light[2] = s_gl.cur_lamb_light[2];
-	out->lamb_light[3] = s_gl.cur_lamb_light[3];
+	out->owner_light[0] = s_gl.cur_lamb_light[0];
+	out->owner_light[1] = s_gl.cur_lamb_light[1];
+	out->owner_light[2] = s_gl.cur_lamb_light[2];
+	out->owner_light[3] = s_gl.cur_lamb_light[3];
 
 	out->sea_level = bb_sea_level;
 	out->time_s = s_gl.cur_anim_time;
@@ -1859,7 +1859,7 @@ void nd_seven_gl_submit_mob_actors(const nd_mob_actor_in_t *actors, uint32_t cou
 		}
 		if ((a->flags & (ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS)) ==
 		    (ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS)) {
-			nd_seven_fill_lamb_anim(gx, gy, &a->anim);
+			nd_seven_fill_player_anim(gx, gy, &a->anim);
 		}
 		if ((a->flags & ND_MOB_ACT_IN_WATER) != 0u ||
 		    (bb_sea_level > -900.0f && a->world_z < bb_sea_level + 0.15f)) {

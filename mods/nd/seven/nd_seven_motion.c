@@ -164,13 +164,13 @@ void nd_seven_set_lamb_in_water(int in_water)
 	s_lamb_in_water = in_water ? 1 : 0;
 }
 
-void nd_seven_fill_lamb_anim(float terr_gx, float terr_gy, mob_anim_params_t *out)
+void nd_seven_fill_player_anim(float terr_gx, float terr_gy, mob_anim_params_t *out)
 {
 	if (!out)
 		return;
 	float cy = cosf(s_lamb_yaw_rad);
 	float sy = sinf(s_lamb_yaw_rad);
-	/* Lamb local +Y (nose) in (E, S) is (-sin(yaw), cos(yaw)); local +X (right) is (cos(yaw), sin(yaw)) */
+	/* Actor local +Y (forward) in (E, S) is (-sin(yaw), cos(yaw)); local +X (right) is (cos(yaw), sin(yaw)) */
 	float slope_fwd = terr_gx * (-sy) + terr_gy * cy;
 	float slope_lat = terr_gx * cy + terr_gy * sy;
 	float tgt_pitch = mot_clampf(atanf(slope_fwd) * 0.65f, -0.38f, 0.38f);
@@ -182,18 +182,22 @@ void nd_seven_fill_lamb_anim(float terr_gx, float terr_gy, mob_anim_params_t *ou
 	s_slope_pitch += (tgt_pitch - s_slope_pitch) * 0.25f;
 	s_slope_roll  += (tgt_roll  - s_slope_roll)  * 0.25f;
 
-	out->anim_sec    = s_anim_sec;
-	out->gait_phase  = s_gait_phase;
-	out->speed_norm  = s_speed_norm;
-	out->turn_rate   = s_lamb_turn_rate;
-	out->hop_z       = s_hop_z;
-	out->hop_vel     = s_hop_vel;
-	out->land_squash = s_land_squash;
-	out->slope_pitch = s_slope_pitch;
-	out->slope_roll  = s_slope_roll;
-	out->idle_sec    = s_idle_sec;
-	out->interact_t  = s_interact_t;
-	out->in_water    = s_lamb_in_water;
+	out->anim_sec     = s_anim_sec;
+	out->gait_phase   = s_gait_phase;
+	out->speed_norm   = s_speed_norm;
+	out->turn_rate    = s_lamb_turn_rate;
+	out->hop_z        = s_hop_z;
+	out->hop_vel      = s_hop_vel;
+	out->land_squash  = s_land_squash;
+	out->slope_pitch  = s_slope_pitch;
+	out->slope_roll   = s_slope_roll;
+	out->idle_sec     = s_idle_sec;
+	out->interact_t   = s_interact_t;
+	out->in_water     = s_lamb_in_water;
+	out->action_id    = MOB_ACT_NONE;
+	out->action_phase = 0.0f;
+	out->look_yaw     = 0.0f;
+	out->look_pitch   = 0.0f;
 }
 
 void nd_seven_reset_input(void)

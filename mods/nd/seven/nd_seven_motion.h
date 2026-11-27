@@ -26,7 +26,7 @@ void  nd_seven_trigger_hop(void);
 void  nd_seven_trigger_interact(void);
 void  nd_seven_set_mouse_run(int active);
 void  nd_seven_set_lamb_in_water(int in_water);
-void  nd_seven_fill_lamb_anim(float terr_gx, float terr_gy, mob_anim_params_t *out);
+void  nd_seven_fill_player_anim(float terr_gx, float terr_gy, mob_anim_params_t *out);
 
 /* Lamb placement & inspection */
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);

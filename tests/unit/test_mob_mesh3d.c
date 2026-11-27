@@ -24,7 +24,8 @@ assert_watertight_and_outward(const mob_mesh3d_t *mesh)
 		assert(v->ao >= 0.4f && v->ao <= 1.001f);
 		assert(v->bone_idx < mesh->skel.count);
 		assert(v->bone_idx2 < mesh->skel.count);
-		assert(v->mat_id <= MOB_MAT_GLOSS);
+		assert(v->mat_id < MOB_MAT_COUNT);
+		assert(v->pal_slot < MOB_PAL_COUNT);
 		assert(v->bone_weight > 0.0f && v->bone_weight <= 1.0f);
 	}
 
@@ -122,7 +123,7 @@ test_lamb_aging_and_mesh(void)
 	assert(fabsf(mesh.min_x + mesh.max_x) < 1e-4f);
 	assert(fabsf(mesh.min_y + mesh.max_y) < 1e-4f);
 
-	uint32_t mat_counts[3] = { 0, 0, 0 };
+	uint32_t mat_counts[MOB_MAT_COUNT] = { 0 };
 	uint32_t blended_count = 0;
 	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
 		mat_counts[mesh.vtx[i].mat_id]++;
@@ -332,10 +333,154 @@ test_mobs_dsv_piscine_and_avian(void)
 	printf("test_avian_all_6_species: PASS (watertight + flight flap & perched fold verified)\n");
 }
 
+static void
+test_biped_human_and_dna_resolution(void)
+{
+	static mob_vtx3d_t vtx[4096], posed[4096];
+	static uint16_t idx[16384];
+	mob_mesh3d_t mesh = { .vtx = vtx, .idx = idx, .max_vtx = 4096, .max_idx = 16384 };
+	mob_pose3d_t pose;
+
+	/* 1. Default human: watertight, outward CCW, grounded, ~1.55-1.95 m tall, 21 bones */
+	creature_dna_t h0 = creature_dna_human_default(101u);
+	creature_state_t st = { .age = 0.55f, .weight = 0.50f, .coat_state = 0, .seed = 101u };
+	assert(h0.archetype == CREATURE_ARCH_BIPED);
+	assert(h0.species == CREATURE_SPECIES_HUMAN);
+
+	mob_build_mesh(&h0, &st, &mesh);
+	assert_watertight_and_outward(&mesh);
+	assert(mesh.skel.count == MOB_BIPED_BONE_COUNT);
+	assert(fabsf(mesh.min_z) < 1e-5f);
+	assert(mesh.max_z >= 1.50f && mesh.max_z <= 1.98f);
+	assert(fabsf(mesh.min_x + mesh.max_x) < 1e-4f);
+	assert(fabsf(mesh.min_y + mesh.max_y) < 1e-4f);
+
+	uint32_t mats[MOB_MAT_COUNT] = { 0 };
+	uint32_t pal_used[MOB_PAL_COUNT] = { 0 };
+	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+		mats[mesh.vtx[i].mat_id]++;
+		pal_used[mesh.vtx[i].pal_slot]++;
+	}
+	assert(mats[MOB_MAT_SKIN] > 60);
+	assert(mats[MOB_MAT_HAIR] > 20);
+	assert(mats[MOB_MAT_CLOTH] > 60);
+	assert(mats[MOB_MAT_LEATHER] > 20);
+	assert(mats[MOB_MAT_GLOSS] > 16);
+	assert(pal_used[MOB_PAL_PRIMARY] > 40);
+	assert(pal_used[MOB_PAL_SECONDARY] > 20);
+	assert(pal_used[MOB_PAL_ACCENT] > 40);
+
+	/* 2. Armored + cloaked + bearded + helmeted variant: METAL material present & watertight */
+	creature_dna_t knight = h0;
+	knight.arch.biped.garment_top    = 2; /* armor cuirass */
+	knight.arch.biped.garment_bottom = 1; /* robe/skirt */
+	knight.arch.biped.headgear       = 2; /* helm */
+	knight.arch.biped.beard_style    = 2; /* full beard */
+	knight.arch.biped.cloak_len      = 2; /* long cloak */
+	mob_build_mesh(&knight, &st, &mesh);
+	assert_watertight_and_outward(&mesh);
+	uint32_t metal_n = 0;
+	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+		if (mesh.vtx[i].mat_id == MOB_MAT_METAL) metal_n++;
+	}
+	assert(metal_n > 60);
+
+	/* 3. Structural geom_hash: invariant to palette & seed, sensitive to geometry changes */
+	creature_dna_t h1 = h0;
+	h1.seed = 9999u;
+	h1.palette[0] = 0xFF332211u;
+	h1.palette[1] = 0xFF11AA44u;
+	h1.palette[2] = 0xFF2244EEu;
+	h1.palette[3] = 0xFFCC9922u;
+	assert(creature_dna_geom_hash(&h0, &st) == creature_dna_geom_hash(&h1, &st));
+	assert(creature_dna_geom_hash(&h0, &st) != creature_dna_geom_hash(&knight, &st));
+
+	/* 4. Non-fragile entity resolution: player named "Sparrow" must NOT turn into a bird */
+	creature_dna_t rdna;
+	creature_state_t rst;
+	int matched_sparrow_player = creature_dna_resolve_entity("", "Sparrow", 1, 77u, &rdna, &rst);
+	assert(matched_sparrow_player == 0);
+	assert(rdna.species != CREATURE_SPECIES_SPARROW);
+	assert(rdna.archetype != CREATURE_ARCH_AVIAN);
+
+	/* Explicit art token overrides name for any actor (including players) */
+	int matched_human_art = creature_dna_resolve_entity("entity/human/1.jpeg", "Sparrow", 1, 77u, &rdna, &rst);
+	assert(matched_human_art == 1);
+	assert(rdna.species == CREATURE_SPECIES_HUMAN);
+	assert(rdna.archetype == CREATURE_ARCH_BIPED);
+
+	int matched_shark_art = creature_dna_resolve_entity("entity/shark/2.png", "Bob", 1, 88u, &rdna, &rst);
+	assert(matched_shark_art == 1);
+	assert(rdna.species == CREATURE_SPECIES_SHARK);
+	assert(rdna.archetype == CREATURE_ARCH_PISCINE);
+
+	/* Non-player NPC with empty art still resolves cleanly by species name */
+	int matched_owl_npc = creature_dna_resolve_entity("", "Owl", 0, 55u, &rdna, &rst);
+	assert(matched_owl_npc == 1);
+	assert(rdna.species == CREATURE_SPECIES_OWL);
+	assert(rdna.archetype == CREATURE_ARCH_AVIAN);
+
+	/* 5. Biped FK poses across all locomotion & action states */
+	mob_build_mesh(&h0, &st, &mesh);
+
+	mob_anim_params_t p_walk = {
+		.gait_phase = 1.1f, .speed_norm = 0.55f, .turn_rate = 0.8f,
+		.anim_sec = 1.5f, .look_yaw = 0.35f, .look_pitch = -0.15f
+	};
+	mob_eval_pose(h0.archetype, &mesh.skel, &p_walk, &pose);
+	assert_pose_orthonormal(&pose, MOB_BIPED_BONE_COUNT);
+	mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed);
+
+	float max_leg_dy = 0.0f, max_arm_dy = 0.0f;
+	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+		float dy = fabsf(posed[i].y - mesh.vtx[i].y);
+		if (mesh.vtx[i].bone_idx == MOB_BIPED_LEG_L_LO && dy > max_leg_dy) max_leg_dy = dy;
+		if (mesh.vtx[i].bone_idx == MOB_BIPED_ARM_R_LO && dy > max_arm_dy) max_arm_dy = dy;
+	}
+	assert(max_leg_dy > 0.08f);
+	assert(max_arm_dy > 0.04f);
+
+	/* Right-hand swing displaces hand socket strongly */
+	mob_anim_params_t p_swing = {
+		.anim_sec = 2.0f, .action_id = MOB_ACT_SWING, .action_phase = 0.32f
+	};
+	mob_eval_pose(h0.archetype, &mesh.skel, &p_swing, &pose);
+	assert_pose_orthonormal(&pose, MOB_BIPED_BONE_COUNT);
+	const mob_bone_t *hr = &mesh.skel.bones[MOB_BIPED_HAND_R];
+	const float *hm = pose.m[MOB_BIPED_HAND_R];
+	float hx = hm[0] * hr->tx + hm[1] * hr->ty + hm[2]  * hr->tz + hm[3];
+	float hy = hm[4] * hr->tx + hm[5] * hr->ty + hm[6]  * hr->tz + hm[7];
+	float hz = hm[8] * hr->tx + hm[9] * hr->ty + hm[10] * hr->tz + hm[11];
+	float hand_disp = sqrtf((hx - hr->tx) * (hx - hr->tx) +
+	                        (hy - hr->ty) * (hy - hr->ty) +
+	                        (hz - hr->tz) * (hz - hr->tz));
+	assert(hand_disp > 0.35f);
+
+	/* Verify all other biped modes remain strictly SO(3) orthonormal */
+	static const mob_anim_params_t modes[] = {
+		{ .speed_norm = 1.0f, .gait_phase = 2.1f, .anim_sec = 3.0f }, /* sprint */
+		{ .speed_norm = 0.6f, .hop_z = 0.4f, .hop_vel = 2.2f, .anim_sec = 3.1f }, /* jump */
+		{ .speed_norm = 0.4f, .in_water = 1, .anim_sec = 4.0f }, /* swim */
+		{ .anim_sec = 5.0f, .action_id = MOB_ACT_USE,    .action_phase = 0.5f },
+		{ .anim_sec = 5.1f, .action_id = MOB_ACT_SIT,    .action_phase = 0.5f },
+		{ .anim_sec = 5.2f, .action_id = MOB_ACT_CROUCH, .action_phase = 0.5f },
+		{ .anim_sec = 5.3f, .action_id = MOB_ACT_EMOTE,  .action_phase = 0.5f },
+		{ .anim_sec = 5.4f, .action_id = MOB_ACT_DOWNED, .action_phase = 0.5f }
+	};
+	for (uint32_t k = 0; k < sizeof(modes) / sizeof(modes[0]); k++) {
+		mob_eval_pose(h0.archetype, &mesh.skel, &modes[k], &pose);
+		assert_pose_orthonormal(&pose, MOB_BIPED_BONE_COUNT);
+	}
+
+	printf("test_biped_human: PASS (vtx=%u idx=%u h=%.3fm metal=%u leg_dy=%.3fm arm_dy=%.3fm swing=%.3fm)\n",
+	       mesh.vtx_count, mesh.idx_count, mesh.max_z, metal_n, max_leg_dy, max_arm_dy, hand_disp);
+}
+
 int
 main(void)
 {
 	test_lamb_aging_and_mesh();
 	test_mobs_dsv_piscine_and_avian();
+	test_biped_human_and_dna_resolution();
 	return 0;
 }

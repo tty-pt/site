@@ -5060,11 +5060,11 @@ int main(void)
 						const char *mcol_vs = nd_mob_gl_color_vs_src();
 						const char *mcol_fs = nd_mob_gl_color_fs_src();
 						assert(msh_vs && strstr(msh_vs, "uBoneTex") != NULL && strstr(msh_vs, "mob_skin") != NULL);
-						assert(mcol_vs && strstr(mcol_vs, "uBoneTex") != NULL && strstr(mcol_vs, "mob_skin") != NULL);
-						assert(mcol_fs && strstr(mcol_fs, "isWool") != NULL && strstr(mcol_fs, "isSkin") != NULL);
-						assert(strstr(mcol_fs, "isGloss") != NULL && strstr(mcol_fs, "ownerGlow") != NULL);
+						assert(mcol_vs && strstr(mcol_vs, "uBoneTex") != NULL && strstr(mcol_vs, "MOB_PAL_BASE_X") != NULL);
+						assert(mcol_fs && strstr(mcol_fs, "mId == 0") != NULL && strstr(mcol_fs, "mId == 5") != NULL);
+						assert(strstr(mcol_fs, "uOwnerLight") != NULL && strstr(mcol_fs, "ownerGlow") != NULL);
 
-						nd_mob_actor_in_t actors[4];
+						nd_mob_actor_in_t actors[5];
 						memset(actors, 0, sizeof(actors));
 
 						/* 0: local player lamb (ungulate) */
@@ -5101,13 +5101,21 @@ int main(void)
 						actors[3].alpha = 1.0f;
 						actors[3].flags = ND_MOB_ACT_AIRBORNE;
 
-						nd_seven_gl_submit_mob_actors(actors, 4u, 1.0f / 60.0f);
+						/* 4: human (biped) */
+						actors[4].ref = 404;
+						assert(creature_dna_resolve_entity("entity/human/1.jpeg", "Adventurer", 1, 404u,
+						                                   &actors[4].dna, &actors[4].state) == 1);
+						actors[4].world_x = 160.0f; actors[4].world_y = 70.0f; actors[4].world_z = 24.0f;
+						actors[4].scale_wu_per_m = 45.0f;
+						actors[4].alpha = 1.0f;
+
+						nd_seven_gl_submit_mob_actors(actors, 5u, 1.0f / 60.0f);
 						nd_mob_gl_stats_t mstats;
 						memset(&mstats, 0, sizeof(mstats));
 						assert(nd_mob_gl_get_stats(&mstats) == 0);
-						assert(mstats.active_actors == 4u);
-						assert(mstats.cached_species >= 4u);
-						assert(mstats.total_verts >= 1500u && mstats.total_indices >= 8000u);
+						assert(mstats.active_actors == 5u);
+						assert(mstats.cached_species >= 5u);
+						assert(mstats.total_verts >= 2000u && mstats.total_indices >= 10000u);
 
 						/* Reset staged mob actors cleanly */
 						nd_seven_gl_submit_mob_actors(NULL, 0u, 1.0f / 60.0f);

@@ -2095,7 +2095,20 @@ static inline int seven_emit_room_billboards(const nd_client_state_t *st, const 
 	return seven_emit_room_billboards_ex(st, node, pos, w_level, tint, false, NULL, NULL, NULL);
 }
 
-enum { D_OBJ, D_ENTITY, D_LAMB };
+enum { D_OBJ, D_ENTITY, D_LOCAL_PLAYER };
+
+static const nd_entity_desc_t *
+nd_seven_find_entity(const nd_client_state_t *st, uint32_t ref)
+{
+	if (!st || ref == 0)
+		return NULL;
+	for (size_t i = 0; i < (size_t)st->entity_count && i < sizeof(st->entities) / sizeof(st->entities[0]); i++) {
+		if (st->entities[i].ref == ref)
+			return &st->entities[i];
+	}
+	return NULL;
+}
+
 typedef struct {
 	int32_t wx, wy;        /* world position */
 	int16_t wz;            /* ground elevation (block units) */
@@ -2853,14 +2866,14 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 		if (tj == eff_lamb_row && n < MAX_DRAW) {
 			int64_t lwx = 0, lwy = 0;
 			nd_seven_world_pos(st, &lwx, &lwy);
-			dr[n].what = D_LAMB;
+			dr[n].what = D_LOCAL_PLAYER;
 			dr[n].wx = (int32_t)lwx;
 			dr[n].wy = (int32_t)lwy;
 			float lamb_f = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
 			dr[n].wz = (int16_t)lamb_f;
 			dr[n].z_f = lamb_f;
 			dr[n].entity_flags = 0;
-			dr[n].entity_ref = 0;
+			dr[n].entity_ref = st ? st->me : 0u;
 			dr[n].name[0] = '\0';
 			n++;
 		}
@@ -2873,20 +2886,26 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 			float bw = 0.0f, bh = 0.0f;
 			float bay = 0.0f, bwz_off = 0.0f;
 
-			if (dr[a].what == D_LAMB) {
+			if (dr[a].what == D_LOCAL_PLAYER) {
 				if (mob_actor_count < ND_MOB_GL_MAX_ACTORS) {
 					uint16_t world_id = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
 					int16_t lamb_wl = 0;
 					bool has_w = (seven_has_water_at(world_id, dr[a].wx, dr[a].wy, &lamb_wl) != 0);
-					bool lamb_glows = (nd_seven_is_universe_owner(st) != 0);
+					bool owner_glows = (nd_seven_is_universe_owner(st) != 0);
+					const nd_entity_desc_t *me_ent = st ? nd_seven_find_entity(st, st->me) : NULL;
+					uint32_t me_seed = (st && st->me) ? st->me : 42u;
 					nd_mob_actor_in_t *ma = &s_mob_actors[mob_actor_count++];
 					memset(ma, 0, sizeof(*ma));
 					ma->ref = 0;
-					ma->dna = creature_dna_lamb_default(42u);
-					ma->state.age = 0.15f;
-					ma->state.weight = 0.65f;
-					ma->state.coat_state = 0;
-					ma->state.seed = 42u;
+					if (!creature_dna_resolve_entity(me_ent ? me_ent->art : NULL,
+					                                 me_ent ? me_ent->name : NULL,
+					                                 1, me_seed, &ma->dna, &ma->state)) {
+						ma->dna = creature_dna_lamb_default(42u);
+						ma->state.age = 0.15f;
+						ma->state.weight = 0.65f;
+						ma->state.coat_state = 0;
+						ma->state.seed = 42u;
+					}
 					ma->world_x = (float)dr[a].wx;
 					ma->world_y = (float)dr[a].wy;
 					ma->world_z = dr[a].z_f;
@@ -2895,7 +2914,7 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					ma->water_z = has_w ? (float)lamb_wl : -1000.0f;
 					ma->alpha = 1.0f;
 					ma->flags = ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS |
-					            (lamb_glows ? ND_MOB_ACT_OWNER_GLOW : 0u) |
+					            (owner_glows ? ND_MOB_ACT_OWNER_GLOW : 0u) |
 					            (s_prev_lamb_in_water ? ND_MOB_ACT_IN_WATER : 0u);
 				}
 				continue;
@@ -2903,11 +2922,15 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 				uint32_t seed = dr[a].entity_ref
 				              ? dr[a].entity_ref
 				              : (uint32_t)((uint32_t)dr[a].wx * 0x9E3779B1u ^ (uint32_t)dr[a].wy * 0x85EBCA77u);
-				creature_dna_t ent_dna;
-				creature_state_t ent_st;
-				int matched_species = creature_dna_from_name(dr[a].name, seed, &ent_dna, &ent_st);
+				const nd_entity_desc_t *ent_desc = nd_seven_find_entity(st, dr[a].entity_ref);
 				bool is_player_ent = (dr[a].entity_flags & ND_EF_PLAYER) != 0u;
 				bool is_creature_ent = (dr[a].entity_flags & ND_EF_CREATURE) != 0u;
+				creature_dna_t ent_dna;
+				creature_state_t ent_st;
+				int matched_species = creature_dna_resolve_entity(
+					ent_desc ? ent_desc->art : NULL,
+					dr[a].name, is_player_ent ? 1 : 0,
+					seed, &ent_dna, &ent_st);
 				if ((matched_species || is_player_ent || is_creature_ent) &&
 				    mob_actor_count < ND_MOB_GL_MAX_ACTORS) {
 					if (!matched_species) {

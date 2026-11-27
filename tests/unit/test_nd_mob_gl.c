@@ -120,15 +120,17 @@ void lam_glPixelStorei(GLenum p, GLint v)
 
 void lam_glTexImage2D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLint b, GLenum f, GLenum ty, const void *px)
 {
-	(void)t; (void)l; (void)inf; (void)w; (void)h; (void)b; (void)f; (void)ty; (void)px;
+	(void)t; (void)l; (void)inf; (void)h; (void)b; (void)f; (void)ty; (void)px;
 	assert(s_mock_unpack_align == 4);
+	assert(w == (GLsizei)ND_MOB_GL_ACTOR_TEX_W);
 	s_mock_tex_uploads_aligned++;
 }
 
 void lam_glTexSubImage2D(GLenum t, GLint l, GLint xo, GLint yo, GLsizei w, GLsizei h, GLenum f, GLenum ty, const void *px)
 {
-	(void)t; (void)l; (void)xo; (void)yo; (void)w; (void)h; (void)f; (void)ty; (void)px;
+	(void)t; (void)l; (void)xo; (void)yo; (void)h; (void)f; (void)ty; (void)px;
 	assert(s_mock_unpack_align == 4);
+	assert(w == (GLsizei)ND_MOB_GL_ACTOR_TEX_W);
 	s_mock_tex_uploads_aligned++;
 }
 
@@ -348,12 +350,12 @@ main(int argc, char **argv)
 	assert(nd_mob_gl_get_stats(&st) == 0);
 	assert(st.gl_ready == 1u);
 
-	/* 4. Sync all 14 mobs.dsv species + ungulates simultaneously */
+	/* 4. Sync all 14 mobs.dsv species + ungulates + human simultaneously */
 	static const char *const k_names[] = {
 		"Goldfish", "Salmon", "Tuna", "Koifish",
 		"Dolphin", "Shark", "Moonfish", "Rainbowfish",
 		"Icebird", "Parrot", "Swallow", "Woodpecker",
-		"Sparrow", "Owl", "Lamb", "Sheep", "Horse", "Cow", "Pig"
+		"Sparrow", "Owl", "Lamb", "Sheep", "Horse", "Cow", "Pig", "Human"
 	};
 	enum { N_ALL = (int)(sizeof(k_names) / sizeof(k_names[0])) };
 	nd_mob_actor_in_t zoo[N_ALL];
@@ -381,6 +383,75 @@ main(int argc, char **argv)
 	assert(nd_mob_gl_get_stats(&st) == 0);
 	assert(st.active_actors == (uint32_t)N_ALL);
 	assert(st.cached_species == (uint32_t)N_ALL);
+
+	/* 5. Multi-palette single-VBO instancing + attachment socket query (nd_mob_gl_get_bone_matrix) */
+	uint32_t species_before_crowd = st.cached_species;
+	nd_mob_actor_in_t crowd[3];
+	memset(crowd, 0, sizeof(crowd));
+	creature_dna_t base_human = creature_dna_human_default(500u);
+	base_human.arch.biped.garment_top    = 0;
+	base_human.arch.biped.garment_bottom = 0;
+	base_human.arch.biped.headgear       = 1; /* distinct from zoo human so +1 cache entry */
+	base_human.arch.biped.cloak_len      = 1;
+	static const uint32_t k_palettes[3][4] = {
+		{ 0xE6B89CFFu, 0x2B1E16FFu, 0xB83228FFu, 0x2E4A7DFFu },
+		{ 0x8D5524FFu, 0x1A1410FFu, 0x2F7A48FFu, 0x6E3B20FFu },
+		{ 0xF5D0B5FFu, 0xD4A84BFFu, 0x4A3A8CFFu, 0x222630FFu }
+	};
+	for (int i = 0; i < 3; i++) {
+		crowd[i].ref = (uint64_t)(5000 + i);
+		crowd[i].dna = base_human;
+		crowd[i].dna.seed = (uint32_t)(700 + i);
+		for (int c = 0; c < 4; c++)
+			crowd[i].dna.palette[c] = k_palettes[i][c];
+		crowd[i].state.age = 0.55f;
+		crowd[i].state.weight = 0.5f;
+		crowd[i].world_x = 10.0f * (float)i;
+		crowd[i].scale_wu_per_m = 45.0f;
+		crowd[i].alpha = 1.0f;
+		crowd[i].flags = ND_MOB_ACT_HAS_ANIM_PARAMS;
+		crowd[i].anim.action_id = (i == 0) ? MOB_ACT_SWING : MOB_ACT_NONE;
+		crowd[i].anim.action_phase = 0.35f;
+		crowd[i].anim.anim_sec = 1.2f;
+	}
+	assert(nd_mob_gl_sync(crowd, 3u, 0.016f) == 3);
+	assert(nd_mob_gl_draw_color(&frame) == 1); /* 3 differently-colored humans -> 1 instanced draw call! */
+	assert(nd_mob_gl_get_stats(&st) == 0);
+	assert(st.cached_species == species_before_crowd + 1u);
+
+	/* Query right-hand socket bone matrix for crowd[0] */
+	float hand_m[12];
+	assert(nd_mob_gl_get_bone_matrix(5000u, MOB_BIPED_HAND_R, hand_m) == 0);
+	for (int k = 0; k < 12; k++)
+		assert(isfinite(hand_m[k]));
+	float det = hand_m[0] * (hand_m[5] * hand_m[10] - hand_m[6] * hand_m[9])
+	          - hand_m[1] * (hand_m[4] * hand_m[10] - hand_m[6] * hand_m[8])
+	          + hand_m[2] * (hand_m[4] * hand_m[9]  - hand_m[5] * hand_m[8]);
+	assert(fabsf(det - 1.0f) < 1e-4f);
+	/* Invalid ref or out-of-range bone returns -1 */
+	assert(nd_mob_gl_get_bone_matrix(999999u, MOB_BIPED_HAND_R, hand_m) == -1);
+	assert(nd_mob_gl_get_bone_matrix(5000u, MOB_BIPED_BONE_COUNT, hand_m) == -1);
+
+	/* 6. Dynamic species cache growth past legacy 32-slot cap (zero silent fallback) */
+	nd_mob_actor_in_t variants[24];
+	memset(variants, 0, sizeof(variants));
+	for (int i = 0; i < 24; i++) {
+		variants[i].ref = (uint64_t)(8000 + i);
+		variants[i].dna = creature_dna_human_default((uint32_t)(8000 + i));
+		variants[i].dna.arch.biped.garment_top    = (uint8_t)(i % 3);
+		variants[i].dna.arch.biped.garment_bottom = (uint8_t)((i / 3) % 2);
+		variants[i].dna.arch.biped.headgear       = (uint8_t)((i / 6) % 3);
+		variants[i].dna.arch.biped.cloak_len      = (uint8_t)((i / 18) % 3);
+		variants[i].dna.arch.biped.torso_v_taper  = 0.15f + 0.03f * (float)i;
+		variants[i].state.age = 0.55f;
+		variants[i].state.weight = 0.50f;
+		variants[i].scale_wu_per_m = 45.0f;
+		variants[i].alpha = 1.0f;
+	}
+	assert(nd_mob_gl_sync(variants, 24u, 0.016f) == 24);
+	assert(nd_mob_gl_draw_color(&frame) == 24);
+	assert(nd_mob_gl_get_stats(&st) == 0);
+	assert(st.cached_species > 32u);
 
 	printf("PASS test_nd_mob_gl (actors=%u, cached_species=%u, total_verts=%u, total_indices=%u)\n",
 	       st.active_actors, st.cached_species, st.total_verts, st.total_indices);
