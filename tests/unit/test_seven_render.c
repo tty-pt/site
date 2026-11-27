@@ -4103,8 +4103,11 @@ int main(void)
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_HIGH);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1920 && rh == 1080);
-				nd_seven_render(fb, 1920, 1080, &st);
-				nd_seven_render(fb, 1920, 1080, &st);
+				for (int wave = 0; wave < 3; wave++) {
+					nd_seven_render(fb, 1920, 1080, &st);
+					if (wave < 2)
+						nd_seven_drain_async();
+				}
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 1920 && st_h == 1080);
 				assert(sc_w == 1920 && sc_h == 1080);
@@ -4125,6 +4128,7 @@ int main(void)
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1286 && rh == 724);
 				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_drain_async();
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 1920 && st_h == 1080);
@@ -4154,8 +4158,11 @@ int main(void)
 				assert(nd_seven_get_fps_cap() == 60);
 				nd_seven_scaled_dims(1920, 1080, &rw, &rh);
 				assert(rw == 1440 && rh == 810);
-				nd_seven_render(fb, 1920, 1080, &st);
-				nd_seven_render(fb, 1920, 1080, &st);
+				for (int wave = 0; wave < 3; wave++) {
+					nd_seven_render(fb, 1920, 1080, &st);
+					if (wave < 2)
+						nd_seven_drain_async();
+				}
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 1920 && st_h == 1080);
 				assert(sc_w == 1440 && sc_h == 810);
@@ -4173,6 +4180,7 @@ int main(void)
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_CUSTOM);
 				assert(nd_seven_gl_should_queue_cloud_chunk(0, 0, 5120, 5120, p1) == false);
 				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_drain_async();
 				nd_seven_render(fb, 1920, 1080, &st);
 				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
 				assert(st_w == 1920 && st_h == 1080);

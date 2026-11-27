@@ -159,6 +159,87 @@ int main(void)
 		assert(q[3] == nd_field_room_hyp_coarse(world, (int16_t)(rx + 1), (int16_t)(ry + 1)));
 	}
 	printf("PASS: ruggedness_4x, fine_4x (mixed rug cache), and coarse_quad bit-exact (2,000 samples)\n");
+
+	/* 4. Conservative nd_field_elevation_bounds stress test across small..macro patches */
+	const int32_t patch_sizes[] = { 160, 640, 2560, 10240, 32768 };
+	int bounds_ocean_tight = 0;
+	int bounds_mountain_hits = 0;
+	for (int iter = 0; iter < 2000; iter++) {
+		uint16_t world = (uint16_t)(iter % 2);
+		int32_t sz = patch_sizes[iter % (int)(sizeof(patch_sizes) / sizeof(patch_sizes[0]))];
+		int32_t ox = (int32_t)(next_u32() % 6000000u) - 3000000;
+		int32_t oy = (int32_t)(next_u32() % 6000000u) - 3000000;
+		float z_min = 0.0f, z_max = 0.0f;
+		nd_field_elevation_bounds(world, ox, oy, sz, sz, &z_min, &z_max);
+		assert(z_min <= z_max);
+		if (z_max < 150.0f)
+			bounds_ocean_tight++;
+
+		for (int sy = 0; sy <= 2; sy++) {
+			for (int sx = 0; sx <= 2; sx++) {
+				int32_t wx = ox + (sz * sx) / 2;
+				int32_t wy = oy + (sz * sy) / 2;
+				nd_field_sample_t sp = nd_field_sample_step(world, 0, wx, wy);
+				float z = (float)sp.elevation_q12_4 * 0.0625f;
+				if (z < z_min - 0.5f || z > z_max + 0.5f) {
+					fprintf(stderr,
+					        "BOUNDS VIOLATION world=%u ox=%d oy=%d sz=%d wx=%d wy=%d z=%.2f bounds=[%.2f, %.2f]\n",
+					        world, ox, oy, sz, wx, wy, z, z_min, z_max);
+					abort();
+				}
+				if (z > 600.0f)
+					bounds_mountain_hits++;
+			}
+		}
+	}
+	assert(bounds_ocean_tight > 100);
+	assert(bounds_mountain_hits > 20);
+	printf("PASS: nd_field_elevation_bounds conservative across 2,000 patches (18,000 pts, tight_ocean=%d, mtn_pts=%d)\n",
+	       bounds_ocean_tight, bounds_mountain_hits);
+
+	/* 5. Earth-like planetary mountain distribution, slopes & calm World 0 spawn */
+	int land_cnt = 0, plains_cnt = 0, mtn_cnt = 0, alpine_cnt = 0;
+	int max_slope_dz = 0;
+	for (int iter = 0; iter < 4096; iter++) {
+		int16_t rx = (int16_t)(next_u32() & 0xFFFFu);
+		int16_t ry = (int16_t)(next_u32() & 0xFFFFu);
+		int16_t h = nd_field_room_hyp_coarse(0, rx, ry);
+		if (h <= 0)
+			continue;
+		land_cnt++;
+		if (h < 100) plains_cnt++;
+		if (h >= 500) mtn_cnt++;
+		if (h >= 1000) alpine_cnt++;
+		if (h >= 300) {
+			int16_t hx = nd_field_room_hyp_coarse(0, (int16_t)(rx + 1), ry);
+			int16_t hy = nd_field_room_hyp_coarse(0, rx, (int16_t)(ry + 1));
+			int dx = h > hx ? (h - hx) : (hx - h);
+			int dy = h > hy ? (h - hy) : (hy - h);
+			if (dx > max_slope_dz) max_slope_dz = dx;
+			if (dy > max_slope_dz) max_slope_dz = dy;
+		}
+	}
+	assert(land_cnt > 500);
+	assert(plains_cnt * 100 >= land_cnt * 35 && plains_cnt * 100 <= land_cnt * 70);
+	assert(mtn_cnt * 100 >= land_cnt * 8);
+	assert(alpine_cnt * 100 >= land_cnt * 2);
+	assert(max_slope_dz >= 80); /* >= ~26.5 deg over 160 wu room span */
+
+	/* World 0 spawn valley [-24..24] keeps zero tectonic mountain spires on top of spawn */
+	uint32_t w0_seed = 0x48454947u;
+	for (int ry = -24; ry <= 24; ry += 4) {
+		for (int rx = -24; rx <= 24; rx += 4) {
+			int16_t h = nd_field_room_hyp_coarse(0, (int16_t)rx, (int16_t)ry);
+			assert(nd_field_orogeny_wu(w0_seed, 0, rx, ry, h) == 0);
+		}
+	}
+	printf("PASS: Earth-like orogeny (land=%d plains=%.1f%% mtn>=500=%.1f%% alpine>=1000=%.1f%% max_dz=%d wu/room)\n",
+	       land_cnt,
+	       100.0 * (double)plains_cnt / (double)land_cnt,
+	       100.0 * (double)mtn_cnt / (double)land_cnt,
+	       100.0 * (double)alpine_cnt / (double)land_cnt,
+	       max_slope_dz);
+
 	printf("=== ALL ND FIELD SIMD TESTS PASSED ===\n");
 	return 0;
 }

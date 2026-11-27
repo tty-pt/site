@@ -111,6 +111,100 @@
 	"        return min(peak, 1854.0);\n" \
 	"    }\n" \
 	"}\n" \
+	"float chaff_wpoint_periodic_2d_f(int x, int y, int shift, uint seed) {\n" \
+	"    uint ushift = uint(shift);\n" \
+	"    uint cell_count_mask = (1u << (16u - ushift)) - 1u;\n" \
+	"    uint mask_frac = (1u << ushift) - 1u;\n" \
+	"    uint ux = uint(x) & 0xFFFFu;\n" \
+	"    uint uy = uint(y) & 0xFFFFu;\n" \
+	"    uint kx0 = ux >> ushift;\n" \
+	"    uint ky0 = uy >> ushift;\n" \
+	"    uint kx1 = (kx0 + 1u) & cell_count_mask;\n" \
+	"    uint ky1 = (ky0 + 1u) & cell_count_mask;\n" \
+	"    float inv_step = 1.0 / float(1 << shift);\n" \
+	"    float fx = float(ux & mask_frac) * inv_step;\n" \
+	"    float fy = float(uy & mask_frac) * inv_step;\n" \
+	"    float u = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0);\n" \
+	"    float v = fy * fy * fy * (fy * (fy * 6.0 - 15.0) + 10.0);\n" \
+	"    float v00 = float(chaff_hash2(ivec2(int(kx0), int(ky0)), seed) >> 24u);\n" \
+	"    float v10 = float(chaff_hash2(ivec2(int(kx1), int(ky0)), seed) >> 24u);\n" \
+	"    float v01 = float(chaff_hash2(ivec2(int(kx0), int(ky1)), seed) >> 24u);\n" \
+	"    float v11 = float(chaff_hash2(ivec2(int(kx1), int(ky1)), seed) >> 24u);\n" \
+	"    return mix(mix(v00, v10, u), mix(v01, v11, u), v);\n" \
+	"}\n" \
+	"float nd_gpu_orogeny_wu(uint seed, int rx, int ry, float base_hyp, float fw) {\n" \
+	"    if (base_hyp <= 2.0) return 0.0;\n" \
+	"    float coast = smoothstep(2.0, 30.0, base_hyp);\n" \
+	"    uint oseed = seed ^ 0xD0D2877Du;\n" \
+	"    float wx_raw = chaff_wpoint_periodic_2d_f(rx, ry, 8, oseed ^ 0x11A3u) - 128.0;\n" \
+	"    float wy_raw = chaff_wpoint_periodic_2d_f(rx, ry, 8, oseed ^ 0x22B7u) - 128.0;\n" \
+	"    float mx_raw = chaff_wpoint_periodic_2d_f(rx, ry, 6, oseed ^ 0x33C9u) - 128.0;\n" \
+	"    float my_raw = chaff_wpoint_periodic_2d_f(rx, ry, 6, oseed ^ 0x44DBu) - 128.0;\n" \
+	"    int urx = rx + int(floor(wx_raw * 0.5)) + int(floor(mx_raw * 0.125));\n" \
+	"    int ury = ry + int(floor(wy_raw * 0.5)) + int(floor(my_raw * 0.125));\n" \
+	"    float prov_raw = chaff_wpoint_periodic_2d_f(urx, ury, 8, oseed ^ 0x55EDu);\n" \
+	"    float n_belt = chaff_wpoint_periodic_2d_f(urx, ury, 7, oseed ^ 0x661Fu) - 128.0;\n" \
+	"    float belt_r = 128.0 - abs(n_belt);\n" \
+	"    float h_sig = (prov_raw * 3.0 + belt_r * 5.0) * 0.125;\n" \
+	"    float hill = smoothstep(96.0, 150.0, h_sig);\n" \
+	"    float a_sig = (belt_r * (144.0 + prov_raw)) * (1.0 / 256.0);\n" \
+	"    if (base_hyp > 80.0) {\n" \
+	"        a_sig += min((base_hyp - 80.0) * 0.125, 28.0);\n" \
+	"    }\n" \
+	"    float a_sm = smoothstep(78.0, 146.0, a_sig);\n" \
+	"    float alpine = a_sm * (0.5 + 0.5 * a_sm);\n" \
+	"    if (hill <= 0.0001 && alpine <= 0.0001) return 0.0;\n" \
+	"    float w4_oct = nd_octave_weight(2304.0, fw);\n" \
+	"    float uplift = 0.0;\n" \
+	"    if (hill > 0.0001) {\n" \
+	"        float n5 = chaff_wpoint_periodic_2d_f(urx + 713, ury - 419, 5, oseed ^ 0x7731u);\n" \
+	"        float r5 = 128.0 - abs(n5 - 128.0);\n" \
+	"        float f5 = (n5 * 88.0 + r5 * 240.0) * (1.0 / 256.0);\n" \
+	"        float f4 = 0.0;\n" \
+	"        if (w4_oct > 0.001) {\n" \
+	"            float n4 = chaff_wpoint_periodic_2d_f(urx - 317, ury + 823, 4, oseed ^ 0x8843u);\n" \
+	"            f4 = (n4 * 108.0) * (1.0 / 256.0) * w4_oct;\n" \
+	"        }\n" \
+	"        uplift += (f5 + f4) * hill;\n" \
+	"    }\n" \
+	"    if (alpine > 0.0001) {\n" \
+	"        float n6 = chaff_wpoint_periodic_2d_f(urx + 191, ury + 547, 6, oseed ^ 0x9955u) - 128.0;\n" \
+	"        float r6 = 128.0 - abs(n6);\n" \
+	"        float h6 = (r6 * r6) * (1.0 / 128.0);\n" \
+	"        float n5 = chaff_wpoint_periodic_2d_f(urx - 613, ury + 271, 5, oseed ^ 0xAA67u) - 128.0;\n" \
+	"        float r5 = 128.0 - abs(n5);\n" \
+	"        float h5 = (r5 * (64.0 + r5 * 0.5)) * (1.0 / 128.0);\n" \
+	"        float w5 = 72.0 + h6 * (184.0 / 128.0);\n" \
+	"        float h5w = (h5 * w5) * (1.0 / 256.0);\n" \
+	"        float alp = h6 * (420.0 / 128.0) + h5w * (560.0 / 128.0);\n" \
+	"        if (w4_oct > 0.001) {\n" \
+	"            float n4 = chaff_wpoint_periodic_2d_f(urx + 409, ury - 733, 4, oseed ^ 0xBB79u) - 128.0;\n" \
+	"            float r4 = 128.0 - abs(n4);\n" \
+	"            float h4 = (r4 * (64.0 + r4 * 0.5)) * (1.0 / 128.0);\n" \
+	"            float w4 = 56.0 + h5w * (200.0 / 128.0);\n" \
+	"            float h4w = (h4 * w4) * (1.0 / 256.0);\n" \
+	"            alp += h4w * (500.0 / 128.0) * w4_oct;\n" \
+	"            float w3_oct = nd_octave_weight(1152.0, fw);\n" \
+	"            if (w3_oct > 0.001) {\n" \
+	"                float n3 = chaff_wpoint_periodic_2d_f(urx - 227, ury - 389, 3, oseed ^ 0xCC8Bu) - 128.0;\n" \
+	"                float r3 = 128.0 - abs(n3);\n" \
+	"                float w3 = 32.0 + h4w * (224.0 / 128.0);\n" \
+	"                float h3w = (r3 * w3) * (1.0 / 256.0);\n" \
+	"                alp += h3w * (300.0 / 128.0) * w3_oct;\n" \
+	"                float w2_oct = nd_octave_weight(576.0, fw);\n" \
+	"                if (w2_oct > 0.001 && h3w > 0.0) {\n" \
+	"                    float n2 = chaff_wpoint_periodic_2d_f(urx + 131, ury + 179, 2, oseed ^ 0xDD9Du) - 128.0;\n" \
+	"                    float r2 = 128.0 - abs(n2);\n" \
+	"                    float w2 = h3w * 2.0;\n" \
+	"                    float h2w = (r2 * w2) * (1.0 / 256.0);\n" \
+	"                    alp += h2w * (140.0 / 128.0) * w2_oct;\n" \
+	"                }\n" \
+	"            }\n" \
+	"        }\n" \
+	"        uplift += alp * alpine;\n" \
+	"    }\n" \
+	"    return max(uplift * coast, 0.0);\n" \
+	"}\n" \
 	"float nd_gpu_room_hyp_coarse(uint seed, int rx_unwrapped, int ry_unwrapped, float fw) {\n" \
 	"    int rx = ((rx_unwrapped + 32768) & 65535) - 32768;\n" \
 	"    int ry = ((ry_unwrapped + 32768) & 65535) - 32768;\n" \
@@ -138,7 +232,8 @@
 	"    float c_y1 = wrap_x ? mix(c01, c11, tx) : c01;\n" \
 	"    float c = wrap_y ? mix(c_y0, c_y1, ty) : c_y0;\n" \
 	"    c -= float(uSeaOffsetQ12_4);\n" \
-	"    return nd_gpu_bimodal_hypsometry(c * 0.0625);\n" \
+	"    float base_hyp = nd_gpu_bimodal_hypsometry(c * 0.0625);\n" \
+	"    return min(base_hyp + nd_gpu_orogeny_wu(seed, rx, ry, base_hyp, fw), 1854.0);\n" \
 	"}\n" \
 	"vec3 nd_gpu_eval_canonical_field(vec2 worldPos, float fw, float texelSpan, float texZ, vec2 texGrad, out float out_fine_elev) {\n" \
 	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n" \
@@ -254,6 +349,9 @@
 	"        coast_w = 0.25 + (-rel_water / 8.0) * 0.25;\n" \
 	"    } else if (rel_water < 6.0) {\n" \
 	"        coast_w = 0.25 + (rel_water / 6.0) * 0.75;\n" \
+	"    }\n" \
+	"    if (rel_water > 140.0) {\n" \
+	"        coast_w *= 1.0 + 0.75 * smoothstep(140.0, 460.0, rel_water);\n" \
 	"    }\n" \
 	"    fineH = clamp(fineH * coast_w, -127.0, 127.0);\n" \
 	"    fineGrad *= coast_w;\n" \
