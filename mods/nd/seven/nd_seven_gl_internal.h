@@ -923,6 +923,9 @@ typedef struct {
 	GLuint frame_ubo;
 	lam_gl_cmd_buf_t cmd_buf;
 	uint32_t cmd_words[4096];
+
+	/* Active GPU-skinned creature actor count queued for external/nd-mob-gl */
+	uint32_t mob_actor_count;
 } nd_seven_gl_state_t;
 
 /* Shared module state */

@@ -143,3 +143,6 @@
 	path = .business
 	url = git@github.com:tty-pt/business.git
 	update = none
+[submodule "external/nd-mob-gl"]
+	path = external/nd-mob-gl
+	url = git@github.com:tty-pt/nd-mob-gl.git

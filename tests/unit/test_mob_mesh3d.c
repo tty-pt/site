@@ -22,8 +22,8 @@ assert_watertight_and_outward(const mob_mesh3d_t *mesh)
 		float nlen = sqrtf(v->nx * v->nx + v->ny * v->ny + v->nz * v->nz);
 		assert(fabsf(nlen - 1.0f) < 0.02f);
 		assert(v->ao >= 0.4f && v->ao <= 1.001f);
-		assert(v->bone_idx < MOB_UNGULATE_BONE_COUNT);
-		assert(v->bone_idx2 < MOB_UNGULATE_BONE_COUNT);
+		assert(v->bone_idx < mesh->skel.count);
+		assert(v->bone_idx2 < mesh->skel.count);
 		assert(v->mat_id <= MOB_MAT_GLOSS);
 		assert(v->bone_weight > 0.0f && v->bone_weight <= 1.0f);
 	}
@@ -69,9 +69,9 @@ assert_watertight_and_outward(const mob_mesh3d_t *mesh)
 }
 
 static void
-assert_pose_orthonormal(const mob_pose3d_t *pose)
+assert_pose_orthonormal(const mob_pose3d_t *pose, uint8_t expected_bones)
 {
-	assert(pose->count == MOB_UNGULATE_BONE_COUNT);
+	assert(pose->count == expected_bones);
 	for (uint8_t b = 0; b < pose->count; b++) {
 		const float *m = pose->m[b];
 		for (int k = 0; k < 12; k++)
@@ -115,7 +115,7 @@ test_lamb_aging_and_mesh(void)
 	mob_mesh3d_t mesh = { .vtx = vtx, .idx = idx, .max_vtx = 2048, .max_idx = 8192 };
 
 	/* Test young lamb (canonical ~0.40-0.65 m tall, hooves at z=0, centered XY, all 3 materials present) */
-	mob_build_ungulate_mesh(&lamb, &st_lamb, &mesh);
+	mob_build_mesh(&lamb, &st_lamb, &mesh);
 	assert_watertight_and_outward(&mesh);
 	assert(fabsf(mesh.min_z) < 1e-5f);
 	assert(mesh.max_z >= 0.40f && mesh.max_z <= 0.65f);
@@ -138,13 +138,30 @@ test_lamb_aging_and_mesh(void)
 	       mesh.vtx_count, mesh.idx_count,
 	       mat_counts[0], mat_counts[1], mat_counts[2], blended_count, mesh.max_z);
 
+	/* Smooth-coated ungulates (horse/cow/pig) must NOT shade torso as wool */
+	creature_dna_t horse = creature_dna_for_species(CREATURE_SPECIES_HORSE, 7);
+	mob_build_mesh(&horse, &st_adult, &mesh);
+	assert_watertight_and_outward(&mesh);
+	uint32_t horse_wool = 0, horse_skin = 0;
+	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+		if (mesh.vtx[i].mat_id == MOB_MAT_WOOL) horse_wool++;
+		if (mesh.vtx[i].mat_id == MOB_MAT_SKIN) horse_skin++;
+	}
+	assert(horse_wool == 0);
+	assert(horse_skin > 400);
+	printf("test_ungulate_generalized: PASS (horse vtx=%u wool=%u skin=%u h=%.3fm)\n",
+	       mesh.vtx_count, horse_wool, horse_skin, mesh.max_z);
+
+	/* Rebuild lamb for animation tests */
+	mob_build_mesh(&lamb, &st_lamb, &mesh);
+
 	/* Test Phase 4 hierarchical FK & LBS animation across idle, graze, trot, canter, hop, swim, slope */
 	static mob_vtx3d_t posed_vtx[2048];
 	mob_pose3d_t pose;
 
 	/* Zero-param pose preserves exact identity */
 	mob_pose_identity(&pose, mesh.skel.count);
-	assert_pose_orthonormal(&pose);
+	assert_pose_orthonormal(&pose, MOB_UNGULATE_BONE_COUNT);
 	mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed_vtx);
 	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
 		assert(fabsf(posed_vtx[i].x - mesh.vtx[i].x) < 1e-5f);
@@ -157,8 +174,8 @@ test_lamb_aging_and_mesh(void)
 		.gait_phase = 1.2f, .speed_norm = 0.60f, .turn_rate = 1.5f,
 		.anim_sec = 2.0f, .slope_pitch = 0.18f, .slope_roll = -0.10f
 	};
-	mob_eval_ungulate_pose(&mesh.skel, &p_trot, &pose);
-	assert_pose_orthonormal(&pose);
+	mob_eval_pose(lamb.archetype, &mesh.skel, &p_trot, &pose);
+	assert_pose_orthonormal(&pose, MOB_UNGULATE_BONE_COUNT);
 	mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed_vtx);
 	float max_leg_disp = 0.0f;
 	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
@@ -177,8 +194,8 @@ test_lamb_aging_and_mesh(void)
 	mob_anim_params_t p_hop = {
 		.speed_norm = 0.7f, .hop_z = 0.28f, .hop_vel = 1.4f, .anim_sec = 3.0f
 	};
-	mob_eval_ungulate_pose(&mesh.skel, &p_hop, &pose);
-	assert_pose_orthonormal(&pose);
+	mob_eval_pose(lamb.archetype, &mesh.skel, &p_hop, &pose);
+	assert_pose_orthonormal(&pose, MOB_UNGULATE_BONE_COUNT);
 	mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed_vtx);
 	float min_hop_z = 1e9f;
 	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
@@ -189,7 +206,7 @@ test_lamb_aging_and_mesh(void)
 	/* Idle graze dips snout lower than alert idle */
 	mob_anim_params_t p_alert = { .idle_sec = 0.5f, .anim_sec = 1.0f };
 	mob_anim_params_t p_graze = { .idle_sec = 6.0f, .anim_sec = 1.0f };
-	mob_eval_ungulate_pose(&mesh.skel, &p_alert, &pose);
+	mob_eval_pose(lamb.archetype, &mesh.skel, &p_alert, &pose);
 	mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed_vtx);
 	float snout_z_alert = 0.0f;
 	uint32_t snout_n = 0;
@@ -198,8 +215,8 @@ test_lamb_aging_and_mesh(void)
 	}
 	snout_z_alert /= (float)snout_n;
 
-	mob_eval_ungulate_pose(&mesh.skel, &p_graze, &pose);
-	assert_pose_orthonormal(&pose);
+	mob_eval_pose(lamb.archetype, &mesh.skel, &p_graze, &pose);
+	assert_pose_orthonormal(&pose, MOB_UNGULATE_BONE_COUNT);
 	mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed_vtx);
 	float snout_z_graze = 0.0f;
 	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
@@ -210,18 +227,18 @@ test_lamb_aging_and_mesh(void)
 
 	/* Canter & swim poses remain orthonormal with unit normals */
 	mob_anim_params_t p_canter = { .gait_phase = 2.4f, .speed_norm = 1.0f, .anim_sec = 4.0f };
-	mob_eval_ungulate_pose(&mesh.skel, &p_canter, &pose);
-	assert_pose_orthonormal(&pose);
+	mob_eval_pose(lamb.archetype, &mesh.skel, &p_canter, &pose);
+	assert_pose_orthonormal(&pose, MOB_UNGULATE_BONE_COUNT);
 
 	mob_anim_params_t p_swim = { .speed_norm = 0.4f, .in_water = 1, .anim_sec = 5.0f, .interact_t = 0.5f };
-	mob_eval_ungulate_pose(&mesh.skel, &p_swim, &pose);
-	assert_pose_orthonormal(&pose);
+	mob_eval_pose(lamb.archetype, &mesh.skel, &p_swim, &pose);
+	assert_pose_orthonormal(&pose, MOB_UNGULATE_BONE_COUNT);
 
 	printf("test_lamb_anim: PASS (leg_disp=%.3fm hop_min_z=%.3fm graze_drop=%.3fm)\n",
 	       max_leg_disp, min_hop_z, snout_z_alert - snout_z_graze);
 
 	/* Test adult sheep (taller, horns grown, still watertight) */
-	mob_build_ungulate_mesh(&lamb, &st_adult, &mesh);
+	mob_build_mesh(&lamb, &st_adult, &mesh);
 	assert_watertight_and_outward(&mesh);
 	assert(fabsf(mesh.min_z) < 1e-5f);
 	assert(mesh.max_z >= 0.65f && mesh.max_z <= 0.98f);
@@ -230,9 +247,95 @@ test_lamb_aging_and_mesh(void)
 	       mesh.max_y - mesh.min_y, mesh.max_x - mesh.min_x);
 }
 
+static void
+test_mobs_dsv_piscine_and_avian(void)
+{
+	static const char *fish_names[] = {
+		"goldfish", "salmon", "tuna", "koifish",
+		"dolphin", "shark", "moonfish", "rainbowfish"
+	};
+	static const char *bird_names[] = {
+		"icebird", "parrot", "swallow", "woodpecker", "sparrow", "owl"
+	};
+
+	static mob_vtx3d_t vtx[2048], posed[2048];
+	static uint16_t idx[8192];
+	mob_mesh3d_t mesh = { .vtx = vtx, .idx = idx, .max_vtx = 2048, .max_idx = 8192 };
+	mob_pose3d_t pose;
+
+	/* Verify all 8 fish species from mobs.dsv */
+	for (uint32_t f = 0; f < sizeof(fish_names) / sizeof(fish_names[0]); f++) {
+		creature_dna_t dna;
+		creature_state_t st;
+		int matched = creature_dna_from_name(fish_names[f], 100u + f, &dna, &st);
+		assert(matched == 1);
+		assert(dna.archetype == CREATURE_ARCH_PISCINE);
+
+		mob_build_mesh(&dna, &st, &mesh);
+		assert_watertight_and_outward(&mesh);
+		assert(mesh.skel.count == MOB_PISCINE_BONE_COUNT);
+		assert(fabsf(mesh.min_z) < 1e-5f);
+		assert(fabsf(mesh.min_x + mesh.max_x) < 1e-4f);
+		assert(fabsf(mesh.min_y + mesh.max_y) < 1e-4f);
+
+		mob_anim_params_t swim = { .speed_norm = 0.75f, .turn_rate = 0.8f, .anim_sec = 0.42f, .in_water = 1 };
+		mob_eval_pose(dna.archetype, &mesh.skel, &swim, &pose);
+		assert_pose_orthonormal(&pose, MOB_PISCINE_BONE_COUNT);
+		mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed);
+
+		/* Tail caudal fin must show clear lateral S-wave displacement */
+		float max_tail_dx = 0.0f;
+		for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+			if (mesh.vtx[i].bone_idx == MOB_FISH_CAUDAL_UP) {
+				float dx = fabsf(posed[i].x - mesh.vtx[i].x);
+				if (dx > max_tail_dx) max_tail_dx = dx;
+			}
+		}
+		assert(max_tail_dx > 0.01f);
+	}
+	printf("test_piscine_all_8_species: PASS (watertight + S-wave swim verified)\n");
+
+	/* Verify all 6 bird species from mobs.dsv */
+	for (uint32_t b = 0; b < sizeof(bird_names) / sizeof(bird_names[0]); b++) {
+		creature_dna_t dna;
+		creature_state_t st;
+		int matched = creature_dna_from_name(bird_names[b], 200u + b, &dna, &st);
+		assert(matched == 1);
+		assert(dna.archetype == CREATURE_ARCH_AVIAN);
+
+		mob_build_mesh(&dna, &st, &mesh);
+		assert_watertight_and_outward(&mesh);
+		assert(mesh.skel.count == MOB_AVIAN_BONE_COUNT);
+		assert(fabsf(mesh.min_z) < 1e-5f);
+		assert(fabsf(mesh.min_x + mesh.max_x) < 1e-4f);
+
+		/* Airborne wingbeat vs perched wing fold */
+		mob_anim_params_t fly = { .speed_norm = 0.85f, .hop_z = 0.6f, .anim_sec = 0.20f };
+		mob_eval_pose(dna.archetype, &mesh.skel, &fly, &pose);
+		assert_pose_orthonormal(&pose, MOB_AVIAN_BONE_COUNT);
+		mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed);
+		float fly_span_x = 0.0f;
+		for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+			if (fabsf(posed[i].x) > fly_span_x) fly_span_x = fabsf(posed[i].x);
+		}
+
+		mob_anim_params_t perch = { .speed_norm = 0.0f, .hop_z = 0.0f, .anim_sec = 1.0f };
+		mob_eval_pose(dna.archetype, &mesh.skel, &perch, &pose);
+		assert_pose_orthonormal(&pose, MOB_AVIAN_BONE_COUNT);
+		mob_skin_mesh(mesh.vtx, mesh.vtx_count, &pose, posed);
+		float perch_span_x = 0.0f;
+		for (uint32_t i = 0; i < mesh.vtx_count; i++) {
+			if (fabsf(posed[i].x) > perch_span_x) perch_span_x = fabsf(posed[i].x);
+		}
+		assert(perch_span_x < fly_span_x * 0.72f);
+	}
+	printf("test_avian_all_6_species: PASS (watertight + flight flap & perched fold verified)\n");
+}
+
 int
 main(void)
 {
 	test_lamb_aging_and_mesh();
+	test_mobs_dsv_piscine_and_avian();
 	return 0;
 }

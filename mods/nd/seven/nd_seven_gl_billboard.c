@@ -3,6 +3,7 @@
  */
 
 #include "nd_seven_gl_internal.h"
+#include <nd/mob-gl.h>
 
 void nd_seven_gl_billboard_basis_ex(float wx, float wy, float wz,
                                     float yaw_deg, float pitch_deg,
@@ -441,7 +442,7 @@ float s_shadow_sun_dir[3] = { 0.0f, 0.0f, 0.0f };
 
 static inline float mesh3d_shadow_north_shift(const lam_billboard_gpu_t *b)
 {
-	return (b->mesh_id > 0 && b->mesh_id != ND_MESH3D_LAMB_ID && b->anchor_y > 0.0f)
+	return (b->mesh_id > 0 && b->anchor_y > 0.0f)
 	       ? (b->anchor_y * 0.5f) : 0.0f;
 }
 
@@ -1145,9 +1146,6 @@ bool nd_seven_gl_billboard_is_mesh3d_only(const lam_billboard_gpu_t *b)
 {
 	if (!b || b->mesh_id == 0)
 		return false;
-	/* Procedural 3D lamb has a valid 2D atlas sprite for distant zoom impostor fallback */
-	if (b->mesh_id == ND_MESH3D_LAMB_ID)
-		return false;
 	if (b->mesh_id >= ND_MESH3D_UNDERSTORY_BASE && b->mesh_id < ND_SEVEN_MESH3D_TOTAL)
 		return true;
 	if (b->v0 == b->v1)
@@ -1162,11 +1160,9 @@ void nd_seven_gl_eval_mesh3d_anchor(const lam_billboard_gpu_t *b,
 {
 	/* Center 3D trunks/rocks at (b->x, b->y - anchor_y * 0.5f) along North (-S);
 	 * 3D mesh vertices are rooted at local z = 0 on basis->base_pos (at b->z), so
-	 * param[2] must stay at b->z to keep the 3D shadow map, cutaway, and water line aligned.
-	 * Procedural creatures (ND_MESH3D_LAMB_ID) are centered on their exact world position. */
+	 * param[2] must stay at b->z to keep the 3D shadow map, cutaway, and water line aligned. */
 	bool is_grass = (b->style == ND_BB_STYLE_GRASS);
-	bool is_lamb  = (b->mesh_id == ND_MESH3D_LAMB_ID);
-	float north_shift = (!is_grass && !is_lamb && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float north_shift = (!is_grass && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
 	out_grid_pos[0] = b->x;
 	out_grid_pos[1] = b->y - north_shift;
 	out_grid_pos[2] = b->z;
@@ -1197,9 +1193,6 @@ unsigned nd_seven_gl_unpack_pad0_biome(uint8_t pad0, bool *out_has_biome)
 	return (unsigned)(bio_slot - 1u);
 }
 
-static float s_frame_lamb_gx = 0.0f;
-static float s_frame_lamb_gy = 0.0f;
-
 static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const billboard_basis_t *basis,
                                         const nd_mesh3d_slice_t *sl,
@@ -1209,32 +1202,20 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         gl_mesh3d_inst_t *out_inst)
 {
 	nd_seven_gl_mesh3d_inst_t *out = &out_inst->base;
-	bool is_lamb = (b->mesh_id == ND_MESH3D_LAMB_ID);
-	float scale_xy = 1.0f;
-	float scale_z  = 1.0f;
-	float yaw_norm = 0.0f;
-	float flip = 1.0f;
+	float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
+	float ref_h = (sl && sl->mesh_h_wu > 0.1f) ? sl->mesh_h_wu : ((sl && sl->sprite_h > 0.1f) ? (float)sl->sprite_h : 12.0f);
+	float scale_xy = fmaxf(0.15f, b->width / ref_w);
+	float scale_z  = fmaxf(0.15f, b->height / ref_h);
 
-	if (is_lamb) {
-		/* Lamb vertices are authored 1:1 in metric world units (1m = 45wu).
-		 * Continuous 360-deg facing from nd_seven_get_lamb_yaw_rad() in [-pi, pi].
-		 * Shader maps yaw = (yaw01 - 0.5) * 2pi with +Y_local -> (-sin(yaw)*E + cos(yaw)*S). */
-		yaw_norm = nd_seven_get_lamb_yaw_rad() * (1.0f / TWO_PI_F);
-	} else {
-		float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
-		float ref_h = (sl && sl->mesh_h_wu > 0.1f) ? sl->mesh_h_wu : ((sl && sl->sprite_h > 0.1f) ? (float)sl->sprite_h : 12.0f);
-		scale_xy = fmaxf(0.15f, b->width / ref_w);
-		scale_z  = fmaxf(0.15f, b->height / ref_h);
+	/* Deterministic full 360-deg 3D yaw rotation and horizontal mirror from u0 > u1 */
+	uint32_t h = (uint32_t)(b->x * 73.0f) * 0x9E3779B1u ^ (uint32_t)(b->y * 131.0f) * 0x85EBCA77u ^
+	             ((uint32_t)b->mesh_id * 0xC2B2AE3Du);
+	h ^= h >> 16;
+	h *= 0x7FEB352Du;
+	h ^= h >> 15;
+	float yaw_norm = ((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f;
+	float flip = (b->u0 > b->u1) ? -1.0f : 1.0f;
 
-		/* Deterministic full 360-deg 3D yaw rotation and horizontal mirror from u0 > u1 */
-		uint32_t h = (uint32_t)(b->x * 73.0f) * 0x9E3779B1u ^ (uint32_t)(b->y * 131.0f) * 0x85EBCA77u ^
-		             ((uint32_t)b->mesh_id * 0xC2B2AE3Du);
-		h ^= h >> 16;
-		h *= 0x7FEB352Du;
-		h ^= h >> 15;
-		yaw_norm = ((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f;
-		flip = (b->u0 > b->u1) ? -1.0f : 1.0f;
-	}
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
@@ -1270,7 +1251,7 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 
 	float rgba[4];
 	nd_seven_gl_unpack_rgba_u32(b->tint_rgba, rgba);
-	float sheen = (!is_lamb && (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u)) ? (basis->grass_rustle * 0.14f) : 0.0f;
+	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u) ? (basis->grass_rustle * 0.14f) : 0.0f;
 	out->tint[0] = fminf(1.0f, rgba[0] + sheen);
 	out->tint[1] = fminf(1.0f, rgba[1] + sheen * 1.1f);
 	out->tint[2] = fminf(1.0f, rgba[2] + sheen * 0.5f);
@@ -1289,7 +1270,7 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	float d2_c = dx_c * dx_c + dy_c * dy_c;
 	bool want_slope_norm = (b->style == ND_BB_STYLE_GRASS || b->style == ND_BB_STYLE_FLORA) &&
 	                       (d2_c < 650.0f * 650.0f);
-	bool need_terr_plane = is_lamb || want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
+	bool need_terr_plane = want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
 	if (need_terr_plane && nd_seven_get_chunk_sys()) {
 		static struct {
 			int32_t  qx, qy, qz;
@@ -1348,10 +1329,6 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 			s_terr_cache[set][dst_w].gy = gy;
 			s_terr_cache[set][dst_w].curv = curv;
 		}
-	}
-	if (is_lamb) {
-		s_frame_lamb_gx = gx;
-		s_frame_lamb_gy = gy;
 	}
 	float sh_flags = (want_shadow ? 1.0f : 0.0f) + (want_lamb_shadow ? 2.0f : 0.0f);
 	float yaw01 = fminf(0.999f, fmaxf(0.001f, yaw_norm + 0.5f));
@@ -1458,6 +1435,23 @@ static void gl_draw_mesh3d_bucket(uint32_t m)
 	}
 }
 
+static bool s_bb_frame_mob_shadow_done = false;
+static bool s_bb_frame_mob_color_done = false;
+
+static void gl_draw_mob_shadow_pass(float bb_sea_level)
+{
+	if (s_gl.mob_actor_count == 0 || s_bb_frame_mob_shadow_done)
+		return;
+	nd_mob_shadow_pass_t spass;
+	memcpy(spass.light_vp, s_gl.tree_shadow_write_vp, sizeof(spass.light_vp));
+	spass.shadow_origin[0] = s_gl.tree_shadow_write_origin[0];
+	spass.shadow_origin[1] = s_gl.tree_shadow_write_origin[1];
+	spass.shadow_origin[2] = s_gl.tree_shadow_write_origin[2];
+	spass.sea_level = bb_sea_level;
+	(void)nd_mob_gl_draw_shadow(&spass);
+	s_bb_frame_mob_shadow_done = true;
+}
+
 static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float space_t,
                                  bool any_sun_shadow, bool any_lamb_shadow)
 {
@@ -1501,26 +1495,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(gl_mesh3d_inst_t), s_mesh3d_sorted);
 
-	if (s_mesh3d_counts[ND_MESH3D_LAMB_ID] > 0) {
-		mob_anim_params_t lamb_ap;
-		nd_seven_fill_lamb_anim(s_frame_lamb_gx, s_frame_lamb_gy, &lamb_ap);
-		uint32_t lamb_first_vert = 0;
-		const nd_mesh3d_vert_t *lamb_verts = NULL;
-		uint32_t lamb_vcount = nd_seven_mesh3d_update_lamb_pose(&lamb_ap, &lamb_first_vert, &lamb_verts);
-		if (lamb_vcount > 0 && lamb_verts) {
-			glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
-			glBufferSubData(GL_ARRAY_BUFFER,
-			                (size_t)lamb_first_vert * sizeof(nd_mesh3d_vert_t),
-			                (size_t)lamb_vcount * sizeof(nd_mesh3d_vert_t),
-			                lamb_verts);
-		}
-	}
-
 	/* Pass A: True 3D directional depth shadow map pass into ping-pong 1024x1024 FBO using
 	 * dedicated depth-only shadow pipelines (opaque zero-discard + alpha-cutout foliage).
 	 * Unbinds unit 12 before writing to guarantee zero WebGL2 FBO/texture feedback loops.
-	 * Flush terrain shadow casters before enabling mesh3d attributes 1..10 so WebGL2 never sees
-	 * unbound enabled attributes during glDrawElements. */
+	 * Flush terrain and mob shadow casters before enabling mesh3d attributes 1..10 so WebGL2
+	 * never sees unbound enabled attributes during glDrawElements. */
 	bool run_pass_a = (s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f);
 	if (run_pass_a) {
 		glTimerBegin(ND_GPU_PASS_TREE_SHADOW);
@@ -1539,6 +1518,11 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 		glDepthMask(GL_TRUE);
 		if (s_gl.terr_shadow_q_count > 0) {
 			gl_flush_terrain_shadows_to_fbo();
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
+		}
+		if (s_gl.mob_actor_count > 0 && !s_bb_frame_mob_shadow_done) {
+			gl_draw_mob_shadow_pass(bb_sea_level);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, s_gl.atlas_tex);
 		}
@@ -1774,6 +1758,125 @@ void gl_reset_billboard_frame_state(void)
 	s_bb_frame_mesh3d_sun_sh = false;
 	s_bb_frame_mesh3d_lamb_sh = false;
 	s_bb_frame_atlas_rgba = NULL;
+	s_gl.mob_actor_count = 0;
+	s_bb_frame_mob_shadow_done = false;
+	s_bb_frame_mob_color_done = false;
+}
+
+static void gl_fill_mob_frame(float bb_sea_level, nd_mob_frame_t *out)
+{
+	memset(out, 0, sizeof(*out));
+	memcpy(out->mvp, s_gl.cur_mvp, sizeof(out->mvp));
+
+	bool ts_active = (s_gl.tree_shadow_ready && s_gl.tree_shadow_read_valid &&
+	                  s_gl.tree_shadow_active > 0.001f);
+	if (ts_active) {
+		memcpy(out->shadow_vp, s_gl.tree_shadow_read_vp, sizeof(out->shadow_vp));
+		out->shadow_origin[0] = s_gl.tree_shadow_read_origin[0];
+		out->shadow_origin[1] = s_gl.tree_shadow_read_origin[1];
+		out->shadow_origin[2] = s_gl.tree_shadow_read_origin[2];
+		out->shadow_active = 1u;
+	}
+	out->shadow_tex_unit = 12u;
+
+	out->cam_pos[0] = s_gl.cur_eye[0];
+	out->cam_pos[1] = s_gl.cur_eye[1];
+	out->cam_pos[2] = s_gl.cur_eye[2];
+	out->sun_dir[0] = s_gl.cur_sun_dir[0];
+	out->sun_dir[1] = s_gl.cur_sun_dir[1];
+	out->sun_dir[2] = s_gl.cur_sun_dir[2];
+	out->moon_dir[0] = s_gl.cur_moon_dir[0];
+	out->moon_dir[1] = s_gl.cur_moon_dir[1];
+	out->moon_dir[2] = s_gl.cur_moon_dir[2];
+
+	float space_t = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 12000.0f) / 40000.0f));
+	float fog_scale = 1.0f + space_t * 250.0f;
+	out->sky_col[0] = 0.55f * (1.0f - space_t) + 0.002f * space_t;
+	out->sky_col[1] = 0.70f * (1.0f - space_t) + 0.003f * space_t;
+	out->sky_col[2] = 0.85f * (1.0f - space_t) + 0.006f * space_t;
+	out->atmo_intensity = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f));
+
+	float near_fog_start = s_gl.cur_dist * 1.5f;
+	float near_fog_end   = s_gl.cur_dist * 4.0f;
+	float far_fog_start  = fmaxf(near_fog_start, 110000.0f) * fog_scale;
+	float far_fog_end    = fmaxf(near_fog_end,   380000.0f) * fog_scale;
+	float fog_blend      = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 1200.0f));
+	out->fog_start = near_fog_start + (far_fog_start - near_fog_start) * fog_blend;
+	out->fog_end   = near_fog_end + (far_fog_end - near_fog_end) * fog_blend;
+
+	out->east[0]  = s_gl.cur_E[0]; out->east[1]  = s_gl.cur_E[1]; out->east[2]  = s_gl.cur_E[2];
+	out->south[0] = s_gl.cur_S[0]; out->south[1] = s_gl.cur_S[1]; out->south[2] = s_gl.cur_S[2];
+	out->up[0]    = s_gl.cur_N[0]; out->up[1]    = s_gl.cur_N[1]; out->up[2]    = s_gl.cur_N[2];
+
+	out->lamb_light[0] = s_gl.cur_lamb_light[0];
+	out->lamb_light[1] = s_gl.cur_lamb_light[1];
+	out->lamb_light[2] = s_gl.cur_lamb_light[2];
+	out->lamb_light[3] = s_gl.cur_lamb_light[3];
+
+	out->sea_level = bb_sea_level;
+	out->time_s = s_gl.cur_anim_time;
+}
+
+void nd_seven_gl_submit_mob_actors(const nd_mob_actor_in_t *actors, uint32_t count, float dt)
+{
+	if (!actors || count == 0) {
+		s_gl.mob_actor_count = 0;
+		s_bb_frame_mob_shadow_done = true;
+		s_bb_frame_mob_color_done = true;
+		return;
+	}
+	if (count > ND_MOB_GL_MAX_ACTORS)
+		count = ND_MOB_GL_MAX_ACTORS;
+
+	static nd_mob_actor_in_t s_staged_mobs[ND_MOB_GL_MAX_ACTORS];
+	float bb_sea_level = (s_gl.focal_sea_level > -900.0f) ? s_gl.focal_sea_level : s_gl.cur_sea_level;
+	bool has_chunks = (nd_seven_get_chunk_sys() != NULL);
+
+	for (uint32_t i = 0; i < count; i++) {
+		nd_mob_actor_in_t *a = &s_staged_mobs[i];
+		*a = actors[i];
+
+		double pos_d[3];
+		float E[3], S[3], N[3];
+		torus_frame_double((double)a->world_x, (double)a->world_y, (double)a->world_z,
+		                   &s_gl.cur_pdef, pos_d, E, S, N);
+		a->rel_x = (float)(pos_d[0] - s_gl.cur_origin[0]);
+		a->rel_y = (float)(pos_d[1] - s_gl.cur_origin[1]);
+		a->rel_z = (float)(pos_d[2] - s_gl.cur_origin[2]);
+
+		float gx = a->ground_gx;
+		float gy = a->ground_gy;
+		if (has_chunks && (a->flags & (ND_MOB_ACT_AIRBORNE | ND_MOB_ACT_IN_WATER)) == 0u) {
+			const float step = 16.0f;
+			float dz_e = shadow_corner_terrain_dz(a->world_x + step, a->world_y, a->world_z, step, 0.0f);
+			float dz_w = shadow_corner_terrain_dz(a->world_x - step, a->world_y, a->world_z, -step, 0.0f);
+			float dz_s = shadow_corner_terrain_dz(a->world_x, a->world_y + step, a->world_z, 0.0f, step);
+			float dz_n = shadow_corner_terrain_dz(a->world_x, a->world_y - step, a->world_z, 0.0f, -step);
+			gx = (dz_e - dz_w) * (0.5f / step);
+			gy = (dz_s - dz_n) * (0.5f / step);
+			a->ground_gx = gx;
+			a->ground_gy = gy;
+		}
+		if ((a->flags & (ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS)) ==
+		    (ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS)) {
+			nd_seven_fill_lamb_anim(gx, gy, &a->anim);
+		}
+		if ((a->flags & ND_MOB_ACT_IN_WATER) != 0u ||
+		    (bb_sea_level > -900.0f && a->world_z < bb_sea_level + 0.15f)) {
+			s_gl.sprites_in_water = true;
+		}
+	}
+
+	(void)nd_mob_gl_register_mem();
+	if (nd_mob_gl_sync(s_staged_mobs, count, dt) >= 0) {
+		s_gl.mob_actor_count = count;
+		s_bb_frame_mob_shadow_done = false;
+		s_bb_frame_mob_color_done = false;
+	} else {
+		s_gl.mob_actor_count = 0;
+		s_bb_frame_mob_shadow_done = true;
+		s_bb_frame_mob_color_done = true;
+	}
 }
 
 static void gl_upload_atlas_if_needed(const uint32_t *atlas_rgba)
@@ -1845,10 +1948,12 @@ static void gl_submit_staged_billboards(const uint32_t *atlas_rgba, bool final_s
 	s_bb_frame_mesh3d_lamb_sh = false;
 
 	uint32_t total_items = mesh3d_n + core_n + other_n;
+	bool has_pending_mobs = (s_gl.mob_actor_count > 0 &&
+	                         (!s_bb_frame_mob_color_done || !s_bb_frame_mob_shadow_done));
 	bool need_terr_shadow = (final_submit && s_gl.terr_shadow_q_count > 0 &&
 	                         s_gl.tree_shadow_ready && !s_gl.tree_shadow_skip_write &&
 	                         s_gl.cur_dist < 2300.0f);
-	if (total_items == 0 && !need_terr_shadow)
+	if (total_items == 0 && !need_terr_shadow && !has_pending_mobs)
 		return;
 
 	gl_end_terrain_pass();
@@ -1869,6 +1974,55 @@ static void gl_submit_staged_billboards(const uint32_t *atlas_rgba, bool final_s
 	if (mesh3d_n > 0) {
 		s_gl.perf_mesh3d_count += mesh3d_n;
 		flush_mesh3d_staging(mesh3d_n, bb_sea_level, space_t, mesh3d_sun_sh, mesh3d_lamb_sh);
+	}
+
+	/* GPU-skinned multi-creature Pass A fallback (when no 3D scenery triggered Pass A)
+	 * and Pass C1 opaque Early-Z color pass via external/nd-mob-gl. */
+	if (s_gl.mob_actor_count > 0) {
+		if (!s_bb_frame_mob_shadow_done && s_gl.tree_shadow_ready &&
+		    !s_gl.tree_shadow_skip_write && s_gl.cur_dist < 2300.0f) {
+			glTimerBegin(ND_GPU_PASS_TREE_SHADOW);
+			int write_idx = 1 - s_gl.tree_shadow_read_idx;
+			GLuint dummy = gl_ensure_tree_shadow_dummy();
+			glActiveTexture(GL_TEXTURE0 + 12);
+			glBindTexture(GL_TEXTURE_2D, dummy);
+			glActiveTexture(GL_TEXTURE0);
+			glBindFramebuffer(GL_FRAMEBUFFER, s_gl.tree_shadow_fbo[write_idx]);
+			glViewport(0, 0, ND_TREE_SHADOW_RES, ND_TREE_SHADOW_RES);
+			glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+			glDisable(GL_BLEND);
+			glDisable(GL_STENCIL_TEST);
+			glEnable(GL_DEPTH_TEST);
+			glDepthFunc(GL_LEQUAL);
+			glDepthMask(GL_TRUE);
+			if (s_gl.terr_shadow_q_count > 0)
+				gl_flush_terrain_shadows_to_fbo();
+			gl_draw_mob_shadow_pass(bb_sea_level);
+			glTimerEnd(ND_GPU_PASS_TREE_SHADOW);
+			s_gl.tree_shadow_write_draws = true;
+			gl_bind_scene_target();
+		}
+		if (!s_bb_frame_mob_color_done) {
+			nd_mob_frame_t mf;
+			gl_fill_mob_frame(bb_sea_level, &mf);
+			gl_bind_tree_shadow_read(-1);
+			glEnable(GL_DEPTH_TEST);
+			glDepthFunc(GL_LEQUAL);
+			glDepthMask(GL_TRUE);
+			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			glDisable(GL_BLEND);
+			glEnable(GL_STENCIL_TEST);
+			glStencilMask(0x09);
+			glStencilFunc(GL_ALWAYS, 0x01, 0x09);
+			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+			(void)nd_mob_gl_draw_color(&mf);
+			glStencilMask(0xFF);
+			glDisable(GL_STENCIL_TEST);
+			s_bb_frame_mob_color_done = true;
+			s_gl.res_depth_valid = false;
+			s_gl.res_color_valid = false;
+			s_gl.perf_mesh3d_count += s_gl.mob_actor_count;
+		}
 	}
 
 	if (core_n > 0 || other_n > 0) {

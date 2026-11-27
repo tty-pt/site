@@ -369,9 +369,6 @@ void nd_seven_mesh3d_init(void)
 		nd_m3d_build_stone_spec(&b, gen_sp, sw, sh, &s_mesh3d_slices[mid]);
 	}
 
-	/* Build procedural 3D lamb template (ND_MESH3D_LAMB_ID) */
-	nd_m3d_build_lamb_spec(&b, 42u, 0.15f, &s_mesh3d_slices[ND_MESH3D_LAMB_ID]);
-
 	/* Build all 12 instanced 3D Living Meadow clump templates (180..191) */
 	for (unsigned mv = 0; mv < (unsigned)ND_MESH3D_MEADOW_COUNT; mv++) {
 		uint8_t mid = (uint8_t)(ND_MESH3D_MEADOW_BASE + mv);
@@ -587,20 +584,6 @@ const nd_mesh3d_slice_t *nd_seven_mesh3d_slice(uint8_t mesh_id)
 	if (mesh_id == 0 || mesh_id >= ND_SEVEN_MESH3D_TOTAL)
 		return NULL;
 	return &s_mesh3d_slices[mesh_id];
-}
-
-uint32_t nd_seven_mesh3d_update_lamb_pose(const mob_anim_params_t *params,
-                                          uint32_t *out_first_vert,
-                                          const nd_mesh3d_vert_t **out_verts)
-{
-	nd_seven_mesh3d_init();
-	const nd_mesh3d_slice_t *sl = &s_mesh3d_slices[ND_MESH3D_LAMB_ID];
-	if (sl->vert_count == 0u || sl->first_vert + sl->vert_count > s_mesh3d_vert_count)
-		return 0u;
-	uint32_t n = nd_m3d_update_lamb_pose(params, &s_mesh3d_verts[sl->first_vert], sl->vert_count);
-	if (out_first_vert) *out_first_vert = sl->first_vert;
-	if (out_verts)      *out_verts      = &s_mesh3d_verts[sl->first_vert];
-	return n;
 }
 
 uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id)

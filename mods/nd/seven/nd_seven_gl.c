@@ -4,6 +4,7 @@
  */
 
 #include "nd_seven_gl_internal.h"
+#include <nd/mob-gl.h>
 
 nd_seven_gl_state_t s_gl;
 
@@ -382,7 +383,7 @@ static void init_grid_buffers(void)
 	const uint32_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
 	s_gl.mesh3d_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
-	glBufferData(GL_ARRAY_BUFFER, m3d_verts, (GLsizei)((size_t)m3d_vcnt * sizeof(nd_mesh3d_vert_t)), GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, m3d_verts, (GLsizei)((size_t)m3d_vcnt * sizeof(nd_mesh3d_vert_t)), GL_STATIC_DRAW);
 
 	s_gl.mesh3d_ibo = glCreateBuffer();
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
@@ -1375,6 +1376,8 @@ static void init_pipelines(void)
 	 * queuing async shader compiles so frame 0 stays sub-millisecond on CPU. */
 	init_grid_buffers();
 	gl_init_noise_lut_placeholders();
+	(void)nd_mob_gl_register_mem();
+	(void)nd_mob_gl_init(0);
 
 	/* Boot Tier (2 minimal shaders): sky + dry_near terrain.
 	 * Rendering & full camera/HUD interactivity unblock as soon as these 2 link.

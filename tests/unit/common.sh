@@ -141,6 +141,7 @@ ND_UX_INCLUDES="\
 	-I$REPO_ROOT/external/nd-world/include \
 	-I$REPO_ROOT/external/nd-plant/include \
 	-I$REPO_ROOT/external/nd-mob/include \
+	-I$REPO_ROOT/external/nd-mob-gl/include \
 	-I$REPO_ROOT/mods/common/ux \
 	-I$REPO_ROOT/mods/nd/ux \
 	-I$REPO_ROOT/mods/nd/seven"
@@ -173,6 +174,7 @@ ND_SEVEN_SRCS="\
 	mods/nd/seven/nd_seven_ground.c \
 	mods/nd/seven/nd_seven_motion.c \
 	mods/nd/seven/nd_seven_objects.c \
+	external/nd-mob-gl/src/libnd-mob-gl.c \
 	external/libareole/src/areole.c \
 	external/liblamina/src/particle.c \
 	external/libstele/src/stele_wq.c"
@@ -241,6 +243,6 @@ unit_run_nd_seven_test() {
 	# shellcheck disable=SC2086
 	"$UNIT_GCC" $_extra_cflags $ND_UX_INCLUDES \
 		-o "$_bin" "$_test_abs" "$UNIT_ARCHIVE" \
-		$UNIT_EXT_LDFLAGS $_libs
+		$UNIT_EXT_LDFLAGS -lxylem -lstele $_libs
 	LD_LIBRARY_PATH="$UNIT_LD_LIBRARY_PATH" "$_bin"
 }

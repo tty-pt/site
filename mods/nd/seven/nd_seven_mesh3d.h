@@ -55,27 +55,11 @@ nd_m3d_stone_metric_dims(uint8_t kind, uint8_t variant,
  *   6..7: Fallen Mossy Log with broken stubs & humus saddle */
 #define ND_MESH3D_GEOBREAK_BASE  ND_MESH3D_TOTAL
 #define ND_MESH3D_GEOBREAK_COUNT 8u
-#define ND_MESH3D_LAMB_ID        (ND_MESH3D_GEOBREAK_BASE + ND_MESH3D_GEOBREAK_COUNT)
-#define ND_SEVEN_MESH3D_TOTAL    (ND_MESH3D_LAMB_ID + 1u)
-
-#include <nd/mob_anim.h>
-
-/* Dedicated opaque creature material band in (0.55, 0.70):
- * strictly outside alpha-tested foliage [0.195, 0.425] and rock [0.70, 0.85). */
-#define ND_MAT3D_CREATURE_SKIN   0.58f
-#define ND_MAT3D_CREATURE_WOOL   0.62f
-#define ND_MAT3D_CREATURE_GLOSS  0.66f
-
+#define ND_SEVEN_MESH3D_TOTAL    (ND_MESH3D_GEOBREAK_BASE + ND_MESH3D_GEOBREAK_COUNT)
 
 void nd_m3d_build_stone_spec(nd_mesh3d_builder_t *b,
                              unsigned sp, uint16_t sw, uint16_t sh,
                              nd_mesh3d_slice_t *out_slice);
-void nd_m3d_build_lamb_spec(nd_mesh3d_builder_t *b,
-                            uint32_t seed, float age,
-                            nd_mesh3d_slice_t *out_slice);
-uint32_t nd_m3d_update_lamb_pose(const mob_anim_params_t *params,
-                                 nd_mesh3d_vert_t *dst_verts,
-                                 uint32_t max_verts);
 void nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
                                      const uint32_t *indices,
                                      const nd_mesh3d_slice_t *slice,

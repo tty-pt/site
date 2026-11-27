@@ -972,6 +972,7 @@ int nd_spatial_tile_resolve(const nd_client_state_t *st, int ti, int tj, nd_spat
 			so->hw = 0;
 			so->hh = 0;
 			so->anchor_y = 6;
+			so->entity_flags = e->flags;
 			so->entity_ref = e->ref;
 			so->flip = (uint8_t)((ndw_mix(e->ref) >> 8) & 1);
 			so->sprite_id = nd_seven_resolve_entity_sprite(e);

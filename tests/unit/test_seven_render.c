@@ -12,6 +12,7 @@
 #include "nd_seven_motion.h"
 #include "nd_seven_ground.h"
 #include "nd_seven_gl.h"
+#include <nd/mob-gl.h>
 #include "nd_lamina.h"
 #include <ttypt/webgl.h>
 #include <ttypt/corolla.h>
@@ -4884,8 +4885,7 @@ int main(void)
 			{
 				assert(ND_MESH3D_GEOBREAK_BASE == 206u);
 				assert(ND_MESH3D_GEOBREAK_COUNT == 8u);
-				assert(ND_MESH3D_LAMB_ID == 214u);
-				assert(ND_SEVEN_MESH3D_TOTAL == 215u);
+				assert(ND_SEVEN_MESH3D_TOTAL == 214u);
 				assert(nd_seven_mesh3d_slice(ND_SEVEN_MESH3D_TOTAL) == NULL);
 
 				assert(nd_seven_geobreak_mesh3d_id(0u, 0u) == ND_MESH3D_NONE);
@@ -5046,67 +5046,71 @@ int main(void)
 					assert(strstr(fs_m3d, "microAO = clamp(0.74 + 0.46 * grShade") == NULL);
 					assert(strstr(fs_m3d, "clamp(cavityAO * contactAO * microAO, 0.38, 1.14)") != NULL);
 
-					/* Procedural 3D lamb template invariants: metric scale, opaque wool class,
-					 * distant 2D sprite impostor fallback, exact grounding, and creature/glow shaders */
+					/* Generalized GPU-skinned multi-creature pipeline (external/nd-mob-gl):
+					 * Seven's scenery mesh3d shader is stripped of legacy creature hacks, and
+					 * local lamb + remote creatures sync through nd_seven_gl_submit_mob_actors(). */
 					{
-						const nd_mesh3d_slice_t *lsl = nd_seven_mesh3d_slice(ND_MESH3D_LAMB_ID);
-						assert(lsl != NULL && lsl->vert_count >= 400u && lsl->idx_count >= 2000u);
-						assert(lsl->mesh_w_wu >= 24.0f && lsl->mesh_w_wu <= 40.0f);
-						assert(lsl->mesh_h_wu >= 18.0f && lsl->mesh_h_wu <= 28.0f);
-						assert(lsl->anchor_y == 0u);
-						assert(nd_seven_mesh3d_is_opaque(ND_MESH3D_LAMB_ID) == true);
+						assert(strstr(fs_m3d, "isCreature") == NULL);
+						assert(strstr(fs_m3d, "isCreatureSkin") == NULL);
+						assert(strstr(fs_m3d, "isCreatureWool") == NULL);
+						assert(strstr(fs_m3d, "isCreatureGloss") == NULL);
+						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreature") == NULL);
 
-						memset(&b, 0, sizeof(b));
-						b.mesh_id = ND_MESH3D_LAMB_ID;
-						b.u0 = 0.0f; b.u1 = 0.0625f; b.v0 = 0.0f; b.v1 = 0.0625f;
-						assert(!nd_seven_gl_billboard_is_mesh3d_only(&b));
+						const char *msh_vs = nd_mob_gl_shadow_vs_src();
+						const char *mcol_vs = nd_mob_gl_color_vs_src();
+						const char *mcol_fs = nd_mob_gl_color_fs_src();
+						assert(msh_vs && strstr(msh_vs, "uBoneTex") != NULL && strstr(msh_vs, "mob_skin") != NULL);
+						assert(mcol_vs && strstr(mcol_vs, "uBoneTex") != NULL && strstr(mcol_vs, "mob_skin") != NULL);
+						assert(mcol_fs && strstr(mcol_fs, "isWool") != NULL && strstr(mcol_fs, "isSkin") != NULL);
+						assert(strstr(mcol_fs, "isGloss") != NULL && strstr(mcol_fs, "ownerGlow") != NULL);
 
-						b.x = 120.0f; b.y = -40.0f; b.z = 24.0f;
-						b.anchor_y = 16.0f; b.style = ND_BB_STYLE_GLOW;
-						nd_seven_gl_eval_mesh3d_anchor(&b, anchor);
-						assert(fabsf(anchor[0] - 120.0f) < 1e-5f);
-						assert(fabsf(anchor[1] - (-40.0f)) < 1e-5f && "3D lamb must stand at exact b->y with zero north shift");
-						assert(fabsf(anchor[2] - 24.0f) < 1e-5f);
+						nd_mob_actor_in_t actors[4];
+						memset(actors, 0, sizeof(actors));
 
-						assert(strstr(fs_m3d, "isCreature") != NULL);
-						assert(strstr(fs_m3d, "isCreatureSkin") != NULL);
-						assert(strstr(fs_m3d, "isCreatureWool") != NULL);
-						assert(strstr(fs_m3d, "isCreatureGloss") != NULL);
-						assert(strstr(fs_m3d, "isLambGlow") != NULL);
-						assert(strstr(fs_m3d, "vWorldPos.xy * 0.65") == NULL);
-						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreature") != NULL);
-						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreatureWool") != NULL);
-						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreatureGloss") != NULL);
-						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isLambGlow") != NULL);
+						/* 0: local player lamb (ungulate) */
+						actors[0].ref = 0;
+						actors[0].dna = creature_dna_lamb_default(42u);
+						actors[0].state.age = 0.15f;
+						actors[0].state.weight = 0.65f;
+						actors[0].state.seed = 42u;
+						actors[0].world_x = 120.0f; actors[0].world_y = -40.0f; actors[0].world_z = 24.0f;
+						actors[0].scale_wu_per_m = 45.0f;
+						actors[0].alpha = 1.0f;
+						actors[0].flags = ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS | ND_MOB_ACT_OWNER_GLOW;
 
-						/* Live procedural skeletal pose update must deform the lamb slice in place */
-						{
-							mob_anim_params_t p_idle;
-							memset(&p_idle, 0, sizeof(p_idle));
-							uint32_t voff = 0u;
-							const nd_mesh3d_vert_t *lv = NULL;
-							uint32_t vcnt_l = nd_seven_mesh3d_update_lamb_pose(&p_idle, &voff, &lv);
-							assert(lv != NULL && vcnt_l == lsl->vert_count && voff == lsl->first_vert);
-							float idle_z[16];
-							for (int k = 0; k < 16; k++)
-								idle_z[k] = lv[(uint32_t)((k * 47) % (int)vcnt_l)].pos[2];
+						/* 1: horse (smooth-coated ungulate) */
+						actors[1].ref = 101;
+						assert(creature_dna_from_name("horse", 101u, &actors[1].dna, &actors[1].state) == 1);
+						actors[1].world_x = 180.0f; actors[1].world_y = -40.0f; actors[1].world_z = 24.0f;
+						actors[1].scale_wu_per_m = 45.0f;
+						actors[1].alpha = 1.0f;
 
-							mob_anim_params_t p_trot = p_idle;
-							p_trot.speed_norm = 0.75f;
-							p_trot.gait_phase = 1.57f;
-							p_trot.hop_z = 0.30f;
-							const nd_mesh3d_vert_t *lv2 = NULL;
-							uint32_t vcnt_l2 = nd_seven_mesh3d_update_lamb_pose(&p_trot, &voff, &lv2);
-							assert(lv2 == lv && vcnt_l2 == lsl->vert_count);
-							float max_dz = 0.0f;
-							for (int k = 0; k < 16; k++) {
-								float dz = fabsf(lv2[(uint32_t)((k * 47) % (int)vcnt_l)].pos[2] - idle_z[k]);
-								if (dz > max_dz) max_dz = dz;
-							}
-							assert(max_dz > 8.0f && "Live trotting+hopping lamb pose must lift and animate vertices");
-							/* Restore idle pose cleanly */
-							(void)nd_seven_mesh3d_update_lamb_pose(&p_idle, &voff, &lv);
-						}
+						/* 2: goldfish (piscine) */
+						actors[2].ref = 202;
+						assert(creature_dna_from_name("goldfish", 202u, &actors[2].dna, &actors[2].state) == 1);
+						actors[2].world_x = 90.0f; actors[2].world_y = 60.0f; actors[2].world_z = -4.0f;
+						actors[2].scale_wu_per_m = 45.0f;
+						actors[2].alpha = 1.0f;
+						actors[2].flags = ND_MOB_ACT_IN_WATER;
+
+						/* 3: owl (avian) */
+						actors[3].ref = 303;
+						assert(creature_dna_from_name("owl", 303u, &actors[3].dna, &actors[3].state) == 1);
+						actors[3].world_x = 150.0f; actors[3].world_y = 20.0f; actors[3].world_z = 64.0f;
+						actors[3].scale_wu_per_m = 45.0f;
+						actors[3].alpha = 1.0f;
+						actors[3].flags = ND_MOB_ACT_AIRBORNE;
+
+						nd_seven_gl_submit_mob_actors(actors, 4u, 1.0f / 60.0f);
+						nd_mob_gl_stats_t mstats;
+						memset(&mstats, 0, sizeof(mstats));
+						assert(nd_mob_gl_get_stats(&mstats) == 0);
+						assert(mstats.active_actors == 4u);
+						assert(mstats.cached_species >= 4u);
+						assert(mstats.total_verts >= 1500u && mstats.total_indices >= 8000u);
+
+						/* Reset staged mob actors cleanly */
+						nd_seven_gl_submit_mob_actors(NULL, 0u, 1.0f / 60.0f);
 					}
 				}
 

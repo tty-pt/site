@@ -363,6 +363,12 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
                                           int32_t span_w, int32_t span_h,
                                           const nd_planet_def_t *eff_pdef);
 
+#include <nd/mob-gl-types.h>
+
+void nd_seven_gl_submit_mob_actors(const nd_mob_actor_in_t *actors,
+                                   uint32_t count,
+                                   float dt);
+
 void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
                                   uint32_t count,
                                   const uint32_t *atlas_rgba);

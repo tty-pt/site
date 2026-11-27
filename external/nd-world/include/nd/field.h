@@ -235,6 +235,90 @@ nd_field_get_planet_scale(void)
 	                                nd_field_get_room_h());
 }
 
+static inline int32_t
+nd_field_active_max_elev_wu(void)
+{
+	return nd_field_get_planet_scale().max_elev_wu;
+}
+
+static inline float
+nd_field_active_global_max_z(void)
+{
+	return (float)nd_field_active_max_elev_wu() + 200.0f;
+}
+
+/* Saturating clamp to legacy int16_t ABI range [-32768, 32767] */
+static inline int16_t
+nd_field_clamp_i16(int32_t v)
+{
+	if (v > 32767) return 32767;
+	if (v < -32768) return -32768;
+	return (int16_t)v;
+}
+
+/* Exact deterministic integer square root floor(sqrt(x)) (bit-exact across CPU/WASM/SIMD) */
+static inline uint32_t
+nd_field_isqrt32(uint32_t x)
+{
+	uint32_t res = 0u;
+	uint32_t bit = 1u << 30;
+	while (bit > x)
+		bit >>= 2;
+	while (bit != 0u) {
+		if (x >= res + bit) {
+			x -= res + bit;
+			res = (res >> 1) + bit;
+		} else {
+			res >>= 1;
+		}
+		bit >>= 2;
+	}
+	return res;
+}
+
+#ifndef ND_XXH32_U32_DEFINED
+#define ND_XXH32_U32_DEFINED 1
+static inline uint32_t
+nd_xxh32_u32(uint32_t val, uint32_t seed)
+{
+	uint32_t h32 = seed + 0x165667B1u + 4u;
+	h32 += val * 0xC2B2AE3Du;
+	h32 = ((h32 << 17) | (h32 >> 15)) * 0x27D4EB2Fu;
+	h32 ^= h32 >> 15;
+	h32 *= 0x85EBCA77u;
+	h32 ^= h32 >> 13;
+	h32 *= 0xC2B2AE3Du;
+	h32 ^= h32 >> 16;
+	return h32;
+}
+#endif
+
+/* Phase 2: 10 Real-World Geological Landform Archetypes */
+typedef enum {
+	ND_GEO_ALLUVIAL_PLAIN    = 0, /* 1. Alluvial coastal plains & floodplains (0-2 deg) */
+	ND_GEO_PIEDMONT_HILLS    = 1, /* 2. Rolling piedmont & pastoral hills (5-18 deg, 30-180 m) */
+	ND_GEO_ALPINE_CORDILLERA = 2, /* 3. Alpine folded cordilleras (35-60 deg, 1200-1800+ m) */
+	ND_GEO_CANYON_MESA       = 3, /* 4. Canyonlands, layered mesas & stratified buttes */
+	ND_GEO_FAULT_ESCARPMENT  = 4, /* 5. Asymmetric fault-block escarpments (scarp + dip slope) */
+	ND_GEO_GLACIAL_FJORD     = 5, /* 6. Glacial U-valleys & coastal fjords */
+	ND_GEO_VOLCANIC_CONE     = 6, /* 7. Volcanic stratovolcano cones & breached calderas */
+	ND_GEO_KARST_TOWERS      = 7, /* 8. Karst & limestone towers / sinkhole valleys */
+	ND_GEO_ARID_BASIN_ERG    = 8, /* 9. Arid basins, salt playas & wind-aligned dune ergs */
+	ND_GEO_SEA_CLIFF_COAST   = 9, /* 10. Dramatic hard-rock sea cliffs & coastal headlands */
+	ND_GEO_PROVINCE_COUNT    = 10
+} nd_geo_province_t;
+
+typedef struct {
+	uint8_t province;        /* Primary nd_geo_province_t (0..9) */
+	uint8_t secondary;       /* Secondary blended nd_geo_province_t (0..9) */
+	uint8_t blend_q8;        /* Smooth transition weight 0..255 */
+	uint8_t tectonic_uplift; /* 0..255: crustal uplift intensity */
+	uint8_t strata_hardness; /* 0..255: cliff-terrace crispness vs smooth erosion */
+	uint8_t basin_flatness;  /* 0..255: alluvial/playa/u-valley floor flattening */
+	uint8_t erosion_age;     /* 0..255: young jagged alpine vs ancient rounded piedmont */
+	uint8_t fault_azimuth;   /* 0..255: predominant structural strike/dip angle (0..2*pi) */
+} nd_geology_t;
+
 /* Wrap integer room coordinate modulo 2^bits into [-2^(bits-1), 2^(bits-1) - 1].
  * At bits == 16 this is bit-identical to (int32_t)(int16_t)r. */
 static inline int32_t
@@ -281,8 +365,8 @@ static const octave_t ND_FIELD_COARSE_TM_OCTAVES[] = {
 
 #define ND_FIELD_FINE_COUNT      ND_FIELD_OCTAVE_COUNT
 #define ND_FIELD_FINE_AMP_BUDGET (((1 << ND_FIELD_OCTAVE_COUNT) - 1) * ND_FIELD_1F_SCALE)
-#define ND_FIELD_MAX_ELEV_WU     6400
-#define ND_FIELD_GLOBAL_MAX_Z    6600.0f
+#define ND_FIELD_MAX_ELEV_WU     81000
+#define ND_FIELD_GLOBAL_MAX_Z    81200.0f
 
 #define ND_FIELD_NOISE_DIM       2
 #define ND_FIELD_NOISE_PRECISION 8
@@ -322,9 +406,9 @@ nd_field_sun_dist(uint16_t obits)
 
 /* Canonical Bimodal Hypsometric Transfer Function:
  * Transforms continuous continental elevation into realistic planetary relief:
- * deep ocean trenches (-800..-40), shallow coastal shelves (-12..0),
- * fertile lowlands/grasslands (0..15), rolling highlands (15..30),
- * and soaring alpine mountain peaks (30..1200). Zero magic numbers. */
+ * deep ocean trenches (-2000..-40), shallow coastal shelves (-12..0),
+ * fertile lowlands/grasslands (0..42), continental uplands & plateaus (43..270+),
+ * topped by Phase 2 metric geological province orogeny up to nd_field_active_max_elev_wu(). */
 static inline int32_t
 nd_field_bimodal_hypsometry(int32_t elev)
 {
@@ -340,16 +424,16 @@ nd_field_bimodal_hypsometry(int32_t elev)
 			return -deep;
 		}
 	} else {
-		/* Landmass: coastal plain (0..8), fertile lowlands (8..25), rolling plateaus (25..60), mountain ranges (60..1854) */
+		/* Landmass: coastal plain (0..8), fertile lowlands (8..25), continental interior uplands (25..150) */
 		if (elev <= 8) {
 			return (elev * 12) / 8; /* Crisp coastal slope lifting land cleanly above sea level */
 		} else if (elev <= 25) {
 			return 12 + ((elev - 8) * 18) / 10; /* Lowlands & uplands: elevated +12..+42 */
 		} else {
-			/* High mountain sharpening: plateaus (43..270), cordilleras, alpine summits up to ND_FIELD_MAX_ELEV_WU */
+			int32_t max_e = nd_field_active_max_elev_wu();
 			int32_t m = elev - 25;
 			int32_t peak = 43 + (m * 22) / 10 + (m * m * 12) / 100;
-			if (peak > ND_FIELD_MAX_ELEV_WU) peak = ND_FIELD_MAX_ELEV_WU;
+			if (peak > max_e) peak = max_e;
 			return peak;
 		}
 	}
@@ -701,13 +785,46 @@ nd_field_torus_signed_solar_q15(int16_t pos_x, int16_t pos_y, uint16_t sun_azimu
 	return dot_q15;
 }
 
+/* Metric environmental lapse rate calibrated to nd_planet_scale_t.snowline_base_wu:
+ * Lowlands (0..100 m = 0..4,500 wu) stay warm; foothills cool into montane conifers;
+ * subalpine meadows emerge above ~450 m; temperate summits cross freezing at snowline_base_wu. */
+static inline int32_t
+nd_field_lapse_cool(int32_t elev_rel)
+{
+	if (elev_rel <= 4500)
+		return 0;
+	int32_t snow_wu = (int32_t)nd_field_get_planet_scale().snowline_base_wu;
+	int32_t span = snow_wu - 4500;
+	if (span < 4500) span = 4500;
+	int32_t cool = (int32_t)(((int64_t)(elev_rel - 4500) * 96LL) / (int64_t)span);
+	if (cool > 220) cool = 220;
+	return cool;
+}
+
+/* Metric orographic rain shadow (leeward) & precipitation lift (windward) across 3 upwind rooms */
+static inline int32_t
+nd_field_orographic_rain_delta(int32_t cur_hyp, int32_t up_hyp, int32_t sea_lvl)
+{
+	if (up_hyp > sea_lvl + 6750 && cur_hyp < up_hyp - 180) {
+		int32_t shadow_depth = up_hyp - (sea_lvl + 6750);
+		if (shadow_depth > 27000) shadow_depth = 27000;
+		return -((shadow_depth * 64) / 27000);
+	}
+	if (cur_hyp > up_hyp + 180 && cur_hyp > sea_lvl + 2250) {
+		int32_t lift_height = cur_hyp - up_hyp;
+		if (lift_height > 2700) lift_height = 2700;
+		return (lift_height * 48) / 2700;
+	}
+	return 0;
+}
+
 /* Canonical Mean Annual Toroidal Climate Temperature (in NeverDark temperature units):
  * Governed by poloidal latitude phi (room_y) relative to the plane of the torus (Z = 0):
  *   - Outer Equator (room_y = 0, phi = 0): unobstructed overhead insolation (+94 base)
  *   - Inner Equator (room_y = +-32768, phi = +-pi): in the torus plane but partially eclipsed
  *     by the opposite side of the ring around equinox noon (-8 arch-shadow cooling -> +86 base)
  *   - North & South Polar Crowns (room_y = +-16384, phi = +-pi/2): tangent to orbital plane (-46 base)
- *   - High mountain environmental lapse rate above elev_rel > 220 world units. */
+ *   - Metric high mountain environmental lapse rate via nd_field_lapse_cool(). */
 static inline int16_t
 nd_field_lat_climate_temp(int16_t pos_y, uint32_t tm, int32_t elev_rel)
 {
@@ -729,11 +846,7 @@ nd_field_lat_climate_temp(int16_t pos_y, uint32_t tm, int32_t elev_rel)
 
 	int32_t tm_var = (int32_t)(tm >> 16) - 128;
 	int32_t tm_amp = (eq_dist > 11500) ? 12 : 18;
-	int32_t bio_temp = 96 - lat_cool - inner_eclipse_cool + (tm_var * tm_amp / 128);
-	if (elev_rel > 350) {
-		/* High mountain environmental lapse rate: forested foothills up to ~1200 wu, alpine tundra ~1400..1900 wu, snowcaps ~1900..6400 wu */
-		bio_temp -= ((elev_rel - 350) * 58) / 1000;
-	}
+	int32_t bio_temp = 96 - lat_cool - inner_eclipse_cool + (tm_var * tm_amp / 128) - nd_field_lapse_cool(elev_rel);
 	if (bio_temp < -32000) bio_temp = -32000;
 	if (bio_temp > 32000) bio_temp = 32000;
 	return (int16_t)bio_temp;
@@ -966,11 +1079,12 @@ nd_field_bio_blend_topo(uint32_t rn, int16_t tmp, int32_t elev_rel,
 	nd_field_bio_blend(rn, tmp, &b1, &b2, &bl);
 
 	/* 1. Subalpine & Alpine Meadow Belt (BIOME_ALPINE_MEADOW = 3):
-	 *    High mountain slopes and benches (elev_rel >= 260 wu) where montane climate cools
-	 *    into timberline flower-rich meadows (-22 <= tmp <= +28) with sufficient moisture (rn >= 115).
-	 *    Smooth transition across edge in [0..40]. */
-	if (elev_rel >= 260 && tmp >= -22 && tmp <= 28 && rn >= 115u && b1 != BIOME_PERMANENT_ICE) {
-		int32_t d_elev = elev_rel - 260;
+	 *    High mountain slopes and benches above ~38% of temperate snowline (~456 m = 20,520 wu at b=16)
+	 *    where montane climate cools into timberline flower-rich meadows (-22 <= tmp <= +28) with
+	 *    sufficient moisture (rn >= 115). Smooth transition across edge in [0..40]. */
+	int32_t alp_min_wu = (int32_t)(nd_field_get_planet_scale().snowline_base_wu * 0.38f);
+	if (elev_rel >= alp_min_wu && tmp >= -22 && tmp <= 28 && rn >= 115u && b1 != BIOME_PERMANENT_ICE) {
+		int32_t d_elev = (elev_rel - alp_min_wu) / 45;
 		int32_t d_cold = (tmp - (-22)) * 2;
 		int32_t d_warm = (28 - tmp) * 2;
 		int32_t edge = d_elev;

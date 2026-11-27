@@ -53,7 +53,8 @@ EXTRA_SRCS = \
 	$(REPO_ROOT)/mods/common/ux/site_ui.c \
 	$(REPO_ROOT)/external/libareole/src/areole.c \
 	$(REPO_ROOT)/external/libcorolla/src/corolla.c \
-	$(REPO_ROOT)/external/liblamina/src/particle.c
+	$(REPO_ROOT)/external/liblamina/src/particle.c \
+	$(REPO_ROOT)/external/nd-mob-gl/src/libnd-mob-gl.c
 
 INCS = \
 	-I$(REPO_ROOT)/lib/bud-lamina \
@@ -75,6 +76,7 @@ INCS = \
 	-I$(REPO_ROOT)/external/nd-seven/include \
 	-I$(REPO_ROOT)/external/nd-plant/include \
 	-I$(REPO_ROOT)/external/nd-mob/include \
+	-I$(REPO_ROOT)/external/nd-mob-gl/include \
 	-I$(REPO_ROOT)/external/nd-stone/include \
 	-I$(REPO_ROOT)/external/nd-attr/include \
 	-I$(REPO_ROOT)/external/nd-equip/include \
@@ -111,7 +113,8 @@ EXTRA_OBJS = \
 	$(BUILD_DIR)/extra/site_ui.o \
 	$(BUILD_DIR)/extra/areole.o \
 	$(BUILD_DIR)/extra/corolla.o \
-	$(BUILD_DIR)/extra/particle.o
+	$(BUILD_DIR)/extra/particle.o \
+	$(BUILD_DIR)/extra/libnd-mob-gl.o
 
 ALL_OBJS = $(APP_OBJ) $(UX_OBJS) $(SEVEN_OBJS) $(EXTRA_OBJS)
 DEP_FLAGS = -MMD -MP
@@ -158,6 +161,10 @@ $(BUILD_DIR)/extra/corolla.o: $(REPO_ROOT)/external/libcorolla/src/corolla.c
 	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
 
 $(BUILD_DIR)/extra/particle.o: $(REPO_ROOT)/external/liblamina/src/particle.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
+
+$(BUILD_DIR)/extra/libnd-mob-gl.o: $(REPO_ROOT)/external/nd-mob-gl/src/libnd-mob-gl.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(DEP_FLAGS) -Wno-unused-parameter $(DEFS) $(INCS) -c -o $@ $<
 

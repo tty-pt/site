@@ -70,6 +70,7 @@ typedef struct {
 	uint8_t col_mask;         /* programmer-defined collision footprint */
 	uint8_t hw, hh;           /* collision half-extents */
 	uint8_t anchor_y;         /* downward screen-Y anchor offset from bottom of sprite */
+	uint16_t entity_flags;    /* ND_EF_* bitmask from BCP entity desc */
 	uint32_t entity_ref;      /* Corm DB entity ref if known */
 	char name[32];            /* display name */
 	char art[64];             /* staged art path if known */

@@ -2106,6 +2106,8 @@ typedef struct {
 	uint8_t fg;
 	uint8_t sprite_id;
 	uint8_t flip;
+	uint16_t entity_flags;
+	uint32_t entity_ref;
 	char name[32];
 } drawable_3d_t;
 
@@ -2783,6 +2785,9 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 	drawable_3d_t *dr = ctx->dr;
 	lam_billboard_gpu_t *s_all_gpu_batch = ctx->batch;
 	uint32_t all_gpu_count = ctx->batch_count;
+	static nd_mob_actor_in_t s_mob_actors[ND_MOB_GL_MAX_ACTORS];
+	static float s_prev_mob_time = 0.0f;
+	uint32_t mob_actor_count = 0;
 
 	for (int tj = obj_j0; tj <= obj_j1; tj++) {
 		int n = 0;
@@ -2811,6 +2816,8 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 						dr[n].z_f = (float)elev_q / 16.0f;
 						dr[n].flip = sp.objs[k].flip;
 						dr[n].sprite_id = entity_atlas_sprite(sp.objs[k].sprite_id);
+						dr[n].entity_flags = sp.objs[k].entity_flags;
+						dr[n].entity_ref = sp.objs[k].entity_ref;
 						snprintf(dr[n].name, sizeof(dr[n].name), "%s", sp.objs[k].name);
 						n++;
 					} else {
@@ -2835,6 +2842,8 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 						dr[n].z_f = (float)elev_q / 16.0f;
 						dr[n].sprite_id = 0;
 						dr[n].flip = 0;
+						dr[n].entity_flags = 0;
+						dr[n].entity_ref = 0;
 						snprintf(dr[n].name, sizeof(dr[n].name), "%s", sp.objs[k].name);
 						n++;
 					}
@@ -2850,6 +2859,8 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 			float lamb_f = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
 			dr[n].wz = (int16_t)lamb_f;
 			dr[n].z_f = lamb_f;
+			dr[n].entity_flags = 0;
+			dr[n].entity_ref = 0;
 			dr[n].name[0] = '\0';
 			n++;
 		}
@@ -2863,24 +2874,88 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 			float bay = 0.0f, bwz_off = 0.0f;
 
 			if (dr[a].what == D_LAMB) {
-				int row, col;
-				if (nd_seven_get_walking()) {
-					row = nd_seven_get_dir();
-					col = (int)((nd_seven_get_anim() / 4) % 6);
-				} else {
-					row = 4 + nd_seven_get_dir();
-					col = (int)((nd_seven_get_anim() / 24) % 4);
+				if (mob_actor_count < ND_MOB_GL_MAX_ACTORS) {
+					uint16_t world_id = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
+					int16_t lamb_wl = 0;
+					bool has_w = (seven_has_water_at(world_id, dr[a].wx, dr[a].wy, &lamb_wl) != 0);
+					bool lamb_glows = (nd_seven_is_universe_owner(st) != 0);
+					nd_mob_actor_in_t *ma = &s_mob_actors[mob_actor_count++];
+					memset(ma, 0, sizeof(*ma));
+					ma->ref = 0;
+					ma->dna = creature_dna_lamb_default(42u);
+					ma->state.age = 0.15f;
+					ma->state.weight = 0.65f;
+					ma->state.coat_state = 0;
+					ma->state.seed = 42u;
+					ma->world_x = (float)dr[a].wx;
+					ma->world_y = (float)dr[a].wy;
+					ma->world_z = dr[a].z_f;
+					ma->yaw_rad = nd_seven_get_lamb_yaw_rad();
+					ma->scale_wu_per_m = 45.0f;
+					ma->water_z = has_w ? (float)lamb_wl : -1000.0f;
+					ma->alpha = 1.0f;
+					ma->flags = ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS |
+					            (lamb_glows ? ND_MOB_ACT_OWNER_GLOW : 0u) |
+					            (s_prev_lamb_in_water ? ND_MOB_ACT_IN_WATER : 0u);
 				}
-				bw = (float)LAMB_SIZE;
-				bh = (float)LAMB_SIZE;
-				bay = (float)(LAMB_SIZE - LAMB_AY);
-				bwz_off = (float)((LAMB_SIZE - 1) - LAMB_FOOT_Y);
-				u0 = (float)(col * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
-				v0 = (float)(row * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-				u1 = (float)((col + 1) * LAMB_SIZE) / (float)ND_SEVEN_ATLAS_W;
-				v1 = (float)((row + 1) * LAMB_SIZE) / (float)ND_SEVEN_RUNTIME_ATLAS_H;
-				has_sprite = 1;
+				continue;
 			} else if (dr[a].what == D_ENTITY) {
+				uint32_t seed = dr[a].entity_ref
+				              ? dr[a].entity_ref
+				              : (uint32_t)((uint32_t)dr[a].wx * 0x9E3779B1u ^ (uint32_t)dr[a].wy * 0x85EBCA77u);
+				creature_dna_t ent_dna;
+				creature_state_t ent_st;
+				int matched_species = creature_dna_from_name(dr[a].name, seed, &ent_dna, &ent_st);
+				bool is_player_ent = (dr[a].entity_flags & ND_EF_PLAYER) != 0u;
+				bool is_creature_ent = (dr[a].entity_flags & ND_EF_CREATURE) != 0u;
+				if ((matched_species || is_player_ent || is_creature_ent) &&
+				    mob_actor_count < ND_MOB_GL_MAX_ACTORS) {
+					if (!matched_species) {
+						ent_dna = creature_dna_lamb_default(seed);
+						memset(&ent_st, 0, sizeof(ent_st));
+						ent_st.age = is_player_ent ? 0.15f : 0.60f;
+						ent_st.weight = 0.65f;
+						ent_st.seed = seed;
+					}
+					uint16_t world_id = (st && st->map_data.width > 0) ? (uint16_t)st->map_data.pos[3] : 0;
+					int16_t true_wl = 0;
+					bool has_w = (seven_has_water_at(world_id, dr[a].wx, dr[a].wy, &true_wl) != 0);
+					nd_mob_actor_in_t *ma = &s_mob_actors[mob_actor_count++];
+					memset(ma, 0, sizeof(*ma));
+					ma->ref = dr[a].entity_ref
+					        ? (uint64_t)dr[a].entity_ref
+					        : (((uint64_t)(uint32_t)dr[a].wx << 32) | (uint64_t)(uint32_t)dr[a].wy | 1ull);
+					ma->dna = ent_dna;
+					ma->state = ent_st;
+					ma->world_x = (float)dr[a].wx;
+					ma->world_y = (float)dr[a].wy;
+					ma->world_z = dr[a].z_f;
+					ma->yaw_rad = dr[a].flip ? -1.5707963f : 1.5707963f;
+					ma->scale_wu_per_m = 45.0f;
+					ma->water_z = has_w ? (float)true_wl : -1000.0f;
+					ma->alpha = 1.0f;
+					if ((dr[a].entity_flags & ND_EF_UNIVERSE_OWNER) != 0u)
+						ma->flags |= ND_MOB_ACT_OWNER_GLOW;
+					if (ent_dna.archetype == CREATURE_ARCH_PISCINE) {
+						ma->flags |= ND_MOB_ACT_IN_WATER;
+						if (has_w) {
+							float depth_band = fmaxf(6.0f, fminf(28.0f, ((float)true_wl - dr[a].z_f) * 0.45f));
+							float target_z = (float)true_wl - depth_band;
+							if (target_z < dr[a].z_f + 4.0f)
+								target_z = dr[a].z_f + 4.0f;
+							ma->world_z = target_z;
+						}
+					} else if (ent_dna.archetype == CREATURE_ARCH_AVIAN) {
+						float base_z = (has_w && (float)true_wl > dr[a].z_f) ? (float)true_wl : dr[a].z_f;
+						float hover_h = 34.0f + 16.0f * (float)(seed & 7u) * (1.0f / 7.0f)
+						              + 6.0f * sinf(s_frame_anim_time * 1.4f + (float)(seed & 255u) * 0.05f);
+						ma->world_z = base_z + hover_h;
+						ma->flags |= ND_MOB_ACT_AIRBORNE;
+					} else if (has_w && dr[a].z_f < (float)true_wl - 0.15f) {
+						ma->flags |= ND_MOB_ACT_IN_WATER;
+					}
+					continue;
+				}
 				int sprite = 0;
 				if (dr[a].sprite_id) {
 					sprite = dr[a].sprite_id;
@@ -2967,17 +3042,14 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 			}
 
 			if (has_sprite) {
-				float alt_fade_b = (dr[a].what == D_LAMB)
-					? 1.0f
-					: seven_eval_billboard_alpha((float)dr[a].wx, (float)dr[a].wy, dr[a].z_f, bw, bh);
+				float alt_fade_b = seven_eval_billboard_alpha((float)dr[a].wx, (float)dr[a].wy, dr[a].z_f, bw, bh);
 				uint32_t tint_b = seven_pack_white_alpha(alt_fade_b);
 				if (tint_b == 0)
 					continue;
 
 				lam_billboard_gpu_t *dst_bb = &s_all_gpu_batch[all_gpu_count];
 				dst_bb->x = (float)dr[a].wx;
-				/* Give the lamb a microscopic +0.01f wy bias so it always wins exact row ties */
-				dst_bb->y = (float)dr[a].wy + (dr[a].what == D_LAMB ? 0.01f : 0.0f);
+				dst_bb->y = (float)dr[a].wy;
 				dst_bb->z = dr[a].z_f;
 				dst_bb->width = bw;
 				dst_bb->height = bh;
@@ -2996,15 +3068,6 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 						    dr[a].z_f < (float)true_wl - 0.05f)
 							dst_bb->pad0 |= 0x80u;
 					}
-				} else if (dr[a].what == D_LAMB) {
-					bool lamb_glows = (nd_seven_is_universe_owner(st) != 0);
-					dst_bb->tint_rgba = tint_b;
-					dst_bb->style = lamb_glows ? ND_BB_STYLE_GLOW : ND_BB_STYLE_STANDARD;
-					dst_bb->shadow_rx = lamb_glows ? 0 : 8;
-					dst_bb->shadow_ry = lamb_glows ? 0 : 4;
-					dst_bb->pad0 = (uint8_t)((s_prev_lamb_in_water ? 0x80u : 0u) |
-					                         ((uint8_t)nd_seven_get_dir() & 3u));
-					dst_bb->mesh_id = ND_MESH3D_LAMB_ID;
 				} else {
 					dst_bb->tint_rgba = tint_b;
 					dst_bb->pad0 = 0;
@@ -3169,6 +3232,15 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 			}
 		}
 	}
+
+	float mob_dt = 1.0f / 60.0f;
+	if (s_prev_mob_time > 0.0f && s_frame_anim_time > s_prev_mob_time) {
+		mob_dt = s_frame_anim_time - s_prev_mob_time;
+		if (mob_dt < 0.001f) mob_dt = 0.001f;
+		if (mob_dt > 0.1f) mob_dt = 0.1f;
+	}
+	s_prev_mob_time = s_frame_anim_time;
+	nd_seven_gl_submit_mob_actors(s_mob_actors, mob_actor_count, mob_dt);
 
 	ctx->batch_count = all_gpu_count;
 }

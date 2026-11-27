@@ -131,7 +131,7 @@ $(VERSION_GEN): $(REPO_ROOT)/htdocs/styles.css $(REPO_ROOT)/htdocs/hyle.css $(RE
 $(WASM_BUILD_TARGETS): $(CX_HEADERS) $(WASM_CX_C) $(WASM_COMMON_SRC) $(SITE_UI_DEPS)
 	@if echo 'int main(void){}' | $(WASI_CC) $(WASM_CFLAGS) -x c - -c -o /dev/null >/dev/null 2>&1; then \
 		for src in ${${@:$(WASM_PATH)/%.wasm=%}-src}; do \
-			case "$$src" in *libxylem-wasm.c|*hyle-bud*) continue ;; esac; \
+			case "$$src" in *libxylem-wasm.c|*hyle-bud*|*nd-mob-gl*) continue ;; esac; \
 			if [ -f "$$src" ]; then \
 				bad=$$(sed -e 's,//.*,,g' -e 's,/\*.*\*/,,g' "$$src" | grep -En '\b(corm_|source_|axil_|hyle_source|XY_DECL|XY_IMPL)\b' || true); \
 				if [ -n "$$bad" ]; then \
