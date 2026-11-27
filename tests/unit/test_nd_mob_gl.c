@@ -40,6 +40,9 @@ static uint32_t    s_mock_draw_calls   = 0;
 static uint32_t    s_mock_cull_disables = 0;
 static int         s_mock_unpack_align = 1; /* intentionally start at 1 to verify 4 is set */
 static uint32_t    s_mock_tex_uploads_aligned = 0;
+static size_t      s_mock_last_inst_bytes = 0;
+static float       s_mock_last_inst0_yaw  = 0.0f;
+static uint32_t    s_mock_res_deletes     = 0;
 static int         s_mock_async_delay  = 0;
 static GLuint      s_mock_next_id      = 1;
 
@@ -104,10 +107,21 @@ void lam_glDeleteProgram(GLuint p)
 
 void   lam_glUseProgram(GLuint p) { (void)p; }
 GLuint lam_glCreateBuffer(void) { return s_mock_next_id++; }
+void   lam_glDeleteBuffer(GLuint b) { (void)b; s_mock_res_deletes++; }
 void   lam_glBindBuffer(GLenum t, GLuint b) { (void)t; (void)b; }
 void   lam_glBufferData(GLenum t, const void *d, size_t s, GLenum u) { (void)t; (void)d; (void)s; (void)u; }
-void   lam_glBufferSubData(GLenum t, size_t o, size_t s, const void *d) { (void)t; (void)o; (void)s; (void)d; }
+void   lam_glBufferSubData(GLenum t, size_t o, size_t s, const void *d)
+{
+	(void)t; (void)o;
+	s_mock_last_inst_bytes = s;
+	if (d && s >= 64u) {
+		/* world_pos_yaw is floats [4..7], so yaw is float [7] */
+		const float *f = (const float *)d;
+		s_mock_last_inst0_yaw = f[7];
+	}
+}
 GLuint lam_glCreateTexture(void) { return s_mock_next_id++; }
+void   lam_glDeleteTexture(GLuint t) { (void)t; s_mock_res_deletes++; }
 void   lam_glBindTexture(GLenum t, GLuint tex) { (void)t; (void)tex; }
 void   lam_glActiveTexture(GLenum t) { (void)t; }
 void   lam_glTexParameteri(GLenum t, GLenum p, GLint v) { (void)t; (void)p; (void)v; }
@@ -149,6 +163,7 @@ void   lam_glUniform4f(GLint l, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)
 { (void)l; (void)v0; (void)v1; (void)v2; (void)v3; }
 void   lam_glUniformMatrix4fv(GLint l, GLsizei c, GLboolean t, const GLfloat *v) { (void)l; (void)c; (void)t; (void)v; }
 GLuint lam_glCreateVertexArray(void) { return s_mock_next_id++; }
+void   lam_glDeleteVertexArray(GLuint v) { (void)v; s_mock_res_deletes++; }
 void   lam_glBindVertexArray(GLuint v) { (void)v; }
 #endif
 
@@ -452,6 +467,45 @@ main(int argc, char **argv)
 	assert(nd_mob_gl_draw_color(&frame) == 24);
 	assert(nd_mob_gl_get_stats(&st) == 0);
 	assert(st.cached_species > 32u);
+#ifdef LAM_WEBGL_NATIVE
+	/* Verify 64-byte cache-line-aligned instance buffer upload (24 * 64 = 1536 bytes) */
+	assert(s_mock_last_inst_bytes == 24u * 64u);
+
+	/* 7. Verify NPC Eastward motion (+X, dy=0) steers yaw toward -pi/2 so (-sin(yaw), cos(yaw)) = (+1, 0) */
+	nd_mob_actor_in_t walker;
+	memset(&walker, 0, sizeof(walker));
+	walker.ref = 9001u;
+	walker.dna = creature_dna_lamb_default(9001u);
+	walker.state.age = 0.55f;
+	walker.state.weight = 0.60f;
+	walker.scale_wu_per_m = 45.0f;
+	walker.alpha = 1.0f;
+	walker.yaw_rad = 0.0f; /* initially facing +Y (South) */
+	walker.ground_gx = 0.25f; /* uphill to East */
+	assert(nd_mob_gl_sync(&walker, 1u, 0.05f) == 1);
+	for (int step = 0; step < 20; step++) {
+		walker.world_x += 4.0f; /* pure +X Eastward displacement */
+		assert(nd_mob_gl_sync(&walker, 1u, 0.05f) == 1);
+	}
+	assert(nd_mob_gl_draw_color(&frame) == 1);
+	assert(s_mock_last_inst_bytes == 64u);
+	assert(fabsf(s_mock_last_inst0_yaw - (-1.5707963f)) < 0.05f);
+
+	/* 8. Verify nd_mob_gl_shutdown frees CPU cache + GL resources cleanly and supports re-init */
+	uint32_t prog_del_before = s_mock_prog_deletes;
+	uint32_t res_del_before  = s_mock_res_deletes;
+	assert(nd_mob_gl_shutdown(1) == 0);
+	assert(s_mock_prog_deletes >= prog_del_before + 2u);
+	assert(s_mock_res_deletes >= res_del_before + 5u);
+	assert(nd_mob_gl_get_stats(&st) == 0);
+	assert(st.cached_species == 0u && st.active_actors == 0u && st.gl_ready == 0u);
+
+	assert(nd_mob_gl_init(0) == 0);
+	assert(nd_mob_gl_sync(&walker, 1u, 0.016f) == 1);
+	assert(nd_mob_gl_draw_color(&frame) == 1);
+	assert(nd_mob_gl_get_stats(&st) == 0);
+	assert(st.cached_species == 1u && st.gl_ready == 1u);
+#endif
 
 	printf("PASS test_nd_mob_gl (actors=%u, cached_species=%u, total_verts=%u, total_indices=%u)\n",
 	       st.active_actors, st.cached_species, st.total_verts, st.total_indices);

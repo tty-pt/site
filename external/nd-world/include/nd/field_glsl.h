@@ -108,7 +108,7 @@
 	"        if (elev <= 25.0) return 12.0 + (elev - 8.0) * 1.8;\n" \
 	"        float m = elev - 25.0;\n" \
 	"        float peak = 43.0 + m * 2.2 + m * m * 0.12;\n" \
-	"        return min(peak, 6400.0);\n" \
+	"        return min(peak, max(uPlanetMetric.y, 6400.0));\n" \
 	"    }\n" \
 	"}\n" \
 	"float chaff_wpoint_periodic_2d_f(int x, int y, int shift, uint seed) {\n" \
@@ -132,8 +132,85 @@
 	"    float v11 = float(chaff_hash2(ivec2(int(kx1), int(ky1)), seed) >> 24u);\n" \
 	"    return mix(mix(v00, v10, u), mix(v01, v11, u), v);\n" \
 	"}\n" \
+	"uint nd_gpu_xxh32_u32(uint val, uint seed) {\n" \
+	"    uint h32 = seed + 0x165667B5u;\n" \
+	"    h32 += val * 0xC2B2AE3Du;\n" \
+	"    h32 = ((h32 << 17u) | (h32 >> 15u)) * 0x27D4EB2Fu;\n" \
+	"    h32 ^= h32 >> 15u;\n" \
+	"    h32 *= 0x85EBCA77u;\n" \
+	"    h32 ^= h32 >> 13u;\n" \
+	"    h32 *= 0xC2B2AE3Du;\n" \
+	"    h32 ^= h32 >> 16u;\n" \
+	"    return h32;\n" \
+	"}\n" \
+	"float nd_gpu_terrace(float x) {\n" \
+	"    float xc = clamp(x, 0.0, 256.0);\n" \
+	"    if (xc >= 256.0) return 1.0;\n" \
+	"    float tier = floor(xc * (1.0 / 64.0));\n" \
+	"    float rem = xc - tier * 64.0;\n" \
+	"    float riser = smoothstep(2.0, 26.0, rem) * 60.0;\n" \
+	"    float bench = rem * 0.0625;\n" \
+	"    return clamp((tier * 64.0 + riser + bench) * (1.0 / 256.0), 0.0, 1.0);\n" \
+	"}\n" \
+	"float nd_gpu_scarp_wave(float proj) {\n" \
+	"    float phase = mod(proj, 256.0);\n" \
+	"    return (phase < 52.0) ? smoothstep(0.0, 52.0, phase) : (1.0 - smoothstep(52.0, 256.0, phase));\n" \
+	"}\n" \
+	"float nd_gpu_dune_wave(float proj) {\n" \
+	"    float phase = mod(proj, 64.0);\n" \
+	"    return (phase < 40.0) ? (phase * (1.0 / 40.0)) : ((64.0 - phase) * (1.0 / 24.0));\n" \
+	"}\n" \
+	"float nd_gpu_volcano_cone(float d) {\n" \
+	"    if (d >= 240.0) return 0.0;\n" \
+	"    float c = smoothstep(0.0, 220.0, 240.0 - d);\n" \
+	"    c = c * (0.375 + 0.625 * c);\n" \
+	"    if (d < 36.0) {\n" \
+	"        c = max(0.0, c - smoothstep(0.0, 36.0, 36.0 - d) * 0.25);\n" \
+	"    }\n" \
+	"    return c;\n" \
+	"}\n" \
+	"float nd_gpu_orogeny_eval_archetype(uint prov, float az_rad, vec2 corner_r, vec2 ur,\n" \
+	"                                    float base_hyp, float hill, float alpine, float scale_f,\n" \
+	"                                    float hill_raw, float alp_raw,\n" \
+	"                                    float r9, float r8, float r7, float r5) {\n" \
+	"    float env = max(hill, alpine);\n" \
+	"    if (prov == 0u) {\n" \
+	"        return hill_raw * 0.5 * hill + alp_raw * 0.125 * alpine;\n" \
+	"    } else if (prov == 1u) {\n" \
+	"        return hill_raw * 10.0 * hill + alp_raw * 0.375 * alpine;\n" \
+	"    } else if (prov == 2u) {\n" \
+	"        return hill_raw * 12.0 * hill + alp_raw * alpine;\n" \
+	"    } else if (prov == 3u) {\n" \
+	"        float m_sig = (r9 * 3.0 + r7 * 2.0) * 0.2;\n" \
+	"        float terr = nd_gpu_terrace(m_sig * 2.0);\n" \
+	"        float mesa_cap = terr * 38000.0 * (0.75 + 0.25 * scale_f);\n" \
+	"        return (mesa_cap + hill_raw * 6.0) * env + alp_raw * 0.125 * alpine;\n" \
+	"    } else if (prov == 4u) {\n" \
+	"        float proj = ur.x * cos(az_rad) + ur.y * sin(az_rad);\n" \
+	"        float scarp_h = nd_gpu_scarp_wave(proj) * 54000.0 * scale_f;\n" \
+	"        return (scarp_h * 0.25 + hill_raw * 6.0) * hill + (scarp_h * 0.75 + alp_raw * 0.25) * alpine;\n" \
+	"    } else if (prov == 5u) {\n" \
+	"        float u_wall = smoothstep(46.0, 98.0, (r9 * 5.0 + r8 * 3.0) * 0.125);\n" \
+	"        return (hill_raw * 7.0 * u_wall) * hill + (alp_raw * u_wall) * alpine;\n" \
+	"    } else if (prov == 6u) {\n" \
+	"        float volc_h = nd_gpu_volcano_cone(length(ur - corner_r)) * 76000.0 * scale_f;\n" \
+	"        return (volc_h + hill_raw * 7.0) * env + alp_raw * 0.25 * alpine;\n" \
+	"    } else if (prov == 7u) {\n" \
+	"        float k_sig = (r5 * r5 * r5) * (1.0 / 16384.0);\n" \
+	"        return (k_sig * 165.0 + hill_raw * 3.0) * env + alp_raw * 0.25 * alpine;\n" \
+	"    } else if (prov == 8u) {\n" \
+	"        float proj = ur.x * cos(az_rad) + ur.y * sin(az_rad);\n" \
+	"        float dune_h = nd_gpu_dune_wave(proj) * 1792.0;\n" \
+	"        return (dune_h + hill_raw * 2.0) * hill + alp_raw * 0.1875 * alpine;\n" \
+	"    } else {\n" \
+	"        float cliff_h = smoothstep(6.0, 20.0, base_hyp) * 4800.0 + hill_raw * 8.0;\n" \
+	"        return cliff_h * hill + alp_raw * 0.625 * alpine;\n" \
+	"    }\n" \
+	"}\n" \
 	"float nd_gpu_orogeny_wu(uint seed, int rx, int ry, float base_hyp, float fw) {\n" \
 	"    if (base_hyp <= 6.0) return 0.0;\n" \
+	"    float maxElev = max(uPlanetMetric.y, 81000.0);\n" \
+	"    float scale_f = maxElev * (1.0 / 81000.0);\n" \
 	"    float coast = smoothstep(6.0, 16.0, base_hyp);\n" \
 	"    uint oseed = seed ^ 0xD0D2877Du;\n" \
 	"    float wx_raw = chaff_wpoint_periodic_2d_f(rx, ry, 8, oseed ^ 0x11A3u) - 128.0;\n" \
@@ -155,55 +232,101 @@
 	"    float alpine = a_sm * (0.5 + 0.5 * a_sm);\n" \
 	"    if (hill <= 0.0001 && alpine <= 0.0001) return 0.0;\n" \
 	"    float w4_oct = nd_octave_weight(2304.0, fw);\n" \
-	"    float uplift = 0.0;\n" \
+	"    float r8 = 128.0 - abs(prov_raw - 128.0);\n" \
+	"    float r7 = belt_r;\n" \
+	"    float n9 = chaff_wpoint_periodic_2d_f(urx + 313, ury - 571, 9, oseed ^ 0x4E3Bu) - 128.0;\n" \
+	"    float r9 = 128.0 - abs(n9);\n" \
+	"    float n5h = chaff_wpoint_periodic_2d_f(urx + 713, ury - 419, 5, oseed ^ 0x7731u);\n" \
+	"    float r5 = 128.0 - abs(n5h - 128.0);\n" \
+	"    float hill_raw = 0.0;\n" \
 	"    if (hill > 0.0001) {\n" \
-	"        float n5 = chaff_wpoint_periodic_2d_f(urx + 713, ury - 419, 5, oseed ^ 0x7731u);\n" \
-	"        float r5 = 128.0 - abs(n5 - 128.0);\n" \
-	"        float f5 = (n5 * 192.0 + r5 * 528.0) * (1.0 / 256.0);\n" \
+	"        float f5 = (n5h * 192.0 + r5 * 528.0) * (1.0 / 256.0);\n" \
 	"        float f4 = 0.0;\n" \
 	"        if (w4_oct > 0.001) {\n" \
 	"            float n4 = chaff_wpoint_periodic_2d_f(urx - 317, ury + 823, 4, oseed ^ 0x8843u);\n" \
 	"            f4 = (n4 * 240.0) * (1.0 / 256.0) * w4_oct;\n" \
 	"        }\n" \
-	"        uplift += (f5 + f4) * hill;\n" \
+	"        hill_raw = f5 + f4;\n" \
 	"    }\n" \
+	"    float alp_raw = 0.0;\n" \
 	"    if (alpine > 0.0001) {\n" \
+	"        float n10 = chaff_wpoint_periodic_2d_f(urx - 829, ury + 467, 10, oseed ^ 0x3D29u) - 128.0;\n" \
+	"        float r10 = 128.0 - abs(n10);\n" \
+	"        float h10 = (r10 * r10) * (1.0 / 128.0);\n" \
+	"        float h9 = (r9 * (64.0 + r9 * 0.5)) * (1.0 / 128.0);\n" \
+	"        float w9 = 96.0 + h10 * (160.0 / 128.0);\n" \
+	"        float h9w = (h9 * w9) * (1.0 / 256.0);\n" \
+	"        float h8 = (r8 * (64.0 + r8 * 0.5)) * (1.0 / 128.0);\n" \
+	"        float w8 = 84.0 + h9w * (172.0 / 128.0);\n" \
+	"        float h8w = (h8 * w8) * (1.0 / 256.0);\n" \
+	"        float h7 = (r7 * (64.0 + r7 * 0.5)) * (1.0 / 128.0);\n" \
+	"        float w7 = 76.0 + h8w * (180.0 / 128.0);\n" \
+	"        float h7w = (h7 * w7) * (1.0 / 256.0);\n" \
 	"        float n6 = chaff_wpoint_periodic_2d_f(urx + 191, ury + 547, 6, oseed ^ 0x9955u) - 128.0;\n" \
 	"        float r6 = 128.0 - abs(n6);\n" \
 	"        float h6 = (r6 * r6) * (1.0 / 128.0);\n" \
+	"        float w6 = 72.0 + h7w * (184.0 / 128.0);\n" \
+	"        float h6w = (h6 * w6) * (1.0 / 256.0);\n" \
 	"        float n5 = chaff_wpoint_periodic_2d_f(urx - 613, ury + 271, 5, oseed ^ 0xAA67u) - 128.0;\n" \
-	"        float r5 = 128.0 - abs(n5);\n" \
-	"        float h5 = (r5 * (64.0 + r5 * 0.5)) * (1.0 / 128.0);\n" \
-	"        float w5 = 72.0 + h6 * (184.0 / 128.0);\n" \
+	"        float r5a = 128.0 - abs(n5);\n" \
+	"        float h5 = (r5a * (64.0 + r5a * 0.5)) * (1.0 / 128.0);\n" \
+	"        float w5 = 64.0 + h6w * (192.0 / 128.0);\n" \
 	"        float h5w = (h5 * w5) * (1.0 / 256.0);\n" \
-	"        float alp = h6 * (1350.0 / 128.0) + h5w * (1900.0 / 128.0);\n" \
+	"        alp_raw = h10 * (33000.0 / 128.0) + h9w * (26000.0 / 128.0) +\n" \
+	"                  h8w * (16500.0 / 128.0) + h7w * (10000.0 / 128.0) +\n" \
+	"                  h6w * (5200.0 / 128.0)  + h5w * (2600.0 / 128.0);\n" \
 	"        if (w4_oct > 0.001) {\n" \
 	"            float n4 = chaff_wpoint_periodic_2d_f(urx + 409, ury - 733, 4, oseed ^ 0xBB79u) - 128.0;\n" \
 	"            float r4 = 128.0 - abs(n4);\n" \
 	"            float h4 = (r4 * (64.0 + r4 * 0.5)) * (1.0 / 128.0);\n" \
 	"            float w4 = 56.0 + h5w * (200.0 / 128.0);\n" \
 	"            float h4w = (h4 * w4) * (1.0 / 256.0);\n" \
-	"            alp += h4w * (1650.0 / 128.0) * w4_oct;\n" \
+	"            alp_raw += h4w * (1300.0 / 128.0) * w4_oct;\n" \
 	"            float w3_oct = nd_octave_weight(1152.0, fw);\n" \
 	"            if (w3_oct > 0.001) {\n" \
 	"                float n3 = chaff_wpoint_periodic_2d_f(urx - 227, ury - 389, 3, oseed ^ 0xCC8Bu) - 128.0;\n" \
 	"                float r3 = 128.0 - abs(n3);\n" \
 	"                float w3 = 32.0 + h4w * (224.0 / 128.0);\n" \
 	"                float h3w = (r3 * w3) * (1.0 / 256.0);\n" \
-	"                alp += h3w * (960.0 / 128.0) * w3_oct;\n" \
+	"                alp_raw += h3w * (650.0 / 128.0) * w3_oct;\n" \
 	"                float w2_oct = nd_octave_weight(576.0, fw);\n" \
 	"                if (w2_oct > 0.001 && h3w > 0.0) {\n" \
 	"                    float n2 = chaff_wpoint_periodic_2d_f(urx + 131, ury + 179, 2, oseed ^ 0xDD9Du) - 128.0;\n" \
 	"                    float r2 = 128.0 - abs(n2);\n" \
 	"                    float w2 = h3w * 2.0;\n" \
 	"                    float h2w = (r2 * w2) * (1.0 / 256.0);\n" \
-	"                    alp += h2w * (440.0 / 128.0) * w2_oct;\n" \
+	"                    alp_raw += h2w * (350.0 / 128.0) * w2_oct;\n" \
 	"                }\n" \
 	"            }\n" \
 	"        }\n" \
-	"        uplift += alp * alpine;\n" \
+	"        alp_raw *= scale_f;\n" \
 	"    }\n" \
-	"    return max(uplift * coast, 0.0);\n" \
+	"    int cx0 = urx >> 9;\n" \
+	"    int cy0 = ury >> 9;\n" \
+	"    float fx = float(urx & 511) * (1.0 / 512.0);\n" \
+	"    float fy = float(ury & 511) * (1.0 / 512.0);\n" \
+	"    float u = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0);\n" \
+	"    float v = fy * fy * fy * (fy * (fy * 6.0 - 15.0) + 10.0);\n" \
+	"    vec2 ur_v = vec2(float(urx), float(ury));\n" \
+	"    float acc = 0.0;\n" \
+	"    for (int k = 0; k < 4; k++) {\n" \
+	"        int dxk = k & 1;\n" \
+	"        int dyk = k >> 1;\n" \
+	"        float wk = ((dxk == 0) ? (1.0 - u) : u) * ((dyk == 0) ? (1.0 - v) : v);\n" \
+	"        if (wk <= 0.0001) continue;\n" \
+	"        int cxk = cx0 + dxk;\n" \
+	"        int cyk = cy0 + dyk;\n" \
+	"        uint wcx = uint(cxk) & 127u;\n" \
+	"        uint wcy = uint(cyk) & 127u;\n" \
+	"        uint gh = nd_gpu_xxh32_u32((wcx * 0x9E3779B1u) ^ (wcy * 0x85EBCA77u), oseed ^ 0x51A7BEEFu);\n" \
+	"        uint prov = gh % 10u;\n" \
+	"        float az_rad = float((gh >> 8u) & 255u) * (6.28318530718 / 256.0);\n" \
+	"        float hk = nd_gpu_orogeny_eval_archetype(\n" \
+	"            prov, az_rad, vec2(float(cxk << 9), float(cyk << 9)), ur_v,\n" \
+	"            base_hyp, hill, alpine, scale_f, hill_raw, alp_raw, r9, r8, r7, r5);\n" \
+	"        acc += wk * hk;\n" \
+	"    }\n" \
+	"    return max(acc * coast, 0.0);\n" \
 	"}\n" \
 	"float nd_gpu_room_hyp_coarse(uint seed, int rx_unwrapped, int ry_unwrapped, float fw) {\n" \
 	"    int rx = ((rx_unwrapped + 32768) & 65535) - 32768;\n" \
@@ -233,7 +356,7 @@
 	"    float c = wrap_y ? mix(c_y0, c_y1, ty) : c_y0;\n" \
 	"    c -= float(uSeaOffsetQ12_4);\n" \
 	"    float base_hyp = nd_gpu_bimodal_hypsometry(c * 0.0625);\n" \
-	"    return min(base_hyp + nd_gpu_orogeny_wu(seed, rx, ry, base_hyp, fw), 6400.0);\n" \
+	"    return min(base_hyp + nd_gpu_orogeny_wu(seed, rx, ry, base_hyp, fw), max(uPlanetMetric.y, 6400.0));\n" \
 	"}\n" \
 	"vec3 nd_gpu_eval_canonical_field(vec2 worldPos, float fw, float texelSpan, float texZ, vec2 texGrad, out float out_fine_elev) {\n" \
 	"    uint seed = 0x48454947u ^ (uint(uWorldId) * 0x9E3779B1u);\n" \

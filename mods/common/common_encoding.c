@@ -1,6 +1,5 @@
 #include <ctype.h>
 #include <errno.h>
-#include <iconv.h>
 #include <stdio.h>
 #include <string.h>
 

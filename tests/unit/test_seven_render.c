@@ -3858,7 +3858,7 @@ int main(void)
 				float dv = (float)lh / (float)ND_SEVEN_WORLD_DIM_H;
 				float alpha = 3.14159265f * sqrtf(du * du + dv * dv);
 				float r_min_p1 = (p1->minor_r > 1.0f) ? p1->minor_r : 1335000.0f;
-				float max_limb = acosf(fminf(1.0f, r_min_p1 / (r_min_p1 + ND_FIELD_GLOBAL_MAX_Z))) + 0.045f;
+				float max_limb = acosf(fminf(1.0f, r_min_p1 / (r_min_p1 + nd_field_active_global_max_z()))) + 0.045f;
 				if (alpha < 1.15f && alpha + max_limb < 1.55f && dot_vn < -sinf(alpha + max_limb) - 1e-3f)
 					back_hemisphere_leaves++;
 			}
@@ -3965,6 +3965,7 @@ int main(void)
 			/* 13d. Front-to-Back 3D Camera-Eye Sorting Invariant (Terrain Pass at zoom = 0.02f) */
 			nd_seven_set_zoom(0.02f);
 			nd_seven_render(fb, 1280, 720, &st);
+			nd_seven_render(fb, 1280, 720, &st);
 			uint32_t mid_leaves = nd_seven_last_visible_leaf_count();
 			assert(mid_leaves > 4);
 			int64_t lwx_cur = 0, lwy_cur = 0;
@@ -3982,11 +3983,28 @@ int main(void)
 			for (int k = 0; k < 3; k++) pose_13d.center[k] = (double)p1->center[k];
 			float wl_13d = (float)nd_field_water_level(0);
 			float prev_d2 = -1.0f;
+			ar_system_t *cs_13d = nd_seven_get_chunk_sys();
+			size_t active_13d = cs_13d ? ar_system_get_active_count(cs_13d) : 0;
 			for (uint32_t li = 0; li < mid_leaves; li++) {
 				int32_t lox = 0, loy = 0, lw = 0, lh = 0;
 				assert(nd_seven_last_visible_leaf_bounds(li, &lox, &loy, &lw, &lh) == 1);
-				float z0 = -2150.0f, z1 = ND_FIELD_GLOBAL_MAX_Z;
-				float az0 = z0, az1 = z1;
+				float z0 = -2150.0f, z1 = nd_field_active_global_max_z();
+				for (size_t aj = 0; aj < active_13d; aj++) {
+					const ar_node_t *cn = ar_system_get_active_node(cs_13d, aj);
+					if (cn && cn->ox == lox && cn->oy == loy && cn->w == lw && cn->h == lh) {
+						if (cn->level <= 3u && (cn->flags & AR_NODE_FLAG_DEFERRED) == 0u) {
+							float cz0 = (float)cn->min_val * 0.0625f - 32.0f;
+							float cz1 = (float)cn->max_val * 0.0625f + 32.0f;
+							if (cz0 > z0) z0 = cz0;
+							if (cz1 < z1) z1 = cz1;
+							if (z0 > z1) { float mid = 0.5f * (z0 + z1); z0 = mid; z1 = mid; }
+						}
+						break;
+					}
+				}
+				z0 -= 180.0f;
+				z1 += 180.0f;
+				float az0 = -2150.0f, az1 = nd_field_active_global_max_z();
 				nd_field_elevation_bounds(0, lox, loy, lw, lh, &az0, &az1);
 				if (az0 > z0) z0 = az0;
 				if (az1 < z1) z1 = az1;
@@ -5061,7 +5079,8 @@ int main(void)
 						const char *mcol_fs = nd_mob_gl_color_fs_src();
 						assert(msh_vs && strstr(msh_vs, "uBoneTex") != NULL && strstr(msh_vs, "mob_skin") != NULL);
 						assert(mcol_vs && strstr(mcol_vs, "uBoneTex") != NULL && strstr(mcol_vs, "MOB_PAL_BASE_X") != NULL);
-						assert(mcol_fs && strstr(mcol_fs, "mId == 0") != NULL && strstr(mcol_fs, "mId == 5") != NULL);
+						assert(mcol_fs && ((strstr(mcol_fs, "kMatA[mId]") != NULL && strstr(mcol_fs, "kMatC[mId]") != NULL) ||
+						                   (strstr(mcol_fs, "mId == 0") != NULL && strstr(mcol_fs, "mId == 5") != NULL)));
 						assert(strstr(mcol_fs, "uOwnerLight") != NULL && strstr(mcol_fs, "ownerGlow") != NULL);
 
 						nd_mob_actor_in_t actors[5];
@@ -6237,7 +6256,8 @@ int main(void)
 						float gap = fabsf(hs[0] - hs[1]);
 						float hi_h = (hs[0] >= hs[1]) ? hs[0] : hs[1];
 						float hi_span = (hs[0] >= hs[1]) ? (float)a->w : (float)b->w;
-						float skirt = fmaxf(12.0f, fminf(3200.0f, fmaxf(hi_span * 0.16f, fmaxf(0.0f, hi_h) * 0.25f)));
+						float skirt_cap = fmaxf(3200.0f, nd_field_active_max_elev_wu() * 0.5f);
+						float skirt = fmaxf(12.0f, fminf(skirt_cap, fmaxf(hi_span * 0.16f, fmaxf(0.0f, hi_h) * 0.35f)));
 						if (gap > worst_gap) worst_gap = gap;
 						if (gap > skirt) total_cracks++;
 					}

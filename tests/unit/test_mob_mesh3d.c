@@ -25,7 +25,7 @@ assert_watertight_and_outward(const mob_mesh3d_t *mesh)
 		assert(v->bone_idx < mesh->skel.count);
 		assert(v->bone_idx2 < mesh->skel.count);
 		assert(v->mat_id < MOB_MAT_COUNT);
-		assert(v->pal_slot < MOB_PAL_COUNT);
+		assert(v->pal_slot < MOB_PAL_COUNT || v->pal_slot >= MOB_PAL_VENTRAL_BASE);
 		assert(v->bone_weight > 0.0f && v->bone_weight <= 1.0f);
 	}
 
@@ -330,6 +330,33 @@ test_mobs_dsv_piscine_and_avian(void)
 		}
 		assert(perch_span_x < fly_span_x * 0.72f);
 	}
+	/* Verify piscine & avian meshes are 100% live-palette-driven (VBO identical across palettes) */
+	{
+		static mob_vtx3d_t vtx_a[2048], vtx_b[2048];
+		static uint16_t idx_a[8192], idx_b[8192];
+		mob_mesh3d_t ma = { .vtx = vtx_a, .idx = idx_a, .max_vtx = 2048, .max_idx = 8192 };
+		mob_mesh3d_t mb = { .vtx = vtx_b, .idx = idx_b, .max_vtx = 2048, .max_idx = 8192 };
+		const char *pair[2] = { "salmon", "parrot" };
+		for (int k = 0; k < 2; k++) {
+			creature_dna_t d0, d1;
+			creature_state_t s0;
+			assert(creature_dna_from_name(pair[k], 500u + (uint32_t)k, &d0, &s0) == 1);
+			d1 = d0;
+			d1.palette[0] = 0x112233FFu;
+			d1.palette[1] = 0x445566FFu;
+			d1.palette[2] = 0x778899FFu;
+			d1.palette[3] = 0xAABBCCFFu;
+			mob_build_mesh(&d0, &s0, &ma);
+			mob_build_mesh(&d1, &s0, &mb);
+			assert(ma.vtx_count == mb.vtx_count && ma.idx_count == mb.idx_count);
+			assert(memcmp(ma.vtx, mb.vtx, ma.vtx_count * sizeof(mob_vtx3d_t)) == 0);
+			uint32_t ventral_n = 0;
+			for (uint32_t i = 0; i < ma.vtx_count; i++) {
+				if (ma.vtx[i].pal_slot >= MOB_PAL_VENTRAL_BASE) ventral_n++;
+			}
+			assert(ventral_n > 20);
+		}
+	}
 	printf("test_avian_all_6_species: PASS (watertight + flight flap & perched fold verified)\n");
 }
 
@@ -370,7 +397,8 @@ test_biped_human_and_dna_resolution(void)
 	assert(pal_used[MOB_PAL_SECONDARY] > 20);
 	assert(pal_used[MOB_PAL_ACCENT] > 40);
 
-	/* 2. Armored + cloaked + bearded + helmeted variant: METAL material present & watertight */
+	/* 2. Armored + cloaked + bearded + helmeted variant: METAL material present, watertight,
+	 *    and vertical capsule lateral basis keeps chest & cloak wider along X than deep along Y */
 	creature_dna_t knight = h0;
 	knight.arch.biped.garment_top    = 2; /* armor cuirass */
 	knight.arch.biped.garment_bottom = 1; /* robe/skirt */
@@ -380,19 +408,32 @@ test_biped_human_and_dna_resolution(void)
 	mob_build_mesh(&knight, &st, &mesh);
 	assert_watertight_and_outward(&mesh);
 	uint32_t metal_n = 0;
+	float ch_x0 = 1e9f, ch_x1 = -1e9f, ch_y0 = 1e9f, ch_y1 = -1e9f;
+	float cl_x0 = 1e9f, cl_x1 = -1e9f, cl_y0 = 1e9f, cl_y1 = -1e9f;
 	for (uint32_t i = 0; i < mesh.vtx_count; i++) {
-		if (mesh.vtx[i].mat_id == MOB_MAT_METAL) metal_n++;
+		const mob_vtx3d_t *v = &mesh.vtx[i];
+		if (v->mat_id == MOB_MAT_METAL) metal_n++;
+		if (v->bone_idx == MOB_BIPED_CHEST) {
+			if (v->x < ch_x0) ch_x0 = v->x;
+			if (v->x > ch_x1) ch_x1 = v->x;
+			if (v->y < ch_y0) ch_y0 = v->y;
+			if (v->y > ch_y1) ch_y1 = v->y;
+		} else if (v->bone_idx == MOB_BIPED_CLOAK) {
+			if (v->x < cl_x0) cl_x0 = v->x;
+			if (v->x > cl_x1) cl_x1 = v->x;
+			if (v->y < cl_y0) cl_y0 = v->y;
+			if (v->y > cl_y1) cl_y1 = v->y;
+		}
 	}
 	assert(metal_n > 60);
+	assert((ch_x1 - ch_x0) > (ch_y1 - ch_y0) * 1.25f);
+	assert((cl_x1 - cl_x0) > (cl_y1 - cl_y0) * 2.00f);
 
-	/* 3. Structural geom_hash: invariant to palette & seed, sensitive to geometry changes */
-	creature_dna_t h1 = h0;
-	h1.seed = 9999u;
-	h1.palette[0] = 0xFF332211u;
-	h1.palette[1] = 0xFF11AA44u;
-	h1.palette[2] = 0xFF2244EEu;
-	h1.palette[3] = 0xFFCC9922u;
+	/* 3. Structural geom_hash: invariant to palette & seed, sensitive to geometry changes;
+	 *    different non-zero seeds produce diverse human palettes automatically */
+	creature_dna_t h1 = creature_dna_human_default(9999u);
 	assert(creature_dna_geom_hash(&h0, &st) == creature_dna_geom_hash(&h1, &st));
+	assert(h0.palette[0] != h1.palette[0] || h0.palette[2] != h1.palette[2]);
 	assert(creature_dna_geom_hash(&h0, &st) != creature_dna_geom_hash(&knight, &st));
 
 	/* 4. Non-fragile entity resolution: player named "Sparrow" must NOT turn into a bird */

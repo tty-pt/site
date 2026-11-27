@@ -9,5 +9,5 @@ _bin="$UNIT_TMPDIR/test_seven_gl_ffi"
 # shellcheck disable=SC2086
 "$UNIT_GCC" -Wall -Wextra -Werror -O1 -DLAM_WEBGL_NATIVE $ND_UX_INCLUDES \
 	-o "$_bin" "$REPO_ROOT/tests/unit/test_seven_gl_ffi.c" "$UNIT_ARCHIVE" \
-	$UNIT_EXT_LDFLAGS -lxxhash -lm -lpthread
+	$UNIT_EXT_LDFLAGS -lxylem -lstele -lxxhash -lm -lpthread
 LD_LIBRARY_PATH="$UNIT_LD_LIBRARY_PATH" "$_bin"

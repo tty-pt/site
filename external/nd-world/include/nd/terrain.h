@@ -49,14 +49,14 @@ static inline int16_t
 nd_terrain_height_fine(int32_t wx, int32_t wy, uint16_t world)
 {
 	nd_field_sample_t s = nd_field_sample(world, 3, wx, wy);
-	return s.elevation;
+	return nd_field_clamp_i16(s.elevation);
 }
 
 /* Surface elevation H(x, y, world) at integer room coordinates */
 static inline int16_t
 nd_terrain_height(int16_t x, int16_t y, uint16_t world)
 {
-	return nd_field_room_hyp_coarse(world, x, y);
+	return nd_field_clamp_i16(nd_field_room_hyp_coarse(world, x, y));
 }
 
 /* Directional surface slope normal & sunlight hillshading */
@@ -86,10 +86,11 @@ nd_terrain_eval(uint16_t world, int32_t wx, int32_t wy, uint32_t anim)
 	(void)anim;
 	nd_field_sample_t s = nd_field_sample(world, 3, wx, wy);
 	nd_terrain_query_t q;
-	q.elevation   = s.elevation;
-	q.water_level = s.water_level;
-	q.depth       = (int16_t)(s.water_level - s.elevation);
-	q.is_water    = (uint8_t)(q.depth > 0);
+	int32_t depth32 = (int32_t)s.water_level - s.elevation;
+	q.elevation   = nd_field_clamp_i16(s.elevation);
+	q.water_level = nd_field_clamp_i16(s.water_level);
+	q.depth       = nd_field_clamp_i16(depth32);
+	q.is_water    = (uint8_t)(depth32 > 0);
 
 	int16_t h_e = nd_terrain_height_fine(wx + 2, wy, world);
 	int16_t h_w = nd_terrain_height_fine(wx - 2, wy, world);
@@ -133,9 +134,9 @@ nd_terrain_cavity(int32_t x, int32_t y, int32_t z, uint16_t world)
 }
 
 static inline int
-nd_terrain_is_solid(int16_t x, int16_t y, int16_t z, uint16_t world)
+nd_terrain_is_solid(int16_t x, int16_t y, int32_t z, uint16_t world)
 {
-	int16_t h = nd_terrain_height(x, y, world);
+	int32_t h = (int32_t)nd_terrain_height(x, y, world);
 	if (z > h)
 		return 0; /* Open air above the surface */
 	if (z == h)
@@ -143,48 +144,47 @@ nd_terrain_is_solid(int16_t x, int16_t y, int16_t z, uint16_t world)
 
 	int cavity = nd_terrain_cavity((int32_t)x * ND_TERRAIN_SUB,
 	                               (int32_t)y * ND_TERRAIN_SUB,
-	                               (int32_t)z * ND_TERRAIN_SUB, world);
+	                               z * ND_TERRAIN_SUB, world);
 	return cavity >= ND_TERRAIN_CAVE_THRESHOLD;
 }
 
 static inline int
-nd_terrain_is_cave(int16_t x, int16_t y, int16_t z, uint16_t world)
+nd_terrain_is_cave(int16_t x, int16_t y, int32_t z, uint16_t world)
 {
-	int16_t h = nd_terrain_height(x, y, world);
+	int32_t h = (int32_t)nd_terrain_height(x, y, world);
 	if (z >= h)
 		return 0;
 
 	int cavity = nd_terrain_cavity((int32_t)x * ND_TERRAIN_SUB,
 	                               (int32_t)y * ND_TERRAIN_SUB,
-	                               (int32_t)z * ND_TERRAIN_SUB, world);
+	                               z * ND_TERRAIN_SUB, world);
 	return cavity < ND_TERRAIN_CAVE_THRESHOLD;
 }
 
 static inline int
 nd_terrain_is_entrance(int16_t x, int16_t y, uint16_t world)
 {
-	int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
-	int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
-	nd_field_sample_t s = nd_field_sample(world, 0, wx, wy);
-	if (s.elevation <= s.water_level)
+	int32_t h = (int32_t)nd_terrain_height(x, y, world);
+	if (h <= (int32_t)nd_terrain_water_level(world))
 		return 0;
 
-	return nd_terrain_is_cave(x, y, s.elevation - 1, world);
+	return nd_terrain_is_cave(x, y, h - 1, world);
 }
 
 /* --- Climate & Biome Resolution ------------------------------------------ */
 
 static inline uint8_t
-nd_terrain_biome(int16_t x, int16_t y, int16_t z, uint16_t world)
+nd_terrain_biome(int16_t x, int16_t y, int32_t z, uint16_t world)
 {
 	int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
 	int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
 	nd_field_sample_t s = nd_field_sample(world, 0, wx, wy);
+	int32_t h = (int32_t)nd_field_clamp_i16(s.elevation);
 
-	if (z <= s.elevation && s.elevation < s.water_level)
+	if (z <= h && s.elevation < s.water_level)
 		return BIOME_WATER;
 
-	if (z < s.elevation && nd_terrain_is_cave(x, y, z, world)) {
+	if (z < h && nd_terrain_is_cave(x, y, z, world)) {
 		if (z < -60) return BIOME_VOLCANIC;
 		return BIOME_SHRUBLAND;
 	}
@@ -207,37 +207,38 @@ typedef struct {
 } nd_terrain_cell_t;
 
 static inline nd_terrain_cell_t
-nd_terrain_query(int16_t x, int16_t y, int16_t z, uint16_t world)
+nd_terrain_query(int16_t x, int16_t y, int32_t z, uint16_t world)
 {
 	nd_terrain_cell_t cell;
 	int32_t wx = (int32_t)x * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
 	int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
 	nd_field_sample_t s = nd_field_sample(world, 0, wx, wy);
 
-	cell.elevation = s.elevation;
-	cell.water_level = s.water_level;
+	cell.elevation = nd_field_clamp_i16(s.elevation);
+	cell.water_level = nd_field_clamp_i16(s.water_level);
 	cell.biome = s.bio;
 	nd_terrain_slope(x, y, world, &cell.slope_x, &cell.slope_y);
 
-	if (z > s.elevation) {
+	int32_t h = (int32_t)cell.elevation;
+	if (z > h) {
 		cell.is_solid = 0;
 		cell.is_cave = 0;
-	} else if (z == s.elevation) {
+	} else if (z == h) {
 		cell.is_solid = 1;
 		cell.is_cave = 0;
 	} else {
 		int cavity = nd_terrain_cavity((int32_t)x * ND_TERRAIN_SUB,
 		                               (int32_t)y * ND_TERRAIN_SUB,
-		                               (int32_t)z * ND_TERRAIN_SUB, world);
+		                               z * ND_TERRAIN_SUB, world);
 		cell.is_cave = (cavity < ND_TERRAIN_CAVE_THRESHOLD);
 		cell.is_solid = !cell.is_cave;
 	}
 
 	cell.is_entrance = 0;
-	if (s.elevation > s.water_level) {
+	if (h > (int32_t)cell.water_level) {
 		int cavity = nd_terrain_cavity((int32_t)x * ND_TERRAIN_SUB,
 		                               (int32_t)y * ND_TERRAIN_SUB,
-		                               (int32_t)(s.elevation - 1) * ND_TERRAIN_SUB, world);
+		                               (h - 1) * ND_TERRAIN_SUB, world);
 		cell.is_entrance = (cavity < ND_TERRAIN_CAVE_THRESHOLD);
 	}
 	cell.is_water = (uint8_t)(cell.elevation < cell.water_level && z <= cell.water_level);

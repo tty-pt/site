@@ -70,10 +70,10 @@ noise_full(size_t i, point_t s, ucoord_t obits)
 		r.tmp = fs.temp;
 		r.rn = fs.rain;
 		r.bio_idx = fs.bio;
-		r.elevation = fs.elevation;
-		r.water_level = fs.water_level;
+		r.elevation = nd_field_clamp_i16(fs.elevation);
+		r.water_level = nd_field_clamp_i16(fs.water_level);
 		r.is_water = fs.is_water;
-		r.water_depth = fs.depth;
+		r.water_depth = nd_field_clamp_i16(fs.depth);
 
 		uint32_t w = 0, _he = 0, _tm = 0, _cl = 0;
 		nd_field_normalize_noise(&fs, (uint16_t)obits, rx, ry, &_he, &w, &_tm, &_cl);

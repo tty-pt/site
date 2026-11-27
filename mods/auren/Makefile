@@ -1,4 +1,4 @@
-EXTRA_CFLAGS += -I../common -I/usr/include/json-c
+EXTRA_CFLAGS += -I../common
 EXTRA_LDLIBS += -lbud -ljson-c -lpthread
 SRC = auren.c ux/auren_ui.cx
 

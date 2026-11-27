@@ -1,4 +1,4 @@
-EXTRA_CFLAGS += -I../common -I/usr/include/json-c
+EXTRA_CFLAGS += -I../common
 EXTRA_LDLIBS += -lbud -ljson-c -lpthread
 
 SRC = chat.c ux/chat_ui.cx

@@ -127,16 +127,22 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 	{
 		int fine_rel = (int)fs.fine_elev;
 		int elev_rel = ((int)fs.elevation_q12_4 - ((int)fs.water_level << 4)) >> 4;
+		int max_e = (int)nd_field_active_max_elev_wu();
 		if (elev_rel < -2000) elev_rel = -2000;
-		if (elev_rel > ND_FIELD_MAX_ELEV_WU) elev_rel = ND_FIELD_MAX_ELEV_WU;
+		if (elev_rel > max_e) elev_rel = max_e;
 
-		/* Natural alpine snowline transition on mountain ranges (> 1500..2400 wu):
-		 * Lowlands, plains, and foothills (< 1500 wu) preserve their authentic biome color in
-		 * uSubstrateTex, while high cordilleras and summits (> 1500..2400+ wu) are capped in white snow. */
+		/* Metric alpine snowline transition scaled to active planet_scale (default 54,000 wu = 1,200 m at b=16):
+		 * Lowlands, plains, and foothills preserve authentic biome color in uSubstrateTex,
+		 * while high cordilleras and summits above snowline_base_wu transition to alpine snow. */
+		int snow_lo = (int)nd_field_get_planet_scale().snowline_base_wu;
+		if (snow_lo < 1500) snow_lo = 1500;
+		int snow_span = snow_lo / 3;
+		if (snow_span < 900) snow_span = 900;
+		int snow_hi = snow_lo + snow_span;
 		int snow_w = 0;
-		if (elev_rel > 1500 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
+		if (elev_rel > snow_lo && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
 			uint32_t c_snow = 0xFFFFFAF6u; /* Pure alpine snow RGB(246, 250, 255) */
-			snow_w = (elev_rel <= 2400) ? ((elev_rel - 1500) * 255 / 900) : 255;
+			snow_w = (elev_rel <= snow_hi) ? ((elev_rel - snow_lo) * 255 / snow_span) : 255;
 			col = macro_blend_rgb(col, c_snow, snow_w);
 		}
 
@@ -538,7 +544,7 @@ static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float
 			az1 = ent->az1;
 		} else {
 			az0 = -2150.0f;
-			az1 = ND_FIELD_GLOBAL_MAX_Z;
+			az1 = nd_field_active_global_max_z();
 			nd_field_elevation_bounds(ctx->world, iox, ioy, iw, ih, &az0, &az1);
 			ent->ox = iox;
 			ent->oy = ioy;
@@ -1036,7 +1042,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	float r_planet = pdef->minor_r;
 	/* Global analytical Z ceiling tightened per patch by nd_field_elevation_bounds & cached node bounds */
 	float z_min_cull = -2150.0f;
-	float z_max_cull =  ND_FIELD_GLOBAL_MAX_Z;
+	float z_max_cull =  nd_field_active_global_max_z();
 	float cull_margin = 180.0f;
 	s_frame_sag_radius = r_planet;
 
@@ -2896,7 +2902,7 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					uint32_t me_seed = (st && st->me) ? st->me : 42u;
 					nd_mob_actor_in_t *ma = &s_mob_actors[mob_actor_count++];
 					memset(ma, 0, sizeof(*ma));
-					ma->ref = 0;
+					ma->ref = (st && st->me) ? (uint64_t)st->me : 0ull;
 					if (!creature_dna_resolve_entity(me_ent ? me_ent->art : NULL,
 					                                 me_ent ? me_ent->name : NULL,
 					                                 1, me_seed, &ma->dna, &ma->state)) {

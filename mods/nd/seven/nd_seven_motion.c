@@ -194,8 +194,8 @@ void nd_seven_fill_player_anim(float terr_gx, float terr_gy, mob_anim_params_t *
 	out->idle_sec     = s_idle_sec;
 	out->interact_t   = s_interact_t;
 	out->in_water     = s_lamb_in_water;
-	out->action_id    = MOB_ACT_NONE;
-	out->action_phase = 0.0f;
+	out->action_id    = (s_interact_t > 0.001f) ? MOB_ACT_USE : MOB_ACT_NONE;
+	out->action_phase = (s_interact_t > 0.001f) ? (1.0f - s_interact_t) : 0.0f;
 	out->look_yaw     = 0.0f;
 	out->look_pitch   = 0.0f;
 }

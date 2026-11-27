@@ -266,7 +266,7 @@ int main(void)
 		int32_t orig_wx = 80;
 		int32_t orig_wy = 64;
 		nd_field_sample_t fs_orig = nd_field_sample(0, 0, orig_wx, orig_wy);
-		assert(b_orig.elevation == fs_orig.elevation);
+		assert(b_orig.elevation == nd_field_clamp_i16(fs_orig.elevation));
 		assert(b_orig.water_level == fs_orig.water_level);
 		assert(b_orig.is_water == fs_orig.is_water);
 
@@ -285,7 +285,7 @@ int main(void)
 					int32_t wy = -(int32_t)y * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
 					nd_field_sample_t fs = nd_field_sample((uint16_t)w, 0, wx, wy);
 
-					int diff_h = abs((int)b.elevation - (int)fs.elevation);
+					int diff_h = abs((int)b.elevation - (int)nd_field_clamp_i16(fs.elevation));
 					assert(diff_h <= 18);
 					assert(b.water_level == fs.water_level);
 					compared_rooms++;

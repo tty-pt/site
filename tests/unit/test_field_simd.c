@@ -225,7 +225,7 @@ int main(void)
 	assert(plains_cnt * 100 >= land_cnt * 35 && plains_cnt * 100 <= land_cnt * 70);
 	assert(mtn_cnt * 100 >= land_cnt * 8);
 	assert(alpine_cnt * 100 >= land_cnt * 2);
-	assert(towering_cnt >= 5 && max_elev >= 3500);
+	assert(towering_cnt >= 5 && max_elev >= 45000 && max_elev <= 81000);
 	assert(max_slope_dz >= 160); /* >= 45 deg alpine flanks over 160 wu room span */
 
 	/* World 0 spawn valley [-24..24] keeps zero tectonic mountain spires on top of spawn,
@@ -341,6 +341,113 @@ int main(void)
 		assert(nd_field_room_hyp_coarse(0, 123, -456) == h16_ref);
 
 		printf("PASS: Phase 0 metric scale (45 wu/m), Q27.4 headroom (400k wu), and periodic wrap (b=16,18,20,22,23)\n");
+	}
+
+	/* 7. Phase 2: Geological Province Synthesis & Metric Hypsometry (10 Landform Archetypes) */
+	{
+		assert(sizeof(nd_geology_t) == 8);
+
+		int prov_counts[ND_GEO_PROVINCE_COUNT] = {0};
+		int prov_core_cnt[ND_GEO_PROVINCE_COUNT] = {0};
+		int64_t prov_elev_sum[ND_GEO_PROVINCE_COUNT] = {0};
+		int32_t prov_elev_max[ND_GEO_PROVINCE_COUNT] = {0};
+		int prov_land_cnt[ND_GEO_PROVINCE_COUNT] = {0};
+		int64_t prov_flat_sum[ND_GEO_PROVINCE_COUNT] = {0};
+		int64_t prov_strata_sum[ND_GEO_PROVINCE_COUNT] = {0};
+
+		for (int gy = 0; gy < 64; gy++) {
+			for (int gx = 0; gx < 64; gx++) {
+				int32_t rx = -32768 + gx * 1024 + 128;
+				int32_t ry = -32768 + gy * 1024 + 128;
+				nd_geology_t g = nd_field_geology(0, rx, ry);
+				assert(g.province < ND_GEO_PROVINCE_COUNT);
+				assert(g.secondary < ND_GEO_PROVINCE_COUNT);
+				prov_counts[g.province]++;
+				if (g.blend_q8 < 64) {
+					prov_core_cnt[g.province]++;
+					prov_flat_sum[g.province] += (int64_t)g.basin_flatness;
+					prov_strata_sum[g.province] += (int64_t)g.strata_hardness;
+				}
+
+				int32_t h = nd_field_room_hyp_coarse(0, rx, ry);
+				if (h > 6) {
+					prov_land_cnt[g.province]++;
+					prov_elev_sum[g.province] += h;
+					if (h > prov_elev_max[g.province])
+						prov_elev_max[g.province] = h;
+				}
+			}
+		}
+
+		/* All 10 geological archetypes must occur naturally across the planet */
+		for (int p = 0; p < ND_GEO_PROVINCE_COUNT; p++) {
+			assert(prov_counts[p] >= 150);
+			assert(prov_core_cnt[p] >= 20);
+			assert(prov_land_cnt[p] >= 20);
+		}
+
+		/* Distinct geomorphic signatures on province interiors:
+		 *  - Alluvial plains are much flatter than alpine cordilleras
+		 *  - Canyon mesas have harder sedimentary strata than alluvial plains
+		 *  - Alpine cordilleras build significantly higher peaks than alluvial plains */
+		assert(prov_flat_sum[ND_GEO_ALLUVIAL_PLAIN] / prov_core_cnt[ND_GEO_ALLUVIAL_PLAIN] >
+		       prov_flat_sum[ND_GEO_ALPINE_CORDILLERA] / prov_core_cnt[ND_GEO_ALPINE_CORDILLERA] + 150);
+		assert(prov_strata_sum[ND_GEO_CANYON_MESA] / prov_core_cnt[ND_GEO_CANYON_MESA] >
+		       prov_strata_sum[ND_GEO_ALLUVIAL_PLAIN] / prov_core_cnt[ND_GEO_ALLUVIAL_PLAIN] + 150);
+		assert(prov_elev_max[ND_GEO_ALPINE_CORDILLERA] > prov_elev_max[ND_GEO_ALLUVIAL_PLAIN] * 2);
+
+		/* Exact periodic torus wrap of nd_field_geology() across b = 16, 18, 20 */
+		const uint8_t geo_bits[] = { 16u, 18u, 20u };
+		for (size_t bi = 0; bi < sizeof(geo_bits) / sizeof(geo_bits[0]); bi++) {
+			uint8_t b = geo_bits[bi];
+			int32_t span = (int32_t)(1u << b);
+			nd_field_set_planet_bits(b);
+			int32_t coords[4][2] = {
+				{ 0, 0 }, { 1234, -5678 }, { (span >> 1) - 1, -(span >> 1) + 7 }, { -9999, 17777 }
+			};
+			for (int k = 0; k < 4; k++) {
+				int32_t rx = coords[k][0], ry = coords[k][1];
+				nd_geology_t g0  = nd_field_geology(0, rx, ry);
+				nd_geology_t gx  = nd_field_geology(0, rx + span, ry);
+				nd_geology_t gy  = nd_field_geology(0, rx, ry + span);
+				nd_geology_t gxy = nd_field_geology(0, rx - span, ry - span);
+				assert(memcmp(&g0, &gx, sizeof(g0)) == 0);
+				assert(memcmp(&g0, &gy, sizeof(g0)) == 0);
+				assert(memcmp(&g0, &gxy, sizeof(g0)) == 0);
+			}
+		}
+
+		/* Metric summit scaling law across planet_bits = 16, 18, 20, 22 */
+		const uint8_t scale_bits[4] = { 16u, 18u, 20u, 22u };
+		int32_t peak_by_b[4] = {0};
+		for (int bi = 0; bi < 4; bi++) {
+			uint8_t b = scale_bits[bi];
+			nd_field_set_planet_bits(b);
+			nd_planet_scale_t ps = nd_field_get_planet_scale();
+			int32_t pk = 0;
+			uint32_t st_rng = 0xCAFEBABEu ^ ((uint32_t)b * 0x9E3779B1u);
+			uint32_t mask = (1u << b) - 1u;
+			int32_t half = (int32_t)(1u << (b - 1u));
+			for (int it = 0; it < 4096; it++) {
+				st_rng ^= st_rng << 13; st_rng ^= st_rng >> 17; st_rng ^= st_rng << 5;
+				int32_t rx = (int32_t)(st_rng & mask) - half;
+				st_rng ^= st_rng << 13; st_rng ^= st_rng >> 17; st_rng ^= st_rng << 5;
+				int32_t ry = (int32_t)(st_rng & mask) - half;
+				int32_t h = nd_field_room_hyp_coarse(0, rx, ry);
+				assert(h <= ps.max_elev_wu);
+				if (h > pk) pk = h;
+			}
+			peak_by_b[bi] = pk;
+		}
+		nd_field_set_planet_bits(16);
+
+		assert(peak_by_b[0] >= 45000 && peak_by_b[0] <= 81000);
+		assert(peak_by_b[1] > peak_by_b[0] && peak_by_b[1] >= 100000);
+		assert(peak_by_b[2] > peak_by_b[1] && peak_by_b[2] >= 140000);
+		assert(peak_by_b[3] > peak_by_b[2] && peak_by_b[3] >= 200000);
+
+		printf("PASS: Phase 2 10-archetype geology, periodic wrap, and metric summits (b16=%d b18=%d b20=%d b22=%d wu)\n",
+		       peak_by_b[0], peak_by_b[1], peak_by_b[2], peak_by_b[3]);
 	}
 
 	printf("=== ALL ND FIELD SIMD TESTS PASSED ===\n");
