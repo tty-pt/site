@@ -2563,11 +2563,12 @@ int main(void)
 		float avg_clear_span = sum_clear_span / (float)clear_rooms;
 		float avg_rugged_span = sum_rugged_span / (float)rugged_rooms;
 
-		/* Clear plains remain gently level while rugged zones have 4x+ higher average intra-room 3D relief
-		 * and peak single-room 3D vertical spans exceeding 25 world units */
-		assert(avg_clear_span <= 8.0f);
-		assert(avg_rugged_span >= avg_clear_span * 3.5f);
-		assert(max_rugged_span >= 25.0f);
+		/* Clear plains remain gently rolling (< 5 deg across 640 wu L0 chunk) while rugged zones add
+		 * substantial intra-chunk 3D relief with peak single-chunk vertical spans exceeding 40 world units */
+		assert(avg_clear_span <= 60.0f);
+		assert(avg_rugged_span >= avg_clear_span * 1.35f);
+		assert(avg_rugged_span - avg_clear_span >= 15.0f);
+		assert(max_rugged_span >= 40.0f);
 
 		printf("PASS: non-stationary regional 3D relief verified (clear=%d rooms avg=%.1f, rolling=%d, rugged=%d rooms avg=%.1f max=%.1f world units)\n",
 		       clear_rooms, avg_clear_span, rolling_rooms, rugged_rooms, avg_rugged_span, max_rugged_span);
@@ -4161,15 +4162,6 @@ int main(void)
 				uint32_t bbs_detail_low = nd_seven_last_mid_billboard_count();
 				assert(bbs_detail_low > 0 && bbs_detail_low < bbs_detail_100);
 
-				/* Verify Low preset smoothly relaxes to native 1920x1080 scene + 0.67x clouds in orbit */
-				nd_seven_set_zoom(0.0001f);
-				nd_seven_render(fb, 1920, 1080, &st);
-				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
-				assert(st_w == 1920 && st_h == 1080);
-				assert(sc_w == 1920 && sc_h == 1080);
-				assert(cl_w == 1286 && cl_h == 724);
-				nd_seven_set_zoom(0.08f);
-
 				/* 3) Medium Preset (75% res sub-rect, 75% detail, non-compounding 0.42x->0.75x clouds + CSM) */
 				nd_seven_apply_quality_preset(ND_QUALITY_MEDIUM);
 				assert(nd_seven_get_quality_preset() == ND_QUALITY_MEDIUM);
@@ -4193,6 +4185,16 @@ int main(void)
 				assert(csm_act == true);
 				uint32_t bbs_detail_75 = nd_seven_last_mid_billboard_count();
 				assert(bbs_detail_75 > bbs_detail_low && bbs_detail_75 < bbs_detail_100);
+
+				/* Verify Low preset smoothly relaxes to native 1920x1080 scene + 0.67x clouds in orbit */
+				nd_seven_apply_quality_preset(ND_QUALITY_LOW);
+				nd_seven_set_zoom(0.0001f);
+				nd_seven_render(fb, 1920, 1080, &st);
+				nd_seven_gl_get_target_info(&st_w, &st_h, &sc_w, &sc_h, &sc_samples, &cl_w, &cl_h, &csm_act);
+				assert(st_w == 1920 && st_h == 1080);
+				assert(sc_w == 1920 && sc_h == 1080);
+				assert(cl_w == 1286 && cl_h == 724);
+				nd_seven_set_zoom(0.08f);
 
 				/* 4) Custom Settings: 25% resolution sub-rect, 200% scenery detail, Clouds Off, MSAA On */
 				nd_seven_set_res_scale(0.25f);
@@ -6220,8 +6222,8 @@ int main(void)
 					int ty = ((a->oy + a->h == b->oy) || (b->oy + b->h == a->oy)) &&
 					         (a->ox < b->ox + b->w && b->ox < a->ox + a->w);
 					if (!tx && !ty) continue;
-					int gq_a = (a->level == 0u || a->level >= 11u || dist >= 200000.0f) ? 48 : 24;
-					int gq_b = (b->level == 0u || b->level >= 11u || dist >= 200000.0f) ? 48 : 24;
+					int gq_a = (a->level == 0u || a->level >= 11u || dist >= 200000.0f || (a->max_val - a->min_val) >= 80 * 16) ? 48 : 24;
+					int gq_b = (b->level == 0u || b->level >= 11u || dist >= 200000.0f || (b->max_val - b->min_val) >= 80 * 16) ? 48 : 24;
 					float e0 = tx ? fmaxf((float)a->oy, (float)b->oy) : fmaxf((float)a->ox, (float)b->ox);
 					float e1 = tx ? fminf((float)(a->oy + a->h), (float)(b->oy + b->h))
 					              : fminf((float)(a->ox + a->w), (float)(b->ox + b->w));
@@ -6426,10 +6428,10 @@ int main(void)
 		nd_seven_gl_horizon_eval_cpu(near_r, NULL, sun_low, 0.0f, 0.0f, 500.0f, &vis, &sky);
 		assert(vis > 0.999f && sky > 0.999f);
 
-		/* 4. Synthetic 1,800 m (81,000 wu) mountain ridge across cardinal & diagonal sun azimuths */
-		const float ridge_h = 81000.0f;
+		/* 4. Synthetic 480 m (21,600 wu) mountain ridge across cardinal & diagonal sun azimuths */
+		const float ridge_h = 21600.0f;
 		const float elev_rad = 20.0f * (3.14159265358979323846f / 180.0f);
-		const float shad_len = ridge_h / tanf(elev_rad); /* ~222,545 wu */
+		const float shad_len = ridge_h / tanf(elev_rad); /* ~59,345 wu */
 		const float az_deg[6] = { 0.0f, 180.0f, 90.0f, 270.0f, 45.0f, 22.5f };
 		far_r->cx = 0.0f; far_r->cy = 0.0f; far_r->half_wu = 262144.0f;
 		far_r->base_z_wu = 0.5f * ridge_h; far_r->wu_per_meter = 45.0f; far_r->height_valid = 1u;
@@ -6458,7 +6460,7 @@ int main(void)
 			                             &v_in, &s_in);
 			assert(v_in < 0.05f);
 
-			/* Down-sun beyond shadow tip (1.10 * L, clamped inside 0.85 * half) */
+			/* Up-sun side is sunlit */
 			float v_out = 0.0f, s_out = 1.0f;
 			float d_up = 0.35f * shad_len;
 			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_a,
@@ -6471,13 +6473,13 @@ int main(void)
 			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_a, 0.0f, 0.0f, ridge_h, &v_top, NULL);
 			assert(v_top > 0.99f);
 		}
-		/* Beyond shadow tip along +X with steeper 45 deg sun (L = 81,000 wu) */
+		/* Beyond shadow tip along +X with steeper 45 deg sun (L = 21,600 wu) */
 		{
 			float sun_45[3] = { 0.70710678f, 0.0f, 0.70710678f };
 			nd_seven_gl_horizon_sweep_sun(far_r, sun_45, NULL);
 			float v_mid = 1.0f, v_far = 0.0f;
-			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_45, -40000.0f, 0.0f, 0.0f, &v_mid, NULL);
-			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_45, -110000.0f, 0.0f, 0.0f, &v_far, NULL);
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_45, -0.45f * ridge_h, 0.0f, 0.0f, &v_mid, NULL);
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_45, -1.50f * ridge_h, 0.0f, 0.0f, &v_far, NULL);
 			assert(v_mid < 0.05f && v_far > 0.95f);
 		}
 		/* Night sun disables cast shadow while preserving sky_vis */
@@ -6580,12 +6582,12 @@ int main(void)
 			assert(worst_fp16_err <= 2.5f);
 		}
 
-		/* 8. Real nd_field world sampling & relief shading on world_id = 0 alpine massif (-16000, -148000) */
+		/* 8. Real nd_field world sampling & relief shading on world_id = 0 alpine massif (767168, 537792) */
 		{
 			float sea = (float)nd_field_water_level(0);
-			nd_seven_gl_horizon_sample_field(far_r,  0, sea, -16000.0f, -148000.0f, 262144.0f);
+			nd_seven_gl_horizon_sample_field(far_r,  0, sea, 767168.0f, 537792.0f, 262144.0f);
 			nd_seven_gl_horizon_compute_sky_vis(far_r);
-			nd_seven_gl_horizon_sample_field(near_r, 0, sea, -16000.0f, -148000.0f, 32768.0f);
+			nd_seven_gl_horizon_sample_field(near_r, 0, sea, 767168.0f, 537792.0f, 32768.0f);
 			nd_seven_gl_horizon_compute_sky_vis(near_r);
 
 			float sun_alp[3] = { cosf(0.12f), 0.10f, sinf(0.12f) }; /* ~6.9 deg alpine golden hour */
@@ -6626,7 +6628,7 @@ int main(void)
 				assert(ref_r != NULL);
 				float h_rad = 49152.0f;
 				float t_wu = (2.0f * h_rad) / (float)(N - 1);
-				float cx0 = -16000.0f, cy0 = -148000.0f;
+				float cx0 = 767168.0f, cy0 = 537792.0f;
 				float cx1 = cx0 + 8.0f * t_wu;
 				float cy1 = cy0 - 8.0f * t_wu;
 				/* Prime near_r at (cx0, cy0), then scroll diagonally to (cx1, cy1) */
@@ -6750,6 +6752,126 @@ int main(void)
 		nd_seven_reset_cam();
 		printf("PASS: Zelda/MMO camera-relative WASD+HJKL, diagonal norm (%.1f vs %.1f), hop arc (%.2fm), recenter & damped zoom verified\n",
 		       diag_dist, card_dist, peak_hop);
+	}
+
+	/* === 360-Degree Yaw-Rotation Mountain Silhouette Stability === */
+	{
+		/* 1. Shader contract: isotropic distance morph invariant under camera yaw/pitch */
+		const char *vs_terr = nd_seven_gl_vs_terrain();
+		assert(vs_terr != NULL);
+		assert(strstr(vs_terr, "lodDist = sqrt(dot(worldPos, worldPos) + uCamDist * uCamDist)") != NULL);
+
+		typedef struct {
+			int32_t ox, oy, w, h;
+			uint8_t level;
+			float v5[5];
+		} yaw_snap_t;
+
+		yaw_snap_t *prev = (yaw_snap_t *)calloc(1024, sizeof(*prev));
+		yaw_snap_t *curr = (yaw_snap_t *)calloc(1024, sizeof(*curr));
+		assert(prev && curr);
+
+		nd_client_state_t yst;
+		memset(&yst, 0, sizeof(yst));
+		yst.map_data.width = 1;
+		yst.map_data.height = 1;
+		/* Alpine massif vantage (767168, 537792; 363m peaks) with distant ranges visible in all directions */
+		yst.map_data.pos[0] = (int16_t)(767168 / 160);
+		yst.map_data.pos[1] = (int16_t)(-537792 / 128);
+		nd_seven_set_detail_scale(1.0f);
+
+		const float yzooms[2] = { 0.25f, 0.05f };
+		int level_flips = 0;
+		int split_merge_flips = 0;
+		int overlap_pairs = 0;
+		float max_vdrift_wu = 0.0f;
+
+		for (int zi = 0; zi < 2; zi++) {
+			nd_seven_set_zoom(yzooms[zi]);
+
+			/* Warm full 360-deg ring in the 1024-node pool until converged (pops == 0, bud == 0) */
+			for (int pass = 0; pass < 8; pass++) {
+				uint32_t pass_pops = 0, pass_bud = 0;
+				for (int a = 0; a < 24; a++) {
+					nd_seven_set_cam_angles((float)(a * 15), 55.0f);
+					nd_seven_render(NULL, 1280, 720, &yst);
+					nd_seven_drain_async();
+					ar_metrics_t ym;
+					ar_system_get_metrics(nd_seven_get_chunk_sys(), &ym);
+					pass_pops += ym.frame_populates;
+					pass_bud += ym.frame_split_blocks_budget;
+				}
+				if (pass_pops == 0 && pass_bud == 0)
+					break;
+			}
+
+			size_t prev_n = 0;
+			for (int a = 0; a <= 24; a++) {
+				nd_seven_set_cam_angles((float)(a * 15), 55.0f);
+				nd_seven_render(NULL, 1280, 720, &yst);
+				nd_seven_drain_async();
+
+				ar_system_t *cs = nd_seven_get_chunk_sys();
+				size_t nl = ar_system_get_active_count(cs);
+				assert(nl >= 8 && nl <= 1024);
+
+				for (size_t i = 0; i < nl; i++) {
+					const ar_node_t *n = ar_system_get_active_node(cs, i);
+					uint32_t vd = n->vert_dim;
+					uint32_t gd = n->grid_dim;
+					uint32_t mid = gd / 2u;
+					curr[i].ox = n->ox;
+					curr[i].oy = n->oy;
+					curr[i].w  = n->w;
+					curr[i].h  = n->h;
+					curr[i].level = n->level;
+					curr[i].v5[0] = (float)n->values[0] * 0.0625f;
+					curr[i].v5[1] = (float)n->values[gd] * 0.0625f;
+					curr[i].v5[2] = (float)n->values[gd * vd] * 0.0625f;
+					curr[i].v5[3] = (float)n->values[gd * vd + gd] * 0.0625f;
+					curr[i].v5[4] = (float)n->values[mid * vd + mid] * 0.0625f;
+				}
+
+				if (a > 0) {
+					for (size_t i = 0; i < nl; i++) {
+						for (size_t j = 0; j < prev_n; j++) {
+							int ov = (curr[i].ox < prev[j].ox + prev[j].w &&
+							          prev[j].ox < curr[i].ox + curr[i].w &&
+							          curr[i].oy < prev[j].oy + prev[j].h &&
+							          prev[j].oy < curr[i].oy + curr[i].h);
+							if (!ov) continue;
+							overlap_pairs++;
+							if (curr[i].ox != prev[j].ox || curr[i].oy != prev[j].oy ||
+							    curr[i].w  != prev[j].w  || curr[i].h  != prev[j].h) {
+								split_merge_flips++;
+							} else {
+								if (curr[i].level != prev[j].level)
+									level_flips++;
+								for (int k = 0; k < 5; k++) {
+									float d = fabsf(curr[i].v5[k] - prev[j].v5[k]);
+									if (d > max_vdrift_wu) max_vdrift_wu = d;
+								}
+							}
+						}
+					}
+				}
+				memcpy(prev, curr, nl * sizeof(*curr));
+				prev_n = nl;
+			}
+		}
+
+		free(curr);
+		free(prev);
+		nd_seven_set_zoom(1.0f);
+		nd_seven_reset_cam();
+
+		assert(overlap_pairs >= 500);
+		assert(level_flips == 0);
+		assert(split_merge_flips == 0);
+		assert(max_vdrift_wu == 0.0f);
+
+		printf("PASS: 360-deg yaw-rotation silhouette stability (pairs=%d, level_flips=%d, split_merge=%d, max_vdrift=%.3f wu)\n",
+		       overlap_pairs, level_flips, split_merge_flips, max_vdrift_wu);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

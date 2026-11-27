@@ -16,6 +16,13 @@ static uint32_t next_u32(void)
 	return x;
 }
 
+static int cmp_i32_asc(const void *a, const void *b)
+{
+	int32_t x = *(const int32_t *)a;
+	int32_t y = *(const int32_t *)b;
+	return (x > y) - (x < y);
+}
+
 static void assert_sample_eq(const nd_field_sample_t *a, const nd_field_sample_t *b,
                              const char *ctx, uint16_t world, int32_t step_q16,
                              int32_t wx, int32_t wy)
@@ -197,68 +204,95 @@ int main(void)
 	printf("PASS: nd_field_elevation_bounds conservative across 2,000 patches (18,000 pts, tight_ocean=%d, mtn_pts=%d)\n",
 	       bounds_ocean_tight, bounds_mountain_hits);
 
-	/* 5. Earth-like planetary mountain distribution, slopes & calm World 0 spawn */
-	int land_cnt = 0, plains_cnt = 0, mtn_cnt = 0, alpine_cnt = 0, towering_cnt = 0;
-	int max_slope_dz = 0, max_elev = 0;
-	for (int iter = 0; iter < 4096; iter++) {
-		int16_t rx = (int16_t)(next_u32() & 0xFFFFu);
-		int16_t ry = (int16_t)(next_u32() & 0xFFFFu);
-		int32_t h = nd_field_room_hyp_coarse(0, rx, ry);
-		if (h <= 0)
-			continue;
-		land_cnt++;
-		if (h > max_elev) max_elev = h;
-		if (h < 100) plains_cnt++;
-		if (h >= 500) mtn_cnt++;
-		if (h >= 1000) alpine_cnt++;
-		if (h >= 3000) towering_cnt++;
-		if (h >= 300) {
-			int32_t hx = nd_field_room_hyp_coarse(0, (int16_t)(rx + 1), ry);
-			int32_t hy = nd_field_room_hyp_coarse(0, rx, (int16_t)(ry + 1));
-			int dx = h > hx ? (h - hx) : (hx - h);
-			int dy = h > hy ? (h - hy) : (hy - h);
-			if (dx > max_slope_dz) max_slope_dz = dx;
-			if (dy > max_slope_dz) max_slope_dz = dy;
-		}
-	}
-	assert(land_cnt > 500);
-	assert(plains_cnt * 100 >= land_cnt * 35 && plains_cnt * 100 <= land_cnt * 70);
-	assert(mtn_cnt * 100 >= land_cnt * 8);
-	assert(alpine_cnt * 100 >= land_cnt * 2);
-	assert(towering_cnt >= 5 && max_elev >= 45000 && max_elev <= 81000);
-	assert(max_slope_dz >= 160); /* >= 45 deg alpine flanks over 160 wu room span */
-
-	/* World 0 spawn valley [-24..24] keeps zero tectonic mountain spires on top of spawn,
-	 * while distant alpine ranges loom prominently (>= 10 deg) on Spawn's horizon. */
-	uint32_t w0_seed = 0x48454947u;
-	for (int ry = -24; ry <= 24; ry += 4) {
-		for (int rx = -24; rx <= 24; rx += 4) {
-			int32_t h = nd_field_room_hyp_coarse(0, (int16_t)rx, (int16_t)ry);
-			assert(nd_field_orogeny_wu(w0_seed, 0, rx, ry, h) == 0);
-		}
-	}
+	/* 5. Calibrated continuous Earth-like planetary relief, slope bounds, torus seam & calm spawn */
 	{
-		int32_t h0 = nd_field_room_hyp_coarse(0, 0, 0);
-		double max_hor_deg = 0.0;
-		for (int dy = -128; dy <= 128; dy += 4) {
-			for (int dx = -128; dx <= 128; dx += 4) {
-				if (dx == 0 && dy == 0) continue;
-				double d = sqrt((double)dx * 160.0 * (double)dx * 160.0 +
-				                (double)dy * 128.0 * (double)dy * 128.0);
-				if (d < 400.0 || d > 25000.0) continue;
-				int32_t h = nd_field_room_hyp_coarse(0, (int16_t)dx, (int16_t)dy);
-				if (h <= h0) continue;
-				double ang = atan2((double)(h - h0), d) * 180.0 / 3.14159265358979323846;
-				if (ang > max_hor_deg) max_hor_deg = ang;
+		static int32_t elevs[12000], dzs[12000], cdzs[12000];
+		int n_land = 0, n_coast = 0, plains_cnt = 0, hills_cnt = 0, mtn_cnt = 0;
+		int32_t max_slope_dz = 0, max_elev = 0;
+
+		for (int y = -32768; y < 32768; y += 373) {
+			for (int x = -32768; x < 32768; x += 373) {
+				int32_t h = nd_field_room_hyp_coarse(0, x, y);
+				if (h <= 0)
+					continue;
+				int32_t hx = nd_field_room_hyp_coarse(0, x + 1, y);
+				int32_t hy = nd_field_room_hyp_coarse(0, x, y + 1);
+				int32_t dx = h > hx ? (h - hx) : (hx - h);
+				int32_t dy = h > hy ? (h - hy) : (hy - h);
+				int32_t dz = dx > dy ? dx : dy;
+				if (n_land < 12000) {
+					elevs[n_land] = h;
+					dzs[n_land] = dz;
+					n_land++;
+				}
+				if (h > max_elev) max_elev = h;
+				if (dz > max_slope_dz) max_slope_dz = dz;
+				if (h < 1200) plains_cnt++;
+				else if (h < 5000) hills_cnt++;
+				else mtn_cnt++;
+				if (h < 400 && n_coast < 12000)
+					cdzs[n_coast++] = dz;
 			}
 		}
-		assert(max_hor_deg >= 10.0);
-		printf("PASS: Earth-like orogeny (land=%d plains=%.1f%% mtn>=500=%.1f%% alpine>=1000=%.1f%% peak>=3000=%d max=%d max_dz=%d spawn_horizon=%.1fdeg)\n",
-		       land_cnt,
-		       100.0 * (double)plains_cnt / (double)land_cnt,
-		       100.0 * (double)mtn_cnt / (double)land_cnt,
-		       100.0 * (double)alpine_cnt / (double)land_cnt,
-		       towering_cnt, max_elev, max_slope_dz, max_hor_deg);
+
+		/* Explicit torus wrap seam check at rx = 32767 -> -32768 and ry = 32767 -> -32768 */
+		int32_t seam_max_dz = 0;
+		for (int c = -32768; c < 32768; c += 17) {
+			int32_t d1 = nd_field_room_hyp_coarse(0, 32767, c) - nd_field_room_hyp_coarse(0, -32768, c);
+			int32_t d2 = nd_field_room_hyp_coarse(0, c, 32767) - nd_field_room_hyp_coarse(0, c, -32768);
+			if (d1 < 0) d1 = -d1;
+			if (d2 < 0) d2 = -d2;
+			if (d1 > seam_max_dz) seam_max_dz = d1;
+			if (d2 > seam_max_dz) seam_max_dz = d2;
+		}
+
+		qsort(elevs, (size_t)n_land, sizeof(int32_t), cmp_i32_asc);
+		qsort(dzs,   (size_t)n_land, sizeof(int32_t), cmp_i32_asc);
+		qsort(cdzs,  (size_t)n_coast, sizeof(int32_t), cmp_i32_asc);
+
+		int32_t p25_elev = elevs[n_land / 4];
+		int32_t p50_elev = elevs[n_land / 2];
+		int32_t p90_elev = elevs[(9 * n_land) / 10];
+		int32_t p99_dz   = dzs[(99 * n_land) / 100];
+		int32_t coast_p99_dz = cdzs[(99 * n_coast) / 100];
+
+		assert(n_land >= 5000);
+		assert(n_coast >= 500);
+		assert(plains_cnt * 100 >= n_land * 45 && plains_cnt * 100 <= n_land * 72);
+		assert(hills_cnt * 100 >= n_land * 18);
+		assert(mtn_cnt * 100 >= n_land * 5);
+		assert(p25_elev > 60);    /* continuous rolling lowlands, zero tabletop pancakes */
+		assert(p50_elev > 400);
+		assert(p90_elev > 4000);
+		assert(max_elev >= 14000 && max_elev <= 21600);
+		assert(p99_dz <= 110);    /* natural non-vertical flanks (~34 deg p99) */
+		assert(max_slope_dz >= 90 && max_slope_dz <= 260);
+		assert(coast_p99_dz <= 105);
+		assert(seam_max_dz <= 260);
+
+		/* World 0 spawn valley [-24..24] stays calm rolling lowland without spires or cliffs */
+		int32_t sp_max_z = 0, sp_max_dz = 0;
+		for (int ry = -24; ry <= 24; ry++) {
+			for (int rx = -24; rx <= 24; rx++) {
+				int32_t h  = nd_field_room_hyp_coarse(0, rx, ry);
+				int32_t hx = nd_field_room_hyp_coarse(0, rx + 1, ry);
+				int32_t hy = nd_field_room_hyp_coarse(0, rx, ry + 1);
+				int32_t dx = h > hx ? (h - hx) : (hx - h);
+				int32_t dy = h > hy ? (h - hy) : (hy - h);
+				if (h > sp_max_z) sp_max_z = h;
+				if (dx > sp_max_dz) sp_max_dz = dx;
+				if (dy > sp_max_dz) sp_max_dz = dy;
+			}
+		}
+		assert(sp_max_z <= 250 && sp_max_dz <= 80);
+
+		printf("PASS: Calibrated Earth-like relief (land=%d plains=%.1f%% hills=%.1f%% mtn=%.1f%% p25=%d p50=%d p90=%d max=%d p99_dz=%d max_dz=%d seam_dz=%d coast_p99=%d spawn_z=%d/dz=%d)\n",
+		       n_land,
+		       100.0 * (double)plains_cnt / (double)n_land,
+		       100.0 * (double)hills_cnt / (double)n_land,
+		       100.0 * (double)mtn_cnt / (double)n_land,
+		       p25_elev, p50_elev, p90_elev, max_elev,
+		       p99_dz, max_slope_dz, seam_max_dz, coast_p99_dz, sp_max_z, sp_max_dz);
 	}
 
 	/* 6. Phase 0: 1:1 physical metric scale (45 wu/m), int32_t Q27.4 elevation headroom,
@@ -273,21 +307,21 @@ int main(void)
 		assert(ps16.world_w_wu == 10485760LL);
 		assert(ps16.world_h_wu == 8388608LL);
 		assert(ps16.areole_max_levels == 17);
-		assert(ps16.max_elev_wu == 81000); /* 1800 m * 45 wu/m */
+		assert(ps16.max_elev_wu == 21600); /* 480 m * 45 wu/m */
 
 		nd_planet_scale_t ps18 = nd_planet_scale_for_bits(18, 160, 128);
 		assert(ps18.rooms_per_axis == 262144u);
 		assert(ps18.world_w_wu == 41943040LL);
 		assert(ps18.world_h_wu == 33554432LL);
 		assert(ps18.areole_max_levels == 19);
-		assert(ps18.max_elev_wu == 202500); /* 4500 m * 45 wu/m */
+		assert(ps18.max_elev_wu == 72000); /* 1600 m * 45 wu/m */
 
 		nd_planet_scale_t ps20 = nd_planet_scale_for_bits(20, 160, 128);
 		assert(ps20.rooms_per_axis == 1048576u);
 		assert(ps20.world_w_wu == 167772160LL);
 		assert(ps20.world_h_wu == 134217728LL);
 		assert(ps20.areole_max_levels == 21);
-		assert(ps20.max_elev_wu == 270000); /* 6000 m * 45 wu/m */
+		assert(ps20.max_elev_wu == 189000); /* 4200 m * 45 wu/m */
 
 		nd_planet_scale_t ps22 = nd_planet_scale_for_bits(22, 160, 128);
 		assert(ps22.rooms_per_axis == 4194304u);
@@ -441,10 +475,10 @@ int main(void)
 		}
 		nd_field_set_planet_bits(16);
 
-		assert(peak_by_b[0] >= 45000 && peak_by_b[0] <= 81000);
-		assert(peak_by_b[1] > peak_by_b[0] && peak_by_b[1] >= 100000);
-		assert(peak_by_b[2] > peak_by_b[1] && peak_by_b[2] >= 140000);
-		assert(peak_by_b[3] > peak_by_b[2] && peak_by_b[3] >= 200000);
+		assert(peak_by_b[0] >= 14000 && peak_by_b[0] <= 21600);
+		assert(peak_by_b[1] > peak_by_b[0] && peak_by_b[1] >= 40000 && peak_by_b[1] <= 72000);
+		assert(peak_by_b[2] > peak_by_b[1] && peak_by_b[2] >= 90000 && peak_by_b[2] <= 189000);
+		assert(peak_by_b[3] > peak_by_b[2] && peak_by_b[3] >= 160000 && peak_by_b[3] <= 398250);
 
 		printf("PASS: Phase 2 10-archetype geology, periodic wrap, and metric summits (b16=%d b18=%d b20=%d b22=%d wu)\n",
 		       peak_by_b[0], peak_by_b[1], peak_by_b[2], peak_by_b[3]);

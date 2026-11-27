@@ -12,7 +12,7 @@ Authoritative engineering plan for transforming NeverDark's procedural terrain f
 |-------|-------|--------|--------------|
 | **Phase 0** | Metric Scale (`45 wu/m`), `nd_planet_scale_t`, `int32_t` Elevations & Chunk-Relative `RGBA16F` | **COMPLETE** | Bit-exact at `b = 16` (`worldgen_golden.txt` 1280 rows), Everest `398,250 wu` fp16 err `<= 0.25 wu` (`< 5.6 mm`), `b = 16..23` verified |
 | **Phase 1** | World-Scale Horizon Shadow Maps & Mountain Shadow Relief | **COMPLETE** | 2-cascade `256×128` `GL_RGBA16F` horizon shadow + 8-azimuth sky-AO atlas (`uTerrHorizonMap`, `NdFrameUBO` `320 B`), coupled across all 5 scene pipelines; Everest fp16 `< 2.5 m`, 0 steady-state GL uploads |
-| **Phase 2** | Geological Province Synthesis & Metric Hypsometry (10 Landform Archetypes) | **COMPLETE** | 8 B `nd_geology_t` across all 10 archetypes (CPU + 4-wide SIMD bit-exact + GPU `field_glsl.h`); metric summits `b16=56,138 wu` (`<=81,000`), `b18=202,500`, `b20=270,000`, `b22=319,674 wu`; 500k bounds oracle `0` violations (`fine_span=990.8 wu`); `worldgen_golden.txt` updated |
+| **Phase 2** | Geological Province Synthesis & Calibrated Continuous Hypsometry (10 Landform Archetypes) | **COMPLETE** | 8 B `nd_geology_t` across all 10 archetypes (`1024`-room quintic cells, CPU + 4-wide SIMD bit-exact + GPU `field_glsl.h`); calibrated continuous 3-tier relief gated on LOD-invariant `c_cont_q8`: `b16 <= 21,600 wu` (`480 m`), `b18 <= 72,000 wu` (`1,600 m`), `b20 <= 189,000 wu` (`4,200 m`), `b22 <= 398,250 wu` (`8,850 m`); World 0 `plains=59.6% hills=30.0% mtns=10.4%`, `p99_dz=93 wu/room`, `max_dz=220 wu/room`, torus-seam continuous; isotropic 360° yaw-invariant LOD silhouettes (`0` level flips, `0.000 wu` drift); `worldgen_golden.txt` updated |
 | **Phase 3** | Erosion-Sculpted Mountains & Coupled Mountain-to-Sea Hydrology | Planned | Ridge-to-valley drainage, alluvial aprons, cirques, braided deltas |
 | **Phase 4** | Climate-Coupled Altitude Zonation, Orographic Rain Shadows & Volumetric Cloud Ceiling | Planned | Metric timberline/snowline, windward/leeward contrast, summits piercing clouds |
 | **Phase 5** | Photorealistic Micro-Relief, Strata-Ribbed Crags & Distant Canopy Massing | Planned | Anti-toy-model mid-range detail, rocky arêtes piercing snow, distant canopy texture |
@@ -54,9 +54,12 @@ Every subsystem (`nd-world`, `libareole`, `nd_seven`, shaders) derives its world
 
 | `planet_bits` | Rooms/Side (`2^b`) | Flat Span (`km × km`) | Torus `R` (`km`) | Torus `r0` (`km`) | Torus Area (`km²`) | Real-World Equivalent | Target `max_relief_m` (`wu`) | `areole max_levels` |
 |---:|---:|---:|---:|---:|---:|---|---:|---:|
-| **16** *(default)* | `65,536` | `233 × 186 km` | `44.4 km` | `29.7 km` | `52,053 km²` | Switzerland / Costa Rica | `1,800 m` (`81,000 wu`) | `17` |
-| **18** | `262,144` | `932 × 746 km` | `177.8 km` | `118.7 km` | `832,850 km²` | France / Texas / Iberia | `4,500 m` (`202,500 wu`) | `19` |
-| **20** | `1,048,576` | `3,728 × 2,983 km` | `711.1 km` | `474.7 km` | `13,325,600 km²` | Europe / Australia | `6,000 m` (`270,000 wu`) | `21` |
+| **16** *(default)* | `65,536` | `233 × 186 km` | `44.4 km` | `29.7 km` | `52,053 km²` | Scotland / Lake District / Costa Rica | `480 m` (`21,600 wu`) | `17` |
+| **17** | `131,072` | `466 × 373 km` | `88.9 km` | `59.3 km` | `208,212 km²` | Pyrenees / New Zealand | `900 m` (`40,500 wu`) | `18` |
+| **18** | `262,144` | `932 × 746 km` | `177.8 km` | `118.7 km` | `832,850 km²` | France / Texas / Iberia | `1,600 m` (`72,000 wu`) | `19` |
+| **19** | `524,288` | `1,864 × 1,491 km` | `355.6 km` | `237.3 km` | `3,331,400 km²` | Andes / Western Europe | `2,800 m` (`126,000 wu`) | `20` |
+| **20** | `1,048,576` | `3,728 × 2,983 km` | `711.1 km` | `474.7 km` | `13,325,600 km²` | Europe / Australia | `4,200 m` (`189,000 wu`) | `21` |
+| **21** | `2,097,152` | `7,457 × 5,965 km` | `1,422.2 km` | `949.3 km` | `53,302,400 km²` | Eurasia / Americas | `6,400 m` (`288,000 wu`) | `22` |
 | **22** | `4,194,304` | `14,913 × 11,930 km` | `2,844.4 km` | `1,898.7 km` | `213,209,600 km²` | ~42% Earth surface | `8,850 m` (`398,250 wu`) | `23` |
 | **23** | `8,388,608` | `29,826 × 23,861 km` | `5,688.9 km` | `3,797.3 km` | `852,838,400 km²` | Earth+ super-planet | `8,850 m` (`398,250 wu`) | `24` |
 
@@ -150,14 +153,14 @@ Terrain must stop averaging every coordinate into one stationary noise spectrum.
   3. Full fragment-shader coupling (`s_glsl_terr_horizon_fn`, 1-tap Near fast path, Near→Far crossfade, orbital fade, Rayleigh alpine blue `shadowCool`, `skyHemAO`, flat-plain invariance) across terrain (all 7 variants), water, mesh3d (alpha + opaque), grass, and billboards (`mods/nd/seven/nd_seven_gl_shaders.c`, `nd_seven_gl.c`, `nd_seven_gl_billboard.c`).
   4. Unit tests in `tests/unit/test_seven_render.c` verifying cascade scaling/snapping, flat-plain invariance, `1,800 m` ridge shadows across 6 cardinal+diagonal azimuths, Far-to-Near border seeding, 45° alpine bowl SVF, Everest `398,250 wu` `RGBA16F` packing (`< 2.5 m` error), and real `nd_field` alpine shadow relief.
 
-### Phase 2 — Geological Province Synthesis & Metric Hypsometry (10 Landform Archetypes) *(Complete)*
-- **Objective:** Replace the uniform smooth noise blend with sharp regional geological personalities and true metric relief (up to `1,800 m` / `81,000 wu` at `b = 16`, scaling via `nd_planet_scale_t`).
+### Phase 2 — Geological Province Synthesis & Calibrated Continuous Hypsometry (10 Landform Archetypes) *(Complete)*
+- **Objective:** Replace flat lowland pancakes and steep vertical cliffs with continuous, slope-bounded Earth-like relief across 10 geological archetypes (`480 m` / `21,600 wu` at `b = 16`, scaling smoothly to `8,850 m` / `398,250 wu` at `b >= 22`) and isotropic camera-rotation silhouette stability.
 - **Deliverables:**
-  1. Pure-integer, O(1), torus-periodic (`planet_bits = 16..23`) 8-byte `nd_geology_t` evaluator (`nd_field_geology()`, `nd_geo_province_t` covering all 10 landform archetypes) using domain-warped 512-room C2-quintic cells in `external/nd-world/include/nd/field.h`.
-  2. Metric-scale (`45 wu/m`) 10-archetype hypsometry in `nd_field_orogeny_wu()` and bit-exact 4-wide SIMD `nd_field_orogeny_wu_4x()` (macro continental octaves unlocked at `planet_bits >= 18`, scaling cleanly up to `81,000 wu` at `b = 16` and `398,250 wu` at `b >= 22`), paired with conservative 2-sided `nd_field_orogeny_bounds_wu()` and an exact integer-room fine-patch convex hull in `nd_field_elevation_bounds()` (`0` violations across `500,000` oracle samples, `mean_fine_span = 990.8 wu`, `ocean_span = 375.5 wu`).
+  1. Pure-integer, O(1), torus-periodic (`planet_bits = 16..23`) 8-byte `nd_geology_t` evaluator (`nd_field_geology()`, `nd_geo_province_t` covering all 10 landform archetypes) using domain-warped 1024-room C2-quintic cells in `external/nd-world/include/nd/field.h`.
+  2. Continuous 3-tier relief (universal lowland roll, foothill undulations, and power-law slope-bounded alpine cordilleras) gated on LOD-invariant macro continental elevation `c_cont_q8` (`s=15..9`) in `nd_field_orogeny_wu_ex()` and bit-exact 4-wide SIMD `nd_field_orogeny_wu_4x_ex()`, paired with conservative 2-sided `nd_field_orogeny_bounds_wu_ex()` (`0` bounds violations).
   3. Saturating `int32_t -> int16_t` clamping (`nd_field_clamp_i16`) and `int32_t z` cavity/biome safety in `external/nd-world/include/nd/terrain.h` and `external/nd-world/src/noise.c`.
-  4. Bit-consistent GPU GLSL mirror in `external/nd-world/include/nd/field_glsl.h` and metric relief/snowline/skirt ceiling updates in `mods/nd/seven/nd_seven.c` and `mods/nd/seven/nd_seven_gl_shaders.c` (with regenerated `nd_seven_gl_shaders.gen.c`).
-  5. Expanded Phase 2 tests in `tests/unit/test_field_simd.c`, updated `tests/unit/test_seven_render.c` & `tests/unit/test_map_noise.c`, and cleanly regenerated `tests/unit/data/worldgen_golden.txt`.
+  4. Bit-consistent GPU GLSL mirror in `external/nd-world/include/nd/field_glsl.h`, isotropic yaw-invariant LOD anchor in `libareole` (`ar_cull_opts_t.use_lod_anchor`) & `nd_seven_gl_shaders.c` (`lodDist = sqrt(dot(worldPos, worldPos) + uCamDist * uCamDist)`), relief-aware `48×48` HI mesh promotion in `nd_seven_gl.c`, and regenerated `nd_seven_gl_shaders.gen.c`.
+  5. Expanded Phase 2 & 360° yaw-rotation silhouette stability tests in `tests/unit/test_field_simd.c` and `tests/unit/test_seven_render.c`, plus cleanly regenerated `tests/unit/data/worldgen_golden.txt`.
 
 ### Phase 3 — Erosion-Sculpted Mountains & Coupled Mountain-to-Sea Hydrology
 - **Objective:** Replace extruded-looking ridges with dendritic drainage gullies, sharp arêtes, glacial cirques, talus/alluvial aprons, and rivers that actually drain *down* from high mountain ranges to sea level.

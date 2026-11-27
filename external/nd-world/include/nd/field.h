@@ -168,14 +168,19 @@ nd_planet_scale_for_bits(uint8_t bits, int32_t room_w, int32_t room_h)
 	s.world_h_wu        = (int64_t)s.rooms_per_axis * (int64_t)room_h;
 	s.wu_per_meter      = ND_FIELD_WU_PER_METER;
 
-	float relief_m;
-	if (bits <= 16u)      relief_m = 1800.0f;
-	else if (bits == 17u) relief_m = 3000.0f;
-	else if (bits == 18u) relief_m = 4500.0f;
-	else if (bits == 19u) relief_m = 5250.0f;
-	else if (bits == 20u) relief_m = 6000.0f;
-	else if (bits == 21u) relief_m = 7500.0f;
-	else                  relief_m = 8850.0f; /* Everest scale (b >= 22) */
+	/* Planet-relative relief scaled proportionally to torus minor radius r0:
+	 *   b=16 (r0=29.7 km):  480 m (21,600 wu, 1.62% of r0; ~35-70x tall trees, 1,200x lamb)
+	 *   b=18 (r0=119 km):  1,600 m (72,000 wu, 1.35% of r0)
+	 *   b=20 (r0=475 km):  4,200 m (189,000 wu, 0.88% of r0)
+	 *   b>=22 (r0>=1,900 km): 8,850 m (398,250 wu, Everest scale) */
+	float relief_m, snow_m, cloud_lcl_m;
+	if (bits <= 16u)      { relief_m =  480.0f; snow_m =  320.0f; cloud_lcl_m =  360.0f; }
+	else if (bits == 17u) { relief_m =  900.0f; snow_m =  600.0f; cloud_lcl_m =  680.0f; }
+	else if (bits == 18u) { relief_m = 1600.0f; snow_m = 1050.0f; cloud_lcl_m = 1100.0f; }
+	else if (bits == 19u) { relief_m = 2700.0f; snow_m = 1800.0f; cloud_lcl_m = 1350.0f; }
+	else if (bits == 20u) { relief_m = 4200.0f; snow_m = 2700.0f; cloud_lcl_m = 1600.0f; }
+	else if (bits == 21u) { relief_m = 6400.0f; snow_m = 3600.0f; cloud_lcl_m = 1600.0f; }
+	else                  { relief_m = 8850.0f; snow_m = 4200.0f; cloud_lcl_m = 1600.0f; }
 
 	s.max_relief_m     = relief_m;
 	s.max_elev_wu      = (int32_t)(relief_m * s.wu_per_meter + 0.5f);
@@ -183,8 +188,6 @@ nd_planet_scale_for_bits(uint8_t bits, int32_t room_w, int32_t room_h)
 	float scale_mul    = (float)(1u << (bits - ND_FIELD_PLANET_BITS_MIN));
 	s.torus_R_wu       = 2000000.0f * scale_mul;
 	s.torus_r0_wu      = 1335000.0f * scale_mul;
-	float snow_m       = (bits <= 16u) ? 1200.0f : ((bits <= 18u) ? 2400.0f : 3200.0f);
-	float cloud_lcl_m  = (bits <= 16u) ? 1100.0f : 1600.0f;
 	s.snowline_base_wu = snow_m * s.wu_per_meter;
 	s.cloud_lcl_wu     = cloud_lcl_m * s.wu_per_meter;
 	return s;
@@ -365,8 +368,8 @@ static const octave_t ND_FIELD_COARSE_TM_OCTAVES[] = {
 
 #define ND_FIELD_FINE_COUNT      ND_FIELD_OCTAVE_COUNT
 #define ND_FIELD_FINE_AMP_BUDGET (((1 << ND_FIELD_OCTAVE_COUNT) - 1) * ND_FIELD_1F_SCALE)
-#define ND_FIELD_MAX_ELEV_WU     81000
-#define ND_FIELD_GLOBAL_MAX_Z    81200.0f
+#define ND_FIELD_MAX_ELEV_WU     21600
+#define ND_FIELD_GLOBAL_MAX_Z    21800.0f
 
 #define ND_FIELD_NOISE_DIM       2
 #define ND_FIELD_NOISE_PRECISION 8
@@ -786,17 +789,17 @@ nd_field_torus_signed_solar_q15(int16_t pos_x, int16_t pos_y, uint16_t sun_azimu
 }
 
 /* Metric environmental lapse rate calibrated to nd_planet_scale_t.snowline_base_wu:
- * Lowlands (0..100 m = 0..4,500 wu) stay warm; foothills cool into montane conifers;
- * subalpine meadows emerge above ~450 m; temperate summits cross freezing at snowline_base_wu. */
+ * Lowlands (0..40 m = 0..1,800 wu) stay warm; foothills cool into montane conifers;
+ * subalpine meadows emerge above ~38% snowline; temperate summits cross freezing at snowline_base_wu. */
 static inline int32_t
 nd_field_lapse_cool(int32_t elev_rel)
 {
-	if (elev_rel <= 4500)
+	if (elev_rel <= 1800)
 		return 0;
 	int32_t snow_wu = (int32_t)nd_field_get_planet_scale().snowline_base_wu;
-	int32_t span = snow_wu - 4500;
-	if (span < 4500) span = 4500;
-	int32_t cool = (int32_t)(((int64_t)(elev_rel - 4500) * 96LL) / (int64_t)span);
+	int32_t span = snow_wu - 1800;
+	if (span < 3600) span = 3600;
+	int32_t cool = (int32_t)(((int64_t)(elev_rel - 1800) * 96LL) / (int64_t)span);
 	if (cool > 220) cool = 220;
 	return cool;
 }
@@ -805,15 +808,15 @@ nd_field_lapse_cool(int32_t elev_rel)
 static inline int32_t
 nd_field_orographic_rain_delta(int32_t cur_hyp, int32_t up_hyp, int32_t sea_lvl)
 {
-	if (up_hyp > sea_lvl + 6750 && cur_hyp < up_hyp - 180) {
-		int32_t shadow_depth = up_hyp - (sea_lvl + 6750);
-		if (shadow_depth > 27000) shadow_depth = 27000;
-		return -((shadow_depth * 64) / 27000);
+	if (up_hyp > sea_lvl + 2250 && cur_hyp < up_hyp - 90) {
+		int32_t shadow_depth = up_hyp - (sea_lvl + 2250);
+		if (shadow_depth > 9000) shadow_depth = 9000;
+		return -((shadow_depth * 64) / 9000);
 	}
-	if (cur_hyp > up_hyp + 180 && cur_hyp > sea_lvl + 2250) {
+	if (cur_hyp > up_hyp + 90 && cur_hyp > sea_lvl + 900) {
 		int32_t lift_height = cur_hyp - up_hyp;
-		if (lift_height > 2700) lift_height = 2700;
-		return (lift_height * 48) / 2700;
+		if (lift_height > 900) lift_height = 900;
+		return (lift_height * 48) / 900;
 	}
 	return 0;
 }
@@ -1277,11 +1280,13 @@ nd_field_elevation_to_wu(int32_t elev_q12_4)
 #define ND_FIELD_ORIGIN_SEA_OFFSET_Q12_4 360
 
 static inline int32_t
-nd_field_eval_coarse_unwrapped_step_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry)
+nd_field_eval_coarse_unwrapped_ex_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry,
+                                        int32_t *out_cont_q8)
 {
 	static _CHAFF_TLS noise_wcache_t s_coarse_wc[9];
 	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t cur_rx = rx, cur_ry = ry, coarse_q12_4 = 0;
+	int64_t cont_acc = 0;
 
 	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_CONTINENT_MIN; s--) {
 		int16_t amp = chaff_octave_amplitude(s);
@@ -1289,8 +1294,14 @@ nd_field_eval_coarse_unwrapped_step_q12_4(uint32_t seed, int32_t room_step_q16, 
 		uint32_t raw = chaff_wpoint_periodic_2d(cur_rx, cur_ry, s, pbits, 8, oct_seed);
 		int32_t val = (int32_t)(raw >> 16) - 128;
 		coarse_q12_4 += (int32_t)((((int64_t)val * amp) << 4) / 128);
+		if (out_cont_q8) {
+			int32_t val_q8 = (int32_t)(raw >> 8) - 32768;
+			cont_acc += ((int64_t)val_q8 * (int64_t)amp) >> 7;
+		}
 		chaff_rot2d_i32_q15(&cur_rx, &cur_ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
 	}
+	if (out_cont_q8)
+		*out_cont_q8 = (int32_t)cont_acc;
 
 	for (uint8_t s = 8; s >= ND_FIELD_SHIFT_REGIONAL_MIN; s--) {
 		uint32_t w_oct = (s >= 5) ? 65536u : chaff_octave_weight_q16(s, room_step_q16);
@@ -1312,9 +1323,15 @@ nd_field_eval_coarse_unwrapped_step_q12_4(uint32_t seed, int32_t room_step_q16, 
 }
 
 static inline int32_t
+nd_field_eval_coarse_unwrapped_step_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry)
+{
+	return nd_field_eval_coarse_unwrapped_ex_q12_4(seed, room_step_q16, rx, ry, NULL);
+}
+
+static inline int32_t
 nd_field_eval_coarse_unwrapped_q12_4(uint32_t seed, int32_t rx, int32_t ry)
 {
-	return nd_field_eval_coarse_unwrapped_step_q12_4(seed, 0, rx, ry);
+	return nd_field_eval_coarse_unwrapped_ex_q12_4(seed, 0, rx, ry, NULL);
 }
 
 static inline int32_t
@@ -1334,18 +1351,19 @@ nd_field_sea_offset_q12_4(uint16_t world, uint32_t seed)
 	       ND_FIELD_ORIGIN_SEA_OFFSET_Q12_4 + s_cached_origin_bias;
 }
 
-/* 4-wide SIMD coarse unwrapped elevation evaluator.
- * Bit-exact with 4 calls to nd_field_eval_coarse_unwrapped_step_q12_4. */
+/* 4-wide SIMD coarse unwrapped elevation evaluator with optional smooth s=15..9 continental output.
+ * Bit-exact with 4 calls to nd_field_eval_coarse_unwrapped_ex_q12_4. */
 static inline void
-nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q16,
-                                             const int32_t rx[4], const int32_t ry[4],
-                                             int32_t out[4])
+nd_field_eval_coarse_unwrapped_ex_q12_4_4x(uint32_t seed, int32_t room_step_q16,
+                                           const int32_t rx[4], const int32_t ry[4],
+                                           int32_t out[4], int32_t out_cont_q8[4])
 {
 	static _CHAFF_TLS noise_wcache_t s_coarse4_wc[9];
 	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t cur_rx[4] = { rx[0], rx[1], rx[2], rx[3] };
 	int32_t cur_ry[4] = { ry[0], ry[1], ry[2], ry[3] };
 	int32_t acc[4] = { 0, 0, 0, 0 };
+	int64_t cont_acc[4] = { 0, 0, 0, 0 };
 
 	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_CONTINENT_MIN; s--) {
 		int16_t amp = chaff_octave_amplitude(s);
@@ -1356,8 +1374,16 @@ nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q1
 			int32_t val = (int32_t)(raw[i] >> 16) - 128;
 			int64_t num = ((int64_t)val * amp) << 4;
 			acc[i] += (int32_t)((num + ((num >> 63) & 127)) >> 7);
+			if (out_cont_q8) {
+				int32_t val_q8 = (int32_t)(raw[i] >> 8) - 32768;
+				cont_acc[i] += ((int64_t)val_q8 * (int64_t)amp) >> 7;
+			}
 		}
 		chaff_rot2d_i32_q15_4x(cur_rx, cur_ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
+	}
+	if (out_cont_q8) {
+		for (int i = 0; i < 4; i++)
+			out_cont_q8[i] = (int32_t)cont_acc[i];
 	}
 
 	for (uint8_t s = 8; s >= ND_FIELD_SHIFT_REGIONAL_MIN; s--) {
@@ -1385,8 +1411,17 @@ nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q1
 	out[0] = acc[0]; out[1] = acc[1]; out[2] = acc[2]; out[3] = acc[3];
 }
 
+static inline void
+nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q16,
+                                             const int32_t rx[4], const int32_t ry[4],
+                                             int32_t out[4])
+{
+	nd_field_eval_coarse_unwrapped_ex_q12_4_4x(seed, room_step_q16, rx, ry, out, NULL);
+}
+
 static inline int32_t
-nd_field_eval_coarse_torus_x_step_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry_unwrapped)
+nd_field_eval_coarse_torus_x_ex_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry_unwrapped,
+                                      int32_t *out_cont_q8)
 {
 	uint8_t pbits = nd_field_get_planet_bits();
 	uint32_t span = 1u << pbits;
@@ -1395,17 +1430,30 @@ nd_field_eval_coarse_torus_x_step_q12_4(uint32_t seed, int32_t room_step_q16, in
 	if (ux < 512u) {
 		int32_t rx_hi = seam_start + (int32_t)ux;
 		int32_t rx_lo = rx_hi - (int32_t)span;
-		int32_t c_hi = nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, rx_hi, ry_unwrapped);
-		int32_t c_lo = nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, rx_lo, ry_unwrapped);
+		int32_t cont_hi = 0, cont_lo = 0;
+		int32_t c_hi = nd_field_eval_coarse_unwrapped_ex_q12_4(seed, room_step_q16, rx_hi, ry_unwrapped,
+		                                                       out_cont_q8 ? &cont_hi : NULL);
+		int32_t c_lo = nd_field_eval_coarse_unwrapped_ex_q12_4(seed, room_step_q16, rx_lo, ry_unwrapped,
+		                                                       out_cont_q8 ? &cont_lo : NULL);
+		if (out_cont_q8)
+			*out_cont_q8 = cont_hi + (int32_t)(((int64_t)(cont_lo - cont_hi) * (int32_t)ux) >> 9);
 		return c_hi + (int32_t)(((int64_t)(c_lo - c_hi) * (int32_t)ux) >> 9);
 	}
-	return nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, nd_field_wrap_room_coord(rx, pbits), ry_unwrapped);
+	return nd_field_eval_coarse_unwrapped_ex_q12_4(seed, room_step_q16,
+	                                               nd_field_wrap_room_coord(rx, pbits), ry_unwrapped,
+	                                               out_cont_q8);
+}
+
+static inline int32_t
+nd_field_eval_coarse_torus_x_step_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry_unwrapped)
+{
+	return nd_field_eval_coarse_torus_x_ex_q12_4(seed, room_step_q16, rx, ry_unwrapped, NULL);
 }
 
 static inline int32_t
 nd_field_eval_coarse_torus_x_q12_4(uint32_t seed, int32_t rx, int32_t ry_unwrapped)
 {
-	return nd_field_eval_coarse_torus_x_step_q12_4(seed, 0, rx, ry_unwrapped);
+	return nd_field_eval_coarse_torus_x_ex_q12_4(seed, 0, rx, ry_unwrapped, NULL);
 }
 
 /* Continuous regional ruggedness envelope R(wx, wy) in Q8 fixed-point [0..256].
@@ -1475,8 +1523,9 @@ nd_field_ruggedness_q8_4x(uint16_t world, const int32_t wx[4], const int32_t wy[
 }
 
 static inline int32_t
-nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int32_t wy,
-                              int32_t *out_coarse_q12_4, int32_t *out_fine_q12_4)
+nd_field_elevation_step_ex_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int32_t wy,
+                                 int32_t *out_coarse_q12_4, int32_t *out_fine_q12_4,
+                                 int32_t *out_cont_q8)
 {
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
 	uint8_t pbits = nd_field_get_planet_bits();
@@ -1488,23 +1537,34 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 
 	int32_t coarse_q12_4 = 0;
 	int32_t fine_q12_4 = 0;
+	int32_t cont_q8 = 0;
 
-	if (out_coarse_q12_4 != NULL || out_fine_q12_4 == NULL) {
+	if (out_coarse_q12_4 != NULL || out_fine_q12_4 == NULL || out_cont_q8 != NULL) {
 		int32_t room_step_q16 = (step_q16 >= (2048 << 16)) ? (step_q16 / ND_FIELD_ROOM_W) : 0;
 		uint32_t uy = (uint32_t)(ry - seam_start) & (span - 1u);
 		if (uy < 512u) {
 			int32_t ry_hi = seam_start + (int32_t)uy;
 			int32_t ry_lo = ry_hi - (int32_t)span;
-			int32_t c_hi = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, ry_hi);
-			int32_t c_lo = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, ry_lo);
+			int32_t cont_hi = 0, cont_lo = 0;
+			int32_t c_hi = nd_field_eval_coarse_torus_x_ex_q12_4(seed, room_step_q16, rx, ry_hi,
+			                                                     out_cont_q8 ? &cont_hi : NULL);
+			int32_t c_lo = nd_field_eval_coarse_torus_x_ex_q12_4(seed, room_step_q16, rx, ry_lo,
+			                                                     out_cont_q8 ? &cont_lo : NULL);
 			coarse_q12_4 = c_hi + (int32_t)(((int64_t)(c_lo - c_hi) * (int32_t)uy) >> 9);
+			if (out_cont_q8)
+				cont_q8 = cont_hi + (int32_t)(((int64_t)(cont_lo - cont_hi) * (int32_t)uy) >> 9);
 		} else {
-			coarse_q12_4 = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, ry);
+			coarse_q12_4 = nd_field_eval_coarse_torus_x_ex_q12_4(seed, room_step_q16, rx, ry,
+			                                                     out_cont_q8 ? &cont_q8 : NULL);
 		}
-		coarse_q12_4 -= nd_field_sea_offset_q12_4(world, seed);
+		int32_t sea_off = nd_field_sea_offset_q12_4(world, seed);
+		coarse_q12_4 -= sea_off;
+		if (out_cont_q8)
+			*out_cont_q8 = cont_q8 - (sea_off << 4);
 	}
 
-	if (chaff_octave_weight_q16(ND_FIELD_SHIFT_FINE_MAX, step_q16) > 0u) {
+	if (chaff_octave_weight_q16(ND_FIELD_SHIFT_FINE_MAX, step_q16) > 0u &&
+	    (out_fine_q12_4 != NULL || out_cont_q8 == NULL)) {
 		int32_t base_fine_q12_4 = chaff_fbm_rotated_2d_step_q12_4(
 			wx, wy, step_q16,
 			ND_FIELD_SHIFT_FINE_MIN, ND_FIELD_SHIFT_FINE_MAX,
@@ -1546,6 +1606,14 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
 	if (out_coarse_q12_4) *out_coarse_q12_4 = coarse_q12_4;
 	if (out_fine_q12_4) *out_fine_q12_4 = fine_q12_4;
 	return coarse_q12_4 + fine_q12_4;
+}
+
+static inline int32_t
+nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int32_t wy,
+                              int32_t *out_coarse_q12_4, int32_t *out_fine_q12_4)
+{
+	return nd_field_elevation_step_ex_q12_4(world, step_q16, wx, wy,
+	                                        out_coarse_q12_4, out_fine_q12_4, NULL);
 }
 
 static inline int32_t
@@ -1715,14 +1783,15 @@ chaff_elevation_q12_4(uint16_t world, uint8_t lod, int32_t wx, int32_t wy,
  * Phase 2: Geological Province Synthesis & Metric Hypsometry (10 Archetypes)
  *
  * Pure-integer, O(1), torus-periodic (planet_bits = 16..23) geological province
- * evaluator and 10-landform metric orogeny (45 wu/m: up to 1,800 m = 81,000 wu
- * at b=16, scaling to 8,850 m = 398,250 wu at b>=22 via unlocked macro octaves).
- * Uses C2-quintic 2x2 warped province cells for zero triple-junction seams,
- * bit-exact scalar/SIMD parity, and razor-tight 2-sided analytical bounds.
+ * evaluator and 10-landform continuous multi-tier orogeny (45 wu/m: calibrated
+ * 480 m = 21,600 wu at b=16, scaling to 8,850 m = 398,250 wu at b>=22 via
+ * unlocked macro octaves). Uses C2-quintic 2x2 warped 1024-room province cells,
+ * Q12 fixed-point envelopes gated by macro continental height (c_cont_q8),
+ * bit-exact scalar/SIMD parity, and conservative 2-sided analytical bounds.
  * ============================================================================ */
-#define ND_FIELD_OROGENY_SALT 0xD0D2877Du
-#define ND_FIELD_GEO_CELL_SHIFT 9u
-#define ND_FIELD_GEO_CELL_SPAN  512
+#define ND_FIELD_OROGENY_SALT   0xD0D2877Du
+#define ND_FIELD_GEO_CELL_SHIFT 10u
+#define ND_FIELD_GEO_CELL_SPAN  1024
 
 typedef struct {
 	uint8_t base_uplift;
@@ -1756,35 +1825,57 @@ nd_field_smoothstep_q8(int32_t x, int32_t e0, int32_t e1)
 	return s;
 }
 
-/* Exact strictly-monotonic C2 quintic 6t^5 - 15t^4 + 10t^3 over f in [0..512] -> [0..256] */
 static inline int32_t
-nd_field_quintic512_q8(int32_t f)
+nd_field_smoothstep_q12(int32_t x, int32_t e0, int32_t e1)
+{
+	if (x <= e0) return 0;
+	if (x >= e1) return 4096;
+	int64_t t = ((int64_t)(x - e0) * 4096LL) / (int64_t)(e1 - e0);
+	int64_t s = (t * t * (3LL * 4096LL - 2LL * t)) >> 24;
+	if (s < 0) s = 0;
+	if (s > 4096) s = 4096;
+	return (int32_t)s;
+}
+
+/* Ridge transform on Q12 noise [0..4095] -> [0..4096] (peak 4096 at center 2048) */
+static inline int32_t
+nd_field_ridge_q12(int32_t n_q12)
+{
+	int32_t d = (n_q12 >= 2048) ? (n_q12 - 2048) : (2048 - n_q12);
+	int32_t r = 4096 - (d << 1);
+	return r > 0 ? r : 0;
+}
+
+/* Exact strictly-monotonic C2 quintic 6t^5 - 15t^4 + 10t^3 over f in [0..1024] -> [0..4096] */
+static inline int32_t
+nd_field_quintic1024_q12(int32_t f)
 {
 	if (f <= 0) return 0;
-	if (f >= 512) return 256;
-	int64_t t = (int64_t)f << 3; /* Q12 in [0..4096] */
+	if (f >= 1024) return 4096;
+	int64_t t = (int64_t)f << 2; /* Q12 in [0..4096] */
 	int64_t t2 = (t * t) >> 12;
 	int64_t t3 = (t2 * t) >> 12;
 	int64_t poly = ((6LL * t - 61440LL) * t) / 4096LL + 40960LL;
-	int32_t q8 = (int32_t)(((t3 * poly) >> 12) >> 4);
-	if (q8 < 0) q8 = 0;
-	if (q8 > 256) q8 = 256;
-	return q8;
+	int32_t q12 = (int32_t)((t3 * poly) >> 12);
+	if (q12 < 0) q12 = 0;
+	if (q12 > 4096) q12 = 4096;
+	return q12;
 }
 
-/* Strictly monotonic 4-tier sedimentary strata staircase on [0..256] -> [0..256].
- * Broad flat caprock benches (~60% of each tier) separated by crisp cliffs. */
+/* Strictly monotonic 3-tier sedimentary strata staircase on [0..4095] -> [0..4096].
+ * Gentle mesas with broad caprock benches and slope-bounded talus risers. */
 static inline int32_t
-nd_field_terrace_q8(int32_t x)
+nd_field_terrace3_q12(int32_t x)
 {
 	if (x <= 0) return 0;
-	if (x >= 256) return 256;
-	int32_t tier = x >> 6;
-	int32_t rem  = x & 63;
-	int32_t riser = (nd_field_smoothstep_q8(rem, 2, 26) * 60) >> 8;
-	int32_t bench = (rem * 4) >> 6;
-	int32_t out = (tier << 6) + riser + bench;
-	if (out > 256) out = 256;
+	if (x >= 4095) return 4096;
+	int32_t tier = x / 1365;
+	if (tier > 2) tier = 2;
+	int32_t rem = x - tier * 1365;
+	int32_t riser = (int32_t)(((int64_t)nd_field_smoothstep_q12(rem, 120, 760) * 1140LL) >> 12);
+	int32_t bench = (rem * 225) / 1365;
+	int32_t out = tier * 1365 + riser + bench;
+	if (out > 4096) out = 4096;
 	return out;
 }
 
@@ -1813,30 +1904,30 @@ nd_field_geology(uint16_t world, int32_t rx, int32_t ry)
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
 
-	int32_t wx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, pbits, 8, oseed ^ 0x11A3u) >> 16) - 128;
-	int32_t wy_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, pbits, 8, oseed ^ 0x22B7u) >> 16) - 128;
-	int32_t mx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, pbits, 8, oseed ^ 0x33C9u) >> 16) - 128;
-	int32_t my_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, pbits, 8, oseed ^ 0x44DBu) >> 16) - 128;
+	int32_t wx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 9, pbits, 8, oseed ^ 0x11A3u) >> 16) - 128;
+	int32_t wy_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 9, pbits, 8, oseed ^ 0x22B7u) >> 16) - 128;
+	int32_t mx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 7, pbits, 8, oseed ^ 0x33C9u) >> 16) - 128;
+	int32_t my_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 7, pbits, 8, oseed ^ 0x44DBu) >> 16) - 128;
 
 	int32_t urx = rx + (wx_raw >> 1) + (mx_raw >> 3);
 	int32_t ury = ry + (wy_raw >> 1) + (my_raw >> 3);
 
-	int32_t prov_raw = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 8, pbits, 8, oseed ^ 0x55EDu) >> 16);
-	int32_t n_belt = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 7, pbits, 8, oseed ^ 0x661Fu) >> 16) - 128;
-	int32_t belt_r = 128 - (n_belt < 0 ? -n_belt : n_belt);
+	int32_t n10 = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 10, pbits, 8, oseed ^ 0x55EDu) >> 12);
+	int32_t n11 = (int32_t)(chaff_wpoint_periodic_2d(urx + 521, ury - 389, 11, pbits, 8, oseed ^ 0x661Fu) >> 12);
+	int32_t belt_q12 = (nd_field_ridge_q12(n11) * 5 + nd_field_ridge_q12(n10) * 3) >> 3;
 
-	int32_t cx0 = urx >> 9;
-	int32_t cy0 = ury >> 9;
-	int32_t fx = urx & 511;
-	int32_t fy = ury & 511;
-	int32_t u = nd_field_quintic512_q8(fx);
-	int32_t v = nd_field_quintic512_q8(fy);
+	int32_t cx0 = urx >> 10;
+	int32_t cy0 = ury >> 10;
+	int32_t fx = urx & 1023;
+	int32_t fy = ury & 1023;
+	int32_t u = nd_field_quintic1024_q12(fx);
+	int32_t v = nd_field_quintic1024_q12(fy);
 
 	int32_t w[4];
-	w[0] = ((256 - u) * (256 - v)) >> 8;
-	w[1] = (u * (256 - v)) >> 8;
-	w[2] = ((256 - u) * v) >> 8;
-	w[3] = 256 - w[0] - w[1] - w[2];
+	w[0] = (int32_t)(((int64_t)(4096 - u) * (int64_t)(4096 - v)) >> 12);
+	w[1] = (int32_t)(((int64_t)u * (int64_t)(4096 - v)) >> 12);
+	w[2] = (int32_t)(((int64_t)(4096 - u) * (int64_t)v) >> 12);
+	w[3] = 4096 - w[0] - w[1] - w[2];
 
 	uint8_t p[4], az[4];
 	nd_field_geo_corner(oseed, pbits, cx0,     cy0,     &p[0], &az[0]);
@@ -1860,21 +1951,21 @@ nd_field_geology(uint16_t world, int32_t rx, int32_t ry)
 		}
 	}
 
-	int32_t uplift_acc = 0, strata_acc = 0, flat_acc = 0, age_acc = 0;
+	int64_t uplift_acc = 0, strata_acc = 0, flat_acc = 0, age_acc = 0;
 	for (int k = 0; k < 4; k++) {
 		const nd_geo_archetype_props_t *ap = &ND_GEO_ARCHETYPE_PROPS[p[k]];
-		uplift_acc += w[k] * (int32_t)ap->base_uplift;
-		strata_acc += w[k] * (int32_t)ap->strata_hardness;
-		flat_acc   += w[k] * (int32_t)ap->basin_flatness;
-		age_acc    += w[k] * (int32_t)ap->erosion_age;
+		uplift_acc += (int64_t)w[k] * (int64_t)ap->base_uplift;
+		strata_acc += (int64_t)w[k] * (int64_t)ap->strata_hardness;
+		flat_acc   += (int64_t)w[k] * (int64_t)ap->basin_flatness;
+		age_acc    += (int64_t)w[k] * (int64_t)ap->erosion_age;
 	}
 
-	/* Couple crustal uplift intensity smoothly with regional belt ridge */
-	int32_t belt_q8 = belt_r << 1; /* 0..256 */
-	int32_t raw_up = ((uplift_acc >> 8) * (128 + (belt_q8 >> 1) + (prov_raw >> 2))) >> 8;
+	int32_t belt_q8 = belt_q12 >> 4;
+	int32_t prov_q8 = n10 >> 4;
+	int32_t raw_up = (int32_t)(((uplift_acc >> 12) * (128 + (belt_q8 >> 1) + (prov_q8 >> 2))) >> 8);
 	if (raw_up > 255) raw_up = 255;
 
-	int32_t bq8 = 255 - ((w[best] * 255) >> 8);
+	int32_t bq8 = 255 - (int32_t)(((int64_t)w[best] * 255LL) >> 12);
 	if (bq8 < 0) bq8 = 0;
 	if (bq8 > 255) bq8 = 255;
 
@@ -1883,43 +1974,43 @@ nd_field_geology(uint16_t world, int32_t rx, int32_t ry)
 	g.secondary       = p[second];
 	g.blend_q8        = (uint8_t)bq8;
 	g.tectonic_uplift = (uint8_t)raw_up;
-	g.strata_hardness = (uint8_t)(strata_acc >> 8);
-	g.basin_flatness  = (uint8_t)(flat_acc >> 8);
-	g.erosion_age     = (uint8_t)(age_acc >> 8);
+	g.strata_hardness = (uint8_t)(strata_acc >> 12);
+	g.basin_flatness  = (uint8_t)(flat_acc >> 12);
+	g.erosion_age     = (uint8_t)(age_acc >> 12);
 	g.fault_azimuth   = az[best];
 	return g;
 }
 
-/* Asymmetric fault-escarpment wave on phase in [0..255]: steep 52-room scarp + 204-room dip slope */
+/* Asymmetric fault-escarpment wave on phase in [0..1023]: 280-room scarp + 744-room dip slope */
 static inline int32_t
-nd_field_scarp_wave_q8(int32_t proj)
+nd_field_scarp_wave_q12(int32_t proj)
 {
-	int32_t phase = (int32_t)((uint32_t)proj & 255u);
-	if (phase < 52)
-		return nd_field_smoothstep_q8(phase, 0, 52);
-	return 256 - nd_field_smoothstep_q8(phase, 52, 256);
+	int32_t phase = (int32_t)((uint32_t)proj & 1023u);
+	if (phase < 280)
+		return nd_field_smoothstep_q12(phase, 0, 280);
+	return 4096 - nd_field_smoothstep_q12(phase, 280, 1024);
 }
 
-/* Wind-aligned barchan dune erg ripple on phase in [0..63] */
+/* Wind-aligned barchan dune erg ripple on phase in [0..127]: 84-room windward + 44-room leeward */
 static inline int32_t
-nd_field_dune_wave_q8(int32_t proj)
+nd_field_dune_wave_q12(int32_t proj)
 {
-	int32_t phase = (int32_t)((uint32_t)proj & 63u);
-	if (phase < 40)
-		return (phase * 256) / 40;
-	return ((64 - phase) * 256) / 24;
+	int32_t phase = (int32_t)((uint32_t)proj & 127u);
+	if (phase < 84)
+		return nd_field_smoothstep_q12(phase, 0, 84);
+	return 4096 - nd_field_smoothstep_q12(phase, 84, 128);
 }
 
-/* Radial stratovolcano cone profile with breached summit caldera dimple (radius 240 rooms) */
+/* Radial stratovolcano cone profile with breached summit caldera dimple (radius 480 rooms) */
 static inline int32_t
-nd_field_volcano_cone_q8(uint32_t d)
+nd_field_volcano_cone_q12(uint32_t d)
 {
-	if (d >= 240u) return 0;
-	int32_t c = nd_field_smoothstep_q8(240 - (int32_t)d, 0, 220);
-	c = (c * (96 + ((c * 160) >> 8))) >> 8;
-	if (d < 36u) {
-		int32_t cal = nd_field_smoothstep_q8(36 - (int32_t)d, 0, 36);
-		c -= (cal * 64) >> 8;
+	if (d >= 480u) return 0;
+	int32_t c = nd_field_smoothstep_q12(480 - (int32_t)d, 0, 440);
+	c = (int32_t)(((int64_t)c * (1536LL + (((int64_t)c * 2560LL) >> 12))) >> 12);
+	if (d < 64u) {
+		int32_t cal = nd_field_smoothstep_q12(64 - (int32_t)d, 0, 64);
+		c -= (int32_t)(((int64_t)cal * 896LL) >> 12);
 		if (c < 0) c = 0;
 	}
 	return c;
@@ -1929,103 +2020,122 @@ nd_field_volcano_cone_q8(uint32_t d)
 static inline int32_t
 nd_field_orogeny_eval_archetype(uint8_t prov, uint8_t az, int32_t corner_rx, int32_t corner_ry,
                                 int32_t urx, int32_t ury, int32_t base_hyp,
-                                int32_t hill_q8, int32_t alpine_q8, int32_t scale_q8,
-                                int32_t hill_raw, int32_t alp_raw,
-                                int32_t r9, int32_t r8, int32_t r7, int32_t r5)
+                                int32_t shore_q12, int32_t foothill_q12, int32_t inland_q12,
+                                int32_t hill_q12, int32_t alpine_q12, int32_t scale_q12,
+                                int32_t roll_raw, int32_t hill_raw, int32_t alp_raw,
+                                int32_t n10, int32_t r10, int32_t r9, int32_t r7, int32_t r6)
 {
-	int32_t env_q8 = (alpine_q8 > hill_q8) ? alpine_q8 : hill_q8;
+	int32_t roll_term = (int32_t)(((int64_t)roll_raw * (int64_t)shore_q12) >> 12);
 	switch (prov) {
 	case ND_GEO_ALLUVIAL_PLAIN: {
-		int32_t h_hill = hill_raw >> 1;
-		int32_t h_alp  = alp_raw >> 3;
-		return ((h_hill * hill_q8) >> 8) + ((h_alp * alpine_q8) >> 8);
+		int32_t h_hill = (int32_t)(((int64_t)(hill_raw >> 2) * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((int64_t)(alp_raw >> 3) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_hill + h_alp;
 	}
 	case ND_GEO_PIEDMONT_HILLS: {
-		int32_t h_hill = hill_raw * 10;
-		int32_t h_alp  = (alp_raw * 3) >> 3;
-		return ((h_hill * hill_q8) >> 8) + ((h_alp * alpine_q8) >> 8);
+		int32_t h_hill = (int32_t)(((int64_t)hill_raw * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((int64_t)((alp_raw * 3) >> 3) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_hill + h_alp;
 	}
 	case ND_GEO_ALPINE_CORDILLERA: {
-		int32_t h_hill = hill_raw * 12;
-		return ((h_hill * hill_q8) >> 8) + ((alp_raw * alpine_q8) >> 8);
+		int32_t h_hill = (int32_t)(((int64_t)((hill_raw * 5) >> 2) * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((int64_t)alp_raw * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_hill + h_alp;
 	}
 	case ND_GEO_CANYON_MESA: {
-		int32_t m_sig = (r9 * 3 + r7 * 2) / 5;
-		int32_t terr_q8 = nd_field_terrace_q8(m_sig << 1);
-		int32_t mesa_scale = 192 + (scale_q8 >> 2);
-		int32_t mesa_cap = (int32_t)(((int64_t)terr_q8 * 38000LL * (int64_t)mesa_scale) >> 16);
-		return (((mesa_cap + hill_raw * 6) * env_q8) >> 8) + (((alp_raw >> 3) * alpine_q8) >> 8);
+		int32_t m_sig = (n10 * 3 + r9 * 2) / 5;
+		int32_t terr_q12 = nd_field_terrace3_q12(m_sig);
+		int32_t mesa_h = (int32_t)((((int64_t)terr_q12 * 10500LL) >> 12) * (int64_t)scale_q12 >> 12);
+		int32_t h_mesa = (int32_t)(((int64_t)mesa_h * (int64_t)inland_q12) >> 12);
+		int32_t h_hill = (int32_t)(((int64_t)(hill_raw >> 1) * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((int64_t)(alp_raw >> 3) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_mesa + h_hill + h_alp;
 	}
 	case ND_GEO_FAULT_ESCARPMENT: {
 		int32_t ca = nd_field_cos_q15((uint16_t)((uint32_t)az << 8));
 		int32_t sa = nd_field_cos_q15((uint16_t)(((uint32_t)az + 192u) << 8));
-		int32_t proj = (int32_t)(((int64_t)urx * (int64_t)ca + (int64_t)ury * (int64_t)sa) >> 15);
-		int32_t scarp_q8 = nd_field_scarp_wave_q8(proj);
-		int32_t scarp_h = (int32_t)(((int64_t)scarp_q8 * 54000LL * (int64_t)scale_q8) >> 16);
-		int32_t h_hill = (scarp_h >> 2) + hill_raw * 6;
-		int32_t h_alp  = ((scarp_h * 3) >> 2) + (alp_raw >> 2);
-		return ((h_hill * hill_q8) >> 8) + ((h_alp * alpine_q8) >> 8);
+		int32_t dx = urx - corner_rx;
+		int32_t dy = ury - corner_ry;
+		int32_t proj = (int32_t)(((int64_t)dx * (int64_t)ca + (int64_t)dy * (int64_t)sa) >> 15);
+		int32_t scarp_q12 = nd_field_scarp_wave_q12(proj);
+		int32_t scarp_h = (int32_t)((((int64_t)scarp_q12 * 14000LL) >> 12) * (int64_t)scale_q12 >> 12);
+		int32_t h_scarp = (int32_t)(((int64_t)scarp_h * (int64_t)inland_q12) >> 12);
+		int32_t h_hill  = (int32_t)(((int64_t)hill_raw * (int64_t)hill_q12) >> 12);
+		int32_t h_alp   = (int32_t)(((int64_t)(alp_raw >> 2) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_scarp + h_hill + h_alp;
 	}
 	case ND_GEO_GLACIAL_FJORD: {
-		int32_t g_sig = (r9 * 5 + r8 * 3) >> 3;
-		int32_t u_wall_q8 = nd_field_smoothstep_q8(g_sig, 46, 98);
-		int32_t h_hill = ((hill_raw * 7) * u_wall_q8) >> 8;
-		int32_t h_alp  = (int32_t)(((int64_t)alp_raw * (int64_t)u_wall_q8) >> 8);
-		return ((h_hill * hill_q8) >> 8) + ((h_alp * alpine_q8) >> 8);
+		int32_t g_sig = (r10 * 5 + r9 * 3) >> 3;
+		int32_t u_wall_q12 = nd_field_smoothstep_q12(g_sig, 1400, 3100);
+		int32_t h_hill = (int32_t)(((((int64_t)hill_raw * (int64_t)u_wall_q12) >> 12) * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((((int64_t)alp_raw * (int64_t)u_wall_q12) >> 12) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_hill + h_alp;
 	}
 	case ND_GEO_VOLCANIC_CONE: {
 		int32_t dx = urx - corner_rx;
 		int32_t dy = ury - corner_ry;
 		uint32_t d = nd_field_isqrt32((uint32_t)(dx * dx + dy * dy));
-		int32_t cone_q8 = nd_field_volcano_cone_q8(d);
-		int32_t volc_h = (int32_t)(((int64_t)cone_q8 * 76000LL * (int64_t)scale_q8) >> 16);
-		return (((volc_h + hill_raw * 7) * env_q8) >> 8) + (((alp_raw >> 2) * alpine_q8) >> 8);
+		int32_t cone_q12 = nd_field_volcano_cone_q12(d);
+		int32_t volc_h = (int32_t)((((int64_t)cone_q12 * 19500LL) >> 12) * (int64_t)scale_q12 >> 12);
+		int32_t h_volc = (int32_t)(((int64_t)volc_h * (int64_t)inland_q12) >> 12);
+		int32_t h_hill = (int32_t)(((int64_t)hill_raw * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((int64_t)(alp_raw >> 2) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_volc + h_hill + h_alp;
 	}
 	case ND_GEO_KARST_TOWERS: {
-		int32_t k_sig = (r5 * r5 * r5) >> 14; /* 0..128 sharp isolated limestone pinnacles */
-		int32_t karst_h = k_sig * 165;
-		return (((karst_h + hill_raw * 3) * env_q8) >> 8) + (((alp_raw >> 2) * alpine_q8) >> 8);
+		int32_t k_base = (r7 * 5 + r6 * 3) >> 3;
+		int32_t k_sig = (int32_t)(((int64_t)k_base * (int64_t)k_base) >> 12);
+		int32_t karst_h = (int32_t)(((int64_t)k_sig * 3600LL) >> 12);
+		int32_t h_karst = (int32_t)(((int64_t)karst_h * (int64_t)foothill_q12) >> 12);
+		int32_t h_hill  = (int32_t)(((int64_t)(hill_raw >> 1) * (int64_t)hill_q12) >> 12);
+		int32_t h_alp   = (int32_t)(((int64_t)(alp_raw >> 2) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_karst + h_hill + h_alp;
 	}
 	case ND_GEO_ARID_BASIN_ERG: {
 		int32_t ca = nd_field_cos_q15((uint16_t)((uint32_t)az << 8));
 		int32_t sa = nd_field_cos_q15((uint16_t)(((uint32_t)az + 192u) << 8));
-		int32_t proj = (int32_t)(((int64_t)urx * (int64_t)ca + (int64_t)ury * (int64_t)sa) >> 15);
-		int32_t dune_q8 = nd_field_dune_wave_q8(proj);
-		int32_t dune_h = (dune_q8 * 14) >> 1;
-		int32_t h_hill = dune_h + hill_raw * 2;
-		int32_t h_alp  = (alp_raw * 3) >> 4;
-		return ((h_hill * hill_q8) >> 8) + ((h_alp * alpine_q8) >> 8);
+		int32_t dx = urx - corner_rx;
+		int32_t dy = ury - corner_ry;
+		int32_t proj = (int32_t)(((int64_t)dx * (int64_t)ca + (int64_t)dy * (int64_t)sa) >> 15);
+		int32_t dune_q12 = nd_field_dune_wave_q12(proj);
+		int32_t dune_h = (int32_t)(((int64_t)dune_q12 * 720LL) >> 12);
+		int32_t h_dune = (int32_t)(((int64_t)dune_h * (int64_t)shore_q12) >> 12);
+		int32_t h_hill = (int32_t)(((int64_t)(hill_raw >> 1) * (int64_t)hill_q12) >> 12);
+		int32_t h_alp  = (int32_t)(((int64_t)((alp_raw * 3) >> 4) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_dune + h_hill + h_alp;
 	}
 	case ND_GEO_SEA_CLIFF_COAST:
 	default: {
-		int32_t headland_q8 = nd_field_smoothstep_q8(base_hyp, 6, 20);
-		int32_t cliff_h = ((headland_q8 * 4800) >> 8) + hill_raw * 8;
-		int32_t h_alp = (alp_raw * 5) >> 3;
-		return ((cliff_h * hill_q8) >> 8) + ((h_alp * alpine_q8) >> 8);
+		int32_t headland_q12 = nd_field_smoothstep_q12(base_hyp, 6, 64);
+		int32_t cliff_h = (int32_t)(((int64_t)headland_q12 * 1100LL) >> 12);
+		int32_t h_cliff = (int32_t)(((int64_t)cliff_h * (int64_t)shore_q12) >> 12);
+		int32_t h_hill  = (int32_t)(((int64_t)hill_raw * (int64_t)hill_q12) >> 12);
+		int32_t h_alp   = (int32_t)(((int64_t)((alp_raw * 5) >> 3) * (int64_t)alpine_q12) >> 12);
+		return roll_term + h_cliff + h_hill + h_alp;
 	}
 	}
 }
 
-/* Blend 4 corners of the warped 2x2 province cell with C2 quintic weights */
+/* Blend 4 corners of the warped 2x2 1024-room province cell with C2 quintic weights */
 static inline int32_t
 nd_field_orogeny_blend_cell(uint32_t oseed, uint8_t pbits, int32_t urx, int32_t ury,
-                            int32_t base_hyp, int32_t coast_q8, int32_t hill_q8,
-                            int32_t alpine_q8, int32_t scale_q8,
-                            int32_t hill_raw, int32_t alp_raw,
-                            int32_t r9, int32_t r8, int32_t r7, int32_t r5)
+                            int32_t base_hyp, int32_t shore_q12, int32_t foothill_q12,
+                            int32_t inland_q12, int32_t hill_q12, int32_t alpine_q12,
+                            int32_t scale_q12, int32_t roll_raw, int32_t hill_raw, int32_t alp_raw,
+                            int32_t n10, int32_t r10, int32_t r9, int32_t r7, int32_t r6)
 {
-	int32_t cx0 = urx >> 9;
-	int32_t cy0 = ury >> 9;
-	int32_t fx = urx & 511;
-	int32_t fy = ury & 511;
-	int32_t u = nd_field_quintic512_q8(fx);
-	int32_t v = nd_field_quintic512_q8(fy);
+	int32_t cx0 = urx >> 10;
+	int32_t cy0 = ury >> 10;
+	int32_t fx = urx & 1023;
+	int32_t fy = ury & 1023;
+	int32_t u = nd_field_quintic1024_q12(fx);
+	int32_t v = nd_field_quintic1024_q12(fy);
 
 	int32_t w[4];
-	w[0] = ((256 - u) * (256 - v)) >> 8;
-	w[1] = (u * (256 - v)) >> 8;
-	w[2] = ((256 - u) * v) >> 8;
-	w[3] = 256 - w[0] - w[1] - w[2];
+	w[0] = (int32_t)(((int64_t)(4096 - u) * (int64_t)(4096 - v)) >> 12);
+	w[1] = (int32_t)(((int64_t)u * (int64_t)(4096 - v)) >> 12);
+	w[2] = (int32_t)(((int64_t)(4096 - u) * (int64_t)v) >> 12);
+	w[3] = 4096 - w[0] - w[1] - w[2];
 
 	const int32_t cx[4] = { cx0, cx0 + 1, cx0,     cx0 + 1 };
 	const int32_t cy[4] = { cy0, cy0,     cy0 + 1, cy0 + 1 };
@@ -2036,194 +2146,208 @@ nd_field_orogeny_blend_cell(uint32_t oseed, uint8_t pbits, int32_t urx, int32_t 
 		uint8_t prov, az;
 		nd_field_geo_corner(oseed, pbits, cx[k], cy[k], &prov, &az);
 		int32_t h_k = nd_field_orogeny_eval_archetype(
-			prov, az, cx[k] << 9, cy[k] << 9, urx, ury, base_hyp,
-			hill_q8, alpine_q8, scale_q8, hill_raw, alp_raw, r9, r8, r7, r5);
+			prov, az, cx[k] << 10, cy[k] << 10, urx, ury, base_hyp,
+			shore_q12, foothill_q12, inland_q12, hill_q12, alpine_q12, scale_q12,
+			roll_raw, hill_raw, alp_raw, n10, r10, r9, r7, r6);
 		acc += (int64_t)w[k] * (int64_t)h_k;
 	}
-	int32_t uplift = (int32_t)(acc >> 8);
-	uplift = (int32_t)(((int64_t)uplift * (int64_t)coast_q8) >> 8);
+	int32_t uplift = (int32_t)(acc >> 12);
 	return uplift > 0 ? uplift : 0;
 }
 
+/* Compute macro continental height c_cont_q8 (s=15..9 minus sea_off) from (seed, rx, ry)
+ * for legacy callers that invoke nd_field_orogeny_wu without precomputed c_cont_q8. */
 static inline int32_t
-nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry, int32_t base_hyp)
+nd_field_eval_cont_q8_for_seed(uint32_t seed, int32_t rx, int32_t ry)
 {
-	if (base_hyp <= 6)
+	uint16_t world = (uint16_t)(((seed ^ 0x48454947u) * 0x0E8B2F51u) & 0xFFFFu);
+	int32_t wx = rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+	int32_t wy = (ND_FIELD_ROOM_H / 2) - ry * ND_FIELD_ROOM_H;
+	int32_t c_q4 = 0, cont_q8 = 0;
+	nd_field_elevation_step_ex_q12_4(world, 0, wx, wy, &c_q4, NULL, &cont_q8);
+	return cont_q8;
+}
+
+static inline int32_t
+nd_field_orogeny_wu_ex(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry,
+                       int32_t base_hyp, int32_t c_cont_q8)
+{
+	if (base_hyp <= 1)
 		return 0;
 	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t max_e = nd_field_active_max_elev_wu();
-	int32_t scale_q8 = (int32_t)(((int64_t)max_e * 256LL) / 81000LL);
-	int32_t coast_q8 = nd_field_smoothstep_q8(base_hyp, 6, 16);
+	int32_t scale_q12 = (int32_t)(((int64_t)max_e * 4096LL) / 21600LL);
+	int32_t shore_q12 = nd_field_smoothstep_q12(base_hyp, 1, 24);
+	int32_t beach_h_q12 = nd_field_smoothstep_q12(base_hyp, 1, 20);
+	int32_t beach_a_q12 = nd_field_smoothstep_q12(base_hyp, 1, 16);
+	int32_t foothill_q12 = (int32_t)(((int64_t)nd_field_smoothstep_q12(c_cont_q8, 12 * 256, 40 * 256) *
+	                                  (int64_t)beach_h_q12) >> 12);
+	int32_t inland_q12 = (int32_t)(((int64_t)nd_field_smoothstep_q12(c_cont_q8, 25 * 256, 62 * 256) *
+	                                (int64_t)beach_a_q12) >> 12);
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
 
-	int32_t wx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, pbits, 8, oseed ^ 0x11A3u) >> 16) - 128;
-	int32_t wy_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, pbits, 8, oseed ^ 0x22B7u) >> 16) - 128;
-	int32_t mx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, pbits, 8, oseed ^ 0x33C9u) >> 16) - 128;
-	int32_t my_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, pbits, 8, oseed ^ 0x44DBu) >> 16) - 128;
+	int32_t wx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 9, pbits, 8, oseed ^ 0x11A3u) >> 16) - 128;
+	int32_t wy_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 9, pbits, 8, oseed ^ 0x22B7u) >> 16) - 128;
+	int32_t mx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 7, pbits, 8, oseed ^ 0x33C9u) >> 16) - 128;
+	int32_t my_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 7, pbits, 8, oseed ^ 0x44DBu) >> 16) - 128;
 
 	int32_t urx = rx + (wx_raw >> 1) + (mx_raw >> 3);
 	int32_t ury = ry + (wy_raw >> 1) + (my_raw >> 3);
 
-	int32_t prov_raw = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 8, pbits, 8, oseed ^ 0x55EDu) >> 16);
-	int32_t n_belt = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 7, pbits, 8, oseed ^ 0x661Fu) >> 16) - 128;
-	int32_t belt_r = 128 - (n_belt < 0 ? -n_belt : n_belt);
+	/* Shared Q12 octaves [0..4095] across lowland roll, foothills, alpine cordilleras, and archetypes */
+	int32_t n10 = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 10, pbits, 8, oseed ^ 0x55EDu) >> 12);
+	int32_t n11 = (int32_t)(chaff_wpoint_periodic_2d(urx + 521, ury - 389, 11, pbits, 8, oseed ^ 0x661Fu) >> 12);
+	int32_t n9  = (int32_t)(chaff_wpoint_periodic_2d(urx + 313, ury - 571, 9, pbits, 8, oseed ^ 0x4E3Bu) >> 12);
+	int32_t n8  = (int32_t)(chaff_wpoint_periodic_2d(urx - 419, ury + 263, 8, pbits, 8, oseed ^ 0x3D29u) >> 12);
+	int32_t n7  = (int32_t)(chaff_wpoint_periodic_2d(urx + 191, ury + 547, 7, pbits, 8, oseed ^ 0x9955u) >> 12);
+	int32_t n6  = (int32_t)(chaff_wpoint_periodic_2d(urx - 613, ury + 271, 6, pbits, 8, oseed ^ 0xAA67u) >> 12);
+	int32_t n5  = (int32_t)(chaff_wpoint_periodic_2d(urx + 713, ury - 419, 5, pbits, 8, oseed ^ 0x7731u) >> 12);
 
-	int32_t h_sig = (prov_raw * 3 + belt_r * 5) >> 3;
-	int32_t hill_q8 = nd_field_smoothstep_q8(h_sig, 96, 150);
+	int32_t r11 = nd_field_ridge_q12(n11);
+	int32_t r10 = nd_field_ridge_q12(n10);
+	int32_t r9  = nd_field_ridge_q12(n9);
+	int32_t r8  = nd_field_ridge_q12(n8);
+	int32_t r7  = nd_field_ridge_q12(n7);
+	int32_t r6  = nd_field_ridge_q12(n6);
+	int32_t r5  = nd_field_ridge_q12(n5);
 
-	int32_t a_sig = (belt_r * (144 + prov_raw)) >> 8;
-	if (base_hyp > 80) {
-		int32_t cb = (base_hyp - 80) >> 3;
-		if (cb > 28) cb = 28;
-		a_sig += cb;
-	}
-	int32_t a_sm = nd_field_smoothstep_q8(a_sig, 78, 146);
-	int32_t alpine_q8 = (a_sm * (128 + (a_sm >> 1))) >> 8;
+	/* Tier 1: Universal lowland roll (0..613 wu) — always active on land, zero tabletop pancakes */
+	int32_t roll_raw = (int32_t)(((int64_t)n9 * 260LL + (int64_t)n8 * 170LL +
+	                              (int64_t)n7 * 105LL + (int64_t)n6 * 54LL +
+	                              (int64_t)n5 * 24LL) >> 12);
 
-	if (hill_q8 == 0 && alpine_q8 == 0)
-		return 0;
+	/* Tier 2: Rolling foothills & piedmont (0..3,064 wu) */
+	int32_t h_sig = (n10 * 3 + n9 * 3 + r8 * 2) >> 3;
+	int32_t hill_reg_q12 = nd_field_smoothstep_q12(h_sig, 850, 3150);
+	int32_t hill_q12 = (int32_t)(((int64_t)hill_reg_q12 * (int64_t)foothill_q12) >> 12);
 
 	uint32_t w4_oct = (room_step_q16 > 0) ? chaff_octave_weight_q16(4, room_step_q16) : 65536u;
+	int32_t n4 = 0;
+	if (w4_oct > 0u && (hill_q12 > 0 || inland_q12 > 0))
+		n4 = (int32_t)(chaff_wpoint_periodic_2d(urx - 317, ury + 823, 4, pbits, 8, oseed ^ 0x8843u) >> 12);
+
 	int32_t hill_raw = 0;
-	int32_t r8 = 128 - (prov_raw >= 128 ? (prov_raw - 128) : (128 - prov_raw));
-	int32_t r7 = belt_r;
-	int32_t r9 = 0;
-	int32_t r5_karst = 0;
-
-	/* Shared macro shift-9 octave (512 rooms = 1.82 km) feeds mesa/glacial/alpine silhouettes */
-	int32_t n9 = (int32_t)(chaff_wpoint_periodic_2d(urx + 313, ury - 571, 9, pbits, 8, oseed ^ 0x4E3Bu) >> 16) - 128;
-	r9 = 128 - (n9 < 0 ? -n9 : n9);
-
-	if (hill_q8 > 0 || alpine_q8 > 0) {
-		int32_t n5 = (int32_t)(chaff_wpoint_periodic_2d(urx + 713, ury - 419, 5, pbits, 8, oseed ^ 0x7731u) >> 16);
-		int32_t r5 = 128 - (n5 >= 128 ? (n5 - 128) : (128 - n5));
-		r5_karst = r5;
-		if (hill_q8 > 0) {
-			int32_t f5 = (n5 * 192 + r5 * 528) >> 8;
-			int32_t f4 = 0;
-			if (w4_oct > 0u) {
-				int32_t n4 = (int32_t)(chaff_wpoint_periodic_2d(urx - 317, ury + 823, 4, pbits, 8, oseed ^ 0x8843u) >> 16);
-				f4 = (n4 * 240) >> 8;
-				if (w4_oct < 65536u)
-					f4 = (int32_t)(((int64_t)f4 * (int64_t)w4_oct) >> 16);
-			}
-			hill_raw = f5 + f4;
-		}
+	if (hill_q12 > 0) {
+		int64_t f4_h = (w4_oct > 0u) ? ((((int64_t)n4 * 44LL) * (int64_t)w4_oct) >> 16) : 0LL;
+		hill_raw = (int32_t)(((int64_t)n9 * 1400LL + (int64_t)n8 * 840LL +
+		                      (int64_t)n7 * 460LL + (int64_t)r6 * 220LL +
+		                      (int64_t)r5 * 100LL + f4_h) >> 12);
 	}
 
+	/* Tier 3: Power-law slope-bounded mountain cordilleras (up to 21,600 wu at b=16) */
+	int32_t belt_q12 = (r11 * 5 + r10 * 3) >> 3;
+	int32_t a_sm = nd_field_smoothstep_q12(belt_q12, 1200, 3350);
+	int32_t alp_reg_q12 = (int32_t)(((int64_t)a_sm * (1536LL + (((int64_t)a_sm * 2560LL) >> 12))) >> 12);
+	int32_t alpine_q12 = (int32_t)(((int64_t)alp_reg_q12 * (int64_t)inland_q12) >> 12);
+
 	int32_t alp_raw = 0;
-	if (alpine_q8 > 0) {
-		/* Metric-scale ridged multifractal: shift 10 (3.64 km) down to shift 2 (14 m)
-		 * preserving physical 30-45 deg slopes at 45 wu/m up to 81,000 wu (1,800 m) at b=16 */
-		int32_t n10 = (int32_t)(chaff_wpoint_periodic_2d(urx - 829, ury + 467, 10, pbits, 8, oseed ^ 0x3D29u) >> 16) - 128;
-		int32_t r10 = 128 - (n10 < 0 ? -n10 : n10);
-		int32_t h10 = (r10 * r10) >> 7;
+	if (alpine_q12 > 0) {
+		int32_t h11 = (int32_t)(((int64_t)r11 * (int64_t)r11) >> 12);
 
-		int32_t h9 = (r9 * (64 + (r9 >> 1))) >> 7;
-		int32_t w9 = 96 + ((h10 * 160) >> 7);
-		int32_t h9w = (h9 * w9) >> 8;
+		int32_t h10 = (int32_t)(((int64_t)r10 * (1536LL + (((int64_t)r10 * 2560LL) >> 12))) >> 12);
+		int32_t w10 = 1536 + (int32_t)(((int64_t)h11 * 2560LL) >> 12);
+		int32_t h10w = (int32_t)(((int64_t)h10 * (int64_t)w10) >> 12);
 
-		int32_t h8 = (r8 * (64 + (r8 >> 1))) >> 7;
-		int32_t w8 = 84 + ((h9w * 172) >> 7);
-		int32_t h8w = (h8 * w8) >> 8;
+		int32_t h9 = (int32_t)(((int64_t)r9 * (1536LL + (((int64_t)r9 * 2560LL) >> 12))) >> 12);
+		int32_t w9 = 1344 + (int32_t)(((int64_t)h10w * 2752LL) >> 12);
+		int32_t h9w = (int32_t)(((int64_t)h9 * (int64_t)w9) >> 12);
 
-		int32_t h7 = (r7 * (64 + (r7 >> 1))) >> 7;
-		int32_t w7 = 76 + ((h8w * 180) >> 7);
-		int32_t h7w = (h7 * w7) >> 8;
+		int32_t h8 = (int32_t)(((int64_t)r8 * (1536LL + (((int64_t)r8 * 2560LL) >> 12))) >> 12);
+		int32_t w8 = 1216 + (int32_t)(((int64_t)h9w * 2880LL) >> 12);
+		int32_t h8w = (int32_t)(((int64_t)h8 * (int64_t)w8) >> 12);
 
-		int32_t n6 = (int32_t)(chaff_wpoint_periodic_2d(urx + 191, ury + 547, 6, pbits, 8, oseed ^ 0x9955u) >> 16) - 128;
-		int32_t r6 = 128 - (n6 < 0 ? -n6 : n6);
-		int32_t h6 = (r6 * r6) >> 7;
-		int32_t w6 = 72 + ((h7w * 184) >> 7);
-		int32_t h6w = (h6 * w6) >> 8;
+		int32_t h7 = (int32_t)(((int64_t)r7 * (1536LL + (((int64_t)r7 * 2560LL) >> 12))) >> 12);
+		int32_t w7 = 1152 + (int32_t)(((int64_t)h8w * 2944LL) >> 12);
+		int32_t h7w = (int32_t)(((int64_t)h7 * (int64_t)w7) >> 12);
 
-		int32_t n5a = (int32_t)(chaff_wpoint_periodic_2d(urx - 613, ury + 271, 5, pbits, 8, oseed ^ 0xAA67u) >> 16) - 128;
-		int32_t r5a = 128 - (n5a < 0 ? -n5a : n5a);
-		int32_t h5 = (r5a * (64 + (r5a >> 1))) >> 7;
-		int32_t w5 = 64 + ((h6w * 192) >> 7);
-		int32_t h5w = (h5 * w5) >> 8;
+		int32_t h6 = (int32_t)(((int64_t)r6 * (int64_t)r6) >> 12);
+		int32_t w6 = 1024 + (int32_t)(((int64_t)h7w * 3072LL) >> 12);
+		int32_t h6w = (int32_t)(((int64_t)h6 * (int64_t)w6) >> 12);
 
-		alp_raw = (int32_t)(((int64_t)h10 * 33000LL) >> 7) +
-		          (int32_t)(((int64_t)h9w * 26000LL) >> 7) +
-		          (int32_t)(((int64_t)h8w * 16500LL) >> 7) +
-		          (int32_t)(((int64_t)h7w * 10000LL) >> 7) +
-		          (int32_t)(((int64_t)h6w *  5200LL) >> 7) +
-		          (int32_t)(((int64_t)h5w *  2600LL) >> 7);
+		int32_t h5 = (int32_t)(((int64_t)r5 * (1536LL + (((int64_t)r5 * 2560LL) >> 12))) >> 12);
+		int32_t w5 = 960 + (int32_t)(((int64_t)h6w * 3136LL) >> 12);
+		int32_t h5w = (int32_t)(((int64_t)h5 * (int64_t)w5) >> 12);
+
+		alp_raw = (int32_t)(((int64_t)h11  * 11200LL +
+		                     (int64_t)h10w *  7200LL +
+		                     (int64_t)h9w  *  4000LL +
+		                     (int64_t)h8w  *  2000LL +
+		                     (int64_t)h7w  *   960LL +
+		                     (int64_t)h6w  *   440LL +
+		                     (int64_t)h5w  *   180LL) >> 12);
 
 		if (w4_oct > 0u) {
-			int32_t n4 = (int32_t)(chaff_wpoint_periodic_2d(urx + 409, ury - 733, 4, pbits, 8, oseed ^ 0xBB79u) >> 16) - 128;
-			int32_t r4 = 128 - (n4 < 0 ? -n4 : n4);
-			int32_t h4 = (r4 * (64 + (r4 >> 1))) >> 7;
-			int32_t w4 = 56 + ((h5w * 200) >> 7);
-			int32_t h4w = (h4 * w4) >> 8;
-			int32_t c4 = (h4w * 1300) >> 7;
+			int32_t r4 = nd_field_ridge_q12(n4);
+			int32_t h4 = (int32_t)(((int64_t)r4 * (1536LL + (((int64_t)r4 * 2560LL) >> 12))) >> 12);
+			int32_t w4 = 896 + (int32_t)(((int64_t)h5w * 3200LL) >> 12);
+			int32_t h4w = (int32_t)(((int64_t)h4 * (int64_t)w4) >> 12);
+			int32_t c4 = (int32_t)(((int64_t)h4w * 72LL) >> 12);
 			if (w4_oct < 65536u)
 				c4 = (int32_t)(((int64_t)c4 * (int64_t)w4_oct) >> 16);
 			alp_raw += c4;
 
 			uint32_t w3_oct = (room_step_q16 > 0) ? chaff_octave_weight_q16(3, room_step_q16) : 65536u;
 			if (w3_oct > 0u) {
-				int32_t n3 = (int32_t)(chaff_wpoint_periodic_2d(urx - 227, ury - 389, 3, pbits, 8, oseed ^ 0xCC8Bu) >> 16) - 128;
-				int32_t r3 = 128 - (n3 < 0 ? -n3 : n3);
-				int32_t w3 = 32 + ((h4w * 224) >> 7);
-				int32_t h3w = (r3 * w3) >> 8;
-				int32_t c3 = (h3w * 650) >> 7;
+				int32_t n3 = (int32_t)(chaff_wpoint_periodic_2d(urx - 227, ury - 389, 3, pbits, 8, oseed ^ 0xCC8Bu) >> 12);
+				int32_t r3 = nd_field_ridge_q12(n3);
+				int32_t w3 = 512 + (int32_t)(((int64_t)h4w * 3584LL) >> 12);
+				int32_t h3w = (int32_t)(((int64_t)r3 * (int64_t)w3) >> 12);
+				int32_t c3 = (int32_t)(((int64_t)h3w * 28LL) >> 12);
 				if (w3_oct < 65536u)
 					c3 = (int32_t)(((int64_t)c3 * (int64_t)w3_oct) >> 16);
 				alp_raw += c3;
-
-				uint32_t w2_oct = (room_step_q16 > 0) ? chaff_octave_weight_q16(2, room_step_q16) : 65536u;
-				if (w2_oct > 0u && h3w > 0) {
-					int32_t n2 = (int32_t)(chaff_wpoint_periodic_2d(urx + 131, ury + 179, 2, pbits, 8, oseed ^ 0xDD9Du) >> 16) - 128;
-					int32_t r2 = 128 - (n2 < 0 ? -n2 : n2);
-					int32_t w2 = (h3w * 256) >> 7;
-					int32_t h2w = (r2 * w2) >> 8;
-					int32_t c2 = (h2w * 350) >> 7;
-					if (w2_oct < 65536u)
-						c2 = (int32_t)(((int64_t)c2 * (int64_t)w2_oct) >> 16);
-					alp_raw += c2;
-				}
 			}
 		}
 
-		/* Core Scaling Law (Roadmap §2): larger planets unlock macro continental octaves
-		 * (shifts 11..13) to build 4,500..8,850 m cordilleras without stretching local hills */
-		if (pbits >= 18u && max_e > 81000) {
-			int64_t extra_wu = (int64_t)(max_e - 81000);
-			int32_t n11 = (int32_t)(chaff_wpoint_periodic_2d(urx + 1423, ury - 977, 11, pbits, 8, oseed ^ 0x5E11u) >> 16) - 128;
-			int32_t r11 = 128 - (n11 < 0 ? -n11 : n11);
-			int32_t h11 = (r11 * r11) >> 7;
-			if (pbits < 20u) {
-				alp_raw += (int32_t)(((int64_t)h11 * extra_wu * 115LL) / (128LL * 100LL));
-			} else if (pbits < 22u) {
-				int32_t n12 = (int32_t)(chaff_wpoint_periodic_2d(urx - 2113, ury + 1657, 12, pbits, 8, oseed ^ 0x6F23u) >> 16) - 128;
-				int32_t r12 = 128 - (n12 < 0 ? -n12 : n12);
-				int32_t h12 = (r12 * r12) >> 7;
-				alp_raw += (int32_t)(((int64_t)h11 * extra_wu * 60LL + (int64_t)h12 * extra_wu * 55LL) / (128LL * 100LL));
+		/* Planet Scaling Law: larger planets unlock macro continental octaves
+		 * (shifts 12..14) to build 900..8,850 m cordilleras without steepening local hills */
+		if (pbits >= 17u && max_e > 21600) {
+			int64_t extra_wu = (int64_t)(max_e - 21600);
+			int32_t n12 = (int32_t)(chaff_wpoint_periodic_2d(urx - 2113, ury + 1657, 12, pbits, 8, oseed ^ 0x6F23u) >> 12);
+			int32_t r12 = nd_field_ridge_q12(n12);
+			int32_t h12 = (int32_t)(((int64_t)r12 * (int64_t)r12) >> 12);
+			if (pbits < 19u) {
+				alp_raw += (int32_t)(((int64_t)h12 * extra_wu * 125LL) / (4096LL * 100LL));
+			} else if (pbits < 21u) {
+				int32_t n13 = (int32_t)(chaff_wpoint_periodic_2d(urx + 3571, ury + 2909, 13, pbits, 8, oseed ^ 0x7A35u) >> 12);
+				int32_t r13 = nd_field_ridge_q12(n13);
+				int32_t h13 = (int32_t)(((int64_t)r13 * (int64_t)r13) >> 12);
+				alp_raw += (int32_t)(((int64_t)h12 * extra_wu * 65LL + (int64_t)h13 * extra_wu * 60LL) / (4096LL * 100LL));
 			} else {
-				int32_t n12 = (int32_t)(chaff_wpoint_periodic_2d(urx - 2113, ury + 1657, 12, pbits, 8, oseed ^ 0x6F23u) >> 16) - 128;
-				int32_t r12 = 128 - (n12 < 0 ? -n12 : n12);
-				int32_t h12 = (r12 * r12) >> 7;
-				int32_t n13 = (int32_t)(chaff_wpoint_periodic_2d(urx + 3571, ury + 2909, 13, pbits, 8, oseed ^ 0x7A35u) >> 16) - 128;
-				int32_t r13 = 128 - (n13 < 0 ? -n13 : n13);
-				int32_t h13 = (r13 * r13) >> 7;
-				alp_raw += (int32_t)(((int64_t)h11 * extra_wu * 40LL + (int64_t)h12 * extra_wu * 40LL + (int64_t)h13 * extra_wu * 35LL) / (128LL * 100LL));
+				int32_t n13 = (int32_t)(chaff_wpoint_periodic_2d(urx + 3571, ury + 2909, 13, pbits, 8, oseed ^ 0x7A35u) >> 12);
+				int32_t r13 = nd_field_ridge_q12(n13);
+				int32_t h13 = (int32_t)(((int64_t)r13 * (int64_t)r13) >> 12);
+				int32_t n14 = (int32_t)(chaff_wpoint_periodic_2d(urx - 5381, ury - 4127, 14, pbits, 8, oseed ^ 0x8B47u) >> 12);
+				int32_t r14 = nd_field_ridge_q12(n14);
+				int32_t h14 = (int32_t)(((int64_t)r14 * (int64_t)r14) >> 12);
+				alp_raw += (int32_t)(((int64_t)h12 * extra_wu * 45LL + (int64_t)h13 * extra_wu * 42LL + (int64_t)h14 * extra_wu * 38LL) / (4096LL * 100LL));
 			}
 		}
 	}
 
-	return nd_field_orogeny_blend_cell(oseed, pbits, urx, ury, base_hyp, coast_q8,
-	                                   hill_q8, alpine_q8, scale_q8,
-	                                   hill_raw, alp_raw, r9, r8, r7, r5_karst);
+	return nd_field_orogeny_blend_cell(oseed, pbits, urx, ury, base_hyp,
+	                                   shore_q12, foothill_q12, inland_q12,
+	                                   hill_q12, alpine_q12, scale_q12,
+	                                   roll_raw, hill_raw, alp_raw, n10, r10, r9, r7, r6);
 }
 
-/* 4-wide SIMD tectonic orogeny evaluator, bit-exact with 4 calls to nd_field_orogeny_wu. */
-static inline void
-nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
-                       const int32_t rx[4], const int32_t ry[4],
-                       const int32_t base_hyp[4], int32_t out[4])
+static inline int32_t
+nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry, int32_t base_hyp)
 {
-	int any_land = (base_hyp[0] > 6 || base_hyp[1] > 6 || base_hyp[2] > 6 || base_hyp[3] > 6);
+	if (base_hyp <= 1)
+		return 0;
+	int32_t c_cont_q8 = nd_field_eval_cont_q8_for_seed(seed, rx, ry);
+	return nd_field_orogeny_wu_ex(seed, room_step_q16, rx, ry, base_hyp, c_cont_q8);
+}
+
+/* 4-wide SIMD tectonic orogeny evaluator, bit-exact with 4 calls to nd_field_orogeny_wu_ex. */
+static inline void
+nd_field_orogeny_wu_4x_ex(uint32_t seed, int32_t room_step_q16,
+                          const int32_t rx[4], const int32_t ry[4],
+                          const int32_t base_hyp[4], const int32_t c_cont_q8[4],
+                          int32_t out[4])
+{
+	int any_land = (base_hyp[0] > 1 || base_hyp[1] > 1 || base_hyp[2] > 1 || base_hyp[3] > 1);
 	if (!any_land) {
 		out[0] = out[1] = out[2] = out[3] = 0;
 		return;
@@ -2231,15 +2355,17 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 
 	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t max_e = nd_field_active_max_elev_wu();
-	int32_t scale_q8 = (int32_t)(((int64_t)max_e * 256LL) / 81000LL);
+	int32_t scale_q12 = (int32_t)(((int64_t)max_e * 4096LL) / 21600LL);
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
+
 	uint32_t rw_x[4], rw_y[4], rm_x[4], rm_y[4];
-	chaff_wpoint_periodic_2d_4x(rx, ry, 8, pbits, 8, oseed ^ 0x11A3u, rw_x);
-	chaff_wpoint_periodic_2d_4x(rx, ry, 8, pbits, 8, oseed ^ 0x22B7u, rw_y);
-	chaff_wpoint_periodic_2d_4x(rx, ry, 6, pbits, 8, oseed ^ 0x33C9u, rm_x);
-	chaff_wpoint_periodic_2d_4x(rx, ry, 6, pbits, 8, oseed ^ 0x44DBu, rm_y);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 9, pbits, 8, oseed ^ 0x11A3u, rw_x);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 9, pbits, 8, oseed ^ 0x22B7u, rw_y);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 7, pbits, 8, oseed ^ 0x33C9u, rm_x);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 7, pbits, 8, oseed ^ 0x44DBu, rm_y);
 
 	int32_t urx[4], ury[4];
+	int32_t x11[4], y11[4], x9[4], y9[4], x8[4], y8[4], x7[4], y7[4], x6[4], y6[4], x5[4], y5[4];
 	for (int i = 0; i < 4; i++) {
 		int32_t wx_raw = (int32_t)(rw_x[i] >> 16) - 128;
 		int32_t wy_raw = (int32_t)(rw_y[i] >> 16) - 128;
@@ -2247,234 +2373,201 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 		int32_t my_raw = (int32_t)(rm_y[i] >> 16) - 128;
 		urx[i] = rx[i] + (wx_raw >> 1) + (mx_raw >> 3);
 		ury[i] = ry[i] + (wy_raw >> 1) + (my_raw >> 3);
+		x11[i] = urx[i] + 521; y11[i] = ury[i] - 389;
+		x9[i]  = urx[i] + 313; y9[i]  = ury[i] - 571;
+		x8[i]  = urx[i] - 419; y8[i]  = ury[i] + 263;
+		x7[i]  = urx[i] + 191; y7[i]  = ury[i] + 547;
+		x6[i]  = urx[i] - 613; y6[i]  = ury[i] + 271;
+		x5[i]  = urx[i] + 713; y5[i]  = ury[i] - 419;
 	}
 
-	uint32_t r_prov[4], r_belt[4];
-	chaff_wpoint_periodic_2d_4x(urx, ury, 8, pbits, 8, oseed ^ 0x55EDu, r_prov);
-	chaff_wpoint_periodic_2d_4x(urx, ury, 7, pbits, 8, oseed ^ 0x661Fu, r_belt);
+	uint32_t rn10[4], rn11[4], rn9[4], rn8[4], rn7[4], rn6[4], rn5[4];
+	chaff_wpoint_periodic_2d_4x(urx, ury, 10, pbits, 8, oseed ^ 0x55EDu, rn10);
+	chaff_wpoint_periodic_2d_4x(x11, y11, 11, pbits, 8, oseed ^ 0x661Fu, rn11);
+	chaff_wpoint_periodic_2d_4x(x9,  y9,   9, pbits, 8, oseed ^ 0x4E3Bu, rn9);
+	chaff_wpoint_periodic_2d_4x(x8,  y8,   8, pbits, 8, oseed ^ 0x3D29u, rn8);
+	chaff_wpoint_periodic_2d_4x(x7,  y7,   7, pbits, 8, oseed ^ 0x9955u, rn7);
+	chaff_wpoint_periodic_2d_4x(x6,  y6,   6, pbits, 8, oseed ^ 0xAA67u, rn6);
+	chaff_wpoint_periodic_2d_4x(x5,  y5,   5, pbits, 8, oseed ^ 0x7731u, rn5);
 
-	int32_t coast_q8[4], hill_q8[4], alpine_q8[4], r8_v[4], r7_v[4];
-	int any_hill = 0, any_alpine = 0;
+	int32_t shore_q12[4], foothill_q12[4], inland_q12[4], hill_q12[4], alpine_q12[4];
+	int32_t n10_v[4], n9_v[4], n8_v[4], n7_v[4], n6_v[4], n5_v[4];
+	int32_t r11_v[4], r10_v[4], r9_v[4], r8_v[4], r7_v[4], r6_v[4], r5_v[4];
+	int32_t roll_raw[4];
+	int any_hill = 0, any_inland = 0, any_alpine = 0;
+
 	for (int i = 0; i < 4; i++) {
-		if (base_hyp[i] <= 6) {
-			coast_q8[i] = 0;
-			hill_q8[i] = 0;
-			alpine_q8[i] = 0;
-			r8_v[i] = 0;
-			r7_v[i] = 0;
+		if (base_hyp[i] <= 1) {
+			shore_q12[i] = foothill_q12[i] = inland_q12[i] = hill_q12[i] = alpine_q12[i] = 0;
+			n10_v[i] = n9_v[i] = n8_v[i] = n7_v[i] = n6_v[i] = n5_v[i] = 0;
+			r11_v[i] = r10_v[i] = r9_v[i] = r8_v[i] = r7_v[i] = r6_v[i] = r5_v[i] = 0;
+			roll_raw[i] = 0;
 			continue;
 		}
-		coast_q8[i] = nd_field_smoothstep_q8(base_hyp[i], 6, 16);
-		int32_t prov_raw = (int32_t)(r_prov[i] >> 16);
-		int32_t nb = (int32_t)(r_belt[i] >> 16) - 128;
-		int32_t belt_r = 128 - (nb < 0 ? -nb : nb);
-		r8_v[i] = 128 - (prov_raw >= 128 ? (prov_raw - 128) : (128 - prov_raw));
-		r7_v[i] = belt_r;
+		shore_q12[i] = nd_field_smoothstep_q12(base_hyp[i], 1, 24);
+		int32_t beach_h = nd_field_smoothstep_q12(base_hyp[i], 1, 20);
+		int32_t beach_a = nd_field_smoothstep_q12(base_hyp[i], 1, 16);
+		foothill_q12[i] = (int32_t)(((int64_t)nd_field_smoothstep_q12(c_cont_q8[i], 12 * 256, 40 * 256) *
+		                             (int64_t)beach_h) >> 12);
+		inland_q12[i] = (int32_t)(((int64_t)nd_field_smoothstep_q12(c_cont_q8[i], 25 * 256, 62 * 256) *
+		                           (int64_t)beach_a) >> 12);
 
-		int32_t h_sig = (prov_raw * 3 + belt_r * 5) >> 3;
-		hill_q8[i] = nd_field_smoothstep_q8(h_sig, 96, 150);
+		n10_v[i] = (int32_t)(rn10[i] >> 12);
+		int32_t n11 = (int32_t)(rn11[i] >> 12);
+		n9_v[i] = (int32_t)(rn9[i] >> 12);
+		n8_v[i] = (int32_t)(rn8[i] >> 12);
+		n7_v[i] = (int32_t)(rn7[i] >> 12);
+		n6_v[i] = (int32_t)(rn6[i] >> 12);
+		n5_v[i] = (int32_t)(rn5[i] >> 12);
 
-		int32_t a_sig = (belt_r * (144 + prov_raw)) >> 8;
-		if (base_hyp[i] > 80) {
-			int32_t cb = (base_hyp[i] - 80) >> 3;
-			if (cb > 28) cb = 28;
-			a_sig += cb;
-		}
-		int32_t a_sm = nd_field_smoothstep_q8(a_sig, 78, 146);
-		alpine_q8[i] = (a_sm * (128 + (a_sm >> 1))) >> 8;
+		r11_v[i] = nd_field_ridge_q12(n11);
+		r10_v[i] = nd_field_ridge_q12(n10_v[i]);
+		r9_v[i]  = nd_field_ridge_q12(n9_v[i]);
+		r8_v[i]  = nd_field_ridge_q12(n8_v[i]);
+		r7_v[i]  = nd_field_ridge_q12(n7_v[i]);
+		r6_v[i]  = nd_field_ridge_q12(n6_v[i]);
+		r5_v[i]  = nd_field_ridge_q12(n5_v[i]);
 
-		if (hill_q8[i] > 0) any_hill = 1;
-		if (alpine_q8[i] > 0) any_alpine = 1;
-	}
+		roll_raw[i] = (int32_t)(((int64_t)n9_v[i] * 260LL + (int64_t)n8_v[i] * 170LL +
+		                         (int64_t)n7_v[i] * 105LL + (int64_t)n6_v[i] * 54LL +
+		                         (int64_t)n5_v[i] * 24LL) >> 12);
 
-	if (!any_hill && !any_alpine) {
-		out[0] = out[1] = out[2] = out[3] = 0;
-		return;
+		int32_t h_sig = (n10_v[i] * 3 + n9_v[i] * 3 + r8_v[i] * 2) >> 3;
+		int32_t hill_reg_q12 = nd_field_smoothstep_q12(h_sig, 850, 3150);
+		hill_q12[i] = (int32_t)(((int64_t)hill_reg_q12 * (int64_t)foothill_q12[i]) >> 12);
+
+		int32_t belt_q12 = (r11_v[i] * 5 + r10_v[i] * 3) >> 3;
+		int32_t a_sm = nd_field_smoothstep_q12(belt_q12, 1200, 3350);
+		int32_t alp_reg_q12 = (int32_t)(((int64_t)a_sm * (1536LL + (((int64_t)a_sm * 2560LL) >> 12))) >> 12);
+		alpine_q12[i] = (int32_t)(((int64_t)alp_reg_q12 * (int64_t)inland_q12[i]) >> 12);
+
+		if (hill_q12[i] > 0) any_hill = 1;
+		if (inland_q12[i] > 0) any_inland = 1;
+		if (alpine_q12[i] > 0) any_alpine = 1;
 	}
 
 	uint32_t w4_oct = (room_step_q16 > 0) ? chaff_octave_weight_q16(4, room_step_q16) : 65536u;
-
-	int32_t gx9[4], gy9[4], hx5[4], hy5[4];
-	for (int i = 0; i < 4; i++) {
-		gx9[i] = urx[i] + 313; gy9[i] = ury[i] - 571;
-		hx5[i] = urx[i] + 713; hy5[i] = ury[i] - 419;
-	}
-	uint32_t r_n9[4], r_f5[4];
-	chaff_wpoint_periodic_2d_4x(gx9, gy9, 9, pbits, 8, oseed ^ 0x4E3Bu, r_n9);
-	chaff_wpoint_periodic_2d_4x(hx5, hy5, 5, pbits, 8, oseed ^ 0x7731u, r_f5);
-
-	uint32_t r_f4[4] = { 0, 0, 0, 0 };
-	if (any_hill && w4_oct > 0u) {
-		int32_t hx4[4], hy4[4];
-		for (int i = 0; i < 4; i++) { hx4[i] = urx[i] - 317; hy4[i] = ury[i] + 823; }
-		chaff_wpoint_periodic_2d_4x(hx4, hy4, 4, pbits, 8, oseed ^ 0x8843u, r_f4);
+	uint32_t rn4[4] = { 0, 0, 0, 0 };
+	if (w4_oct > 0u && (any_hill || any_inland)) {
+		int32_t x4[4], y4[4];
+		for (int i = 0; i < 4; i++) { x4[i] = urx[i] - 317; y4[i] = ury[i] + 823; }
+		chaff_wpoint_periodic_2d_4x(x4, y4, 4, pbits, 8, oseed ^ 0x8843u, rn4);
 	}
 
 	int32_t hill_raw[4] = { 0, 0, 0, 0 };
-	int32_t r9_v[4], r5k_v[4];
-	for (int i = 0; i < 4; i++) {
-		int32_t n9 = (int32_t)(r_n9[i] >> 16) - 128;
-		r9_v[i] = 128 - (n9 < 0 ? -n9 : n9);
-		int32_t n5 = (int32_t)(r_f5[i] >> 16);
-		int32_t r5 = 128 - (n5 >= 128 ? (n5 - 128) : (128 - n5));
-		r5k_v[i] = r5;
-		if (hill_q8[i] > 0) {
-			int32_t f5 = (n5 * 192 + r5 * 528) >> 8;
-			int32_t f4 = 0;
-			if (w4_oct > 0u) {
-				int32_t n4 = (int32_t)(r_f4[i] >> 16);
-				f4 = (n4 * 240) >> 8;
-				if (w4_oct < 65536u)
-					f4 = (int32_t)(((int64_t)f4 * (int64_t)w4_oct) >> 16);
-			}
-			hill_raw[i] = f5 + f4;
+	if (any_hill) {
+		for (int i = 0; i < 4; i++) {
+			if (hill_q12[i] <= 0) continue;
+			int32_t n4 = (int32_t)(rn4[i] >> 12);
+			int64_t f4_h = (w4_oct > 0u) ? ((((int64_t)n4 * 44LL) * (int64_t)w4_oct) >> 16) : 0LL;
+			hill_raw[i] = (int32_t)(((int64_t)n9_v[i] * 1400LL + (int64_t)n8_v[i] * 840LL +
+			                         (int64_t)n7_v[i] * 460LL + (int64_t)r6_v[i] * 220LL +
+			                         (int64_t)r5_v[i] * 100LL + f4_h) >> 12);
 		}
 	}
 
 	int32_t alp_raw[4] = { 0, 0, 0, 0 };
 	if (any_alpine) {
-		int32_t ax10[4], ay10[4], ax6[4], ay6[4], ax5[4], ay5[4];
-		for (int i = 0; i < 4; i++) {
-			ax10[i] = urx[i] - 829; ay10[i] = ury[i] + 467;
-			ax6[i]  = urx[i] + 191; ay6[i]  = ury[i] + 547;
-			ax5[i]  = urx[i] - 613; ay5[i]  = ury[i] + 271;
-		}
-		uint32_t r_a10[4], r_a6[4], r_a5[4];
-		chaff_wpoint_periodic_2d_4x(ax10, ay10, 10, pbits, 8, oseed ^ 0x3D29u, r_a10);
-		chaff_wpoint_periodic_2d_4x(ax6,  ay6,   6, pbits, 8, oseed ^ 0x9955u, r_a6);
-		chaff_wpoint_periodic_2d_4x(ax5,  ay5,   5, pbits, 8, oseed ^ 0xAA67u, r_a5);
-
 		uint32_t w3_oct = (w4_oct > 0u) ? ((room_step_q16 > 0) ? chaff_octave_weight_q16(3, room_step_q16) : 65536u) : 0u;
-		uint32_t w2_oct = (w3_oct > 0u) ? ((room_step_q16 > 0) ? chaff_octave_weight_q16(2, room_step_q16) : 65536u) : 0u;
-		uint32_t r_a4[4] = { 0, 0, 0, 0 };
-		uint32_t r_a3[4] = { 0, 0, 0, 0 };
-		uint32_t r_a2[4] = { 0, 0, 0, 0 };
-		if (w4_oct > 0u) {
-			int32_t ax4[4], ay4[4];
-			for (int i = 0; i < 4; i++) { ax4[i] = urx[i] + 409; ay4[i] = ury[i] - 733; }
-			chaff_wpoint_periodic_2d_4x(ax4, ay4, 4, pbits, 8, oseed ^ 0xBB79u, r_a4);
-		}
+		uint32_t rn3[4] = { 0, 0, 0, 0 };
 		if (w3_oct > 0u) {
-			int32_t ax3[4], ay3[4];
-			for (int i = 0; i < 4; i++) { ax3[i] = urx[i] - 227; ay3[i] = ury[i] - 389; }
-			chaff_wpoint_periodic_2d_4x(ax3, ay3, 3, pbits, 8, oseed ^ 0xCC8Bu, r_a3);
-		}
-		if (w2_oct > 0u) {
-			int32_t ax2[4], ay2[4];
-			for (int i = 0; i < 4; i++) { ax2[i] = urx[i] + 131; ay2[i] = ury[i] + 179; }
-			chaff_wpoint_periodic_2d_4x(ax2, ay2, 2, pbits, 8, oseed ^ 0xDD9Du, r_a2);
+			int32_t x3[4], y3[4];
+			for (int i = 0; i < 4; i++) { x3[i] = urx[i] - 227; y3[i] = ury[i] - 389; }
+			chaff_wpoint_periodic_2d_4x(x3, y3, 3, pbits, 8, oseed ^ 0xCC8Bu, rn3);
 		}
 
-		uint32_t r_a11[4] = { 0, 0, 0, 0 };
-		uint32_t r_a12[4] = { 0, 0, 0, 0 };
-		uint32_t r_a13[4] = { 0, 0, 0, 0 };
-		if (pbits >= 18u && max_e > 81000) {
-			int32_t ax11[4], ay11[4];
-			for (int i = 0; i < 4; i++) { ax11[i] = urx[i] + 1423; ay11[i] = ury[i] - 977; }
-			chaff_wpoint_periodic_2d_4x(ax11, ay11, 11, pbits, 8, oseed ^ 0x5E11u, r_a11);
-			if (pbits >= 20u) {
-				int32_t ax12[4], ay12[4];
-				for (int i = 0; i < 4; i++) { ax12[i] = urx[i] - 2113; ay12[i] = ury[i] + 1657; }
-				chaff_wpoint_periodic_2d_4x(ax12, ay12, 12, pbits, 8, oseed ^ 0x6F23u, r_a12);
+		uint32_t rn12[4] = { 0, 0, 0, 0 };
+		uint32_t rn13[4] = { 0, 0, 0, 0 };
+		uint32_t rn14[4] = { 0, 0, 0, 0 };
+		if (pbits >= 17u && max_e > 21600) {
+			int32_t x12[4], y12[4];
+			for (int i = 0; i < 4; i++) { x12[i] = urx[i] - 2113; y12[i] = ury[i] + 1657; }
+			chaff_wpoint_periodic_2d_4x(x12, y12, 12, pbits, 8, oseed ^ 0x6F23u, rn12);
+			if (pbits >= 19u) {
+				int32_t x13[4], y13[4];
+				for (int i = 0; i < 4; i++) { x13[i] = urx[i] + 3571; y13[i] = ury[i] + 2909; }
+				chaff_wpoint_periodic_2d_4x(x13, y13, 13, pbits, 8, oseed ^ 0x7A35u, rn13);
 			}
-			if (pbits >= 22u) {
-				int32_t ax13[4], ay13[4];
-				for (int i = 0; i < 4; i++) { ax13[i] = urx[i] + 3571; ay13[i] = ury[i] + 2909; }
-				chaff_wpoint_periodic_2d_4x(ax13, ay13, 13, pbits, 8, oseed ^ 0x7A35u, r_a13);
+			if (pbits >= 21u) {
+				int32_t x14[4], y14[4];
+				for (int i = 0; i < 4; i++) { x14[i] = urx[i] - 5381; y14[i] = ury[i] - 4127; }
+				chaff_wpoint_periodic_2d_4x(x14, y14, 14, pbits, 8, oseed ^ 0x8B47u, rn14);
 			}
 		}
 
 		for (int i = 0; i < 4; i++) {
-			if (alpine_q8[i] <= 0) continue;
-			int32_t n10 = (int32_t)(r_a10[i] >> 16) - 128;
-			int32_t r10 = 128 - (n10 < 0 ? -n10 : n10);
-			int32_t h10 = (r10 * r10) >> 7;
+			if (alpine_q12[i] <= 0) continue;
+			int32_t h11 = (int32_t)(((int64_t)r11_v[i] * (int64_t)r11_v[i]) >> 12);
 
-			int32_t h9 = (r9_v[i] * (64 + (r9_v[i] >> 1))) >> 7;
-			int32_t w9 = 96 + ((h10 * 160) >> 7);
-			int32_t h9w = (h9 * w9) >> 8;
+			int32_t h10 = (int32_t)(((int64_t)r10_v[i] * (1536LL + (((int64_t)r10_v[i] * 2560LL) >> 12))) >> 12);
+			int32_t w10 = 1536 + (int32_t)(((int64_t)h11 * 2560LL) >> 12);
+			int32_t h10w = (int32_t)(((int64_t)h10 * (int64_t)w10) >> 12);
 
-			int32_t h8 = (r8_v[i] * (64 + (r8_v[i] >> 1))) >> 7;
-			int32_t w8 = 84 + ((h9w * 172) >> 7);
-			int32_t h8w = (h8 * w8) >> 8;
+			int32_t h9 = (int32_t)(((int64_t)r9_v[i] * (1536LL + (((int64_t)r9_v[i] * 2560LL) >> 12))) >> 12);
+			int32_t w9 = 1344 + (int32_t)(((int64_t)h10w * 2752LL) >> 12);
+			int32_t h9w = (int32_t)(((int64_t)h9 * (int64_t)w9) >> 12);
 
-			int32_t h7 = (r7_v[i] * (64 + (r7_v[i] >> 1))) >> 7;
-			int32_t w7 = 76 + ((h8w * 180) >> 7);
-			int32_t h7w = (h7 * w7) >> 8;
+			int32_t h8 = (int32_t)(((int64_t)r8_v[i] * (1536LL + (((int64_t)r8_v[i] * 2560LL) >> 12))) >> 12);
+			int32_t w8 = 1216 + (int32_t)(((int64_t)h9w * 2880LL) >> 12);
+			int32_t h8w = (int32_t)(((int64_t)h8 * (int64_t)w8) >> 12);
 
-			int32_t n6 = (int32_t)(r_a6[i] >> 16) - 128;
-			int32_t r6 = 128 - (n6 < 0 ? -n6 : n6);
-			int32_t h6 = (r6 * r6) >> 7;
-			int32_t w6 = 72 + ((h7w * 184) >> 7);
-			int32_t h6w = (h6 * w6) >> 8;
+			int32_t h7 = (int32_t)(((int64_t)r7_v[i] * (1536LL + (((int64_t)r7_v[i] * 2560LL) >> 12))) >> 12);
+			int32_t w7 = 1152 + (int32_t)(((int64_t)h8w * 2944LL) >> 12);
+			int32_t h7w = (int32_t)(((int64_t)h7 * (int64_t)w7) >> 12);
 
-			int32_t n5a = (int32_t)(r_a5[i] >> 16) - 128;
-			int32_t r5a = 128 - (n5a < 0 ? -n5a : n5a);
-			int32_t h5 = (r5a * (64 + (r5a >> 1))) >> 7;
-			int32_t w5 = 64 + ((h6w * 192) >> 7);
-			int32_t h5w = (h5 * w5) >> 8;
+			int32_t h6 = (int32_t)(((int64_t)r6_v[i] * (int64_t)r6_v[i]) >> 12);
+			int32_t w6 = 1024 + (int32_t)(((int64_t)h7w * 3072LL) >> 12);
+			int32_t h6w = (int32_t)(((int64_t)h6 * (int64_t)w6) >> 12);
 
-			int32_t alp = (int32_t)(((int64_t)h10 * 33000LL) >> 7) +
-			              (int32_t)(((int64_t)h9w * 26000LL) >> 7) +
-			              (int32_t)(((int64_t)h8w * 16500LL) >> 7) +
-			              (int32_t)(((int64_t)h7w * 10000LL) >> 7) +
-			              (int32_t)(((int64_t)h6w *  5200LL) >> 7) +
-			              (int32_t)(((int64_t)h5w *  2600LL) >> 7);
+			int32_t h5 = (int32_t)(((int64_t)r5_v[i] * (1536LL + (((int64_t)r5_v[i] * 2560LL) >> 12))) >> 12);
+			int32_t w5 = 960 + (int32_t)(((int64_t)h6w * 3136LL) >> 12);
+			int32_t h5w = (int32_t)(((int64_t)h5 * (int64_t)w5) >> 12);
+
+			int32_t alp = (int32_t)(((int64_t)h11  * 11200LL +
+			                         (int64_t)h10w *  7200LL +
+			                         (int64_t)h9w  *  4000LL +
+			                         (int64_t)h8w  *  2000LL +
+			                         (int64_t)h7w  *   960LL +
+			                         (int64_t)h6w  *   440LL +
+			                         (int64_t)h5w  *   180LL) >> 12);
 
 			if (w4_oct > 0u) {
-				int32_t n4 = (int32_t)(r_a4[i] >> 16) - 128;
-				int32_t r4 = 128 - (n4 < 0 ? -n4 : n4);
-				int32_t h4 = (r4 * (64 + (r4 >> 1))) >> 7;
-				int32_t w4 = 56 + ((h5w * 200) >> 7);
-				int32_t h4w = (h4 * w4) >> 8;
-				int32_t c4 = (h4w * 1300) >> 7;
+				int32_t r4 = nd_field_ridge_q12((int32_t)(rn4[i] >> 12));
+				int32_t h4 = (int32_t)(((int64_t)r4 * (1536LL + (((int64_t)r4 * 2560LL) >> 12))) >> 12);
+				int32_t w4 = 896 + (int32_t)(((int64_t)h5w * 3200LL) >> 12);
+				int32_t h4w = (int32_t)(((int64_t)h4 * (int64_t)w4) >> 12);
+				int32_t c4 = (int32_t)(((int64_t)h4w * 72LL) >> 12);
 				if (w4_oct < 65536u)
 					c4 = (int32_t)(((int64_t)c4 * (int64_t)w4_oct) >> 16);
 				alp += c4;
 
 				if (w3_oct > 0u) {
-					int32_t n3 = (int32_t)(r_a3[i] >> 16) - 128;
-					int32_t r3 = 128 - (n3 < 0 ? -n3 : n3);
-					int32_t w3 = 32 + ((h4w * 224) >> 7);
-					int32_t h3w = (r3 * w3) >> 8;
-					int32_t c3 = (h3w * 650) >> 7;
+					int32_t r3 = nd_field_ridge_q12((int32_t)(rn3[i] >> 12));
+					int32_t w3 = 512 + (int32_t)(((int64_t)h4w * 3584LL) >> 12);
+					int32_t h3w = (int32_t)(((int64_t)r3 * (int64_t)w3) >> 12);
+					int32_t c3 = (int32_t)(((int64_t)h3w * 28LL) >> 12);
 					if (w3_oct < 65536u)
 						c3 = (int32_t)(((int64_t)c3 * (int64_t)w3_oct) >> 16);
 					alp += c3;
-
-					if (w2_oct > 0u && h3w > 0) {
-						int32_t n2 = (int32_t)(r_a2[i] >> 16) - 128;
-						int32_t r2 = 128 - (n2 < 0 ? -n2 : n2);
-						int32_t w2 = (h3w * 256) >> 7;
-						int32_t h2w = (r2 * w2) >> 8;
-						int32_t c2 = (h2w * 350) >> 7;
-						if (w2_oct < 65536u)
-							c2 = (int32_t)(((int64_t)c2 * (int64_t)w2_oct) >> 16);
-						alp += c2;
-					}
 				}
 			}
 
-			if (pbits >= 18u && max_e > 81000) {
-				int64_t extra_wu = (int64_t)(max_e - 81000);
-				int32_t n11 = (int32_t)(r_a11[i] >> 16) - 128;
-				int32_t r11 = 128 - (n11 < 0 ? -n11 : n11);
-				int32_t h11 = (r11 * r11) >> 7;
-				if (pbits < 20u) {
-					alp += (int32_t)(((int64_t)h11 * extra_wu * 115LL) / (128LL * 100LL));
-				} else if (pbits < 22u) {
-					int32_t n12 = (int32_t)(r_a12[i] >> 16) - 128;
-					int32_t r12 = 128 - (n12 < 0 ? -n12 : n12);
-					int32_t h12 = (r12 * r12) >> 7;
-					alp += (int32_t)(((int64_t)h11 * extra_wu * 60LL + (int64_t)h12 * extra_wu * 55LL) / (128LL * 100LL));
+			if (pbits >= 17u && max_e > 21600) {
+				int64_t extra_wu = (int64_t)(max_e - 21600);
+				int32_t r12 = nd_field_ridge_q12((int32_t)(rn12[i] >> 12));
+				int32_t h12 = (int32_t)(((int64_t)r12 * (int64_t)r12) >> 12);
+				if (pbits < 19u) {
+					alp += (int32_t)(((int64_t)h12 * extra_wu * 125LL) / (4096LL * 100LL));
+				} else if (pbits < 21u) {
+					int32_t r13 = nd_field_ridge_q12((int32_t)(rn13[i] >> 12));
+					int32_t h13 = (int32_t)(((int64_t)r13 * (int64_t)r13) >> 12);
+					alp += (int32_t)(((int64_t)h12 * extra_wu * 65LL + (int64_t)h13 * extra_wu * 60LL) / (4096LL * 100LL));
 				} else {
-					int32_t n12 = (int32_t)(r_a12[i] >> 16) - 128;
-					int32_t r12 = 128 - (n12 < 0 ? -n12 : n12);
-					int32_t h12 = (r12 * r12) >> 7;
-					int32_t n13 = (int32_t)(r_a13[i] >> 16) - 128;
-					int32_t r13 = 128 - (n13 < 0 ? -n13 : n13);
-					int32_t h13 = (r13 * r13) >> 7;
-					alp += (int32_t)(((int64_t)h11 * extra_wu * 40LL + (int64_t)h12 * extra_wu * 40LL + (int64_t)h13 * extra_wu * 35LL) / (128LL * 100LL));
+					int32_t r13 = nd_field_ridge_q12((int32_t)(rn13[i] >> 12));
+					int32_t h13 = (int32_t)(((int64_t)r13 * (int64_t)r13) >> 12);
+					int32_t r14 = nd_field_ridge_q12((int32_t)(rn14[i] >> 12));
+					int32_t h14 = (int32_t)(((int64_t)r14 * (int64_t)r14) >> 12);
+					alp += (int32_t)(((int64_t)h12 * extra_wu * 45LL + (int64_t)h13 * extra_wu * 42LL + (int64_t)h14 * extra_wu * 38LL) / (4096LL * 100LL));
 				}
 			}
 			alp_raw[i] = alp;
@@ -2482,25 +2575,39 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 	}
 
 	for (int i = 0; i < 4; i++) {
-		if (hill_q8[i] == 0 && alpine_q8[i] == 0) {
+		if (base_hyp[i] <= 1) {
 			out[i] = 0;
 		} else {
 			out[i] = nd_field_orogeny_blend_cell(
-				oseed, pbits, urx[i], ury[i], base_hyp[i], coast_q8[i],
-				hill_q8[i], alpine_q8[i], scale_q8,
-				hill_raw[i], alp_raw[i], r9_v[i], r8_v[i], r7_v[i], r5k_v[i]);
+				oseed, pbits, urx[i], ury[i], base_hyp[i],
+				shore_q12[i], foothill_q12[i], inland_q12[i],
+				hill_q12[i], alpine_q12[i], scale_q12,
+				roll_raw[i], hill_raw[i], alp_raw[i],
+				n10_v[i], r10_v[i], r9_v[i], r7_v[i], r6_v[i]);
 		}
 	}
 }
 
-/* Exact conservative [out_min, out_max] of (chaff_wpoint_periodic_2d(x, y, shift, pbits, 8, seed) >> 16)
- * over the integer rectangle [x0..x1] x [y0..y1]. Inside each 2^shift cell, C2 quintic value noise is
- * monotonic-bilinear in (u(x), v(y)), so its exact extrema on every sub-cell occur at the sub-cell's
- * 4 corners (split along cell boundaries). Zero Lipschitz inflation; falls back to [0, 255] if wide. */
 static inline void
-nd_field_periodic_rect_bounds(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
-                              uint8_t shift, uint32_t seed,
-                              int32_t *out_min, int32_t *out_max)
+nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
+                       const int32_t rx[4], const int32_t ry[4],
+                       const int32_t base_hyp[4], int32_t out[4])
+{
+	int32_t c_cont_q8[4] = { 0, 0, 0, 0 };
+	for (int i = 0; i < 4; i++) {
+		if (base_hyp[i] > 1)
+			c_cont_q8[i] = nd_field_eval_cont_q8_for_seed(seed, rx[i], ry[i]);
+	}
+	nd_field_orogeny_wu_4x_ex(seed, room_step_q16, rx, ry, base_hyp, c_cont_q8, out);
+}
+
+/* Exact conservative [out_min, out_max] of (chaff_wpoint_periodic_2d(x, y, shift, pbits, 8, seed) >> 12)
+ * in Q12 [0..4095] over the integer rectangle [x0..x1] x [y0..y1]. Inside each 2^shift cell, C2 quintic
+ * value noise is monotonic-bilinear in (u(x), v(y)), so extrema occur at sub-cell corners. */
+static inline void
+nd_field_periodic_rect_bounds_q12(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
+                                  uint8_t shift, uint32_t seed,
+                                  int32_t *out_min, int32_t *out_max)
 {
 	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t span = (int32_t)(1u << pbits);
@@ -2510,7 +2617,7 @@ nd_field_periodic_rect_bounds(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
 	int32_t cy1 = y1 >> shift;
 	if ((cx1 - cx0) > 3 || (cy1 - cy0) > 3 || (x1 - x0) >= span || (y1 - y0) >= span) {
 		*out_min = 0;
-		*out_max = 255;
+		*out_max = 4095;
 		return;
 	}
 	int32_t xs[6], ys[6];
@@ -2533,31 +2640,31 @@ nd_field_periodic_rect_bounds(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
 	if (y1 > y0)
 		ys[ny++] = y1;
 
-	int32_t vmin = 255, vmax = 0;
+	int32_t vmin = 4095, vmax = 0;
 	for (int iy = 0; iy < ny; iy++) {
 		for (int ix = 0; ix < nx; ix++) {
-			int32_t v = (int32_t)(chaff_wpoint_periodic_2d(xs[ix], ys[iy], shift, pbits, 8, seed) >> 16);
+			int32_t v = (int32_t)(chaff_wpoint_periodic_2d(xs[ix], ys[iy], shift, pbits, 8, seed) >> 12);
 			if (v < vmin) vmin = v;
 			if (v > vmax) vmax = v;
 		}
 	}
-	/* +/-1 padding covers fixed-point rounding inside noise_wstep */
-	vmin = (vmin > 0) ? (vmin - 1) : 0;
-	vmax = (vmax < 255) ? (vmax + 1) : 255;
+	/* +/-16 padding covers fixed-point rounding inside noise_wstep */
+	vmin = (vmin > 16) ? (vmin - 16) : 0;
+	vmax = (vmax < 4079) ? (vmax + 16) : 4095;
 	*out_min = vmin;
 	*out_max = vmax;
 }
 
-/* Exact interval bounds [r_lo, r_hi] of r = 128 - |n - 128| for n in [n_lo, n_hi] */
+/* Exact interval bounds [r_lo, r_hi] of nd_field_ridge_q12(n) for n in [n_lo, n_hi] */
 static inline void
-nd_field_ridge_bounds(int32_t n_lo, int32_t n_hi, int32_t *out_lo, int32_t *out_hi)
+nd_field_ridge_bounds_q12(int32_t n_lo, int32_t n_hi, int32_t *out_lo, int32_t *out_hi)
 {
-	int32_t ra = 128 - (n_lo >= 128 ? (n_lo - 128) : (128 - n_lo));
-	int32_t rb = 128 - (n_hi >= 128 ? (n_hi - 128) : (128 - n_hi));
+	int32_t ra = nd_field_ridge_q12(n_lo);
+	int32_t rb = nd_field_ridge_q12(n_hi);
 	int32_t rlo = (ra < rb) ? ra : rb;
-	int32_t rhi = (n_lo <= 128 && n_hi >= 128) ? 128 : ((ra > rb) ? ra : rb);
+	int32_t rhi = (n_lo <= 2048 && n_hi >= 2048) ? 4096 : ((ra > rb) ? ra : rb);
 	if (rlo < 0) rlo = 0;
-	if (rhi > 128) rhi = 128;
+	if (rhi > 4096) rhi = 4096;
 	*out_lo = rlo;
 	*out_hi = rhi;
 }
@@ -2577,69 +2684,68 @@ nd_field_proj_rect_bounds(int32_t urx0, int32_t urx1, int32_t ury0, int32_t ury1
 	*out_hi = (int32_t)((xhi + yhi) >> 15) + 1;
 }
 
-/* Exact interval bounds of nd_field_scarp_wave_q8(proj) over proj in [p_lo, p_hi] */
+/* Exact interval bounds of nd_field_scarp_wave_q12(proj) over proj in [p_lo, p_hi] */
 static inline void
-nd_field_scarp_bounds(int32_t p_lo, int32_t p_hi, int32_t *out_lo, int32_t *out_hi)
+nd_field_scarp_bounds_q12(int32_t p_lo, int32_t p_hi, int32_t *out_lo, int32_t *out_hi)
 {
-	if (p_hi - p_lo >= 256) {
+	if (p_hi - p_lo >= 1024) {
 		*out_lo = 0;
-		*out_hi = 256;
+		*out_hi = 4096;
 		return;
 	}
-	int32_t vlo = nd_field_scarp_wave_q8(p_lo);
+	int32_t vlo = nd_field_scarp_wave_q12(p_lo);
 	int32_t vhi = vlo;
-	int32_t ve  = nd_field_scarp_wave_q8(p_hi);
+	int32_t ve  = nd_field_scarp_wave_q12(p_hi);
 	if (ve < vlo) vlo = ve;
 	if (ve > vhi) vhi = ve;
-	/* Check critical extrema: 0 mod 256 (min=0) and 52 mod 256 (max=256) */
-	int32_t k0 = p_lo >> 8;
+	int32_t k0 = p_lo >> 10;
 	for (int32_t k = k0; k <= k0 + 2; k++) {
-		int32_t c_min = k << 8;
-		int32_t c_max = (k << 8) + 52;
+		int32_t c_min = k << 10;
+		int32_t c_max = (k << 10) + 280;
 		if (c_min >= p_lo && c_min <= p_hi) vlo = 0;
-		if (c_max >= p_lo && c_max <= p_hi) vhi = 256;
+		if (c_max >= p_lo && c_max <= p_hi) vhi = 4096;
 	}
 	*out_lo = vlo;
 	*out_hi = vhi;
 }
 
-/* Exact interval bounds of nd_field_dune_wave_q8(proj) over proj in [p_lo, p_hi] */
+/* Exact interval bounds of nd_field_dune_wave_q12(proj) over proj in [p_lo, p_hi] */
 static inline void
-nd_field_dune_bounds(int32_t p_lo, int32_t p_hi, int32_t *out_lo, int32_t *out_hi)
+nd_field_dune_bounds_q12(int32_t p_lo, int32_t p_hi, int32_t *out_lo, int32_t *out_hi)
 {
-	if (p_hi - p_lo >= 64) {
+	if (p_hi - p_lo >= 128) {
 		*out_lo = 0;
-		*out_hi = 256;
+		*out_hi = 4096;
 		return;
 	}
-	int32_t vlo = nd_field_dune_wave_q8(p_lo);
+	int32_t vlo = nd_field_dune_wave_q12(p_lo);
 	int32_t vhi = vlo;
-	int32_t ve  = nd_field_dune_wave_q8(p_hi);
+	int32_t ve  = nd_field_dune_wave_q12(p_hi);
 	if (ve < vlo) vlo = ve;
 	if (ve > vhi) vhi = ve;
-	int32_t k0 = p_lo >> 6;
+	int32_t k0 = p_lo >> 7;
 	for (int32_t k = k0; k <= k0 + 2; k++) {
-		int32_t c_min = k << 6;
-		int32_t c_max = (k << 6) + 40;
+		int32_t c_min = k << 7;
+		int32_t c_max = (k << 7) + 84;
 		if (c_min >= p_lo && c_min <= p_hi) vlo = 0;
-		if (c_max >= p_lo && c_max <= p_hi) vhi = 256;
+		if (c_max >= p_lo && c_max <= p_hi) vhi = 4096;
 	}
 	*out_lo = vlo;
 	*out_hi = vhi;
 }
 
-/* Exact interval bounds of nd_field_volcano_cone_q8(dist to corner) over rect [urx0..urx1] x [ury0..ury1] */
+/* Exact interval bounds of nd_field_volcano_cone_q12(dist to corner) over rect [urx0..urx1] x [ury0..ury1] */
 static inline void
-nd_field_volcano_bounds(int32_t urx0, int32_t urx1, int32_t ury0, int32_t ury1,
-                        int32_t corner_rx, int32_t corner_ry,
-                        int32_t *out_lo, int32_t *out_hi)
+nd_field_volcano_bounds_q12(int32_t urx0, int32_t urx1, int32_t ury0, int32_t ury1,
+                            int32_t corner_rx, int32_t corner_ry,
+                            int32_t *out_lo, int32_t *out_hi)
 {
 	int32_t cx = (corner_rx < urx0) ? urx0 : ((corner_rx > urx1) ? urx1 : corner_rx);
 	int32_t cy = (corner_ry < ury0) ? ury0 : ((corner_ry > ury1) ? ury1 : corner_ry);
 	int64_t dx_min = (int64_t)(cx - corner_rx);
 	int64_t dy_min = (int64_t)(cy - corner_ry);
 	int64_t d2_min = dx_min * dx_min + dy_min * dy_min;
-	uint32_t d_min = (d2_min >= 57600LL) ? 240u : nd_field_isqrt32((uint32_t)d2_min);
+	uint32_t d_min = (d2_min >= 230400LL) ? 480u : nd_field_isqrt32((uint32_t)d2_min);
 
 	int64_t ax0 = (int64_t)urx0 - corner_rx; if (ax0 < 0) ax0 = -ax0;
 	int64_t ax1 = (int64_t)urx1 - corner_rx; if (ax1 < 0) ax1 = -ax1;
@@ -2648,16 +2754,16 @@ nd_field_volcano_bounds(int32_t urx0, int32_t urx1, int32_t ury0, int32_t ury1,
 	int64_t dx_max = (ax0 > ax1) ? ax0 : ax1;
 	int64_t dy_max = (ay0 > ay1) ? ay0 : ay1;
 	int64_t d2_max = dx_max * dx_max + dy_max * dy_max;
-	uint32_t d_max = (d2_max >= 57600LL) ? 240u : nd_field_isqrt32((uint32_t)d2_max);
+	uint32_t d_max = (d2_max >= 230400LL) ? 480u : nd_field_isqrt32((uint32_t)d2_max);
 
-	/* cone_q8(d) increases on [0..36], peaks at d=36, decreases on [36..240] */
-	int32_t c_lo = nd_field_volcano_cone_q8(d_min);
+	/* cone_q12(d) increases on [0..64], peaks at d=64, decreases on [64..480] */
+	int32_t c_lo = nd_field_volcano_cone_q12(d_min);
 	int32_t c_hi = c_lo;
-	int32_t c_e  = nd_field_volcano_cone_q8(d_max);
+	int32_t c_e  = nd_field_volcano_cone_q12(d_max);
 	if (c_e < c_lo) c_lo = c_e;
 	if (c_e > c_hi) c_hi = c_e;
-	if (d_min <= 36u && d_max >= 36u) {
-		int32_t c_pk = nd_field_volcano_cone_q8(36u);
+	if (d_min <= 64u && d_max >= 64u) {
+		int32_t c_pk = nd_field_volcano_cone_q12(64u);
 		if (c_pk > c_hi) c_hi = c_pk;
 	}
 	*out_lo = c_lo;
@@ -2669,104 +2775,134 @@ static inline void
 nd_field_orogeny_archetype_bounds(uint8_t prov, uint8_t az, int32_t corner_rx, int32_t corner_ry,
                                   int32_t urx0, int32_t urx1, int32_t ury0, int32_t ury1,
                                   int32_t hyp_min, int32_t hyp_max,
+                                  int32_t shore_lo, int32_t shore_hi,
+                                  int32_t foot_lo, int32_t foot_hi,
+                                  int32_t inl_lo, int32_t inl_hi,
                                   int32_t hill_lo, int32_t hill_hi,
-                                  int32_t alp_q_lo, int32_t alp_q_hi, int32_t scale_q8,
+                                  int32_t alp_q_lo, int32_t alp_q_hi, int32_t scale_q12,
+                                  int32_t roll_lo, int32_t roll_hi,
                                   int32_t hraw_lo, int32_t hraw_hi,
                                   int32_t araw_lo, int32_t araw_hi,
+                                  int32_t n10_lo, int32_t n10_hi,
+                                  int32_t r10_lo, int32_t r10_hi,
                                   int32_t r9_lo, int32_t r9_hi,
-                                  int32_t r8_lo, int32_t r8_hi,
                                   int32_t r7_lo, int32_t r7_hi,
-                                  int32_t r5_lo, int32_t r5_hi,
+                                  int32_t r6_lo, int32_t r6_hi,
                                   int32_t *out_lo, int32_t *out_hi)
 {
-	int32_t env_lo = (alp_q_lo > hill_lo) ? alp_q_lo : hill_lo;
-	int32_t env_hi = (alp_q_hi > hill_hi) ? alp_q_hi : hill_hi;
-	int32_t lo = 0, hi = 0;
+	int32_t r_lo = (int32_t)(((int64_t)roll_lo * (int64_t)shore_lo) >> 12);
+	int32_t r_hi = (int32_t)(((int64_t)roll_hi * (int64_t)shore_hi) >> 12) + 1;
+	int32_t lo = r_lo, hi = r_hi;
 
 	switch (prov) {
 	case ND_GEO_ALLUVIAL_PLAIN:
-		lo = (((hraw_lo >> 1) * hill_lo) >> 8) + (((araw_lo >> 3) * alp_q_lo) >> 8);
-		hi = (((hraw_hi >> 1) * hill_hi) >> 8) + (((araw_hi >> 3) * alp_q_hi) >> 8) + 2;
+		lo += (int32_t)(((int64_t)(hraw_lo >> 2) * hill_lo) >> 12) + (int32_t)(((int64_t)(araw_lo >> 3) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)(hraw_hi >> 2) * hill_hi) >> 12) + (int32_t)(((int64_t)(araw_hi >> 3) * alp_q_hi) >> 12) + 4;
 		break;
 	case ND_GEO_PIEDMONT_HILLS:
-		lo = (((hraw_lo * 10) * hill_lo) >> 8) + ((((araw_lo * 3) >> 3) * alp_q_lo) >> 8);
-		hi = (((hraw_hi * 10) * hill_hi) >> 8) + ((((araw_hi * 3) >> 3) * alp_q_hi) >> 8) + 2;
+		lo += (int32_t)(((int64_t)hraw_lo * hill_lo) >> 12) + (int32_t)(((int64_t)((araw_lo * 3) >> 3) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)hraw_hi * hill_hi) >> 12) + (int32_t)(((int64_t)((araw_hi * 3) >> 3) * alp_q_hi) >> 12) + 4;
 		break;
 	case ND_GEO_ALPINE_CORDILLERA:
-		lo = (((hraw_lo * 12) * hill_lo) >> 8) + (int32_t)(((int64_t)araw_lo * alp_q_lo) >> 8);
-		hi = (((hraw_hi * 12) * hill_hi) >> 8) + (int32_t)(((int64_t)araw_hi * alp_q_hi) >> 8) + 2;
+		lo += (int32_t)(((int64_t)((hraw_lo * 5) >> 2) * hill_lo) >> 12) + (int32_t)(((int64_t)araw_lo * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)((hraw_hi * 5) >> 2) * hill_hi) >> 12) + (int32_t)(((int64_t)araw_hi * alp_q_hi) >> 12) + 4;
 		break;
 	case ND_GEO_CANYON_MESA: {
-		int32_t m_lo = (r9_lo * 3 + r7_lo * 2) / 5;
-		int32_t m_hi = (r9_hi * 3 + r7_hi * 2) / 5;
-		int32_t t_lo = nd_field_terrace_q8(m_lo << 1);
-		int32_t t_hi = nd_field_terrace_q8(m_hi << 1);
-		int32_t ms = 192 + (scale_q8 >> 2);
-		int32_t mc_lo = (int32_t)(((int64_t)t_lo * 38000LL * (int64_t)ms) >> 16);
-		int32_t mc_hi = (int32_t)(((int64_t)t_hi * 38000LL * (int64_t)ms) >> 16);
-		lo = (int32_t)(((int64_t)(mc_lo + hraw_lo * 6) * env_lo) >> 8) + (((araw_lo >> 3) * alp_q_lo) >> 8);
-		hi = (int32_t)(((int64_t)(mc_hi + hraw_hi * 6) * env_hi) >> 8) + (((araw_hi >> 3) * alp_q_hi) >> 8) + 4;
+		int32_t m_lo = (n10_lo * 3 + r9_lo * 2) / 5;
+		int32_t m_hi = (n10_hi * 3 + r9_hi * 2) / 5;
+		int32_t t_lo = nd_field_terrace3_q12(m_lo);
+		int32_t t_hi = nd_field_terrace3_q12(m_hi);
+		int32_t mh_lo = (int32_t)((((int64_t)t_lo * 10500LL) >> 12) * (int64_t)scale_q12 >> 12);
+		int32_t mh_hi = (int32_t)((((int64_t)t_hi * 10500LL) >> 12) * (int64_t)scale_q12 >> 12);
+		lo += (int32_t)(((int64_t)mh_lo * inl_lo) >> 12) +
+		      (int32_t)(((int64_t)(hraw_lo >> 1) * hill_lo) >> 12) +
+		      (int32_t)(((int64_t)(araw_lo >> 3) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)mh_hi * inl_hi) >> 12) +
+		      (int32_t)(((int64_t)(hraw_hi >> 1) * hill_hi) >> 12) +
+		      (int32_t)(((int64_t)(araw_hi >> 3) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	case ND_GEO_FAULT_ESCARPMENT: {
 		int32_t p_lo, p_hi, s_lo, s_hi;
-		nd_field_proj_rect_bounds(urx0, urx1, ury0, ury1, az, &p_lo, &p_hi);
-		nd_field_scarp_bounds(p_lo, p_hi, &s_lo, &s_hi);
-		int32_t sh_lo = (int32_t)(((int64_t)s_lo * 54000LL * (int64_t)scale_q8) >> 16);
-		int32_t sh_hi = (int32_t)(((int64_t)s_hi * 54000LL * (int64_t)scale_q8) >> 16);
-		lo = (int32_t)(((int64_t)((sh_lo >> 2) + hraw_lo * 6) * hill_lo) >> 8) +
-		     (int32_t)(((int64_t)(((sh_lo * 3) >> 2) + (araw_lo >> 2)) * alp_q_lo) >> 8);
-		hi = (int32_t)(((int64_t)((sh_hi >> 2) + hraw_hi * 6) * hill_hi) >> 8) +
-		     (int32_t)(((int64_t)(((sh_hi * 3) >> 2) + (araw_hi >> 2)) * alp_q_hi) >> 8) + 4;
+		nd_field_proj_rect_bounds(urx0 - corner_rx, urx1 - corner_rx,
+		                          ury0 - corner_ry, ury1 - corner_ry, az, &p_lo, &p_hi);
+		nd_field_scarp_bounds_q12(p_lo, p_hi, &s_lo, &s_hi);
+		int32_t sh_lo = (int32_t)((((int64_t)s_lo * 14000LL) >> 12) * (int64_t)scale_q12 >> 12);
+		int32_t sh_hi = (int32_t)((((int64_t)s_hi * 14000LL) >> 12) * (int64_t)scale_q12 >> 12);
+		lo += (int32_t)(((int64_t)sh_lo * inl_lo) >> 12) +
+		      (int32_t)(((int64_t)hraw_lo * hill_lo) >> 12) +
+		      (int32_t)(((int64_t)(araw_lo >> 2) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)sh_hi * inl_hi) >> 12) +
+		      (int32_t)(((int64_t)hraw_hi * hill_hi) >> 12) +
+		      (int32_t)(((int64_t)(araw_hi >> 2) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	case ND_GEO_GLACIAL_FJORD: {
-		int32_t g_lo = (r9_lo * 5 + r8_lo * 3) >> 3;
-		int32_t g_hi = (r9_hi * 5 + r8_hi * 3) >> 3;
-		int32_t u_lo = nd_field_smoothstep_q8(g_lo, 46, 98);
-		int32_t u_hi = nd_field_smoothstep_q8(g_hi, 46, 98);
-		int32_t hh_lo = ((hraw_lo * 7) * u_lo) >> 8;
-		int32_t hh_hi = ((hraw_hi * 7) * u_hi) >> 8;
-		int32_t ha_lo = (int32_t)(((int64_t)araw_lo * u_lo) >> 8);
-		int32_t ha_hi = (int32_t)(((int64_t)araw_hi * u_hi) >> 8);
-		lo = ((hh_lo * hill_lo) >> 8) + (int32_t)(((int64_t)ha_lo * alp_q_lo) >> 8);
-		hi = ((hh_hi * hill_hi) >> 8) + (int32_t)(((int64_t)ha_hi * alp_q_hi) >> 8) + 4;
+		int32_t g_lo = (r10_lo * 5 + r9_lo * 3) >> 3;
+		int32_t g_hi = (r10_hi * 5 + r9_hi * 3) >> 3;
+		int32_t u_lo = nd_field_smoothstep_q12(g_lo, 1400, 3100);
+		int32_t u_hi = nd_field_smoothstep_q12(g_hi, 1400, 3100);
+		lo += (int32_t)(((((int64_t)hraw_lo * u_lo) >> 12) * hill_lo) >> 12) +
+		      (int32_t)(((((int64_t)araw_lo * u_lo) >> 12) * alp_q_lo) >> 12);
+		hi += (int32_t)(((((int64_t)hraw_hi * u_hi) >> 12) * hill_hi) >> 12) +
+		      (int32_t)(((((int64_t)araw_hi * u_hi) >> 12) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	case ND_GEO_VOLCANIC_CONE: {
 		int32_t c_lo, c_hi;
-		nd_field_volcano_bounds(urx0, urx1, ury0, ury1, corner_rx, corner_ry, &c_lo, &c_hi);
-		int32_t vh_lo = (int32_t)(((int64_t)c_lo * 76000LL * (int64_t)scale_q8) >> 16);
-		int32_t vh_hi = (int32_t)(((int64_t)c_hi * 76000LL * (int64_t)scale_q8) >> 16);
-		lo = (int32_t)(((int64_t)(vh_lo + hraw_lo * 7) * env_lo) >> 8) + (((araw_lo >> 2) * alp_q_lo) >> 8);
-		hi = (int32_t)(((int64_t)(vh_hi + hraw_hi * 7) * env_hi) >> 8) + (((araw_hi >> 2) * alp_q_hi) >> 8) + 4;
+		nd_field_volcano_bounds_q12(urx0, urx1, ury0, ury1, corner_rx, corner_ry, &c_lo, &c_hi);
+		int32_t vh_lo = (int32_t)((((int64_t)c_lo * 19500LL) >> 12) * (int64_t)scale_q12 >> 12);
+		int32_t vh_hi = (int32_t)((((int64_t)c_hi * 19500LL) >> 12) * (int64_t)scale_q12 >> 12);
+		lo += (int32_t)(((int64_t)vh_lo * inl_lo) >> 12) +
+		      (int32_t)(((int64_t)hraw_lo * hill_lo) >> 12) +
+		      (int32_t)(((int64_t)(araw_lo >> 2) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)vh_hi * inl_hi) >> 12) +
+		      (int32_t)(((int64_t)hraw_hi * hill_hi) >> 12) +
+		      (int32_t)(((int64_t)(araw_hi >> 2) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	case ND_GEO_KARST_TOWERS: {
-		int32_t k_lo = (r5_lo * r5_lo * r5_lo) >> 14;
-		int32_t k_hi = (r5_hi * r5_hi * r5_hi) >> 14;
-		lo = (int32_t)(((int64_t)(k_lo * 165 + hraw_lo * 3) * env_lo) >> 8) + (((araw_lo >> 2) * alp_q_lo) >> 8);
-		hi = (int32_t)(((int64_t)(k_hi * 165 + hraw_hi * 3) * env_hi) >> 8) + (((araw_hi >> 2) * alp_q_hi) >> 8) + 4;
+		int32_t kb_lo = (r7_lo * 5 + r6_lo * 3) >> 3;
+		int32_t kb_hi = (r7_hi * 5 + r6_hi * 3) >> 3;
+		int32_t ks_lo = (int32_t)(((int64_t)kb_lo * kb_lo) >> 12);
+		int32_t ks_hi = (int32_t)(((int64_t)kb_hi * kb_hi) >> 12);
+		int32_t kh_lo = (int32_t)(((int64_t)ks_lo * 3600LL) >> 12);
+		int32_t kh_hi = (int32_t)(((int64_t)ks_hi * 3600LL) >> 12);
+		lo += (int32_t)(((int64_t)kh_lo * foot_lo) >> 12) +
+		      (int32_t)(((int64_t)(hraw_lo >> 1) * hill_lo) >> 12) +
+		      (int32_t)(((int64_t)(araw_lo >> 2) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)kh_hi * foot_hi) >> 12) +
+		      (int32_t)(((int64_t)(hraw_hi >> 1) * hill_hi) >> 12) +
+		      (int32_t)(((int64_t)(araw_hi >> 2) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	case ND_GEO_ARID_BASIN_ERG: {
 		int32_t p_lo, p_hi, d_lo, d_hi;
-		nd_field_proj_rect_bounds(urx0, urx1, ury0, ury1, az, &p_lo, &p_hi);
-		nd_field_dune_bounds(p_lo, p_hi, &d_lo, &d_hi);
-		int32_t dh_lo = (d_lo * 14) >> 1;
-		int32_t dh_hi = (d_hi * 14) >> 1;
-		lo = (((dh_lo + hraw_lo * 2) * hill_lo) >> 8) + ((((araw_lo * 3) >> 4) * alp_q_lo) >> 8);
-		hi = (((dh_hi + hraw_hi * 2) * hill_hi) >> 8) + ((((araw_hi * 3) >> 4) * alp_q_hi) >> 8) + 4;
+		nd_field_proj_rect_bounds(urx0 - corner_rx, urx1 - corner_rx,
+		                          ury0 - corner_ry, ury1 - corner_ry, az, &p_lo, &p_hi);
+		nd_field_dune_bounds_q12(p_lo, p_hi, &d_lo, &d_hi);
+		int32_t dh_lo = (int32_t)(((int64_t)d_lo * 720LL) >> 12);
+		int32_t dh_hi = (int32_t)(((int64_t)d_hi * 720LL) >> 12);
+		lo += (int32_t)(((int64_t)dh_lo * shore_lo) >> 12) +
+		      (int32_t)(((int64_t)(hraw_lo >> 1) * hill_lo) >> 12) +
+		      (int32_t)(((int64_t)((araw_lo * 3) >> 4) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)dh_hi * shore_hi) >> 12) +
+		      (int32_t)(((int64_t)(hraw_hi >> 1) * hill_hi) >> 12) +
+		      (int32_t)(((int64_t)((araw_hi * 3) >> 4) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	case ND_GEO_SEA_CLIFF_COAST:
 	default: {
-		int32_t hl_lo = (hyp_min <= 6) ? 0 : nd_field_smoothstep_q8(hyp_min, 6, 20);
-		int32_t hl_hi = nd_field_smoothstep_q8(hyp_max, 6, 20);
-		int32_t ch_lo = ((hl_lo * 4800) >> 8) + hraw_lo * 8;
-		int32_t ch_hi = ((hl_hi * 4800) >> 8) + hraw_hi * 8;
-		lo = ((ch_lo * hill_lo) >> 8) + (int32_t)((((int64_t)araw_lo * 5LL >> 3) * alp_q_lo) >> 8);
-		hi = ((ch_hi * hill_hi) >> 8) + (int32_t)((((int64_t)araw_hi * 5LL >> 3) * alp_q_hi) >> 8) + 4;
+		int32_t hl_lo = (hyp_min <= 6) ? 0 : nd_field_smoothstep_q12(hyp_min, 6, 64);
+		int32_t hl_hi = nd_field_smoothstep_q12(hyp_max, 6, 64);
+		int32_t ch_lo = (int32_t)(((int64_t)hl_lo * 1100LL) >> 12);
+		int32_t ch_hi = (int32_t)(((int64_t)hl_hi * 1100LL) >> 12);
+		lo += (int32_t)(((int64_t)ch_lo * shore_lo) >> 12) +
+		      (int32_t)(((int64_t)hraw_lo * hill_lo) >> 12) +
+		      (int32_t)(((int64_t)((araw_lo * 5) >> 3) * alp_q_lo) >> 12);
+		hi += (int32_t)(((int64_t)ch_hi * shore_hi) >> 12) +
+		      (int32_t)(((int64_t)hraw_hi * hill_hi) >> 12) +
+		      (int32_t)(((int64_t)((araw_hi * 5) >> 3) * alp_q_hi) >> 12) + 6;
 		break;
 	}
 	}
@@ -2776,212 +2912,234 @@ nd_field_orogeny_archetype_bounds(uint8_t prov, uint8_t az, int32_t corner_rx, i
 	*out_hi = hi;
 }
 
-/* Conservative O(1) 2-sided interval bounds [out_min, out_max] on nd_field_orogeny_wu over
- * room rectangle [rx0..rx1] x [ry0..ry1] with base hypsometry in [hyp_min, hyp_max] for ALL step_q16.
- * Exact [0, 0] over ocean and flat plains; razor-tight over fine alpine/foothill chunks. */
+/* Conservative O(1) 2-sided interval bounds [out_min, out_max] on nd_field_orogeny_wu_ex over
+ * room rectangle [rx0..rx1] x [ry0..ry1] with base hypsometry in [hyp_min, hyp_max] and macro
+ * continental elevation in [cont_lo_q8, cont_hi_q8] for ALL step_q16. */
 static inline void
-nd_field_orogeny_bounds_wu(uint16_t world, int32_t rx0, int32_t rx1,
-                           int32_t ry0, int32_t ry1,
-                           int32_t hyp_min, int32_t hyp_max,
-                           int32_t *out_min, int32_t *out_max)
+nd_field_orogeny_bounds_wu_ex(uint16_t world, int32_t rx0, int32_t rx1,
+                              int32_t ry0, int32_t ry1,
+                              int32_t hyp_min, int32_t hyp_max,
+                              int32_t cont_lo_q8, int32_t cont_hi_q8,
+                              int32_t *out_min, int32_t *out_max)
 {
-	if (hyp_max <= 6) {
+	if (hyp_max <= 1) {
 		*out_min = 0;
 		*out_max = 0;
 		return;
 	}
 	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t max_e = nd_field_active_max_elev_wu();
-	int32_t scale_q8 = (int32_t)(((int64_t)max_e * 256LL) / 81000LL);
-	int32_t coast_lo = (hyp_min <= 6) ? 0 : nd_field_smoothstep_q8(hyp_min, 6, 16);
-	int32_t coast_hi = nd_field_smoothstep_q8(hyp_max, 6, 16);
+	int32_t scale_q12 = (int32_t)(((int64_t)max_e * 4096LL) / 21600LL);
+	int32_t shore_lo = (hyp_min <= 1) ? 0 : nd_field_smoothstep_q12(hyp_min, 1, 24);
+	int32_t shore_hi = nd_field_smoothstep_q12(hyp_max, 1, 24);
+	int32_t bh_lo = (hyp_min <= 1) ? 0 : nd_field_smoothstep_q12(hyp_min, 1, 20);
+	int32_t bh_hi = nd_field_smoothstep_q12(hyp_max, 1, 20);
+	int32_t ba_lo = (hyp_min <= 1) ? 0 : nd_field_smoothstep_q12(hyp_min, 1, 16);
+	int32_t ba_hi = nd_field_smoothstep_q12(hyp_max, 1, 16);
+
+	int32_t foot_lo = (int32_t)(((int64_t)nd_field_smoothstep_q12(cont_lo_q8, 12 * 256, 40 * 256) * bh_lo) >> 12);
+	int32_t foot_hi = (int32_t)(((int64_t)nd_field_smoothstep_q12(cont_hi_q8, 12 * 256, 40 * 256) * bh_hi) >> 12);
+	int32_t inl_lo  = (int32_t)(((int64_t)nd_field_smoothstep_q12(cont_lo_q8, 25 * 256, 62 * 256) * ba_lo) >> 12);
+	int32_t inl_hi  = (int32_t)(((int64_t)nd_field_smoothstep_q12(cont_hi_q8, 25 * 256, 62 * 256) * ba_hi) >> 12);
+
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
 
 	int32_t wx_lo, wx_hi, wy_lo, wy_hi, mx_lo, mx_hi, my_lo, my_hi;
-	nd_field_periodic_rect_bounds(rx0, rx1, ry0, ry1, 8, oseed ^ 0x11A3u, &wx_lo, &wx_hi);
-	nd_field_periodic_rect_bounds(rx0, rx1, ry0, ry1, 8, oseed ^ 0x22B7u, &wy_lo, &wy_hi);
-	nd_field_periodic_rect_bounds(rx0, rx1, ry0, ry1, 6, oseed ^ 0x33C9u, &mx_lo, &mx_hi);
-	nd_field_periodic_rect_bounds(rx0, rx1, ry0, ry1, 6, oseed ^ 0x44DBu, &my_lo, &my_hi);
+	nd_field_periodic_rect_bounds_q12(rx0, rx1, ry0, ry1, 9, oseed ^ 0x11A3u, &wx_lo, &wx_hi);
+	nd_field_periodic_rect_bounds_q12(rx0, rx1, ry0, ry1, 9, oseed ^ 0x22B7u, &wy_lo, &wy_hi);
+	nd_field_periodic_rect_bounds_q12(rx0, rx1, ry0, ry1, 7, oseed ^ 0x33C9u, &mx_lo, &mx_hi);
+	nd_field_periodic_rect_bounds_q12(rx0, rx1, ry0, ry1, 7, oseed ^ 0x44DBu, &my_lo, &my_hi);
 
-	int32_t urx0 = rx0 + ((wx_lo - 128) >> 1) + ((mx_lo - 128) >> 3) - 1;
-	int32_t urx1 = rx1 + ((wx_hi - 128) >> 1) + ((mx_hi - 128) >> 3) + 1;
-	int32_t ury0 = ry0 + ((wy_lo - 128) >> 1) + ((my_lo - 128) >> 3) - 1;
-	int32_t ury1 = ry1 + ((wy_hi - 128) >> 1) + ((my_hi - 128) >> 3) + 1;
+	int32_t urx0 = rx0 + (((wx_lo >> 4) - 128) >> 1) + (((mx_lo >> 4) - 128) >> 3) - 2;
+	int32_t urx1 = rx1 + (((wx_hi >> 4) - 128) >> 1) + (((mx_hi >> 4) - 128) >> 3) + 2;
+	int32_t ury0 = ry0 + (((wy_lo >> 4) - 128) >> 1) + (((my_lo >> 4) - 128) >> 3) - 2;
+	int32_t ury1 = ry1 + (((wy_hi >> 4) - 128) >> 1) + (((my_hi >> 4) - 128) >> 3) + 2;
 
-	int32_t prov_lo, prov_hi, nb_lo, nb_hi;
-	nd_field_periodic_rect_bounds(urx0, urx1, ury0, ury1, 8, oseed ^ 0x55EDu, &prov_lo, &prov_hi);
-	nd_field_periodic_rect_bounds(urx0, urx1, ury0, ury1, 7, oseed ^ 0x661Fu, &nb_lo, &nb_hi);
+	int32_t n10_lo, n10_hi, n11_lo, n11_hi, n9_lo, n9_hi, n8_lo, n8_hi;
+	int32_t n7_lo, n7_hi, n6_lo, n6_hi, n5_lo, n5_hi;
+	nd_field_periodic_rect_bounds_q12(urx0, urx1, ury0, ury1, 10, oseed ^ 0x55EDu, &n10_lo, &n10_hi);
+	nd_field_periodic_rect_bounds_q12(urx0 + 521, urx1 + 521, ury0 - 389, ury1 - 389, 11, oseed ^ 0x661Fu, &n11_lo, &n11_hi);
+	nd_field_periodic_rect_bounds_q12(urx0 + 313, urx1 + 313, ury0 - 571, ury1 - 571, 9, oseed ^ 0x4E3Bu, &n9_lo, &n9_hi);
+	nd_field_periodic_rect_bounds_q12(urx0 - 419, urx1 - 419, ury0 + 263, ury1 + 263, 8, oseed ^ 0x3D29u, &n8_lo, &n8_hi);
+	nd_field_periodic_rect_bounds_q12(urx0 + 191, urx1 + 191, ury0 + 547, ury1 + 547, 7, oseed ^ 0x9955u, &n7_lo, &n7_hi);
+	nd_field_periodic_rect_bounds_q12(urx0 - 613, urx1 - 613, ury0 + 271, ury1 + 271, 6, oseed ^ 0xAA67u, &n6_lo, &n6_hi);
+	nd_field_periodic_rect_bounds_q12(urx0 + 713, urx1 + 713, ury0 - 419, ury1 - 419, 5, oseed ^ 0x7731u, &n5_lo, &n5_hi);
 
-	int32_t r8_lo, r8_hi, belt_lo, belt_hi;
-	nd_field_ridge_bounds(prov_lo, prov_hi, &r8_lo, &r8_hi);
-	nd_field_ridge_bounds(nb_lo, nb_hi, &belt_lo, &belt_hi);
+	int32_t r11_lo, r11_hi, r10_lo, r10_hi, r9_lo, r9_hi, r8_lo, r8_hi, r7_lo, r7_hi, r6_lo, r6_hi, r5_lo, r5_hi;
+	nd_field_ridge_bounds_q12(n11_lo, n11_hi, &r11_lo, &r11_hi);
+	nd_field_ridge_bounds_q12(n10_lo, n10_hi, &r10_lo, &r10_hi);
+	nd_field_ridge_bounds_q12(n9_lo,  n9_hi,  &r9_lo,  &r9_hi);
+	nd_field_ridge_bounds_q12(n8_lo,  n8_hi,  &r8_lo,  &r8_hi);
+	nd_field_ridge_bounds_q12(n7_lo,  n7_hi,  &r7_lo,  &r7_hi);
+	nd_field_ridge_bounds_q12(n6_lo,  n6_hi,  &r6_lo,  &r6_hi);
+	nd_field_ridge_bounds_q12(n5_lo,  n5_hi,  &r5_lo,  &r5_hi);
 
-	int32_t h_sig_lo = (prov_lo * 3 + belt_lo * 5) >> 3;
-	int32_t h_sig_hi = (prov_hi * 3 + belt_hi * 5) >> 3;
-	int32_t hill_lo = nd_field_smoothstep_q8(h_sig_lo, 96, 150);
-	int32_t hill_hi = nd_field_smoothstep_q8(h_sig_hi, 96, 150);
+	int32_t roll_lo = (int32_t)(((int64_t)n9_lo * 260LL + (int64_t)n8_lo * 170LL +
+	                             (int64_t)n7_lo * 105LL + (int64_t)n6_lo * 54LL +
+	                             (int64_t)n5_lo * 24LL) >> 12);
+	int32_t roll_hi = (int32_t)(((int64_t)n9_hi * 260LL + (int64_t)n8_hi * 170LL +
+	                             (int64_t)n7_hi * 105LL + (int64_t)n6_hi * 54LL +
+	                             (int64_t)n5_hi * 24LL) >> 12) + 2;
 
-	int32_t a_sig_lo = (belt_lo * (144 + prov_lo)) >> 8;
-	if (hyp_min > 80) {
-		int32_t cb = (hyp_min - 80) >> 3;
-		if (cb > 28) cb = 28;
-		a_sig_lo += cb;
+	int32_t h_sig_lo = (n10_lo * 3 + n9_lo * 3 + r8_lo * 2) >> 3;
+	int32_t h_sig_hi = (n10_hi * 3 + n9_hi * 3 + r8_hi * 2) >> 3;
+	int32_t hill_lo = (int32_t)(((int64_t)nd_field_smoothstep_q12(h_sig_lo, 850, 3150) * foot_lo) >> 12);
+	int32_t hill_hi = (int32_t)(((int64_t)nd_field_smoothstep_q12(h_sig_hi, 850, 3150) * foot_hi) >> 12);
+
+	int32_t belt_lo = (r11_lo * 5 + r10_lo * 3) >> 3;
+	int32_t belt_hi = (r11_hi * 5 + r10_hi * 3) >> 3;
+	int32_t a_sm_lo = nd_field_smoothstep_q12(belt_lo, 1200, 3350);
+	int32_t a_sm_hi = nd_field_smoothstep_q12(belt_hi, 1200, 3350);
+	int32_t alp_reg_lo = (int32_t)(((int64_t)a_sm_lo * (1536LL + (((int64_t)a_sm_lo * 2560LL) >> 12))) >> 12);
+	int32_t alp_reg_hi = (int32_t)(((int64_t)a_sm_hi * (1536LL + (((int64_t)a_sm_hi * 2560LL) >> 12))) >> 12);
+	int32_t alpine_lo = (int32_t)(((int64_t)alp_reg_lo * inl_lo) >> 12);
+	int32_t alpine_hi = (int32_t)(((int64_t)alp_reg_hi * inl_hi) >> 12);
+
+	int32_t n4_lo = 0, n4_hi = 4095, r4_lo = 0, r4_hi = 4096;
+	if (hill_hi > 0 || alpine_hi > 0) {
+		nd_field_periodic_rect_bounds_q12(urx0 - 317, urx1 - 317, ury0 + 823, ury1 + 823, 4, oseed ^ 0x8843u, &n4_lo, &n4_hi);
+		nd_field_ridge_bounds_q12(n4_lo, n4_hi, &r4_lo, &r4_hi);
 	}
-	int32_t a_sig_hi = (belt_hi * (144 + prov_hi)) >> 8;
-	if (hyp_max > 80) {
-		int32_t cb = (hyp_max - 80) >> 3;
-		if (cb > 28) cb = 28;
-		a_sig_hi += cb;
-	}
-	int32_t a_sm_lo = nd_field_smoothstep_q8(a_sig_lo, 78, 146);
-	int32_t a_sm_hi = nd_field_smoothstep_q8(a_sig_hi, 78, 146);
-	int32_t alpine_lo = (a_sm_lo * (128 + (a_sm_lo >> 1))) >> 8;
-	int32_t alpine_hi = (a_sm_hi * (128 + (a_sm_hi >> 1))) >> 8;
-
-	if (hill_hi == 0 && alpine_hi == 0) {
-		*out_min = 0;
-		*out_max = 0;
-		return;
-	}
-
-	int32_t n9_lo, n9_hi, r9_lo, r9_hi;
-	nd_field_periodic_rect_bounds(urx0 + 313, urx1 + 313, ury0 - 571, ury1 - 571, 9, oseed ^ 0x4E3Bu, &n9_lo, &n9_hi);
-	nd_field_ridge_bounds(n9_lo, n9_hi, &r9_lo, &r9_hi);
-
-	int32_t f5n_lo, f5n_hi, r5k_lo, r5k_hi;
-	nd_field_periodic_rect_bounds(urx0 + 713, urx1 + 713, ury0 - 419, ury1 - 419, 5, oseed ^ 0x7731u, &f5n_lo, &f5n_hi);
-	nd_field_ridge_bounds(f5n_lo, f5n_hi, &r5k_lo, &r5k_hi);
 
 	int32_t hraw_lo = 0, hraw_hi = 0;
 	if (hill_hi > 0) {
-		int32_t f5_lo = (f5n_lo * 192 + r5k_lo * 528) >> 8;
-		int32_t f5_hi = (f5n_hi * 192 + r5k_hi * 528) >> 8;
-		int32_t f4n_lo, f4n_hi;
-		nd_field_periodic_rect_bounds(urx0 - 317, urx1 - 317, ury0 + 823, ury1 + 823, 4, oseed ^ 0x8843u, &f4n_lo, &f4n_hi);
-		/* Conservative for all step_q16: w4_oct can be 0 for lower bound and 1 for upper bound */
-		hraw_lo = f5_lo;
-		hraw_hi = f5_hi + ((f4n_hi * 240) >> 8) + 2;
+		/* Conservative for all step_q16: w4_oct in [0, 65536] */
+		hraw_lo = (int32_t)(((int64_t)n9_lo * 1400LL + (int64_t)n8_lo * 840LL +
+		                     (int64_t)n7_lo * 460LL + (int64_t)r6_lo * 220LL +
+		                     (int64_t)r5_lo * 100LL) >> 12);
+		hraw_hi = (int32_t)(((int64_t)n9_hi * 1400LL + (int64_t)n8_hi * 840LL +
+		                     (int64_t)n7_hi * 460LL + (int64_t)r6_hi * 220LL +
+		                     (int64_t)r5_hi * 100LL + (int64_t)n4_hi * 44LL) >> 12) + 4;
 	}
 
 	int32_t araw_lo = 0, araw_hi = 0;
 	if (alpine_hi > 0) {
-		int32_t n10_lo, n10_hi, r10_lo, r10_hi;
-		nd_field_periodic_rect_bounds(urx0 - 829, urx1 - 829, ury0 + 467, ury1 + 467, 10, oseed ^ 0x3D29u, &n10_lo, &n10_hi);
-		nd_field_ridge_bounds(n10_lo, n10_hi, &r10_lo, &r10_hi);
+		int32_t h11_lo = (int32_t)(((int64_t)r11_lo * r11_lo) >> 12);
+		int32_t h11_hi = (int32_t)(((int64_t)r11_hi * r11_hi) >> 12);
 
-		int32_t n6_lo, n6_hi, r6_lo, r6_hi;
-		nd_field_periodic_rect_bounds(urx0 + 191, urx1 + 191, ury0 + 547, ury1 + 547, 6, oseed ^ 0x9955u, &n6_lo, &n6_hi);
-		nd_field_ridge_bounds(n6_lo, n6_hi, &r6_lo, &r6_hi);
+		int32_t h10_lo = (int32_t)(((int64_t)r10_lo * (1536LL + (((int64_t)r10_lo * 2560LL) >> 12))) >> 12);
+		int32_t h10_hi = (int32_t)(((int64_t)r10_hi * (1536LL + (((int64_t)r10_hi * 2560LL) >> 12))) >> 12);
+		int32_t w10_lo = 1536 + (int32_t)(((int64_t)h11_lo * 2560LL) >> 12);
+		int32_t w10_hi = 1536 + (int32_t)(((int64_t)h11_hi * 2560LL) >> 12);
+		int32_t h10w_lo = (int32_t)(((int64_t)h10_lo * w10_lo) >> 12);
+		int32_t h10w_hi = (int32_t)(((int64_t)h10_hi * w10_hi) >> 12);
 
-		int32_t n5_lo, n5_hi, r5a_lo, r5a_hi;
-		nd_field_periodic_rect_bounds(urx0 - 613, urx1 - 613, ury0 + 271, ury1 + 271, 5, oseed ^ 0xAA67u, &n5_lo, &n5_hi);
-		nd_field_ridge_bounds(n5_lo, n5_hi, &r5a_lo, &r5a_hi);
+		int32_t h9_lo = (int32_t)(((int64_t)r9_lo * (1536LL + (((int64_t)r9_lo * 2560LL) >> 12))) >> 12);
+		int32_t h9_hi = (int32_t)(((int64_t)r9_hi * (1536LL + (((int64_t)r9_hi * 2560LL) >> 12))) >> 12);
+		int32_t w9_lo = 1344 + (int32_t)(((int64_t)h10w_lo * 2752LL) >> 12);
+		int32_t w9_hi = 1344 + (int32_t)(((int64_t)h10w_hi * 2752LL) >> 12);
+		int32_t h9w_lo = (int32_t)(((int64_t)h9_lo * w9_lo) >> 12);
+		int32_t h9w_hi = (int32_t)(((int64_t)h9_hi * w9_hi) >> 12);
 
-		int32_t n4_lo, n4_hi, r4_lo, r4_hi;
-		nd_field_periodic_rect_bounds(urx0 + 409, urx1 + 409, ury0 - 733, ury1 - 733, 4, oseed ^ 0xBB79u, &n4_lo, &n4_hi);
-		nd_field_ridge_bounds(n4_lo, n4_hi, &r4_lo, &r4_hi);
+		int32_t h8_lo = (int32_t)(((int64_t)r8_lo * (1536LL + (((int64_t)r8_lo * 2560LL) >> 12))) >> 12);
+		int32_t h8_hi = (int32_t)(((int64_t)r8_hi * (1536LL + (((int64_t)r8_hi * 2560LL) >> 12))) >> 12);
+		int32_t w8_lo = 1216 + (int32_t)(((int64_t)h9w_lo * 2880LL) >> 12);
+		int32_t w8_hi = 1216 + (int32_t)(((int64_t)h9w_hi * 2880LL) >> 12);
+		int32_t h8w_lo = (int32_t)(((int64_t)h8_lo * w8_lo) >> 12);
+		int32_t h8w_hi = (int32_t)(((int64_t)h8_hi * w8_hi) >> 12);
 
-		int32_t h10_lo = (r10_lo * r10_lo) >> 7, h10_hi = (r10_hi * r10_hi) >> 7;
-		int32_t h9_lo  = (r9_lo * (64 + (r9_lo >> 1))) >> 7, h9_hi = (r9_hi * (64 + (r9_hi >> 1))) >> 7;
-		int32_t w9_lo  = 96 + ((h10_lo * 160) >> 7), w9_hi = 96 + ((h10_hi * 160) >> 7);
-		int32_t h9w_lo = (h9_lo * w9_lo) >> 8, h9w_hi = (h9_hi * w9_hi) >> 8;
+		int32_t h7_lo = (int32_t)(((int64_t)r7_lo * (1536LL + (((int64_t)r7_lo * 2560LL) >> 12))) >> 12);
+		int32_t h7_hi = (int32_t)(((int64_t)r7_hi * (1536LL + (((int64_t)r7_hi * 2560LL) >> 12))) >> 12);
+		int32_t w7_lo = 1152 + (int32_t)(((int64_t)h8w_lo * 2944LL) >> 12);
+		int32_t w7_hi = 1152 + (int32_t)(((int64_t)h8w_hi * 2944LL) >> 12);
+		int32_t h7w_lo = (int32_t)(((int64_t)h7_lo * w7_lo) >> 12);
+		int32_t h7w_hi = (int32_t)(((int64_t)h7_hi * w7_hi) >> 12);
 
-		int32_t h8_lo  = (r8_lo * (64 + (r8_lo >> 1))) >> 7, h8_hi = (r8_hi * (64 + (r8_hi >> 1))) >> 7;
-		int32_t w8_lo  = 84 + ((h9w_lo * 172) >> 7), w8_hi = 84 + ((h9w_hi * 172) >> 7);
-		int32_t h8w_lo = (h8_lo * w8_lo) >> 8, h8w_hi = (h8_hi * w8_hi) >> 8;
+		int32_t h6_lo = (int32_t)(((int64_t)r6_lo * r6_lo) >> 12);
+		int32_t h6_hi = (int32_t)(((int64_t)r6_hi * r6_hi) >> 12);
+		int32_t w6_lo = 1024 + (int32_t)(((int64_t)h7w_lo * 3072LL) >> 12);
+		int32_t w6_hi = 1024 + (int32_t)(((int64_t)h7w_hi * 3072LL) >> 12);
+		int32_t h6w_lo = (int32_t)(((int64_t)h6_lo * w6_lo) >> 12);
+		int32_t h6w_hi = (int32_t)(((int64_t)h6_hi * w6_hi) >> 12);
 
-		int32_t h7_lo  = (belt_lo * (64 + (belt_lo >> 1))) >> 7, h7_hi = (belt_hi * (64 + (belt_hi >> 1))) >> 7;
-		int32_t w7_lo  = 76 + ((h8w_lo * 180) >> 7), w7_hi = 76 + ((h8w_hi * 180) >> 7);
-		int32_t h7w_lo = (h7_lo * w7_lo) >> 8, h7w_hi = (h7_hi * w7_hi) >> 8;
+		int32_t h5_lo = (int32_t)(((int64_t)r5_lo * (1536LL + (((int64_t)r5_lo * 2560LL) >> 12))) >> 12);
+		int32_t h5_hi = (int32_t)(((int64_t)r5_hi * (1536LL + (((int64_t)r5_hi * 2560LL) >> 12))) >> 12);
+		int32_t w5_lo = 960 + (int32_t)(((int64_t)h6w_lo * 3136LL) >> 12);
+		int32_t w5_hi = 960 + (int32_t)(((int64_t)h6w_hi * 3136LL) >> 12);
+		int32_t h5w_lo = (int32_t)(((int64_t)h5_lo * w5_lo) >> 12);
+		int32_t h5w_hi = (int32_t)(((int64_t)h5_hi * w5_hi) >> 12);
 
-		int32_t h6_lo  = (r6_lo * r6_lo) >> 7, h6_hi = (r6_hi * r6_hi) >> 7;
-		int32_t w6_lo  = 72 + ((h7w_lo * 184) >> 7), w6_hi = 72 + ((h7w_hi * 184) >> 7);
-		int32_t h6w_lo = (h6_lo * w6_lo) >> 8, h6w_hi = (h6_hi * w6_hi) >> 8;
+		int32_t h4_hi = (int32_t)(((int64_t)r4_hi * (1536LL + (((int64_t)r4_hi * 2560LL) >> 12))) >> 12);
+		int32_t w4_hi = 896 + (int32_t)(((int64_t)h5w_hi * 3200LL) >> 12);
+		int32_t h4w_hi = (int32_t)(((int64_t)h4_hi * w4_hi) >> 12);
+		int32_t w3_hi = 512 + (int32_t)(((int64_t)h4w_hi * 3584LL) >> 12);
+		int32_t h3w_hi = (int32_t)(((int64_t)4096LL * w3_hi) >> 12);
 
-		int32_t h5_lo  = (r5a_lo * (64 + (r5a_lo >> 1))) >> 7, h5_hi = (r5a_hi * (64 + (r5a_hi >> 1))) >> 7;
-		int32_t w5_lo  = 64 + ((h6w_lo * 192) >> 7), w5_hi = 64 + ((h6w_hi * 192) >> 7);
-		int32_t h5w_lo = (h5_lo * w5_lo) >> 8, h5w_hi = (h5_hi * w5_hi) >> 8;
+		araw_lo = (int32_t)(((int64_t)h11_lo  * 11200LL +
+		                     (int64_t)h10w_lo *  7200LL +
+		                     (int64_t)h9w_lo  *  4000LL +
+		                     (int64_t)h8w_lo  *  2000LL +
+		                     (int64_t)h7w_lo  *   960LL +
+		                     (int64_t)h6w_lo  *   440LL +
+		                     (int64_t)h5w_lo  *   180LL) >> 12);
 
-		int32_t h4_hi  = (r4_hi * (64 + (r4_hi >> 1))) >> 7;
-		int32_t w4_hi  = 56 + ((h5w_hi * 200) >> 7);
-		int32_t h4w_hi = (h4_hi * w4_hi) >> 8;
+		araw_hi = (int32_t)(((int64_t)h11_hi  * 11200LL +
+		                     (int64_t)h10w_hi *  7200LL +
+		                     (int64_t)h9w_hi  *  4000LL +
+		                     (int64_t)h8w_hi  *  2000LL +
+		                     (int64_t)h7w_hi  *   960LL +
+		                     (int64_t)h6w_hi  *   440LL +
+		                     (int64_t)h5w_hi  *   180LL) >> 12) +
+		          (int32_t)(((int64_t)h4w_hi * 72LL) >> 12) +
+		          (int32_t)(((int64_t)h3w_hi * 28LL) >> 12) + 12;
 
-		int32_t w3_hi  = 32 + ((h4w_hi * 224) >> 7);
-		int32_t h3w_hi = (128 * w3_hi) >> 8;
-		int32_t w2_hi  = (h3w_hi * 256) >> 7;
-		int32_t h2w_hi = (128 * w2_hi) >> 8;
-
-		/* Lower bound omits step_q16-attenuated octaves (4, 3, 2) so it is valid for ALL LODs */
-		araw_lo = (int32_t)(((int64_t)h10_lo * 33000LL) >> 7) +
-		          (int32_t)(((int64_t)h9w_lo * 26000LL) >> 7) +
-		          (int32_t)(((int64_t)h8w_lo * 16500LL) >> 7) +
-		          (int32_t)(((int64_t)h7w_lo * 10000LL) >> 7) +
-		          (int32_t)(((int64_t)h6w_lo *  5200LL) >> 7) +
-		          (int32_t)(((int64_t)h5w_lo *  2600LL) >> 7);
-
-		araw_hi = (int32_t)(((int64_t)h10_hi * 33000LL) >> 7) +
-		          (int32_t)(((int64_t)h9w_hi * 26000LL) >> 7) +
-		          (int32_t)(((int64_t)h8w_hi * 16500LL) >> 7) +
-		          (int32_t)(((int64_t)h7w_hi * 10000LL) >> 7) +
-		          (int32_t)(((int64_t)h6w_hi *  5200LL) >> 7) +
-		          (int32_t)(((int64_t)h5w_hi *  2600LL) >> 7) +
-		          ((h4w_hi * 1300) >> 7) + ((h3w_hi * 650) >> 7) + ((h2w_hi * 350) >> 7) + 12;
-
-		if (pbits >= 18u && max_e > 81000) {
-			int64_t extra_wu = (int64_t)(max_e - 81000);
-			int32_t n11_lo, n11_hi, r11_lo, r11_hi;
-			nd_field_periodic_rect_bounds(urx0 + 1423, urx1 + 1423, ury0 - 977, ury1 - 977, 11, oseed ^ 0x5E11u, &n11_lo, &n11_hi);
-			nd_field_ridge_bounds(n11_lo, n11_hi, &r11_lo, &r11_hi);
-			int32_t h11_lo = (r11_lo * r11_lo) >> 7, h11_hi = (r11_hi * r11_hi) >> 7;
-			if (pbits < 20u) {
-				araw_lo += (int32_t)(((int64_t)h11_lo * extra_wu * 115LL) / (128LL * 100LL));
-				araw_hi += (int32_t)(((int64_t)h11_hi * extra_wu * 115LL) / (128LL * 100LL)) + 2;
-			} else if (pbits < 22u) {
-				int32_t n12_lo, n12_hi, r12_lo, r12_hi;
-				nd_field_periodic_rect_bounds(urx0 - 2113, urx1 - 2113, ury0 + 1657, ury1 + 1657, 12, oseed ^ 0x6F23u, &n12_lo, &n12_hi);
-				nd_field_ridge_bounds(n12_lo, n12_hi, &r12_lo, &r12_hi);
-				int32_t h12_lo = (r12_lo * r12_lo) >> 7, h12_hi = (r12_hi * r12_hi) >> 7;
-				araw_lo += (int32_t)(((int64_t)h11_lo * extra_wu * 60LL + (int64_t)h12_lo * extra_wu * 55LL) / (128LL * 100LL));
-				araw_hi += (int32_t)(((int64_t)h11_hi * extra_wu * 60LL + (int64_t)h12_hi * extra_wu * 55LL) / (128LL * 100LL)) + 4;
+		if (pbits >= 17u && max_e > 21600) {
+			int64_t extra_wu = (int64_t)(max_e - 21600);
+			int32_t n12_lo, n12_hi, r12_lo, r12_hi;
+			nd_field_periodic_rect_bounds_q12(urx0 - 2113, urx1 - 2113, ury0 + 1657, ury1 + 1657, 12, oseed ^ 0x6F23u, &n12_lo, &n12_hi);
+			nd_field_ridge_bounds_q12(n12_lo, n12_hi, &r12_lo, &r12_hi);
+			int32_t h12_lo = (int32_t)(((int64_t)r12_lo * r12_lo) >> 12);
+			int32_t h12_hi = (int32_t)(((int64_t)r12_hi * r12_hi) >> 12);
+			if (pbits < 19u) {
+				araw_lo += (int32_t)(((int64_t)h12_lo * extra_wu * 125LL) / (4096LL * 100LL));
+				araw_hi += (int32_t)(((int64_t)h12_hi * extra_wu * 125LL) / (4096LL * 100LL)) + 4;
+			} else if (pbits < 21u) {
+				int32_t n13_lo, n13_hi, r13_lo, r13_hi;
+				nd_field_periodic_rect_bounds_q12(urx0 + 3571, urx1 + 3571, ury0 + 2909, ury1 + 2909, 13, oseed ^ 0x7A35u, &n13_lo, &n13_hi);
+				nd_field_ridge_bounds_q12(n13_lo, n13_hi, &r13_lo, &r13_hi);
+				int32_t h13_lo = (int32_t)(((int64_t)r13_lo * r13_lo) >> 12);
+				int32_t h13_hi = (int32_t)(((int64_t)r13_hi * r13_hi) >> 12);
+				araw_lo += (int32_t)(((int64_t)h12_lo * extra_wu * 65LL + (int64_t)h13_lo * extra_wu * 60LL) / (4096LL * 100LL));
+				araw_hi += (int32_t)(((int64_t)h12_hi * extra_wu * 65LL + (int64_t)h13_hi * extra_wu * 60LL) / (4096LL * 100LL)) + 6;
 			} else {
-				int32_t n12_lo, n12_hi, r12_lo, r12_hi, n13_lo, n13_hi, r13_lo, r13_hi;
-				nd_field_periodic_rect_bounds(urx0 - 2113, urx1 - 2113, ury0 + 1657, ury1 + 1657, 12, oseed ^ 0x6F23u, &n12_lo, &n12_hi);
-				nd_field_ridge_bounds(n12_lo, n12_hi, &r12_lo, &r12_hi);
-				nd_field_periodic_rect_bounds(urx0 + 3571, urx1 + 3571, ury0 + 2909, ury1 + 2909, 13, oseed ^ 0x7A35u, &n13_lo, &n13_hi);
-				nd_field_ridge_bounds(n13_lo, n13_hi, &r13_lo, &r13_hi);
-				int32_t h12_lo = (r12_lo * r12_lo) >> 7, h12_hi = (r12_hi * r12_hi) >> 7;
-				int32_t h13_lo = (r13_lo * r13_lo) >> 7, h13_hi = (r13_hi * r13_hi) >> 7;
-				araw_lo += (int32_t)(((int64_t)h11_lo * extra_wu * 40LL + (int64_t)h12_lo * extra_wu * 40LL + (int64_t)h13_lo * extra_wu * 35LL) / (128LL * 100LL));
-				araw_hi += (int32_t)(((int64_t)h11_hi * extra_wu * 40LL + (int64_t)h12_hi * extra_wu * 40LL + (int64_t)h13_hi * extra_wu * 35LL) / (128LL * 100LL)) + 6;
+				int32_t n13_lo, n13_hi, r13_lo, r13_hi, n14_lo, n14_hi, r14_lo, r14_hi;
+				nd_field_periodic_rect_bounds_q12(urx0 + 3571, urx1 + 3571, ury0 + 2909, ury1 + 2909, 13, oseed ^ 0x7A35u, &n13_lo, &n13_hi);
+				nd_field_ridge_bounds_q12(n13_lo, n13_hi, &r13_lo, &r13_hi);
+				nd_field_periodic_rect_bounds_q12(urx0 - 5381, urx1 - 5381, ury0 - 4127, ury1 - 4127, 14, oseed ^ 0x8B47u, &n14_lo, &n14_hi);
+				nd_field_ridge_bounds_q12(n14_lo, n14_hi, &r14_lo, &r14_hi);
+				int32_t h13_lo = (int32_t)(((int64_t)r13_lo * r13_lo) >> 12);
+				int32_t h13_hi = (int32_t)(((int64_t)r13_hi * r13_hi) >> 12);
+				int32_t h14_lo = (int32_t)(((int64_t)r14_lo * r14_lo) >> 12);
+				int32_t h14_hi = (int32_t)(((int64_t)r14_hi * r14_hi) >> 12);
+				araw_lo += (int32_t)(((int64_t)h12_lo * extra_wu * 45LL + (int64_t)h13_lo * extra_wu * 42LL + (int64_t)h14_lo * extra_wu * 38LL) / (4096LL * 100LL));
+				araw_hi += (int32_t)(((int64_t)h12_hi * extra_wu * 45LL + (int64_t)h13_hi * extra_wu * 42LL + (int64_t)h14_hi * extra_wu * 38LL) / (4096LL * 100LL)) + 8;
 			}
 		}
 	}
 
-	int32_t cx0 = urx0 >> 9, cx1 = urx1 >> 9;
-	int32_t cy0 = ury0 >> 9, cy1 = ury1 >> 9;
+	int32_t cx0 = urx0 >> 10, cx1 = urx1 >> 10;
+	int32_t cy0 = ury0 >> 10, cy1 = ury1 >> 10;
 
 	int32_t blend_lo = 0, blend_hi = max_e;
 	if (cx0 == cx1 && cy0 == cy1) {
-		/* Fast tight path (>99% of fine chunks): warped rect lies inside a single 512-room cell */
-		int32_t u_lo = nd_field_quintic512_q8(urx0 & 511);
-		int32_t u_hi = nd_field_quintic512_q8(urx1 & 511);
-		int32_t v_lo = nd_field_quintic512_q8(ury0 & 511);
-		int32_t v_hi = nd_field_quintic512_q8(ury1 & 511);
+		int32_t u_lo = nd_field_quintic1024_q12(urx0 & 1023);
+		int32_t u_hi = nd_field_quintic1024_q12(urx1 & 1023);
+		int32_t v_lo = nd_field_quintic1024_q12(ury0 & 1023);
+		int32_t v_hi = nd_field_quintic1024_q12(ury1 & 1023);
 
-		/* Exact lower bounds on bilinear weights w00, w10, w01, w11 (minus 1 for >>8 rounding) */
 		int32_t wlo[4];
-		wlo[0] = (((256 - u_hi) * (256 - v_hi)) >> 8) - 1;
-		wlo[1] = ((u_lo * (256 - v_hi)) >> 8) - 1;
-		wlo[2] = (((256 - u_hi) * v_lo) >> 8) - 1;
-		wlo[3] = ((u_lo * v_lo) >> 8) - 1;
+		wlo[0] = (int32_t)(((int64_t)(4096 - u_hi) * (int64_t)(4096 - v_hi)) >> 12) - 2;
+		wlo[1] = (int32_t)(((int64_t)u_lo * (int64_t)(4096 - v_hi)) >> 12) - 2;
+		wlo[2] = (int32_t)(((int64_t)(4096 - u_hi) * (int64_t)v_lo) >> 12) - 2;
+		wlo[3] = (int32_t)(((int64_t)u_lo * (int64_t)v_lo) >> 12) - 2;
 		int32_t wlo_sum = 0;
 		for (int k = 0; k < 4; k++) {
 			if (wlo[k] < 0) wlo[k] = 0;
 			wlo_sum += wlo[k];
 		}
-		if (wlo_sum > 256) wlo_sum = 256;
-		int32_t rem = 256 - wlo_sum;
+		if (wlo_sum > 4096) wlo_sum = 4096;
+		int32_t rem = 4096 - wlo_sum;
 
 		const int32_t cxs[4] = { cx0, cx0 + 1, cx0,     cx0 + 1 };
 		const int32_t cys[4] = { cy0, cy0,     cy0 + 1, cy0 + 1 };
@@ -2991,10 +3149,11 @@ nd_field_orogeny_bounds_wu(uint16_t world, int32_t rx0, int32_t rx1,
 			uint8_t prov, az;
 			nd_field_geo_corner(oseed, pbits, cxs[k], cys[k], &prov, &az);
 			nd_field_orogeny_archetype_bounds(
-				prov, az, cxs[k] << 9, cys[k] << 9, urx0, urx1, ury0, ury1,
-				hyp_min, hyp_max, hill_lo, hill_hi, alpine_lo, alpine_hi, scale_q8,
-				hraw_lo, hraw_hi, araw_lo, araw_hi,
-				r9_lo, r9_hi, r8_lo, r8_hi, belt_lo, belt_hi, r5k_lo, r5k_hi,
+				prov, az, cxs[k] << 10, cys[k] << 10, urx0, urx1, ury0, ury1,
+				hyp_min, hyp_max, shore_lo, shore_hi, foot_lo, foot_hi, inl_lo, inl_hi,
+				hill_lo, hill_hi, alpine_lo, alpine_hi, scale_q12,
+				roll_lo, roll_hi, hraw_lo, hraw_hi, araw_lo, araw_hi,
+				n10_lo, n10_hi, r10_lo, r10_hi, r9_lo, r9_hi, r7_lo, r7_hi, r6_lo, r6_hi,
 				&clo[k], &chi[k]);
 			if (clo[k] < m_lo) m_lo = clo[k];
 			if (chi[k] > m_hi) m_hi = chi[k];
@@ -3006,8 +3165,8 @@ nd_field_orogeny_bounds_wu(uint16_t world, int32_t rx0, int32_t rx1,
 			acc_lo += (int64_t)wlo[k] * (int64_t)clo[k];
 			acc_hi += (int64_t)wlo[k] * (int64_t)chi[k];
 		}
-		blend_lo = (int32_t)(acc_lo >> 8);
-		blend_hi = (int32_t)(acc_hi >> 8) + 4;
+		blend_lo = (int32_t)(acc_lo >> 12);
+		blend_hi = (int32_t)(acc_hi >> 12) + 8;
 	} else if ((cx1 - cx0) <= 2 && (cy1 - cy0) <= 2) {
 		int32_t m_lo = 0x7FFFFFFF, m_hi = 0;
 		for (int32_t cy = cy0; cy <= cy1 + 1; cy++) {
@@ -3016,34 +3175,55 @@ nd_field_orogeny_bounds_wu(uint16_t world, int32_t rx0, int32_t rx1,
 				int32_t clo, chi;
 				nd_field_geo_corner(oseed, pbits, cx, cy, &prov, &az);
 				nd_field_orogeny_archetype_bounds(
-					prov, az, cx << 9, cy << 9, urx0, urx1, ury0, ury1,
-					hyp_min, hyp_max, hill_lo, hill_hi, alpine_lo, alpine_hi, scale_q8,
-					hraw_lo, hraw_hi, araw_lo, araw_hi,
-					r9_lo, r9_hi, r8_lo, r8_hi, belt_lo, belt_hi, r5k_lo, r5k_hi,
+					prov, az, cx << 10, cy << 10, urx0, urx1, ury0, ury1,
+					hyp_min, hyp_max, shore_lo, shore_hi, foot_lo, foot_hi, inl_lo, inl_hi,
+					hill_lo, hill_hi, alpine_lo, alpine_hi, scale_q12,
+					roll_lo, roll_hi, hraw_lo, hraw_hi, araw_lo, araw_hi,
+					n10_lo, n10_hi, r10_lo, r10_hi, r9_lo, r9_hi, r7_lo, r7_hi, r6_lo, r6_hi,
 					&clo, &chi);
 				if (clo < m_lo) m_lo = clo;
 				if (chi > m_hi) m_hi = chi;
 			}
 		}
 		blend_lo = (m_lo < 0x7FFFFFFF) ? m_lo : 0;
-		blend_hi = m_hi + 4;
+		blend_hi = m_hi + 8;
 	} else {
 		/* Wide macro patch spanning >2 cells: bound across worst-case of all 10 archetypes */
 		blend_lo = 0;
-		int32_t alp_max = (((hraw_hi * 12) * hill_hi) >> 8) + (int32_t)(((int64_t)araw_hi * alpine_hi) >> 8);
-		int32_t env_hi  = (alpine_hi > hill_hi) ? alpine_hi : hill_hi;
-		int32_t volc_max = (int32_t)((((int64_t)76000LL * scale_q8 >> 8) + hraw_hi * 7) * env_hi >> 8) +
-		                   (((araw_hi >> 2) * alpine_hi) >> 8);
-		blend_hi = (alp_max > volc_max ? alp_max : volc_max) + 16;
+		int32_t r_hi = (int32_t)(((int64_t)roll_hi * shore_hi) >> 12) + 1;
+		int32_t alp_max = r_hi + (int32_t)(((int64_t)((hraw_hi * 5) >> 2) * hill_hi) >> 12) +
+		                  (int32_t)(((int64_t)araw_hi * alpine_hi) >> 12);
+		int32_t volc_max = r_hi + (int32_t)((((int64_t)19500LL * scale_q12) >> 12) * inl_hi >> 12) +
+		                   (int32_t)(((int64_t)hraw_hi * hill_hi) >> 12) +
+		                   (int32_t)(((int64_t)(araw_hi >> 2) * alpine_hi) >> 12);
+		int32_t karst_max = r_hi + (int32_t)(((int64_t)3600LL * foot_hi) >> 12) +
+		                    (int32_t)(((int64_t)(hraw_hi >> 1) * hill_hi) >> 12) +
+		                    (int32_t)(((int64_t)(araw_hi >> 2) * alpine_hi) >> 12);
+		int32_t cliff_max = r_hi + (int32_t)(((int64_t)1100LL * shore_hi) >> 12) +
+		                    (int32_t)(((int64_t)hraw_hi * hill_hi) >> 12) +
+		                    (int32_t)(((int64_t)((araw_hi * 5) >> 3) * alpine_hi) >> 12);
+		int32_t top = alp_max;
+		if (volc_max > top) top = volc_max;
+		if (karst_max > top) top = karst_max;
+		if (cliff_max > top) top = cliff_max;
+		blend_hi = top + 16;
 	}
 
-	int32_t out_lo = (int32_t)(((int64_t)blend_lo * (int64_t)coast_lo) >> 8);
-	int32_t out_hi = (int32_t)(((int64_t)blend_hi * (int64_t)coast_hi) >> 8) + ((blend_hi > 0) ? 4 : 0);
-	if (out_lo < 0) out_lo = 0;
-	if (out_hi > max_e) out_hi = max_e;
-	if (out_lo > out_hi) out_lo = out_hi;
-	*out_min = out_lo;
-	*out_max = out_hi;
+	if (hyp_min <= 1) blend_lo = 0;
+	if (blend_lo < 0) blend_lo = 0;
+	if (blend_lo > blend_hi) blend_lo = blend_hi;
+	*out_min = blend_lo;
+	*out_max = blend_hi;
+}
+
+static inline void
+nd_field_orogeny_bounds_wu(uint16_t world, int32_t rx0, int32_t rx1,
+                           int32_t ry0, int32_t ry1,
+                           int32_t hyp_min, int32_t hyp_max,
+                           int32_t *out_min, int32_t *out_max)
+{
+	nd_field_orogeny_bounds_wu_ex(world, rx0, rx1, ry0, ry1, hyp_min, hyp_max,
+	                              -3000 * 256, 3000 * 256, out_min, out_max);
 }
 
 /* Backwards-compatible upper-bound wrapper */
@@ -3110,15 +3290,15 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 			for (int64_t rx = rx0; rx <= rx1; rx++) {
 				int32_t wrx = nd_field_wrap_room_coord((int32_t)rx, pbits);
 				int32_t r_wx = wrx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
-				int32_t c_q4 = 0;
-				nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c_q4, NULL);
+				int32_t c_q4 = 0, cont_q8 = 0;
+				nd_field_elevation_step_ex_q12_4(world, 0, r_wx, r_wy, &c_q4, NULL, &cont_q8);
 				int32_t c_wu = c_q4 >> 4;
 				int32_t h_lo = nd_field_bimodal_hypsometry(c_wu - 5);
 				int32_t h_hi = nd_field_bimodal_hypsometry(c_wu + 5);
-				if (h_lo > 6)
-					h_lo += nd_field_orogeny_wu(seed, 0x7FFFFFFF, wrx, wry, h_lo);
-				if (h_hi > 6)
-					h_hi += nd_field_orogeny_wu(seed, 0, wrx, wry, h_hi);
+				if (h_lo > 1)
+					h_lo += nd_field_orogeny_wu_ex(seed, 0x7FFFFFFF, wrx, wry, h_lo, cont_q8);
+				if (h_hi > 1)
+					h_hi += nd_field_orogeny_wu_ex(seed, 0, wrx, wry, h_hi, cont_q8);
 				if (h_lo > max_e) h_lo = max_e;
 				if (h_hi > max_e) h_hi = max_e;
 				if (h_lo < hmin) hmin = h_lo;
@@ -3142,8 +3322,8 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 		int32_t ry_mid = nd_field_wrap_room_coord((int32_t)(ry0 + (span_ry >> 1)), pbits);
 		int32_t r_wx = rx_mid * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
 		int32_t r_wy = -ry_mid * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
-		int32_t c_mid_q12_4 = 0;
-		nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c_mid_q12_4, NULL);
+		int32_t c_mid_q12_4 = 0, cont_mid_q8 = 0;
+		nd_field_elevation_step_ex_q12_4(world, 0, r_wx, r_wy, &c_mid_q12_4, NULL, &cont_mid_q8);
 
 		double hx = 0.5 * (double)span_rx + 1.5;
 		double hy = 0.5 * (double)span_ry + 1.5;
@@ -3156,7 +3336,8 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 		 * along each axis; 3.76 provides exact rounding headroom. */
 		int32_t cur_rx = rx_mid;
 		int32_t cur_ry = ry_mid;
-		double delta_wu = 5.0; /* +4 wu for step_q16 attenuation of s=2..4, +1 wu for >> 4 truncation */
+		double delta_wu = 5.0;      /* +4 wu for step_q16 attenuation of s=2..4, +1 wu for >> 4 truncation */
+		double cont_delta_wu = 2.0; /* s=15..9 continental envelope Lipschitz headroom */
 
 		for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_REGIONAL_MIN; s--) {
 			double amp = (double)chaff_octave_amplitude(s);
@@ -3170,7 +3351,10 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 				if (ax + r_guard >= 32760 || ay + r_guard >= 32760)
 					lip = max_span;
 			}
-			delta_wu += (lip < max_span) ? lip : max_span;
+			double term = (lip < max_span) ? lip : max_span;
+			delta_wu += term;
+			if (s >= ND_FIELD_SHIFT_CONTINENT_MIN)
+				cont_delta_wu += term;
 			chaff_rot2d_i32_q15(&cur_rx, &cur_ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
 		}
 
@@ -3181,13 +3365,18 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 		if (c_lo < -3000) c_lo = -3000;
 		if (c_hi >  3000) c_hi =  3000;
 
+		int32_t cont_d_q8 = (int32_t)ceil(cont_delta_wu * 256.0) + 512;
+		int32_t cont_lo_q8 = cont_mid_q8 - cont_d_q8;
+		int32_t cont_hi_q8 = cont_mid_q8 + cont_d_q8;
+
 		hyp_min = nd_field_bimodal_hypsometry(c_lo);
 		hyp_max = nd_field_bimodal_hypsometry(c_hi);
-		if (hyp_max > 6) {
+		if (hyp_max > 1) {
 			int32_t orog_min = 0, orog_max = 0;
-			nd_field_orogeny_bounds_wu(world, (int32_t)rx0, (int32_t)rx1,
-			                           (int32_t)ry0, (int32_t)ry1,
-			                           hyp_min, hyp_max, &orog_min, &orog_max);
+			nd_field_orogeny_bounds_wu_ex(world, (int32_t)rx0, (int32_t)rx1,
+			                              (int32_t)ry0, (int32_t)ry1,
+			                              hyp_min, hyp_max, cont_lo_q8, cont_hi_q8,
+			                              &orog_min, &orog_max);
 			int32_t h_lo = hyp_min + orog_min;
 			int32_t h_hi = hyp_max + orog_max;
 			if (h_lo > max_e) h_lo = max_e;
@@ -3276,11 +3465,11 @@ nd_field_room_hyp_coarse(uint16_t world, int32_t rx, int32_t ry)
 		uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
 		int32_t r_wx = rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
 		int32_t r_wy = -ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
-		int32_t c = 0;
-		nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c, NULL);
+		int32_t c = 0, cont_q8 = 0;
+		nd_field_elevation_step_ex_q12_4(world, 0, r_wx, r_wy, &c, NULL, &cont_q8);
 		int32_t base_hyp = nd_field_bimodal_hypsometry(c >> 4);
 		int32_t max_e = nd_field_active_max_elev_wu();
-		int32_t tot = base_hyp + nd_field_orogeny_wu(seed, 0, rx, ry, base_hyp);
+		int32_t tot = base_hyp + nd_field_orogeny_wu_ex(seed, 0, rx, ry, base_hyp, cont_q8);
 		if (tot > max_e) tot = max_e;
 		m->hyp = tot;
 		m->hyp_valid = 1;
@@ -3299,12 +3488,12 @@ nd_field_room_hyp_coarse_step(uint16_t world, int32_t step_q16, int32_t rx, int3
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
 	int32_t r_wx = rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
 	int32_t r_wy = -ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
-	int32_t c = 0;
-	nd_field_elevation_step_q12_4(world, step_q16, r_wx, r_wy, &c, NULL);
+	int32_t c = 0, cont_q8 = 0;
+	nd_field_elevation_step_ex_q12_4(world, step_q16, r_wx, r_wy, &c, NULL, &cont_q8);
 	int32_t base_hyp = nd_field_bimodal_hypsometry(c >> 4);
 	int32_t room_step_q16 = step_q16 / ND_FIELD_ROOM_W;
 	int32_t max_e = nd_field_active_max_elev_wu();
-	int32_t tot = base_hyp + nd_field_orogeny_wu(seed, room_step_q16, rx, ry, base_hyp);
+	int32_t tot = base_hyp + nd_field_orogeny_wu_ex(seed, room_step_q16, rx, ry, base_hyp, cont_q8);
 	if (tot > max_e) tot = max_e;
 	return tot;
 }
@@ -3378,20 +3567,21 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 	int32_t room_step_q16 = use_memo ? 0 : (step_q16 / ND_FIELD_ROOM_W);
 	int32_t sea_off = nd_field_sea_offset_q12_4(world, seed);
 
-	int32_t irx[4], iry[4], c4[4];
+	int32_t irx[4], iry[4], c4[4], cont4[4];
 	for (int j = 0; j < 4; j++) {
 		int k = miss_lanes[j < nmiss ? j : 0];
 		irx[j] = wrx[k];
 		iry[j] = wry[k];
 	}
-	nd_field_eval_coarse_unwrapped_step_q12_4_4x(seed, room_step_q16, irx, iry, c4);
+	nd_field_eval_coarse_unwrapped_ex_q12_4_4x(seed, room_step_q16, irx, iry, c4, cont4);
 
 	int32_t base4[4], orog4[4];
 	for (int j = 0; j < 4; j++) {
 		int32_t c = c4[j] - sea_off;
 		base4[j] = nd_field_bimodal_hypsometry(c >> 4);
+		cont4[j] -= (sea_off << 4);
 	}
-	nd_field_orogeny_wu_4x(seed, room_step_q16, irx, iry, base4, orog4);
+	nd_field_orogeny_wu_4x_ex(seed, room_step_q16, irx, iry, base4, cont4, orog4);
 
 	int32_t max_e = nd_field_active_max_elev_wu();
 	for (int j = 0; j < nmiss; j++) {

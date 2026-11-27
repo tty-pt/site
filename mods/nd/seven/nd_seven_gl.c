@@ -3115,10 +3115,11 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	uint8_t grid_lod;
 	bool hi_dist = (slot->last_grid_lod == 2u) ? (s_gl.cur_dist >= 185000.0f) : (s_gl.cur_dist >= 200000.0f);
-	if (level == 0u || level >= 11u || hi_dist)
-		grid_lod = 2u; /* 48x48 HI */
+	bool hi_relief = ((max_z - min_z) >= 80.0f);
+	if (level == 0u || level >= 11u || hi_dist || hi_relief)
+		grid_lod = 2u; /* 48x48 HI (preserves crisp hill/mountain silhouettes & morphs to 24x24) */
 	else
-		grid_lod = 1u; /* 24x24 LO (exact 1:2 vertex alignment with 48x48; preserves alpine ridges) */
+		grid_lod = 1u; /* 24x24 LO (flat ocean & gentle lowland plains) */
 	slot->last_grid_lod = grid_lod;
 
 	static const float k_grid_quads_f[3] = {

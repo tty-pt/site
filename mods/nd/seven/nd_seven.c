@@ -242,7 +242,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.row_sampler = seven_macro_chunk_row_sampler;
 		cfg.eval_row4 = seven_macro_chunk_eval_row4;
 		cfg.max_active = 224;
-		cfg.pool_capacity = 768;
+		cfg.pool_capacity = 1024;
 		cfg.max_levels = 17;
 		cfg.default_rgba = 0xFF3C804Eu;
 		cfg.period_x = (int32_t)ND_SEVEN_WORLD_DIM_W;
@@ -1055,9 +1055,11 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	if (eff_res < ND_SEVEN_RES_MIN) eff_res = ND_SEVEN_RES_MIN;
 	if (eff_res > ND_SEVEN_RES_MAX) eff_res = ND_SEVEN_RES_MAX;
 	nd_seven_gl_set_render_scales(eff_res, alt_prof.eff_cloud_scale);
-	float target_quad_px = alt_prof.target_quad_px;
 	float ar_vp_w = fmaxf(1.0f, (float)w * eff_res);
 	float ar_vp_h = fmaxf(1.0f, (float)h * eff_res);
+	/* Keep angular chunk density invariant above 480p so 720p/1080p/4K viewports
+	 * stay within the 224-leaf WebGL2 texture-array ceiling (zero cap-induced yaw flips). */
+	float target_quad_px = alt_prof.target_quad_px * fmaxf(1.0f, ar_vp_h / 480.0f);
 	float focal_px = (0.5f * ar_vp_h) / tanf(ND_SEVEN_CAM_FOV * 0.5f * (3.14159265358979323846f / 180.0f));
 	float split_thresh = target_quad_px * 48.0f;
 	float lod_px_scale = (split_thresh > 1e-4f) ? (focal_px / split_thresh) : 0.0f;
@@ -1140,7 +1142,10 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		.occluder_no_write = false,
 		.use_cached_bounds = true,
 		.cached_bounds_max_level = 3,
-		.cached_bounds_pad = 32.0f
+		.cached_bounds_pad = 32.0f,
+		.use_lod_anchor = true,
+		.lod_anchor_xyz = { 0.0f, 0.0f, 0.0f },
+		.lod_cam_dist = dist
 	};
 
 	ar_system_begin_frame(cs);
@@ -1477,6 +1482,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 			alt_opts.occluder_concave_inv_r = 1.0f / alt_inner_r;
 			alt_opts.occluder_box_z_pad = 0.0f;
 			alt_opts.use_cached_bounds = false;
+			alt_opts.use_lod_anchor = false;
 
 			const ar_node_t *alt_visible[32];
 			size_t alt_count = ar_system_query_matrix(cs, alt_world, mvp_3d, &alt_opts, alt_visible, 32);
