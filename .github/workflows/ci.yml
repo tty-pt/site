@@ -28,12 +28,6 @@ jobs:
     with:
       name: site
       publish_to: "android,ios"
-      app_id: "pt.tty.site"
-      app_name: "tty-pt"
-      mobile_mods: "mods.mobile.load"
-      mobile_boot: "core"
-      mobile_assets_build: 'for d in external/*/htdocs mods/*/htdocs; do [ -d "$d" ] && cp -f -R "$d"/. htdocs/; done'
-      mobile_seed_dir: "var/software"
       run_tests: false
       run_publish: false
       publish_npm: false

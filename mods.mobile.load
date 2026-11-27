@@ -1,6 +1,11 @@
 # Mobile-safe site module profile for embedded Android / iOS builds.
 # Excludes host-only daemon modules (auren) and optional external ND kernel
 # plugins unless bundled in the app target.
+# @app-id: pt.tty.site
+# @app-name: tty-pt
+# @boot-mod: core
+# @seed-dir: var/software
+# @assets-build: for d in external/*/htdocs mods/*/htdocs; do [ -d "$d" ] && cp -f -R "$d"/. htdocs/; done
 # @static-deps: core common source index mpfd auth libaxil-auth=external/axil-auth/src/libaxil-auth.c
 # @keep-weak: common:site_ui_chrome
 i18n
