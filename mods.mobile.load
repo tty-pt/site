@@ -1,0 +1,12 @@
+# Mobile-safe site module profile for embedded Android / iOS builds.
+# Excludes host-only daemon modules (auren) and optional external ND kernel
+# plugins unless bundled in the app target.
+# @static-deps: core common source index mpfd auth libaxil-auth=external/axil-auth/src/libaxil-auth.c
+# @keep-weak: common:site_ui_chrome
+i18n
+poem
+song
+grp
+gig
+software
+chat

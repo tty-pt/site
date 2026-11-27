@@ -236,4 +236,8 @@ clean:
 
 distclean: clean
 
-.PHONY: all clean distclean wasm wasm-debug
+print-static-spec:
+	@printf 'SRC=%s\n' "$(SRC)"
+	@printf 'CFLAGS=%s\n' "$(EXTRA_CFLAGS)"
+
+.PHONY: all clean distclean wasm wasm-debug print-static-spec

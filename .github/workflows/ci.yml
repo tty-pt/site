@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -21,3 +22,19 @@ jobs:
           sleep 1
       - name: Run test suite
         run: AUTH_SKIP_CONFIRM=1 make test
+
+  mobile:
+    uses: tty-pt/ci/.github/workflows/all-in-one.yml@main
+    with:
+      name: site
+      publish_to: "android,ios"
+      app_id: "pt.tty.site"
+      app_name: "tty-pt"
+      mobile_mods: "mods.mobile.load"
+      mobile_boot: "core"
+      mobile_assets_build: 'for d in external/*/htdocs mods/*/htdocs; do [ -d "$d" ] && cp -f -R "$d"/. htdocs/; done'
+      mobile_seed_dir: "var/software"
+      run_tests: false
+      run_publish: false
+      publish_npm: false
+    secrets: inherit
