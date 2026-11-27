@@ -13,6 +13,11 @@ ND_KERNEL_MODS="libnd-region:libnd-bus:libnd-obj:libnd-world:libnd-view:libnd-mc
 # installed set (start.sh after `make install-libs`) simply do not source this.
 nd_local_ld_path() {
 	_root="$1"; _p=""
-	for _d in "$_root"/external/*/lib; do _p="$_p:$_d"; done
+	[ -d "$_root/external/axil/lib" ] && _p="$_root/external/axil/lib"
+	for _d in "$_root"/external/*/lib; do
+		[ -d "$_d" ] || continue
+		[ "$_d" = "$_root/external/axil/lib" ] && continue
+		_p="$_p:$_d"
+	done
 	printf '%s' "${_p#:}"
 }
