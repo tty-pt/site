@@ -4,6 +4,7 @@
  */
 
 #include "nd_seven_mesh3d.h"
+#include <nd/mob_mesh3d.h>
 
 /* =========================================================================
  * 3D Faceted Geological & Mineral Generator (All 51 NDS_SP_* Specimens)
@@ -910,6 +911,61 @@ nd_m3d_build_geobreak_prop(nd_mesh3d_builder_t *b, uint32_t variant, nd_mesh3d_s
 		out_slice->anchor_y   = 2u;
 		out_slice->shadow_rx  = (uint8_t)(mesh_w * 0.36f);
 		out_slice->shadow_ry  = (uint8_t)(mesh_w * 0.18f);
+		out_slice->pad0       = 0;
+	}
+}
+
+void
+nd_m3d_build_lamb_spec(nd_mesh3d_builder_t *b,
+                       uint32_t seed, float age,
+                       nd_mesh3d_slice_t *out_slice)
+{
+	if (!b || !b->verts || !b->indices) return;
+
+	uint32_t first_vert = b->vert_count;
+	uint32_t first_idx  = b->idx_count;
+
+	creature_dna_t dna = creature_dna_lamb_default(seed);
+	creature_state_t st = { .age = age, .weight = 0.6f, .coat_state = 0, .seed = seed };
+
+	static mob_vtx3d_t vbuf[1024];
+	static uint16_t ibuf[4096];
+	mob_mesh3d_t mesh = { .vtx = vbuf, .idx = ibuf, .max_vtx = 1024, .max_idx = 4096 };
+	mob_build_ungulate_mesh(&dna, &st, &mesh);
+
+	for (uint32_t i = 0; i < mesh.vtx_count && b->vert_count < b->vert_cap; i++) {
+		const mob_vtx3d_t *mv = &mesh.vtx[i];
+		nd_mesh3d_vert_t *dv = &b->verts[b->vert_count++];
+		dv->pos[0]  = mv->x * ND_MESH3D_WU_PER_METER;
+		dv->pos[1]  = mv->y * ND_MESH3D_WU_PER_METER;
+		dv->pos[2]  = mv->z * ND_MESH3D_WU_PER_METER;
+		dv->pos[3]  = 0.0f;
+		dv->norm[0] = mv->nx;
+		dv->norm[1] = mv->ny;
+		dv->norm[2] = mv->nz;
+		dv->norm[3] = 1.0f;
+		dv->col[0]  = mv->r;
+		dv->col[1]  = mv->g;
+		dv->col[2]  = mv->b;
+		dv->col[3]  = ND_MAT3D_STONE_MATTE;
+	}
+
+	for (uint32_t i = 0; i < mesh.idx_count && b->idx_count < b->idx_cap; i++) {
+		b->indices[b->idx_count++] = first_vert + (uint32_t)mesh.idx[i];
+	}
+
+	if (out_slice) {
+		out_slice->first_vert = first_vert;
+		out_slice->vert_count = b->vert_count - first_vert;
+		out_slice->first_idx  = first_idx;
+		out_slice->idx_count  = b->idx_count - first_idx;
+		out_slice->mesh_w_wu  = 1.0f;
+		out_slice->mesh_h_wu  = 1.0f;
+		out_slice->sprite_w   = 32u;
+		out_slice->sprite_h   = 32u;
+		out_slice->anchor_y   = 2u;
+		out_slice->shadow_rx  = 10u;
+		out_slice->shadow_ry  = 6u;
 		out_slice->pad0       = 0;
 	}
 }

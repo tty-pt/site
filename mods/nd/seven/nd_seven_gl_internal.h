@@ -151,7 +151,7 @@ typedef struct {
 _Static_assert(sizeof(gl_mesh3d_inst_t) == 128, "gl_mesh3d_inst_t must be 128 bytes");
 
 /* WebGL2 std140 Frame-Global Uniform Buffer (binding 0, shared by 8 scene programs).
- * Exact 16-byte vec4 alignment: 17 * 16 = 272 bytes, zero wasted padding. */
+ * Exact 16-byte vec4 alignment: 18 * 16 = 288 bytes, zero wasted padding. */
 typedef struct {
 	float uMVP[16];              /*   0 (64 B): mat4 uMVP */
 	float uTreeShadowVP[16];     /*  64 (64 B): mat4 uTreeShadowVP */
@@ -172,17 +172,19 @@ typedef struct {
 	float uWorldDim[2];          /* 256 ( 8 B): vec2 uWorldDim */
 	float uCamDist;              /* 264 ( 4 B): float uCamDist */
 	float uTerrFastDist;         /* 268 ( 4 B): float uTerrFastDist */
+	float uPlanetMetric[4];      /* 272 (16 B): vec4 uPlanetMetric (wu_per_m, max_elev_wu, snowline_wu, cloud_lcl_wu) */
 } nd_frame_ubo_t;
 
-_Static_assert(sizeof(nd_frame_ubo_t) == 272, "nd_frame_ubo_t must match std140 layout (272 bytes)");
+_Static_assert(sizeof(nd_frame_ubo_t) == 288, "nd_frame_ubo_t must match std140 layout (288 bytes)");
 
-/* 48-byte (3 x vec4) per-chunk terrain instance descriptor (attribs 1..3, divisor 1) */
+/* 64-byte (4 x vec4, exact 1 cache line) per-chunk terrain instance descriptor (attribs 1..4, divisor 1) */
 typedef struct {
 	float orig_span[4];  /* loc 1: ox, oy, span_w, span_h */
 	float rel_layers[4]; /* loc 2: rel_ox, rel_oy, slot_layer, river_layer */
 	float meta[4];       /* loc 3: sea_level, morph_start_dist, morph_inv_range, grid_quads + reveal_morph */
+	float height_z[4];   /* loc 4: base_z_wu, min_z_wu, max_z_wu, 0.0f */
 } gl_chunk_inst_t;
-_Static_assert(sizeof(gl_chunk_inst_t) == 48, "gl_chunk_inst_t must be 48 bytes");
+_Static_assert(sizeof(gl_chunk_inst_t) == 64, "gl_chunk_inst_t must be 64 bytes");
 
 typedef struct {
 	uint16_t world;
@@ -301,6 +303,7 @@ typedef struct {
 	float oy;
 	float span_w;
 	float span_h;
+	float base_z_wu;
 } gl_terr_shadow_chunk_t;
 
 #define MAX_TERR_SHADOW_QUEUE 64
@@ -591,6 +594,7 @@ typedef struct {
 	uint32_t last_touch;
 	int32_t min_h_q12_4;
 	int32_t max_h_q12_4;
+	float base_z_wu;     /* per-chunk midpoint height subtracted from RGBA16F R channel */
 	uint8_t has_river;
 	uint8_t has_cpos;
 	uint8_t river_baked; /* 1 = river_array layer slot_idx has valid baked data */
@@ -607,6 +611,7 @@ typedef struct {
 	int32_t span_w, span_h;
 	uint8_t level;
 	float sea_level;
+	float base_z_wu;     /* per-chunk midpoint height for RGBA16F R channel reconstruction */
 	float rel_center[3];
 	float rot_mat4[16];
 	float major_r;

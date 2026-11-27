@@ -2854,7 +2854,7 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					dst_bb->shadow_rx = lamb_glows ? 0 : 8;
 					dst_bb->shadow_ry = lamb_glows ? 0 : 4;
 					dst_bb->pad0 = s_prev_lamb_in_water ? 0x80u : 0;
-					dst_bb->mesh_id = 0;
+					dst_bb->mesh_id = ND_MESH3D_LAMB_ID;
 				} else {
 					dst_bb->tint_rgba = tint_b;
 					dst_bb->pad0 = 0;

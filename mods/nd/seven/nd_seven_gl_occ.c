@@ -1106,7 +1106,8 @@ static float gl_eval_world_humidity_cpu(float wx, float wy, float sea_wet)
 	float wc_v = 0.5f, wc_gx = 0.0f, wc_gy = 0.0f;
 	gl_chaff_grad_noise2d(wx * 0.000045f, wy * 0.000045f, 0x434C494Du, &wc_v, &wc_gx, &wc_gy);
 	float tex_hum = fminf(0.95f, fmaxf(0.08f, 0.50f + 0.28f * (wc_v - 0.5f) + 0.10f * sea_wet));
-	float lat_phi = 6.28318530718f * ((64.0f - wy) / 8388608.0f);
+	float world_h = (float)nd_field_get_planet_scale().world_h_wu;
+	float lat_phi = 6.28318530718f * ((64.0f - wy) / world_h);
 	float lat_deg = asinf(fminf(1.0f, fabsf(sinf(lat_phi)))) * 57.2957795f;
 	float hum = tex_hum
 	          - gl_smoothstep01(24.0f, 0.0f, lat_deg) * 0.18f

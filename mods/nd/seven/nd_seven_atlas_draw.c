@@ -369,6 +369,9 @@ void nd_seven_mesh3d_init(void)
 		nd_m3d_build_stone_spec(&b, gen_sp, sw, sh, &s_mesh3d_slices[mid]);
 	}
 
+	/* Build procedural 3D lamb template (ND_MESH3D_LAMB_ID) */
+	nd_m3d_build_lamb_spec(&b, 42u, 0.15f, &s_mesh3d_slices[ND_MESH3D_LAMB_ID]);
+
 	/* Build all 12 instanced 3D Living Meadow clump templates (180..191) */
 	for (unsigned mv = 0; mv < (unsigned)ND_MESH3D_MEADOW_COUNT; mv++) {
 		uint8_t mid = (uint8_t)(ND_MESH3D_MEADOW_BASE + mv);

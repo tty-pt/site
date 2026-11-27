@@ -148,6 +148,7 @@ Operational guides, build steps, and test instructions for sibling ports and aux
 | Shallow water optical extinction calibration for billboards | `docs/GUIDE_BILLBOARD_SHALLOW_WATER_OPTICS.md` |
 | NeverDark 2.5D Seven continuous 3D terrain renderer specification | `docs/25D.md` |
 | NeverDark procedural 3D terrain & cavern architecture roadmap | `docs/TERRAIN_ROADMAP.md` |
+| Photorealistic real-world terrain roadmap (45 wu/m, scalable planets) | `docs/PHOTOREAL_TERRAIN_ROADMAP.md` |
 | Recursive noise algorithm & `libchaff` mathematical foundation | `docs/RECUR_NOISE.md` |
 | LOD elevation growth & recursive noise blending analysis | `docs/LOD_ELEVATION_RECURSIVE_NOISE_ANALYSIS.md` |
 | Client-side chunk merging, LOD smoothing & stratosphere camera | `docs/ANALYSIS_TERRAIN_CHUNKS_LOD_STRATOSPHERE.md` |

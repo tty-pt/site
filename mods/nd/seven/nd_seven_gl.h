@@ -245,6 +245,14 @@ void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
                                            float span_x, float span_y,
                                            float *out_rgba);
 
+/* Chunk-relative variant storing (h_wu - base_z_wu) in R so RGBA16F retains full
+ * sub-0.05 wu precision at Everest altitudes (400,000+ wu) where absolute fp16 overflows (65504). */
+void nd_seven_gl_bake_chunk_height_derived_rel(const int32_t *height_i32,
+                                               uint32_t tex_w, uint32_t tex_h,
+                                               float span_x, float span_y,
+                                               float base_z_wu,
+                                               float *out_rgba);
+
 /* Pre-bake per-chunk RGBA16F premultiplied river water-table map on CPU upload:
  * R = r_z_rel * r_w (capped safely for fp16), G = r_w (0 on dry banks -> zero water-walls),
  * B = maxC_nb (3x3 tent-weighted river carve proximity), A = 0. */

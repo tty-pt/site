@@ -55,12 +55,16 @@ nd_m3d_stone_metric_dims(uint8_t kind, uint8_t variant,
  *   6..7: Fallen Mossy Log with broken stubs & humus saddle */
 #define ND_MESH3D_GEOBREAK_BASE  ND_MESH3D_TOTAL
 #define ND_MESH3D_GEOBREAK_COUNT 8u
-#define ND_SEVEN_MESH3D_TOTAL    (ND_MESH3D_GEOBREAK_BASE + ND_MESH3D_GEOBREAK_COUNT)
+#define ND_MESH3D_LAMB_ID        (ND_MESH3D_GEOBREAK_BASE + ND_MESH3D_GEOBREAK_COUNT)
+#define ND_SEVEN_MESH3D_TOTAL    (ND_MESH3D_LAMB_ID + 1u)
 
 
 void nd_m3d_build_stone_spec(nd_mesh3d_builder_t *b,
                              unsigned sp, uint16_t sw, uint16_t sh,
                              nd_mesh3d_slice_t *out_slice);
+void nd_m3d_build_lamb_spec(nd_mesh3d_builder_t *b,
+                            uint32_t seed, float age,
+                            nd_mesh3d_slice_t *out_slice);
 void nd_seven_mesh3d_bake_ortho_rgba(const nd_mesh3d_vert_t *verts,
                                      const uint32_t *indices,
                                      const nd_mesh3d_slice_t *slice,

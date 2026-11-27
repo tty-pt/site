@@ -4883,7 +4883,8 @@ int main(void)
 			{
 				assert(ND_MESH3D_GEOBREAK_BASE == 206u);
 				assert(ND_MESH3D_GEOBREAK_COUNT == 8u);
-				assert(ND_SEVEN_MESH3D_TOTAL == 214u);
+				assert(ND_MESH3D_LAMB_ID == 214u);
+				assert(ND_SEVEN_MESH3D_TOTAL == 215u);
 				assert(nd_seven_mesh3d_slice(ND_SEVEN_MESH3D_TOTAL) == NULL);
 
 				assert(nd_seven_geobreak_mesh3d_id(0u, 0u) == ND_MESH3D_NONE);
@@ -5357,6 +5358,46 @@ int main(void)
 				assert(fabsf(p[1] - 0.25f) < 1e-4f);
 				assert(fabsf(p[2]) < 1e-4f);
 			}
+		}
+
+		/* 1c. Phase 0: Everest-altitude chunk-relative RGBA16F bake (398,250 wu = 8,850 m, >6x fp16 max 65504).
+		 * Verify IEEE-754 binary16 round-trip reconstruction error stays < 0.5 wu (< 1.1 cm) with zero Inf/NaN. */
+		{
+			const int32_t everest_base = 398250;
+			int32_t mn = 0x7FFFFFFF, mx = -0x7FFFFFFF;
+			for (int y = 0; y < TH; y++) {
+				for (int x = 0; x < TW; x++) {
+					/* 600 wu (~13.3 m) vertical relief across an L0 alpine ridge chunk */
+					int32_t h_q4 = (everest_base * 16) + (x - 8) * 320 + (y - 8) * 192 + ((x ^ y) & 3);
+					h_a[y * TW + x] = h_q4;
+					if (h_q4 < mn) mn = h_q4;
+					if (h_q4 > mx) mx = h_q4;
+				}
+			}
+			float base_z = floorf(0.5f * ((float)mn * 0.0625f + (float)mx * 0.0625f) + 0.5f);
+			nd_seven_gl_bake_chunk_height_derived_rel(h_a, TW, TH, span_x, span_y, base_z, out_a);
+			float max_fp16_err = 0.0f;
+			for (int y = 0; y < TH; y++) {
+				for (int x = 0; x < TW; x++) {
+					const float *p = &out_a[(y * TW + x) * 4];
+					float rel_h = p[0];
+					/* Emulate IEEE-754 binary16 quantization (10-bit significand, max 65504) */
+					assert(isfinite(rel_h) && fabsf(rel_h) < 65504.0f);
+					float q_rel = rel_h;
+					if (rel_h != 0.0f) {
+						int exp2 = 0;
+						float mant = frexpf(rel_h, &exp2); /* |mant| in [0.5, 1.0) */
+						float q_mant = roundf(mant * 2048.0f) / 2048.0f; /* 11 bits total (1 implicit + 10 explicit) */
+						q_rel = ldexpf(q_mant, exp2);
+					}
+					double recon = (double)base_z + (double)q_rel;
+					double exact = (double)h_a[y * TW + x] * 0.0625;
+					float err = (float)fabs(recon - exact);
+					if (err > max_fp16_err) max_fp16_err = err;
+					assert(err < 0.5f);
+				}
+			}
+			assert(max_fp16_err <= 0.25f);
 		}
 
 		/* 2. Paraboloid curvature: h_q12_4 = 2*(x^2 + y^2) => interior lap = 8 => dst[3] = 8 * 0.16 * (t2w_x + t2w_y) */

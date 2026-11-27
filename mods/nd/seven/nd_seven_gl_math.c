@@ -521,10 +521,11 @@ static inline float chunk_h_extrap(const int32_t *h, int32_t x, int32_t y,
 	return 2.0f * hc - hin;
 }
 
-void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
-                                           uint32_t tex_w, uint32_t tex_h,
-                                           float span_x, float span_y,
-                                           float *out_rgba)
+void nd_seven_gl_bake_chunk_height_derived_rel(const int32_t *height_i32,
+                                               uint32_t tex_w, uint32_t tex_h,
+                                               float span_x, float span_y,
+                                               float base_z_wu,
+                                               float *out_rgba)
 {
 	if (!out_rgba || tex_w == 0u || tex_h == 0u)
 		return;
@@ -542,6 +543,7 @@ void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
 	float gx_scale = 0.5f * 0.0625f * t2w_x;
 	float gy_scale = 0.5f * 0.0625f * t2w_y;
 	float lap_scale = 0.16f * (t2w_x + t2w_y);
+	double base_z_d = (double)base_z_wu;
 
 	for (int32_t y = 0; y < ih; y++) {
 		int32_t y_m = y - 1;
@@ -565,13 +567,22 @@ void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
 				hd = chunk_h_extrap(height_i32, x, y_m, iw, ih);
 				hu = chunk_h_extrap(height_i32, x, y_p, iw, ih);
 			}
-			dst[0] = hc * 0.0625f;
+			dst[0] = (float)((double)row_c[x] * 0.0625 - base_z_d);
 			dst[1] = (hr - hl) * gx_scale;
 			dst[2] = (hu - hd) * gy_scale;
 			dst[3] = (hl + hr + hd + hu - 4.0f * hc) * lap_scale;
 			dst += 4;
 		}
 	}
+}
+
+void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
+                                           uint32_t tex_w, uint32_t tex_h,
+                                           float span_x, float span_y,
+                                           float *out_rgba)
+{
+	nd_seven_gl_bake_chunk_height_derived_rel(height_i32, tex_w, tex_h,
+	                                          span_x, span_y, 0.0f, out_rgba);
 }
 
 void nd_seven_gl_bake_chunk_river(const int32_t *height_i32,

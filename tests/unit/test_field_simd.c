@@ -151,7 +151,7 @@ int main(void)
 		}
 		int16_t rx = (int16_t)(next_u32() & 0xFFFFu);
 		int16_t ry = (int16_t)(next_u32() & 0xFFFFu);
-		int16_t q[4];
+		int32_t q[4];
 		nd_field_room_hyp_coarse_quad(world, rx, ry, q);
 		assert(q[0] == nd_field_room_hyp_coarse(world, rx, ry));
 		assert(q[1] == nd_field_room_hyp_coarse(world, (int16_t)(rx + 1), ry));
@@ -203,7 +203,7 @@ int main(void)
 	for (int iter = 0; iter < 4096; iter++) {
 		int16_t rx = (int16_t)(next_u32() & 0xFFFFu);
 		int16_t ry = (int16_t)(next_u32() & 0xFFFFu);
-		int16_t h = nd_field_room_hyp_coarse(0, rx, ry);
+		int32_t h = nd_field_room_hyp_coarse(0, rx, ry);
 		if (h <= 0)
 			continue;
 		land_cnt++;
@@ -213,8 +213,8 @@ int main(void)
 		if (h >= 1000) alpine_cnt++;
 		if (h >= 3000) towering_cnt++;
 		if (h >= 300) {
-			int16_t hx = nd_field_room_hyp_coarse(0, (int16_t)(rx + 1), ry);
-			int16_t hy = nd_field_room_hyp_coarse(0, rx, (int16_t)(ry + 1));
+			int32_t hx = nd_field_room_hyp_coarse(0, (int16_t)(rx + 1), ry);
+			int32_t hy = nd_field_room_hyp_coarse(0, rx, (int16_t)(ry + 1));
 			int dx = h > hx ? (h - hx) : (hx - h);
 			int dy = h > hy ? (h - hy) : (hy - h);
 			if (dx > max_slope_dz) max_slope_dz = dx;
@@ -233,12 +233,12 @@ int main(void)
 	uint32_t w0_seed = 0x48454947u;
 	for (int ry = -24; ry <= 24; ry += 4) {
 		for (int rx = -24; rx <= 24; rx += 4) {
-			int16_t h = nd_field_room_hyp_coarse(0, (int16_t)rx, (int16_t)ry);
+			int32_t h = nd_field_room_hyp_coarse(0, (int16_t)rx, (int16_t)ry);
 			assert(nd_field_orogeny_wu(w0_seed, 0, rx, ry, h) == 0);
 		}
 	}
 	{
-		int16_t h0 = nd_field_room_hyp_coarse(0, 0, 0);
+		int32_t h0 = nd_field_room_hyp_coarse(0, 0, 0);
 		double max_hor_deg = 0.0;
 		for (int dy = -128; dy <= 128; dy += 4) {
 			for (int dx = -128; dx <= 128; dx += 4) {
@@ -246,7 +246,7 @@ int main(void)
 				double d = sqrt((double)dx * 160.0 * (double)dx * 160.0 +
 				                (double)dy * 128.0 * (double)dy * 128.0);
 				if (d < 400.0 || d > 25000.0) continue;
-				int16_t h = nd_field_room_hyp_coarse(0, (int16_t)dx, (int16_t)dy);
+				int32_t h = nd_field_room_hyp_coarse(0, (int16_t)dx, (int16_t)dy);
 				if (h <= h0) continue;
 				double ang = atan2((double)(h - h0), d) * 180.0 / 3.14159265358979323846;
 				if (ang > max_hor_deg) max_hor_deg = ang;
@@ -259,6 +259,88 @@ int main(void)
 		       100.0 * (double)mtn_cnt / (double)land_cnt,
 		       100.0 * (double)alpine_cnt / (double)land_cnt,
 		       towering_cnt, max_elev, max_slope_dz, max_hor_deg);
+	}
+
+	/* 6. Phase 0: 1:1 physical metric scale (45 wu/m), int32_t Q27.4 elevation headroom,
+	 *    and scalable planet_bits (16..23) periodic continuity + epoch cache invalidation. */
+	{
+		assert(fabsf(ND_FIELD_WU_PER_METER - 45.0f) < 1e-6f);
+		assert(fabsf(ND_FIELD_LAMB_BODY_WU / ND_FIELD_LAMB_HEIGHT_M - 45.0f) < 1e-6f);
+
+		nd_planet_scale_t ps16 = nd_planet_scale_for_bits(16, 160, 128);
+		assert(ps16.planet_bits == 16);
+		assert(ps16.rooms_per_axis == 65536u);
+		assert(ps16.world_w_wu == 10485760LL);
+		assert(ps16.world_h_wu == 8388608LL);
+		assert(ps16.areole_max_levels == 17);
+		assert(ps16.max_elev_wu == 81000); /* 1800 m * 45 wu/m */
+
+		nd_planet_scale_t ps18 = nd_planet_scale_for_bits(18, 160, 128);
+		assert(ps18.rooms_per_axis == 262144u);
+		assert(ps18.world_w_wu == 41943040LL);
+		assert(ps18.world_h_wu == 33554432LL);
+		assert(ps18.areole_max_levels == 19);
+		assert(ps18.max_elev_wu == 202500); /* 4500 m * 45 wu/m */
+
+		nd_planet_scale_t ps20 = nd_planet_scale_for_bits(20, 160, 128);
+		assert(ps20.rooms_per_axis == 1048576u);
+		assert(ps20.world_w_wu == 167772160LL);
+		assert(ps20.world_h_wu == 134217728LL);
+		assert(ps20.areole_max_levels == 21);
+		assert(ps20.max_elev_wu == 270000); /* 6000 m * 45 wu/m */
+
+		nd_planet_scale_t ps22 = nd_planet_scale_for_bits(22, 160, 128);
+		assert(ps22.rooms_per_axis == 4194304u);
+		assert(ps22.areole_max_levels == 23);
+		assert(ps22.max_elev_wu == 398250); /* 8850 m * 45 wu/m (Everest) */
+
+		nd_planet_scale_t ps23 = nd_planet_scale_for_bits(23, 160, 128);
+		assert(ps23.rooms_per_axis == 8388608u);
+		assert(ps23.world_w_wu == 1342177280LL);
+		assert(ps23.world_h_wu == 1073741824LL);
+		assert(ps23.areole_max_levels == 24);
+		assert(ps23.max_elev_wu == 398250);
+
+		/* Verify int32_t Q27.4 elevation headroom at Everest altitude (400,000 wu) */
+		int32_t everest_wu = 400000;
+		int32_t everest_q4 = everest_wu << 4;
+		assert(nd_field_elevation_to_wu(everest_q4) == everest_wu);
+		assert(nd_field_elevation_to_block(everest_q4) == 32767);
+		assert(nd_field_elevation_to_block(-(400000 << 4)) == -32768);
+
+		/* Verify exact periodic torus wrap of nd_field_room_hyp_coarse at b = 18 and b = 20 */
+		int32_t h16_ref = nd_field_room_hyp_coarse(0, 123, -456);
+		uint32_t epoch0 = nd_field_get_planet_epoch();
+
+		const uint8_t test_bits[] = { 18u, 20u };
+		for (size_t bi = 0; bi < sizeof(test_bits) / sizeof(test_bits[0]); bi++) {
+			uint8_t b = test_bits[bi];
+			int32_t span = (int32_t)(1u << b);
+			nd_field_set_planet_bits(b);
+			assert(nd_field_get_planet_bits() == b);
+			assert(nd_field_get_planet_epoch() != epoch0);
+
+			int32_t test_rx[] = { 0, 17, -1234, (span >> 1) - 1, -(span >> 1), (span >> 1) - 128 };
+			int32_t test_ry[] = { 0, -42, 7777, -(span >> 1) + 5, (span >> 1) - 3, (span >> 1) - 64 };
+			for (int k = 0; k < 6; k++) {
+				int32_t rx = test_rx[k];
+				int32_t ry = test_ry[k];
+				int32_t h_base = nd_field_room_hyp_coarse(0, rx, ry);
+				int32_t h_wx   = nd_field_room_hyp_coarse(0, rx + span, ry);
+				int32_t h_wy   = nd_field_room_hyp_coarse(0, rx, ry + span);
+				int32_t h_wxy  = nd_field_room_hyp_coarse(0, rx - span, ry - span);
+				assert(h_base == h_wx);
+				assert(h_base == h_wy);
+				assert(h_base == h_wxy);
+			}
+		}
+
+		/* Restore default b = 16 and verify bit-exact recovery via epoch cache invalidation */
+		nd_field_set_planet_bits(16);
+		assert(nd_field_get_planet_bits() == 16);
+		assert(nd_field_room_hyp_coarse(0, 123, -456) == h16_ref);
+
+		printf("PASS: Phase 0 metric scale (45 wu/m), Q27.4 headroom (400k wu), and periodic wrap (b=16,18,20,22,23)\n");
 	}
 
 	printf("=== ALL ND FIELD SIMD TESTS PASSED ===\n");

@@ -843,7 +843,7 @@ void nd_seven_gl_flush_clouds(void)
 			GLsizei c_indices = want_hi ? GL_TOTAL_INDICES_HI : GL_TOTAL_INDICES_MACRO;
 
 			if (cp->uChunkLayer >= 0)
-				lam_gl_cmd_uniform1f(&s_gl.cmd_buf, cp->uChunkLayer, (float)chk->slot_layer);
+				lam_gl_cmd_uniform2f(&s_gl.cmd_buf, cp->uChunkLayer, (float)chk->slot_layer, chk->base_z_wu);
 
 			if (!var_body_valid[want_var] ||
 			    chk->rel_center[0] != var_rel_center[want_var][0] ||

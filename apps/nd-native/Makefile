@@ -74,6 +74,7 @@ INCS = \
 	-I$(REPO_ROOT)/external/axil-tty/include \
 	-I$(REPO_ROOT)/external/nd-seven/include \
 	-I$(REPO_ROOT)/external/nd-plant/include \
+	-I$(REPO_ROOT)/external/nd-mob/include \
 	-I$(REPO_ROOT)/external/nd-stone/include \
 	-I$(REPO_ROOT)/external/nd-attr/include \
 	-I$(REPO_ROOT)/external/nd-equip/include \

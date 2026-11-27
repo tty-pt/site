@@ -338,7 +338,7 @@ static void init_grid_buffers(void)
 	create_static_grid(GL_GRID_QUADS_HI, grid_uv_scratch, indices_scratch, &s_gl.grid_vbo_hi, &s_gl.grid_ibo_hi);
 	create_grass_tuft_mesh();
 
-	/* Sub-Phase 6D: Instanced terrain chunk VBO (48 B/chunk) + 3 pre-configured terrain grid VAOs */
+	/* Sub-Phase 6D / Phase 0: Instanced terrain chunk VBO (64 B/chunk) + 3 pre-configured terrain grid VAOs */
 	s_gl.terr_inst_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.terr_inst_vbo);
 	glBufferData(GL_ARRAY_BUFFER, NULL, MAX_TERR_DRAW_QUEUE * sizeof(gl_chunk_inst_t), GL_DYNAMIC_DRAW);
@@ -346,7 +346,8 @@ static void init_grid_buffers(void)
 		static const gl_chunk_inst_t k_init_inst = {
 			{ 0.0f, 0.0f, 64.0f, 64.0f },
 			{ 0.0f, 0.0f, 0.0f, 0.0f },
-			{ -999.0f, 0.0f, 0.0f, 0.0f }
+			{ -999.0f, 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, 0.0f, 0.0f }
 		};
 		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(k_init_inst), &k_init_inst);
 		const GLuint vbos[3] = { s_gl.grid_vbo_macro, s_gl.grid_vbo, s_gl.grid_vbo_hi };
@@ -361,7 +362,7 @@ static void init_grid_buffers(void)
 				glVertexAttribDivisor(0, 0);
 				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibos[lod]);
 				glBindBuffer(GL_ARRAY_BUFFER, s_gl.terr_inst_vbo);
-				for (GLuint a = 0; a < 3; a++) {
+				for (GLuint a = 0; a < 4; a++) {
 					glEnableVertexAttribArray(1 + a);
 					glVertexAttribPointer(1 + a, 4, GL_FLOAT, GL_FALSE, sizeof(gl_chunk_inst_t), (size_t)(a * 16));
 					glVertexAttribDivisor(1 + a, 1);
@@ -678,12 +679,17 @@ static void gl_upload_frame_ubo(void)
 	}
 	ubo.uBaseSeaLevel = s_gl.cur_base_sea_level;
 
-	ubo.uWorldDim[0] = ND_SEVEN_WORLD_DIM_W;
-	ubo.uWorldDim[1] = ND_SEVEN_WORLD_DIM_H;
+	nd_planet_scale_t pscale = nd_field_get_planet_scale();
+	ubo.uWorldDim[0] = (float)pscale.world_w_wu;
+	ubo.uWorldDim[1] = (float)pscale.world_h_wu;
 	ubo.uCamDist = s_gl.cur_dist;
 	int q = nd_seven_get_quality_preset();
 	ubo.uTerrFastDist = (q == ND_QUALITY_LOW) ? 240.0f
 	                  : ((q == ND_QUALITY_MEDIUM) ? 360.0f : 520.0f);
+	ubo.uPlanetMetric[0] = pscale.wu_per_meter;
+	ubo.uPlanetMetric[1] = (float)pscale.max_elev_wu;
+	ubo.uPlanetMetric[2] = pscale.snowline_base_wu;
+	ubo.uPlanetMetric[3] = pscale.cloud_lcl_wu;
 
 	glBindBuffer(GL_UNIFORM_BUFFER, s_gl.frame_ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ubo), &ubo);
@@ -1775,7 +1781,7 @@ static void gl_prewarm_pipelines(void)
 			glDisable(GL_BLEND);
 			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 			glUseProgram(s_gl.water_pipe.prog);
-			if (s_gl.water_pipe.uChunkLayers >= 0)  glUniform2f(s_gl.water_pipe.uChunkLayers, 0.0f, 0.0f);
+			if (s_gl.water_pipe.uChunkLayers >= 0)  glUniform3f(s_gl.water_pipe.uChunkLayers, 0.0f, 0.0f, 0.0f);
 			if (s_gl.water_pipe.uViewport >= 0)     glUniform2f(s_gl.water_pipe.uViewport, 1.0f, 1.0f);
 			if (s_gl.water_pipe.uSceneUvScale >= 0) glUniform2f(s_gl.water_pipe.uSceneUvScale, 1.0f, 1.0f);
 			if (s_gl.water_pipe.uNearFar >= 0)      glUniform2f(s_gl.water_pipe.uNearFar, 2.0f, 10000.0f);
@@ -2465,7 +2471,7 @@ void gl_flush_terrain_queue(void)
 				cur_lod = (int)lod;
 				used_vao = true;
 			}
-			for (GLuint a = 0; a < 3; a++) {
+			for (GLuint a = 0; a < 4; a++) {
 				lam_gl_cmd_vertex_attrib_ptr(&s_gl.cmd_buf, 1 + a, 4, GL_FLOAT, GL_FALSE,
 				                             sizeof(gl_chunk_inst_t), base_bytes + (size_t)(a * 16));
 			}
@@ -2479,7 +2485,7 @@ void gl_flush_terrain_queue(void)
 			glVertexAttribDivisor(0, 0);
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
 			glBindBuffer(GL_ARRAY_BUFFER, s_gl.terr_inst_vbo);
-			for (GLuint a = 0; a < 3; a++) {
+			for (GLuint a = 0; a < 4; a++) {
 				glEnableVertexAttribArray(1 + a);
 				glVertexAttribPointer(1 + a, 4, GL_FLOAT, GL_FALSE,
 				                      sizeof(gl_chunk_inst_t), base_bytes + (size_t)(a * 16));
@@ -2510,7 +2516,7 @@ void gl_flush_terrain_queue(void)
 		gl_flush_cmd_ring();
 	} else {
 		gl_flush_cmd_ring();
-		for (GLuint a = 1; a < 4; a++) {
+		for (GLuint a = 1; a < 5; a++) {
 			glVertexAttribDivisor(a, 0);
 			glDisableVertexAttribArray(a);
 		}
@@ -2845,9 +2851,19 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 			}
 			slot->min_h_q12_4 = mn;
 			slot->max_h_q12_4 = mx;
+			{
+				float min_z_wu = (float)mn * 0.0625f;
+				float max_z_wu = (float)mx * 0.0625f;
+				/* Keep base_z_wu = 0 for coastal/lowland chunks so adjacent shoreline chunks
+				 * agree bit-exact in RGBA16F (docs/SHORE.md); switch to midpoint baseline above ±2048 wu. */
+				slot->base_z_wu = (min_z_wu >= -2048.0f && max_z_wu <= 2048.0f)
+				                ? 0.0f
+				                : floorf(0.5f * (min_z_wu + max_z_wu) + 0.5f);
+			}
 		} else {
 			slot->min_h_q12_4 = -(32000 << 4);
 			slot->max_h_q12_4 =  (32000 << 4);
+			slot->base_z_wu = 0.0f;
 		}
 		if (color_rgba && chunk_w > 0 && chunk_h > 0) {
 			size_t n_px = (size_t)chunk_w * (size_t)chunk_h;
@@ -2868,9 +2884,10 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		if (chunk_w <= 128u && chunk_h <= 128u) {
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.height_array);
-			nd_seven_gl_bake_chunk_height_derived(height_i32, chunk_w, chunk_h,
-			                                      (float)span_w, (float)span_h,
-			                                      s_chunk_bake_rgba);
+			nd_seven_gl_bake_chunk_height_derived_rel(height_i32, chunk_w, chunk_h,
+			                                          (float)span_w, (float)span_h,
+			                                          slot->base_z_wu,
+			                                          s_chunk_bake_rgba);
 			glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, slot_idx,
 			                (GLsizei)chunk_w, (GLsizei)chunk_h, 1,
 			                GL_RGBA, GL_FLOAT, s_chunk_bake_rgba);
@@ -3107,6 +3124,10 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	it->inst.meta[1]       = morph_start;
 	it->inst.meta[2]       = morph_inv_range;
 	it->inst.meta[3]       = k_grid_quads_f[grid_lod] + reveal_morph;
+	it->inst.height_z[0]   = slot->base_z_wu;
+	it->inst.height_z[1]   = min_z;
+	it->inst.height_z[2]   = max_z;
+	it->inst.height_z[3]   = 0.0f;
 	it->body_idx  = (uint8_t)body_idx;
 	it->variant   = (uint8_t)want_var;
 	it->grid_lod  = grid_lod;
@@ -3132,6 +3153,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 			sq->oy = (float)oy;
 			sq->span_w = (float)span_w;
 			sq->span_h = (float)span_h;
+			sq->base_z_wu = slot->base_z_wu;
 		}
 	}
 
@@ -3187,6 +3209,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		cq->span_h = span_h;
 		cq->level = level;
 		cq->sea_level = terrain_sea_lvl;
+		cq->base_z_wu = slot->base_z_wu;
 		cq->slot_layer = (uint16_t)slot_idx;
 		cq->river_layer = -1;
 		cq->rel_center[0] = rel_center[0];
@@ -3206,6 +3229,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		wq->span_h = span_h;
 		wq->level = level;
 		wq->sea_level = terrain_sea_lvl;
+		wq->base_z_wu = slot->base_z_wu;
 		wq->slot_layer = (uint16_t)slot_idx;
 		wq->river_layer = active_river_layer;
 		wq->rel_center[0] = rel_center[0];
@@ -3422,8 +3446,8 @@ void nd_seven_gl_flush_water(void)
 			}
 
 			if (s_gl.water_pipe.uChunkLayers >= 0)
-				lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.water_pipe.uChunkLayers,
-				                     (float)chk->slot_layer, (float)chk->river_layer);
+				lam_gl_cmd_uniform3f(&s_gl.cmd_buf, s_gl.water_pipe.uChunkLayers,
+				                     (float)chk->slot_layer, (float)chk->river_layer, chk->base_z_wu);
 
 			if (!has_body ||
 			    chk->rel_center[0] != last_rel_center[0] ||
@@ -3506,7 +3530,8 @@ void gl_flush_terrain_shadows_to_fbo(void)
 	for (uint32_t i = 0; i < s_gl.terr_shadow_q_count; i++) {
 		const gl_terr_shadow_chunk_t *sq = &s_gl.terr_shadow_q[i];
 		if (s_gl.terrain_shadow_pipe.uChunkLayer >= 0)
-			lam_gl_cmd_uniform1f(&s_gl.cmd_buf, s_gl.terrain_shadow_pipe.uChunkLayer, (float)sq->slot_layer);
+			lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.terrain_shadow_pipe.uChunkLayer,
+			                     (float)sq->slot_layer, sq->base_z_wu);
 		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.terrain_shadow_pipe.uChunkOrigin, sq->ox, sq->oy);
 		lam_gl_cmd_uniform2f(&s_gl.cmd_buf, s_gl.terrain_shadow_pipe.uChunkSpan, sq->span_w, sq->span_h);
 		lam_gl_cmd_draw_elements(&s_gl.cmd_buf, GL_TRIANGLES, GL_TOTAL_INDICES_HI, GL_UNSIGNED_SHORT, 0);

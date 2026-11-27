@@ -117,16 +117,134 @@ nd_field_room_center_world(int32_t rx, int32_t ry, int32_t *out_wx, int32_t *out
 #define ND_FIELD_TEMP_MAX        ((int16_t)102)
 
 /* ============================================================================
- * Planetary Scale (2^16 Room Coordinate Lattice):
- *   - Planet Width & Height: 65,536 rooms (int16 lattice range -32,768..+32,767)
- *   - 1 Room = 160 x 128 continuous world units
- *   - Planetary Dimensions: 10,485,760 x 8,388,608 world units
- *   - Octaves incorporate planetary macro wavelengths (shifts 14..8 = 256..16,384 rooms)
- *     down to local topography (shifts 7..2) with zero magic numbers.
+ * Canonical 1:1 Physical Metric Scale (standing lamb = 18 wu = 0.40 m -> 45.0 wu/m)
+ * & Scalable Planetary Lattice (default 2^16 rooms; scales cleanly up to 2^23):
+ *   - 1 m = 45 wu, 1 km = 45,000 wu, 1 room (160 x 128 wu) = 3.556 m x 2.844 m
+ *   - Default b = 16: 65,536 rooms = 233 x 186 km flat (52,053 km^2 torus)
+ *   - Future b = 18..23: France-scale to Earth+ planets via nd_planet_scale_t
  * ============================================================================ */
+#define ND_FIELD_LAMB_HEIGHT_M      0.40f
+#define ND_FIELD_LAMB_BODY_WU       18.0f
+#define ND_FIELD_WU_PER_METER       45.0f
+#define ND_FIELD_METERS_PER_WU      (1.0f / ND_FIELD_WU_PER_METER)
+
 #define ND_FIELD_PLANET_BITS        16
-#define ND_FIELD_PLANET_ROOM_SPAN   (1 << ND_FIELD_PLANET_BITS) /* 65,536 rooms */
+#define ND_FIELD_PLANET_BITS_MIN    16
+#define ND_FIELD_PLANET_BITS_MAX    23
+#define ND_FIELD_PLANET_ROOM_SPAN   (1 << ND_FIELD_PLANET_BITS) /* 65,536 rooms (default b=16) */
 #define ND_FIELD_HEMISPHERE_SPAN    (ND_FIELD_PLANET_ROOM_SPAN / 2) /* 32,768 rooms */
+
+typedef struct {
+	uint8_t  planet_bits;        /* log2(rooms per axis): 16 default, up to 23 */
+	uint8_t  areole_max_levels;  /* planet_bits + 1 (17 at b=16, 24 at b=23) */
+	uint8_t  _pad[2];
+	uint32_t rooms_per_axis;     /* 1u << planet_bits */
+	int64_t  world_w_wu;         /* rooms_per_axis * room_w */
+	int64_t  world_h_wu;         /* rooms_per_axis * room_h */
+	float    wu_per_meter;       /* 45.0f (lamb 18 wu = 0.40 m) */
+	float    max_relief_m;       /* target max mountain relief in meters */
+	int32_t  max_elev_wu;        /* int32_t target elevation cap in wu */
+	int32_t  min_elev_wu;        /* int32_t bathymetric trench floor in wu */
+	float    torus_R_wu;         /* major radius scaled with 2^(planet_bits - 16) */
+	float    torus_r0_wu;        /* minor radius scaled with 2^(planet_bits - 16) */
+	float    snowline_base_wu;   /* metric temperate snowline reference in wu */
+	float    cloud_lcl_wu;       /* metric cumulus lifting condensation level in wu */
+} nd_planet_scale_t;
+
+static inline nd_planet_scale_t
+nd_planet_scale_for_bits(uint8_t bits, int32_t room_w, int32_t room_h)
+{
+	if (bits < ND_FIELD_PLANET_BITS_MIN) bits = ND_FIELD_PLANET_BITS_MIN;
+	if (bits > ND_FIELD_PLANET_BITS_MAX) bits = ND_FIELD_PLANET_BITS_MAX;
+	if (room_w < 16) room_w = ND_FIELD_DEFAULT_ROOM_W;
+	if (room_h < 16) room_h = ND_FIELD_DEFAULT_ROOM_H;
+
+	nd_planet_scale_t s;
+	memset(&s, 0, sizeof(s));
+	s.planet_bits       = bits;
+	s.areole_max_levels = (uint8_t)(bits + 1u);
+	s.rooms_per_axis    = 1u << bits;
+	s.world_w_wu        = (int64_t)s.rooms_per_axis * (int64_t)room_w;
+	s.world_h_wu        = (int64_t)s.rooms_per_axis * (int64_t)room_h;
+	s.wu_per_meter      = ND_FIELD_WU_PER_METER;
+
+	float relief_m;
+	if (bits <= 16u)      relief_m = 1800.0f;
+	else if (bits == 17u) relief_m = 3000.0f;
+	else if (bits == 18u) relief_m = 4500.0f;
+	else if (bits == 19u) relief_m = 5250.0f;
+	else if (bits == 20u) relief_m = 6000.0f;
+	else if (bits == 21u) relief_m = 7500.0f;
+	else                  relief_m = 8850.0f; /* Everest scale (b >= 22) */
+
+	s.max_relief_m     = relief_m;
+	s.max_elev_wu      = (int32_t)(relief_m * s.wu_per_meter + 0.5f);
+	s.min_elev_wu      = -(int32_t)(relief_m * 0.65f * s.wu_per_meter + 0.5f);
+	float scale_mul    = (float)(1u << (bits - ND_FIELD_PLANET_BITS_MIN));
+	s.torus_R_wu       = 2000000.0f * scale_mul;
+	s.torus_r0_wu      = 1335000.0f * scale_mul;
+	float snow_m       = (bits <= 16u) ? 1200.0f : ((bits <= 18u) ? 2400.0f : 3200.0f);
+	float cloud_lcl_m  = (bits <= 16u) ? 1100.0f : 1600.0f;
+	s.snowline_base_wu = snow_m * s.wu_per_meter;
+	s.cloud_lcl_wu     = cloud_lcl_m * s.wu_per_meter;
+	return s;
+}
+
+typedef struct {
+	uint8_t  planet_bits;
+	uint32_t epoch;
+} nd_field_planet_state_t;
+
+static inline nd_field_planet_state_t *
+nd_field_planet_state(void)
+{
+	static nd_field_planet_state_t s_planet = { ND_FIELD_PLANET_BITS, 1u };
+	return &s_planet;
+}
+
+static inline uint8_t
+nd_field_get_planet_bits(void)
+{
+	return nd_field_planet_state()->planet_bits;
+}
+
+static inline uint32_t
+nd_field_get_planet_epoch(void)
+{
+	return nd_field_planet_state()->epoch;
+}
+
+static inline void
+nd_field_set_planet_bits(uint8_t bits)
+{
+	if (bits < ND_FIELD_PLANET_BITS_MIN) bits = ND_FIELD_PLANET_BITS_MIN;
+	if (bits > ND_FIELD_PLANET_BITS_MAX) bits = ND_FIELD_PLANET_BITS_MAX;
+	nd_field_planet_state_t *st = nd_field_planet_state();
+	if (st->planet_bits != bits) {
+		st->planet_bits = bits;
+		st->epoch++;
+		if (st->epoch == 0u) st->epoch = 1u;
+	}
+}
+
+static inline nd_planet_scale_t
+nd_field_get_planet_scale(void)
+{
+	return nd_planet_scale_for_bits(nd_field_get_planet_bits(),
+	                                nd_field_get_room_w(),
+	                                nd_field_get_room_h());
+}
+
+/* Wrap integer room coordinate modulo 2^bits into [-2^(bits-1), 2^(bits-1) - 1].
+ * At bits == 16 this is bit-identical to (int32_t)(int16_t)r. */
+static inline int32_t
+nd_field_wrap_room_coord(int32_t r, uint8_t bits)
+{
+	uint32_t span = 1u << bits;
+	uint32_t half = span >> 1;
+	uint32_t u = ((uint32_t)r + half) & (span - 1u);
+	return (int32_t)u - (int32_t)half;
+}
 
 /* Coarse server octave specifications (noise.c:119) */
 static const octave_t ND_FIELD_COARSE_HE_OCTAVES[] = {
@@ -207,8 +325,8 @@ nd_field_sun_dist(uint16_t obits)
  * deep ocean trenches (-800..-40), shallow coastal shelves (-12..0),
  * fertile lowlands/grasslands (0..15), rolling highlands (15..30),
  * and soaring alpine mountain peaks (30..1200). Zero magic numbers. */
-static inline int16_t
-nd_field_bimodal_hypsometry(int16_t elev)
+static inline int32_t
+nd_field_bimodal_hypsometry(int32_t elev)
 {
 	if (elev < 0) {
 		/* Ocean basin: gradual shallow shelf (-8..0), dropping into mid shelf (-16..-8) and deep seabed (-25..-2000) */
@@ -219,20 +337,20 @@ nd_field_bimodal_hypsometry(int16_t elev)
 			/* Smooth shelf-to-basin progression: -8 -> -8, -12 -> -16, -20 -> -41, deep trenches -> -2000 */
 			int32_t deep = 8 + (d * 18) / 10 + (d * d * 45) / 100;
 			if (deep > 2000) deep = 2000;
-			return (int16_t)(-deep);
+			return -deep;
 		}
 	} else {
 		/* Landmass: coastal plain (0..8), fertile lowlands (8..25), rolling plateaus (25..60), mountain ranges (60..1854) */
 		if (elev <= 8) {
-			return (int16_t)(elev * 12 / 8); /* Crisp coastal slope lifting land cleanly above sea level */
+			return (elev * 12) / 8; /* Crisp coastal slope lifting land cleanly above sea level */
 		} else if (elev <= 25) {
-			return (int16_t)(12 + (elev - 8) * 18 / 10); /* Lowlands & uplands: elevated +12..+42 */
+			return 12 + ((elev - 8) * 18) / 10; /* Lowlands & uplands: elevated +12..+42 */
 		} else {
 			/* High mountain sharpening: plateaus (43..270), cordilleras, alpine summits up to ND_FIELD_MAX_ELEV_WU */
 			int32_t m = elev - 25;
 			int32_t peak = 43 + (m * 22) / 10 + (m * m * 12) / 100;
 			if (peak > ND_FIELD_MAX_ELEV_WU) peak = ND_FIELD_MAX_ELEV_WU;
-			return (int16_t)peak;
+			return peak;
 		}
 	}
 }
@@ -366,8 +484,9 @@ nd_field_room_to_corolla_uv(int16_t rx, int16_t ry, double *out_u, double *out_v
 static inline void
 nd_field_world_to_corolla_uv(double wx, double wy, double *out_u, double *out_v)
 {
-	double wdim_x = (double)ND_FIELD_PLANET_ROOM_SPAN * (double)ND_FIELD_ROOM_W;
-	double wdim_y = (double)ND_FIELD_PLANET_ROOM_SPAN * (double)ND_FIELD_ROOM_H;
+	nd_planet_scale_t ps = nd_field_get_planet_scale();
+	double wdim_x = (double)ps.world_w_wu;
+	double wdim_y = (double)ps.world_h_wu;
 	double u = fmod(wx / wdim_x, 1.0);
 	if (u < 0.0) u += 1.0;
 	double v = fmod((wy / wdim_y) + 0.5, 1.0);
@@ -999,12 +1118,12 @@ nd_field_lod_to_step_q16(uint8_t lod)
 }
 
 typedef struct {
-	int16_t elevation;        /* Total elevation H = coarse + fine */
-	int32_t elevation_q12_4;  /* Sub-pixel elevation in Q28.4 fixed-point (16 sub-units/wu) */
-	int16_t coarse_elev;      /* Coarse elevation */
-	int16_t fine_elev;        /* Fine detail elevation */
-	int16_t water_level;      /* W */
-	int16_t depth;            /* max(0, W - H) */
+	int32_t elevation;        /* Total elevation H = coarse + fine (wu) */
+	int32_t elevation_q12_4;  /* Sub-pixel elevation in Q27.4 fixed-point (16 sub-units/wu) */
+	int32_t coarse_elev;      /* Coarse elevation (wu) */
+	int32_t fine_elev;        /* Fine detail elevation (wu) */
+	int32_t water_level;      /* W (wu) */
+	int32_t depth;            /* max(0, W - H) (wu) */
 	uint8_t is_water;         /* H < W */
 	int16_t temp;             /* Live temperature (climate_temp + diurnal day/night delta) */
 	int16_t climate_temp;     /* Mean annual latitudinal & alpine climate temperature */
@@ -1015,11 +1134,21 @@ typedef struct {
 	uint8_t river_carve_q4;   /* Upland river channel incision C(wx,wy) in Q4 (0..254) */
 } nd_field_sample_t;
 
-/* Whole-block physics compatibility: converts Q28.4 fixed-point elevation to integer block coordinates */
+/* Whole-block physics compatibility: converts Q27.4 fixed-point elevation to integer block coordinates */
 static inline int16_t
 nd_field_elevation_to_block(int32_t elev_q12_4)
 {
-	return (int16_t)(elev_q12_4 >> 4);
+	int32_t blk = elev_q12_4 >> 4;
+	if (blk > 32767) blk = 32767;
+	if (blk < -32768) blk = -32768;
+	return (int16_t)blk;
+}
+
+/* Full-range integer world-unit elevation from Q27.4 fixed-point */
+static inline int32_t
+nd_field_elevation_to_wu(int32_t elev_q12_4)
+{
+	return elev_q12_4 >> 4;
 }
 
 /* ============================================================================
@@ -1037,12 +1166,13 @@ static inline int32_t
 nd_field_eval_coarse_unwrapped_step_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry)
 {
 	static _CHAFF_TLS noise_wcache_t s_coarse_wc[9];
+	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t cur_rx = rx, cur_ry = ry, coarse_q12_4 = 0;
 
 	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_CONTINENT_MIN; s--) {
 		int16_t amp = chaff_octave_amplitude(s);
 		uint32_t oct_seed = seed ^ (uint32_t)(s * 0x85EBCA77u + 1u);
-		uint32_t raw = chaff_wpoint_periodic_2d(cur_rx, cur_ry, s, ND_FIELD_PLANET_BITS, 8, oct_seed);
+		uint32_t raw = chaff_wpoint_periodic_2d(cur_rx, cur_ry, s, pbits, 8, oct_seed);
 		int32_t val = (int32_t)(raw >> 16) - 128;
 		coarse_q12_4 += (int32_t)((((int64_t)val * amp) << 4) / 128);
 		chaff_rot2d_i32_q15(&cur_rx, &cur_ry, CHAFF_ROT_ATAN_COS_Q15, CHAFF_ROT_ATAN_SIN_Q15);
@@ -1077,10 +1207,13 @@ static inline int32_t
 nd_field_sea_offset_q12_4(uint16_t world, uint32_t seed)
 {
 	static _CHAFF_TLS uint16_t s_cached_world = 0xFFFFu;
+	static _CHAFF_TLS uint32_t s_cached_epoch = 0u;
 	static _CHAFF_TLS int32_t s_cached_origin_bias = 0;
-	if (world != s_cached_world) {
+	uint32_t epoch = nd_field_get_planet_epoch();
+	if (world != s_cached_world || epoch != s_cached_epoch) {
 		s_cached_origin_bias = nd_field_eval_coarse_unwrapped_q12_4(seed, 0, 0) >> 2;
 		s_cached_world = world;
+		s_cached_epoch = epoch;
 	}
 	uint32_t w = (((world >> 2) + 2) & 3) * 65536u;
 	return (int32_t)((((int64_t)w * 200 / 262144 - 100)) << 4) +
@@ -1095,6 +1228,7 @@ nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q1
                                              int32_t out[4])
 {
 	static _CHAFF_TLS noise_wcache_t s_coarse4_wc[9];
+	uint8_t pbits = nd_field_get_planet_bits();
 	int32_t cur_rx[4] = { rx[0], rx[1], rx[2], rx[3] };
 	int32_t cur_ry[4] = { ry[0], ry[1], ry[2], ry[3] };
 	int32_t acc[4] = { 0, 0, 0, 0 };
@@ -1103,7 +1237,7 @@ nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q1
 		int16_t amp = chaff_octave_amplitude(s);
 		uint32_t oct_seed = seed ^ (uint32_t)(s * 0x85EBCA77u + 1u);
 		uint32_t raw[4];
-		chaff_wpoint_periodic_2d_4x(cur_rx, cur_ry, s, ND_FIELD_PLANET_BITS, 8, oct_seed, raw);
+		chaff_wpoint_periodic_2d_4x(cur_rx, cur_ry, s, pbits, 8, oct_seed, raw);
 		for (int i = 0; i < 4; i++) {
 			int32_t val = (int32_t)(raw[i] >> 16) - 128;
 			int64_t num = ((int64_t)val * amp) << 4;
@@ -1138,21 +1272,24 @@ nd_field_eval_coarse_unwrapped_step_q12_4_4x(uint32_t seed, int32_t room_step_q1
 }
 
 static inline int32_t
-nd_field_eval_coarse_torus_x_step_q12_4(uint32_t seed, int32_t room_step_q16, int16_t rx, int32_t ry_unwrapped)
+nd_field_eval_coarse_torus_x_step_q12_4(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry_unwrapped)
 {
-	uint16_t ux = (uint16_t)((uint16_t)rx - 32512u);
+	uint8_t pbits = nd_field_get_planet_bits();
+	uint32_t span = 1u << pbits;
+	int32_t seam_start = (int32_t)(span >> 1) - 256;
+	uint32_t ux = (uint32_t)(rx - seam_start) & (span - 1u);
 	if (ux < 512u) {
-		int32_t rx_hi = 32512 + (int32_t)ux;
-		int32_t rx_lo = rx_hi - ND_FIELD_PLANET_ROOM_SPAN;
+		int32_t rx_hi = seam_start + (int32_t)ux;
+		int32_t rx_lo = rx_hi - (int32_t)span;
 		int32_t c_hi = nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, rx_hi, ry_unwrapped);
 		int32_t c_lo = nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, rx_lo, ry_unwrapped);
 		return c_hi + (int32_t)(((int64_t)(c_lo - c_hi) * (int32_t)ux) >> 9);
 	}
-	return nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, (int32_t)rx, ry_unwrapped);
+	return nd_field_eval_coarse_unwrapped_step_q12_4(seed, room_step_q16, nd_field_wrap_room_coord(rx, pbits), ry_unwrapped);
 }
 
 static inline int32_t
-nd_field_eval_coarse_torus_x_q12_4(uint32_t seed, int16_t rx, int32_t ry_unwrapped)
+nd_field_eval_coarse_torus_x_q12_4(uint32_t seed, int32_t rx, int32_t ry_unwrapped)
 {
 	return nd_field_eval_coarse_torus_x_step_q12_4(seed, 0, rx, ry_unwrapped);
 }
@@ -1228,24 +1365,27 @@ nd_field_elevation_step_q12_4(uint16_t world, int32_t step_q16, int32_t wx, int3
                               int32_t *out_coarse_q12_4, int32_t *out_fine_q12_4)
 {
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
+	uint8_t pbits = nd_field_get_planet_bits();
+	uint32_t span = 1u << pbits;
+	int32_t seam_start = (int32_t)(span >> 1) - 256;
 
-	int16_t rx = (int16_t)noise_fdiv(wx - (ND_FIELD_ROOM_W / 2), ND_FIELD_ROOM_W);
-	int16_t ry = (int16_t)noise_fdiv((ND_FIELD_ROOM_H / 2) - wy, ND_FIELD_ROOM_H);
+	int32_t rx = nd_field_wrap_room_coord(noise_fdiv(wx - (ND_FIELD_ROOM_W / 2), ND_FIELD_ROOM_W), pbits);
+	int32_t ry = nd_field_wrap_room_coord(noise_fdiv((ND_FIELD_ROOM_H / 2) - wy, ND_FIELD_ROOM_H), pbits);
 
 	int32_t coarse_q12_4 = 0;
 	int32_t fine_q12_4 = 0;
 
 	if (out_coarse_q12_4 != NULL || out_fine_q12_4 == NULL) {
 		int32_t room_step_q16 = (step_q16 >= (2048 << 16)) ? (step_q16 / ND_FIELD_ROOM_W) : 0;
-		uint16_t uy = (uint16_t)((uint16_t)ry - 32512u);
+		uint32_t uy = (uint32_t)(ry - seam_start) & (span - 1u);
 		if (uy < 512u) {
-			int32_t ry_hi = 32512 + (int32_t)uy;
-			int32_t ry_lo = ry_hi - ND_FIELD_PLANET_ROOM_SPAN;
+			int32_t ry_hi = seam_start + (int32_t)uy;
+			int32_t ry_lo = ry_hi - (int32_t)span;
 			int32_t c_hi = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, ry_hi);
 			int32_t c_lo = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, ry_lo);
 			coarse_q12_4 = c_hi + (int32_t)(((int64_t)(c_lo - c_hi) * (int32_t)uy) >> 9);
 		} else {
-			coarse_q12_4 = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, (int32_t)ry);
+			coarse_q12_4 = nd_field_eval_coarse_torus_x_step_q12_4(seed, room_step_q16, rx, ry);
 		}
 		coarse_q12_4 -= nd_field_sea_offset_q12_4(world, seed);
 	}
@@ -1480,24 +1620,25 @@ nd_field_smoothstep_q8(int32_t x, int32_t e0, int32_t e1)
 	return s;
 }
 
-static inline int16_t
-nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry, int16_t base_hyp)
+static inline int32_t
+nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry, int32_t base_hyp)
 {
 	if (base_hyp <= 6)
 		return 0;
-	int32_t coast_q8 = nd_field_smoothstep_q8((int32_t)base_hyp, 6, 16);
+	uint8_t pbits = nd_field_get_planet_bits();
+	int32_t coast_q8 = nd_field_smoothstep_q8(base_hyp, 6, 16);
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
 
-	int32_t wx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x11A3u) >> 16) - 128;
-	int32_t wy_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x22B7u) >> 16) - 128;
-	int32_t mx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x33C9u) >> 16) - 128;
-	int32_t my_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x44DBu) >> 16) - 128;
+	int32_t wx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, pbits, 8, oseed ^ 0x11A3u) >> 16) - 128;
+	int32_t wy_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 8, pbits, 8, oseed ^ 0x22B7u) >> 16) - 128;
+	int32_t mx_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, pbits, 8, oseed ^ 0x33C9u) >> 16) - 128;
+	int32_t my_raw = (int32_t)(chaff_wpoint_periodic_2d(rx, ry, 6, pbits, 8, oseed ^ 0x44DBu) >> 16) - 128;
 
 	int32_t urx = rx + (wx_raw >> 1) + (mx_raw >> 3);
 	int32_t ury = ry + (wy_raw >> 1) + (my_raw >> 3);
 
-	int32_t prov_raw = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 8, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x55EDu) >> 16);
-	int32_t n_belt = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 7, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x661Fu) >> 16) - 128;
+	int32_t prov_raw = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 8, pbits, 8, oseed ^ 0x55EDu) >> 16);
+	int32_t n_belt = (int32_t)(chaff_wpoint_periodic_2d(urx, ury, 7, pbits, 8, oseed ^ 0x661Fu) >> 16) - 128;
 	int32_t belt_r = 128 - (n_belt < 0 ? -n_belt : n_belt);
 
 	int32_t h_sig = (prov_raw * 3 + belt_r * 5) >> 3;
@@ -1519,12 +1660,12 @@ nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry
 	int32_t uplift = 0;
 
 	if (hill_q8 > 0) {
-		int32_t n5 = (int32_t)(chaff_wpoint_periodic_2d(urx + 713, ury - 419, 5, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x7731u) >> 16);
+		int32_t n5 = (int32_t)(chaff_wpoint_periodic_2d(urx + 713, ury - 419, 5, pbits, 8, oseed ^ 0x7731u) >> 16);
 		int32_t r5 = 128 - (n5 >= 128 ? (n5 - 128) : (128 - n5));
 		int32_t f5 = (n5 * 192 + r5 * 528) >> 8;
 		int32_t f4 = 0;
 		if (w4_oct > 0u) {
-			int32_t n4 = (int32_t)(chaff_wpoint_periodic_2d(urx - 317, ury + 823, 4, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x8843u) >> 16);
+			int32_t n4 = (int32_t)(chaff_wpoint_periodic_2d(urx - 317, ury + 823, 4, pbits, 8, oseed ^ 0x8843u) >> 16);
 			f4 = (n4 * 240) >> 8;
 			if (w4_oct < 65536u)
 				f4 = (int32_t)(((int64_t)f4 * (int64_t)w4_oct) >> 16);
@@ -1533,11 +1674,11 @@ nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry
 	}
 
 	if (alpine_q8 > 0) {
-		int32_t n6 = (int32_t)(chaff_wpoint_periodic_2d(urx + 191, ury + 547, 6, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x9955u) >> 16) - 128;
+		int32_t n6 = (int32_t)(chaff_wpoint_periodic_2d(urx + 191, ury + 547, 6, pbits, 8, oseed ^ 0x9955u) >> 16) - 128;
 		int32_t r6 = 128 - (n6 < 0 ? -n6 : n6);
 		int32_t h6 = (r6 * r6) >> 7;
 
-		int32_t n5 = (int32_t)(chaff_wpoint_periodic_2d(urx - 613, ury + 271, 5, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xAA67u) >> 16) - 128;
+		int32_t n5 = (int32_t)(chaff_wpoint_periodic_2d(urx - 613, ury + 271, 5, pbits, 8, oseed ^ 0xAA67u) >> 16) - 128;
 		int32_t r5 = 128 - (n5 < 0 ? -n5 : n5);
 		int32_t h5 = (r5 * (64 + (r5 >> 1))) >> 7;
 		int32_t w5 = 72 + ((h6 * 184) >> 7);
@@ -1546,7 +1687,7 @@ nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry
 		int32_t alp = ((h6 * 1350) >> 7) + ((h5w * 1900) >> 7);
 
 		if (w4_oct > 0u) {
-			int32_t n4 = (int32_t)(chaff_wpoint_periodic_2d(urx + 409, ury - 733, 4, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xBB79u) >> 16) - 128;
+			int32_t n4 = (int32_t)(chaff_wpoint_periodic_2d(urx + 409, ury - 733, 4, pbits, 8, oseed ^ 0xBB79u) >> 16) - 128;
 			int32_t r4 = 128 - (n4 < 0 ? -n4 : n4);
 			int32_t h4 = (r4 * (64 + (r4 >> 1))) >> 7;
 			int32_t w4 = 56 + ((h5w * 200) >> 7);
@@ -1558,7 +1699,7 @@ nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry
 
 			uint32_t w3_oct = (room_step_q16 > 0) ? chaff_octave_weight_q16(3, room_step_q16) : 65536u;
 			if (w3_oct > 0u) {
-				int32_t n3 = (int32_t)(chaff_wpoint_periodic_2d(urx - 227, ury - 389, 3, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xCC8Bu) >> 16) - 128;
+				int32_t n3 = (int32_t)(chaff_wpoint_periodic_2d(urx - 227, ury - 389, 3, pbits, 8, oseed ^ 0xCC8Bu) >> 16) - 128;
 				int32_t r3 = 128 - (n3 < 0 ? -n3 : n3);
 				int32_t w3 = 32 + ((h4w * 224) >> 7);
 				int32_t h3w = (r3 * w3) >> 8;
@@ -1569,7 +1710,7 @@ nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry
 
 				uint32_t w2_oct = (room_step_q16 > 0) ? chaff_octave_weight_q16(2, room_step_q16) : 65536u;
 				if (w2_oct > 0u && h3w > 0) {
-					int32_t n2 = (int32_t)(chaff_wpoint_periodic_2d(urx + 131, ury + 179, 2, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xDD9Du) >> 16) - 128;
+					int32_t n2 = (int32_t)(chaff_wpoint_periodic_2d(urx + 131, ury + 179, 2, pbits, 8, oseed ^ 0xDD9Du) >> 16) - 128;
 					int32_t r2 = 128 - (n2 < 0 ? -n2 : n2);
 					int32_t w2 = (h3w * 256) >> 7;
 					int32_t h2w = (r2 * w2) >> 8;
@@ -1584,14 +1725,14 @@ nd_field_orogeny_wu(uint32_t seed, int32_t room_step_q16, int32_t rx, int32_t ry
 	}
 
 	uplift = (uplift * coast_q8) >> 8;
-	return (int16_t)(uplift > 0 ? uplift : 0);
+	return uplift > 0 ? uplift : 0;
 }
 
 /* 4-wide SIMD tectonic orogeny evaluator, bit-exact with 4 calls to nd_field_orogeny_wu. */
 static inline void
 nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
                        const int32_t rx[4], const int32_t ry[4],
-                       const int16_t base_hyp[4], int16_t out[4])
+                       const int32_t base_hyp[4], int32_t out[4])
 {
 	int any_land = (base_hyp[0] > 6 || base_hyp[1] > 6 || base_hyp[2] > 6 || base_hyp[3] > 6);
 	if (!any_land) {
@@ -1599,12 +1740,13 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 		return;
 	}
 
+	uint8_t pbits = nd_field_get_planet_bits();
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
 	uint32_t rw_x[4], rw_y[4], rm_x[4], rm_y[4];
-	chaff_wpoint_periodic_2d_4x(rx, ry, 8, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x11A3u, rw_x);
-	chaff_wpoint_periodic_2d_4x(rx, ry, 8, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x22B7u, rw_y);
-	chaff_wpoint_periodic_2d_4x(rx, ry, 6, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x33C9u, rm_x);
-	chaff_wpoint_periodic_2d_4x(rx, ry, 6, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x44DBu, rm_y);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 8, pbits, 8, oseed ^ 0x11A3u, rw_x);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 8, pbits, 8, oseed ^ 0x22B7u, rw_y);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 6, pbits, 8, oseed ^ 0x33C9u, rm_x);
+	chaff_wpoint_periodic_2d_4x(rx, ry, 6, pbits, 8, oseed ^ 0x44DBu, rm_y);
 
 	int32_t urx[4], ury[4];
 	for (int i = 0; i < 4; i++) {
@@ -1617,8 +1759,8 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 	}
 
 	uint32_t r_prov[4], r_belt[4];
-	chaff_wpoint_periodic_2d_4x(urx, ury, 8, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x55EDu, r_prov);
-	chaff_wpoint_periodic_2d_4x(urx, ury, 7, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x661Fu, r_belt);
+	chaff_wpoint_periodic_2d_4x(urx, ury, 8, pbits, 8, oseed ^ 0x55EDu, r_prov);
+	chaff_wpoint_periodic_2d_4x(urx, ury, 7, pbits, 8, oseed ^ 0x661Fu, r_belt);
 
 	int32_t coast_q8[4], hill_q8[4], alpine_q8[4];
 	int any_hill = 0, any_alpine = 0;
@@ -1629,7 +1771,7 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 			alpine_q8[i] = 0;
 			continue;
 		}
-		coast_q8[i] = nd_field_smoothstep_q8((int32_t)base_hyp[i], 6, 16);
+		coast_q8[i] = nd_field_smoothstep_q8(base_hyp[i], 6, 16);
 		int32_t prov_raw = (int32_t)(r_prov[i] >> 16);
 		int32_t nb = (int32_t)(r_belt[i] >> 16) - 128;
 		int32_t belt_r = 128 - (nb < 0 ? -nb : nb);
@@ -1665,9 +1807,9 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 			hx4[i] = urx[i] - 317; hy4[i] = ury[i] + 823;
 		}
 		uint32_t r_f5[4], r_f4[4] = { 0, 0, 0, 0 };
-		chaff_wpoint_periodic_2d_4x(hx5, hy5, 5, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x7731u, r_f5);
+		chaff_wpoint_periodic_2d_4x(hx5, hy5, 5, pbits, 8, oseed ^ 0x7731u, r_f5);
 		if (w4_oct > 0u)
-			chaff_wpoint_periodic_2d_4x(hx4, hy4, 4, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x8843u, r_f4);
+			chaff_wpoint_periodic_2d_4x(hx4, hy4, 4, pbits, 8, oseed ^ 0x8843u, r_f4);
 		for (int i = 0; i < 4; i++) {
 			if (hill_q8[i] <= 0) continue;
 			int32_t n5 = (int32_t)(r_f5[i] >> 16);
@@ -1691,8 +1833,8 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 			ax5[i] = urx[i] - 613; ay5[i] = ury[i] + 271;
 		}
 		uint32_t r_a6[4], r_a5[4];
-		chaff_wpoint_periodic_2d_4x(ax6, ay6, 6, ND_FIELD_PLANET_BITS, 8, oseed ^ 0x9955u, r_a6);
-		chaff_wpoint_periodic_2d_4x(ax5, ay5, 5, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xAA67u, r_a5);
+		chaff_wpoint_periodic_2d_4x(ax6, ay6, 6, pbits, 8, oseed ^ 0x9955u, r_a6);
+		chaff_wpoint_periodic_2d_4x(ax5, ay5, 5, pbits, 8, oseed ^ 0xAA67u, r_a5);
 
 		uint32_t w3_oct = (w4_oct > 0u) ? ((room_step_q16 > 0) ? chaff_octave_weight_q16(3, room_step_q16) : 65536u) : 0u;
 		uint32_t w2_oct = (w3_oct > 0u) ? ((room_step_q16 > 0) ? chaff_octave_weight_q16(2, room_step_q16) : 65536u) : 0u;
@@ -1702,17 +1844,17 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 		if (w4_oct > 0u) {
 			int32_t ax4[4], ay4[4];
 			for (int i = 0; i < 4; i++) { ax4[i] = urx[i] + 409; ay4[i] = ury[i] - 733; }
-			chaff_wpoint_periodic_2d_4x(ax4, ay4, 4, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xBB79u, r_a4);
+			chaff_wpoint_periodic_2d_4x(ax4, ay4, 4, pbits, 8, oseed ^ 0xBB79u, r_a4);
 		}
 		if (w3_oct > 0u) {
 			int32_t ax3[4], ay3[4];
 			for (int i = 0; i < 4; i++) { ax3[i] = urx[i] - 227; ay3[i] = ury[i] - 389; }
-			chaff_wpoint_periodic_2d_4x(ax3, ay3, 3, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xCC8Bu, r_a3);
+			chaff_wpoint_periodic_2d_4x(ax3, ay3, 3, pbits, 8, oseed ^ 0xCC8Bu, r_a3);
 		}
 		if (w2_oct > 0u) {
 			int32_t ax2[4], ay2[4];
 			for (int i = 0; i < 4; i++) { ax2[i] = urx[i] + 131; ay2[i] = ury[i] + 179; }
-			chaff_wpoint_periodic_2d_4x(ax2, ay2, 2, ND_FIELD_PLANET_BITS, 8, oseed ^ 0xDD9Du, r_a2);
+			chaff_wpoint_periodic_2d_4x(ax2, ay2, 2, pbits, 8, oseed ^ 0xDD9Du, r_a2);
 		}
 
 		for (int i = 0; i < 4; i++) {
@@ -1767,7 +1909,7 @@ nd_field_orogeny_wu_4x(uint32_t seed, int32_t room_step_q16,
 
 	for (int i = 0; i < 4; i++) {
 		int32_t u = (uplift[i] * coast_q8[i]) >> 8;
-		out[i] = (int16_t)(u > 0 ? u : 0);
+		out[i] = u > 0 ? u : 0;
 	}
 }
 
@@ -1780,11 +1922,13 @@ nd_field_periodic_rect_bounds(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
                               uint8_t shift, uint32_t seed,
                               int32_t *out_min, int32_t *out_max)
 {
+	uint8_t pbits = nd_field_get_planet_bits();
+	int32_t span = (int32_t)(1u << pbits);
 	int32_t cx0 = x0 >> shift;
 	int32_t cx1 = x1 >> shift;
 	int32_t cy0 = y0 >> shift;
 	int32_t cy1 = y1 >> shift;
-	if ((cx1 - cx0) > 3 || (cy1 - cy0) > 3 || (x1 - x0) >= 65536 || (y1 - y0) >= 65536) {
+	if ((cx1 - cx0) > 3 || (cy1 - cy0) > 3 || (x1 - x0) >= span || (y1 - y0) >= span) {
 		*out_min = 0;
 		*out_max = 255;
 		return;
@@ -1812,7 +1956,7 @@ nd_field_periodic_rect_bounds(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
 	int32_t vmin = 255, vmax = 0;
 	for (int iy = 0; iy < ny; iy++) {
 		for (int ix = 0; ix < nx; ix++) {
-			int32_t v = (int32_t)(chaff_wpoint_periodic_2d(xs[ix], ys[iy], shift, ND_FIELD_PLANET_BITS, 8, seed) >> 16);
+			int32_t v = (int32_t)(chaff_wpoint_periodic_2d(xs[ix], ys[iy], shift, pbits, 8, seed) >> 16);
 			if (v < vmin) vmin = v;
 			if (v > vmax) vmax = v;
 		}
@@ -1826,13 +1970,13 @@ nd_field_periodic_rect_bounds(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
 
 /* Conservative O(1) upper bound on nd_field_orogeny_wu over room rectangle [rx0..rx1] x [ry0..ry1]
  * with base hypsometry <= hyp_max. Zero over ocean and flat plains; tight over foothills and alpine belts. */
-static inline int16_t
+static inline int32_t
 nd_field_orogeny_upper_bound_wu(uint16_t world, int32_t rx0, int32_t rx1,
-                                int32_t ry0, int32_t ry1, int16_t hyp_max)
+                                int32_t ry0, int32_t ry1, int32_t hyp_max)
 {
 	if (hyp_max <= 6)
 		return 0;
-	int32_t coast_hi = nd_field_smoothstep_q8((int32_t)hyp_max, 6, 16);
+	int32_t coast_hi = nd_field_smoothstep_q8(hyp_max, 6, 16);
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
 	uint32_t oseed = seed ^ ND_FIELD_OROGENY_SALT;
 
@@ -1913,7 +2057,7 @@ nd_field_orogeny_upper_bound_wu(uint16_t world, int32_t rx0, int32_t rx1,
 	int32_t max_wu = ((700 * hill_hi) >> 8) + ((alp_hi * alpine_hi) >> 8);
 	int32_t bound_wu = ((max_wu * coast_hi) >> 8) + ((max_wu > 0) ? 2 : 0);
 	if (bound_wu > ND_FIELD_MAX_ELEV_WU) bound_wu = ND_FIELD_MAX_ELEV_WU;
-	return (int16_t)bound_wu;
+	return bound_wu;
 }
 
 /* Conservative O(1) analytical elevation bounds [out_z_min, out_z_max] (in world units)
@@ -1938,6 +2082,11 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 	if (rw <= 0) rw = ND_FIELD_DEFAULT_ROOM_W;
 	if (rh <= 0) rh = ND_FIELD_DEFAULT_ROOM_H;
 
+	uint8_t pbits = nd_field_get_planet_bits();
+	uint32_t span = 1u << pbits;
+	uint32_t mask = span - 1u;
+	int32_t seam_start = (int32_t)(span >> 1) - 256;
+
 	/* Room stencil touched by nd_field_interp_coarse_q12_4 over [ox..ox+w] x [oy..oy+h] */
 	int64_t rx0 = nd_field_fdiv64((int64_t)ox - (int64_t)(rw / 2), (int64_t)rw);
 	int64_t rx1 = nd_field_fdiv64((int64_t)ox + (int64_t)w - (int64_t)(rw / 2), (int64_t)rw) + 1;
@@ -1947,20 +2096,22 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 	int64_t span_rx = rx1 - rx0;
 	int64_t span_ry = ry1 - ry0;
 
-	/* Very large planetary quadrants or patches straddling the torus wrap seam [32512..33023]
-	 * (which also covers int16 wrap +/-32768) fall back to the exact global envelope. */
+	/* Very large planetary quadrants or patches straddling the torus wrap seam
+	 * fall back to the exact global envelope. */
 	if (span_rx >= 8192 || span_ry >= 8192 ||
-	    (uint16_t)((uint16_t)rx0 - 32512u) < 512u || (uint16_t)(32512u - (uint16_t)rx0) <= (uint32_t)span_rx ||
-	    (uint16_t)((uint16_t)ry0 - 32512u) < 512u || (uint16_t)(32512u - (uint16_t)ry0) <= (uint32_t)span_ry) {
+	    (((uint32_t)((int32_t)rx0 - seam_start)) & mask) < 512u ||
+	    (((uint32_t)(seam_start - (int32_t)rx0)) & mask) <= (uint32_t)span_rx ||
+	    (((uint32_t)((int32_t)ry0 - seam_start)) & mask) < 512u ||
+	    (((uint32_t)(seam_start - (int32_t)ry0)) & mask) <= (uint32_t)span_ry) {
 		if (out_z_min) *out_z_min = global_min;
 		if (out_z_max) *out_z_max = global_max;
 		return;
 	}
 
-	int16_t rx_mid = (int16_t)(rx0 + (span_rx >> 1));
-	int16_t ry_mid = (int16_t)(ry0 + (span_ry >> 1));
-	int32_t r_wx = (int32_t)rx_mid * rw + (rw / 2);
-	int32_t r_wy = -(int32_t)ry_mid * rh + (rh / 2);
+	int32_t rx_mid = nd_field_wrap_room_coord((int32_t)(rx0 + (span_rx >> 1)), pbits);
+	int32_t ry_mid = nd_field_wrap_room_coord((int32_t)(ry0 + (span_ry >> 1)), pbits);
+	int32_t r_wx = rx_mid * rw + (rw / 2);
+	int32_t r_wy = -ry_mid * rh + (rh / 2);
 	int32_t c_mid_q12_4 = 0;
 	nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c_mid_q12_4, NULL);
 
@@ -1973,8 +2124,8 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 	/* Track rotated coordinates to detect any int16 wrap in regional octaves (shifts 8..2).
 	 * C2 quintic value noise on spacing 2^s has max derivative (15/8) * 255 / 128 = 3.7354 * amp / 2^s
 	 * along each axis; 3.76 provides exact rounding headroom. */
-	int32_t cur_rx = (int32_t)rx_mid;
-	int32_t cur_ry = (int32_t)ry_mid;
+	int32_t cur_rx = rx_mid;
+	int32_t cur_ry = ry_mid;
 	double delta_wu = 5.0; /* +4 wu for step_q16 attenuation of s=2..4, +1 wu for >> 4 truncation */
 
 	for (uint8_t s = ND_FIELD_SHIFT_PLANET_MAX; s >= ND_FIELD_SHIFT_REGIONAL_MIN; s--) {
@@ -2000,18 +2151,18 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 	if (c_lo < -3000) c_lo = -3000;
 	if (c_hi >  3000) c_hi =  3000;
 
-	int16_t hyp_min = nd_field_bimodal_hypsometry((int16_t)c_lo);
-	int16_t hyp_max = nd_field_bimodal_hypsometry((int16_t)c_hi);
+	int32_t hyp_min = nd_field_bimodal_hypsometry(c_lo);
+	int32_t hyp_max = nd_field_bimodal_hypsometry(c_hi);
 	if (hyp_max > 6) {
-		int32_t h_plus = (int32_t)hyp_max +
-		                 (int32_t)nd_field_orogeny_upper_bound_wu(world,
-		                                                          (int32_t)rx0, (int32_t)rx1,
-		                                                          (int32_t)ry0, (int32_t)ry1,
-		                                                          hyp_max);
+		int32_t h_plus = hyp_max +
+		                 nd_field_orogeny_upper_bound_wu(world,
+		                                                 (int32_t)rx0, (int32_t)rx1,
+		                                                 (int32_t)ry0, (int32_t)ry1,
+		                                                 hyp_max);
 		if (h_plus > ND_FIELD_MAX_ELEV_WU) h_plus = ND_FIELD_MAX_ELEV_WU;
-		hyp_max = (int16_t)h_plus;
+		hyp_max = h_plus;
 	}
-	int16_t sea_lvl = nd_field_water_level(world);
+	int32_t sea_lvl = nd_field_water_level(world);
 
 	/* Fine detail is strictly clamped to +/-ND_FIELD_FINE_AMP_BUDGET (127 wu), and halved
 	 * below sea_lvl - 8. Mountain lakes & rivers only carve downward (never raise coarse). */
@@ -2027,17 +2178,18 @@ nd_field_elevation_bounds(uint16_t world, int32_t ox, int32_t oy, int32_t w, int
 }
 
 typedef struct {
+	uint32_t epoch;
 	uint16_t world;
-	int16_t rx;
-	int16_t ry;
-	int16_t hyp;
+	int32_t  rx;
+	int32_t  ry;
+	int32_t  hyp;
 	uint32_t cl_macro;
 	uint32_t tm_macro;
 	uint32_t rain_memo;
 	int16_t  bio_temp_memo;
-	uint8_t hyp_valid;
-	uint8_t macro_valid;
-	uint8_t climate_valid;
+	uint8_t  hyp_valid;
+	uint8_t  macro_valid;
+	uint8_t  climate_valid;
 } nd_field_room_memo_t;
 
 #ifdef ND_FIELD_MEMO_EXTERN
@@ -2056,14 +2208,19 @@ nd_field_room_memo_table(void)
 }
 
 static inline nd_field_room_memo_t *
-nd_field_room_memo_slot(uint16_t world, int16_t rx, int16_t ry)
+nd_field_room_memo_slot(uint16_t world, int32_t rx, int32_t ry)
 {
 	nd_field_room_memo_t *s_memo = nd_field_room_memo_table();
-	uint32_t idx = (((uint32_t)(uint16_t)rx * 0x9E3779B1u) ^
-	                ((uint32_t)(uint16_t)ry * 0x85EBCA77u) ^
+	uint8_t pbits = nd_field_get_planet_bits();
+	uint32_t epoch = nd_field_get_planet_epoch();
+	rx = nd_field_wrap_room_coord(rx, pbits);
+	ry = nd_field_wrap_room_coord(ry, pbits);
+	uint32_t idx = (((uint32_t)rx * 0x9E3779B1u) ^
+	                ((uint32_t)ry * 0x85EBCA77u) ^
 	                (uint32_t)world) & 4095u;
 	nd_field_room_memo_t *m = &s_memo[idx];
-	if (m->world != world || m->rx != rx || m->ry != ry) {
+	if (m->epoch != epoch || m->world != world || m->rx != rx || m->ry != ry) {
+		m->epoch = epoch;
 		m->world = world;
 		m->rx = rx;
 		m->ry = ry;
@@ -2074,40 +2231,46 @@ nd_field_room_memo_slot(uint16_t world, int16_t rx, int16_t ry)
 	return m;
 }
 
-static inline int16_t
-nd_field_room_hyp_coarse(uint16_t world, int16_t rx, int16_t ry)
+static inline int32_t
+nd_field_room_hyp_coarse(uint16_t world, int32_t rx, int32_t ry)
 {
+	uint8_t pbits = nd_field_get_planet_bits();
+	rx = nd_field_wrap_room_coord(rx, pbits);
+	ry = nd_field_wrap_room_coord(ry, pbits);
 	nd_field_room_memo_t *m = nd_field_room_memo_slot(world, rx, ry);
 	if (!m->hyp_valid) {
 		uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
-		int32_t r_wx = (int32_t)rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
-		int32_t r_wy = -(int32_t)ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
+		int32_t r_wx = rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+		int32_t r_wy = -ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
 		int32_t c = 0;
 		nd_field_elevation_q12_4(world, 0, r_wx, r_wy, &c, NULL);
-		int16_t base_hyp = nd_field_bimodal_hypsometry((int16_t)(c >> 4));
-		int32_t tot = (int32_t)base_hyp + (int32_t)nd_field_orogeny_wu(seed, 0, (int32_t)rx, (int32_t)ry, base_hyp);
+		int32_t base_hyp = nd_field_bimodal_hypsometry(c >> 4);
+		int32_t tot = base_hyp + nd_field_orogeny_wu(seed, 0, rx, ry, base_hyp);
 		if (tot > ND_FIELD_MAX_ELEV_WU) tot = ND_FIELD_MAX_ELEV_WU;
-		m->hyp = (int16_t)tot;
+		m->hyp = tot;
 		m->hyp_valid = 1;
 	}
 	return m->hyp;
 }
 
-static inline int16_t
-nd_field_room_hyp_coarse_step(uint16_t world, int32_t step_q16, int16_t rx, int16_t ry)
+static inline int32_t
+nd_field_room_hyp_coarse_step(uint16_t world, int32_t step_q16, int32_t rx, int32_t ry)
 {
 	if (step_q16 < (2048 << 16))
 		return nd_field_room_hyp_coarse(world, rx, ry);
+	uint8_t pbits = nd_field_get_planet_bits();
+	rx = nd_field_wrap_room_coord(rx, pbits);
+	ry = nd_field_wrap_room_coord(ry, pbits);
 	uint32_t seed = 0x48454947u ^ ((uint32_t)world * 0x9E3779B1u);
-	int32_t r_wx = (int32_t)rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
-	int32_t r_wy = -(int32_t)ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
+	int32_t r_wx = rx * ND_FIELD_ROOM_W + (ND_FIELD_ROOM_W / 2);
+	int32_t r_wy = -ry * ND_FIELD_ROOM_H + (ND_FIELD_ROOM_H / 2);
 	int32_t c = 0;
 	nd_field_elevation_step_q12_4(world, step_q16, r_wx, r_wy, &c, NULL);
-	int16_t base_hyp = nd_field_bimodal_hypsometry((int16_t)(c >> 4));
+	int32_t base_hyp = nd_field_bimodal_hypsometry(c >> 4);
 	int32_t room_step_q16 = step_q16 / ND_FIELD_ROOM_W;
-	int32_t tot = (int32_t)base_hyp + (int32_t)nd_field_orogeny_wu(seed, room_step_q16, (int32_t)rx, (int32_t)ry, base_hyp);
+	int32_t tot = base_hyp + nd_field_orogeny_wu(seed, room_step_q16, rx, ry, base_hyp);
 	if (tot > ND_FIELD_MAX_ELEV_WU) tot = ND_FIELD_MAX_ELEV_WU;
-	return (int16_t)tot;
+	return tot;
 }
 
 /* 4-wide SIMD batch room hypsometry evaluator.
@@ -2115,9 +2278,20 @@ nd_field_room_hyp_coarse_step(uint16_t world, int32_t step_q16, int16_t rx, int1
  * Bit-exact with 4 calls to nd_field_room_hyp_coarse_step(world, step_q16, rx[i], ry[i]). */
 static inline void
 nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
-                            const int16_t rx[4], const int16_t ry[4],
-                            int16_t out[4])
+                            const int32_t rx[4], const int32_t ry[4],
+                            int32_t out[4])
 {
+	uint8_t pbits = nd_field_get_planet_bits();
+	uint32_t epoch = nd_field_get_planet_epoch();
+	uint32_t span = 1u << pbits;
+	uint32_t mask = span - 1u;
+	int32_t seam_start = (int32_t)(span >> 1) - 256;
+	int32_t wrx[4], wry[4];
+	for (int i = 0; i < 4; i++) {
+		wrx[i] = nd_field_wrap_room_coord(rx[i], pbits);
+		wry[i] = nd_field_wrap_room_coord(ry[i], pbits);
+	}
+
 	const int use_memo = (step_q16 < (2048 << 16));
 	int miss_lanes[4];
 	int nmiss = 0;
@@ -2125,11 +2299,11 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 
 	if (use_memo) {
 		for (int i = 0; i < 4; i++) {
-			uint32_t idx = (((uint32_t)(uint16_t)rx[i] * 0x9E3779B1u) ^
-			                ((uint32_t)(uint16_t)ry[i] * 0x85EBCA77u) ^
+			uint32_t idx = (((uint32_t)wrx[i] * 0x9E3779B1u) ^
+			                ((uint32_t)wry[i] * 0x85EBCA77u) ^
 			                (uint32_t)world) & 4095u;
 			nd_field_room_memo_t *m = &s_memo[idx];
-			if (m->world == world && m->rx == rx[i] && m->ry == ry[i] && m->hyp_valid) {
+			if (m->epoch == epoch && m->world == world && m->rx == wrx[i] && m->ry == wry[i] && m->hyp_valid) {
 				out[i] = m->hyp;
 			} else {
 				miss_lanes[nmiss++] = i;
@@ -2139,7 +2313,7 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 			return;
 		if (nmiss == 1) {
 			int k = miss_lanes[0];
-			out[k] = nd_field_room_hyp_coarse(world, rx[k], ry[k]);
+			out[k] = nd_field_room_hyp_coarse(world, wrx[k], wry[k]);
 			return;
 		}
 	} else {
@@ -2150,8 +2324,8 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 	int has_seam = 0;
 	for (int j = 0; j < nmiss; j++) {
 		int k = miss_lanes[j];
-		if ((uint16_t)((uint16_t)rx[k] - 32512u) < 512u ||
-		    (uint16_t)((uint16_t)ry[k] - 32512u) < 512u) {
+		if ((((uint32_t)(wrx[k] - seam_start)) & mask) < 512u ||
+		    (((uint32_t)(wry[k] - seam_start)) & mask) < 512u) {
 			has_seam = 1;
 			break;
 		}
@@ -2159,7 +2333,7 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 	if (has_seam) {
 		for (int j = 0; j < nmiss; j++) {
 			int k = miss_lanes[j];
-			out[k] = nd_field_room_hyp_coarse_step(world, step_q16, rx[k], ry[k]);
+			out[k] = nd_field_room_hyp_coarse_step(world, step_q16, wrx[k], wry[k]);
 		}
 		return;
 	}
@@ -2171,27 +2345,26 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 	int32_t irx[4], iry[4], c4[4];
 	for (int j = 0; j < 4; j++) {
 		int k = miss_lanes[j < nmiss ? j : 0];
-		irx[j] = (int32_t)rx[k];
-		iry[j] = (int32_t)ry[k];
+		irx[j] = wrx[k];
+		iry[j] = wry[k];
 	}
 	nd_field_eval_coarse_unwrapped_step_q12_4_4x(seed, room_step_q16, irx, iry, c4);
 
-	int16_t base4[4], orog4[4];
+	int32_t base4[4], orog4[4];
 	for (int j = 0; j < 4; j++) {
 		int32_t c = c4[j] - sea_off;
-		base4[j] = nd_field_bimodal_hypsometry((int16_t)(c >> 4));
+		base4[j] = nd_field_bimodal_hypsometry(c >> 4);
 	}
 	nd_field_orogeny_wu_4x(seed, room_step_q16, irx, iry, base4, orog4);
 
 	for (int j = 0; j < nmiss; j++) {
 		int k = miss_lanes[j];
-		int32_t tot = (int32_t)base4[j] + (int32_t)orog4[j];
+		int32_t tot = base4[j] + orog4[j];
 		if (tot > ND_FIELD_MAX_ELEV_WU) tot = ND_FIELD_MAX_ELEV_WU;
-		int16_t hyp = (int16_t)tot;
-		out[k] = hyp;
+		out[k] = tot;
 		if (use_memo) {
-			nd_field_room_memo_t *m = nd_field_room_memo_slot(world, rx[k], ry[k]);
-			m->hyp = hyp;
+			nd_field_room_memo_t *m = nd_field_room_memo_slot(world, wrx[k], wry[k]);
+			m->hyp = tot;
 			m->hyp_valid = 1;
 		}
 	}
@@ -2199,37 +2372,37 @@ nd_field_room_hyp_coarse_4x(uint16_t world, int32_t step_q16,
 
 /* Evaluates the 2x2 room quad (rx,ry),(rx+1,ry),(rx,ry+1),(rx+1,ry+1) in one 4-wide SIMD pass. */
 static inline void
-nd_field_room_hyp_coarse_quad(uint16_t world, int16_t rx, int16_t ry, int16_t out[4])
+nd_field_room_hyp_coarse_quad(uint16_t world, int32_t rx, int32_t ry, int32_t out[4])
 {
-	int16_t rx_n = (int16_t)(rx + 1);
-	int16_t ry_n = (int16_t)(ry + 1);
-	int16_t qx[4] = { rx, rx_n, rx, rx_n };
-	int16_t qy[4] = { ry, ry, ry_n, ry_n };
+	int32_t rx_n = rx + 1;
+	int32_t ry_n = ry + 1;
+	int32_t qx[4] = { rx, rx_n, rx, rx_n };
+	int32_t qy[4] = { ry, ry, ry_n, ry_n };
 	nd_field_room_hyp_coarse_4x(world, 0, qx, qy, out);
 }
 
 static inline int32_t
 nd_field_interp_coarse_q12_4(uint16_t world, int32_t rx_q16, int32_t ry_q16)
 {
-	int16_t rx = (int16_t)(rx_q16 >> 16);
-	int16_t ry = (int16_t)(ry_q16 >> 16);
+	int32_t rx = rx_q16 >> 16;
+	int32_t ry = ry_q16 >> 16;
 	uint32_t fx = (uint32_t)(rx_q16 & 0xFFFF);
 	uint32_t fy = (uint32_t)(ry_q16 & 0xFFFF);
 
 	if (fx == 0 && fy == 0) {
-		return (int32_t)nd_field_room_hyp_coarse(world, rx, ry) << 4;
+		return nd_field_room_hyp_coarse(world, rx, ry) << 4;
 	}
 
 	/* C2 quintic Hermite fade: 6t^5 - 15t^4 + 10t^3 (zero 1st & 2nd derivative at room grid lines) */
 	uint32_t tx = noise_wfade5(fx, 16);
 	uint32_t ty = noise_wfade5(fy, 16);
 
-	int16_t q[4];
+	int32_t q[4];
 	nd_field_room_hyp_coarse_quad(world, rx, ry, q);
-	int32_t q00 = (int32_t)q[0] << 4;
-	int32_t q10 = (int32_t)q[1] << 4;
-	int32_t q01 = (int32_t)q[2] << 4;
-	int32_t q11 = (int32_t)q[3] << 4;
+	int32_t q00 = q[0] << 4;
+	int32_t q10 = q[1] << 4;
+	int32_t q01 = q[2] << 4;
+	int32_t q11 = q[3] << 4;
 
 	int32_t q0 = q00 + (int32_t)(((int64_t)(q10 - q00) * tx) >> 16);
 	int32_t q1 = q01 + (int32_t)(((int64_t)(q11 - q01) * tx) >> 16);
@@ -2241,23 +2414,23 @@ nd_field_interp_coarse_step_q12_4(uint16_t world, int32_t step_q16, int32_t rx_q
 {
 	if (step_q16 < (640 << 16))
 		return nd_field_interp_coarse_q12_4(world, rx_q16, ry_q16);
-	int16_t rx = (int16_t)(rx_q16 >> 16);
-	int16_t ry = (int16_t)(ry_q16 >> 16);
+	int32_t rx = rx_q16 >> 16;
+	int32_t ry = ry_q16 >> 16;
 	uint32_t fx = (uint32_t)(rx_q16 & 0xFFFF);
 	uint32_t fy = (uint32_t)(ry_q16 & 0xFFFF);
 
-	int32_t q00 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx, ry) << 4;
+	int32_t q00 = nd_field_room_hyp_coarse_step(world, step_q16, rx, ry) << 4;
 	if ((fx == 0 && fy == 0) || step_q16 >= (2048 << 16))
 		return q00;
 
 	uint32_t tx = noise_wfade5(fx, 16);
 	uint32_t ty = noise_wfade5(fy, 16);
 
-	int16_t rx_next = (int16_t)(rx + 1);
-	int16_t ry_next = (int16_t)(ry + 1);
-	int32_t q10 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx_next, ry) << 4;
-	int32_t q01 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx, ry_next) << 4;
-	int32_t q11 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, rx_next, ry_next) << 4;
+	int32_t rx_next = rx + 1;
+	int32_t ry_next = ry + 1;
+	int32_t q10 = nd_field_room_hyp_coarse_step(world, step_q16, rx_next, ry) << 4;
+	int32_t q01 = nd_field_room_hyp_coarse_step(world, step_q16, rx, ry_next) << 4;
+	int32_t q11 = nd_field_room_hyp_coarse_step(world, step_q16, rx_next, ry_next) << 4;
 
 	int32_t q0 = q00 + (int32_t)(((int64_t)(q10 - q00) * tx) >> 16);
 	int32_t q1 = q01 + (int32_t)(((int64_t)(q11 - q01) * tx) >> 16);
@@ -2265,13 +2438,13 @@ nd_field_interp_coarse_step_q12_4(uint16_t world, int32_t step_q16, int32_t rx_q
 }
 
 static inline void
-nd_field_room_macro_memo(uint16_t world, int16_t rx, int16_t ry,
+nd_field_room_macro_memo(uint16_t world, int32_t rx, int32_t ry,
                          uint32_t *out_cl, uint32_t *out_tm)
 {
 	nd_field_room_memo_t *rm = nd_field_room_memo_slot(world, rx, ry);
 	if (!rm->macro_valid) {
-		rm->cl_macro = chaff_sample_torus_macro((int32_t)rx, (int32_t)ry, 14, 1 + world);
-		rm->tm_macro = chaff_sample_torus_macro((int32_t)rx, (int32_t)ry, 14, 53 + world);
+		rm->cl_macro = chaff_sample_torus_macro(rm->rx, rm->ry, 14, 1 + world);
+		rm->tm_macro = chaff_sample_torus_macro(rm->rx, rm->ry, 14, 53 + world);
 		rm->macro_valid = 1;
 	}
 	*out_cl = rm->cl_macro;
@@ -2282,8 +2455,8 @@ static inline void
 nd_field_interp_macro_q16(uint16_t world, int32_t rx_q16, int32_t ry_q16,
                           uint32_t *out_cl_macro, uint32_t *out_tm_macro)
 {
-	int16_t rx = (int16_t)(rx_q16 >> 16);
-	int16_t ry = (int16_t)(ry_q16 >> 16);
+	int32_t rx = rx_q16 >> 16;
+	int32_t ry = ry_q16 >> 16;
 	uint32_t fx = (uint32_t)(rx_q16 & 0xFFFF);
 	uint32_t fy = (uint32_t)(ry_q16 & 0xFFFF);
 
@@ -2297,8 +2470,8 @@ nd_field_interp_macro_q16(uint16_t world, int32_t rx_q16, int32_t ry_q16,
 
 	uint32_t tx = noise_wfade5(fx, 16);
 	uint32_t ty = noise_wfade5(fy, 16);
-	int16_t rx_next = (int16_t)(rx + 1);
-	int16_t ry_next = (int16_t)(ry + 1);
+	int32_t rx_next = rx + 1;
+	int32_t ry_next = ry + 1;
 
 	uint32_t cl10 = 0, tm10 = 0, cl01 = 0, tm01 = 0, cl11 = 0, tm11 = 0;
 	nd_field_room_macro_memo(world, rx_next, ry, &cl10, &tm10);
@@ -2322,8 +2495,8 @@ nd_field_interp_macro_step_q16(uint16_t world, int32_t step_q16, int32_t rx_q16,
 		nd_field_interp_macro_q16(world, rx_q16, ry_q16, out_cl_macro, out_tm_macro);
 		return;
 	}
-	int16_t rx = (int16_t)((rx_q16 + 32768) >> 16);
-	int16_t ry = (int16_t)((ry_q16 + 32768) >> 16);
+	int32_t rx = (rx_q16 + 32768) >> 16;
+	int32_t ry = (ry_q16 + 32768) >> 16;
 	nd_field_room_macro_memo(world, rx, ry, out_cl_macro, out_tm_macro);
 }
 
@@ -2333,10 +2506,10 @@ nd_field_interp_macro_step_q16(uint16_t world, int32_t step_q16, int32_t rx_q16,
  * (lake_water_lvl) and a continuous 360-degree dry containment rim. */
 static inline void
 nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, int32_t wy,
-                                 int32_t *inout_coarse_q12_4, int16_t *inout_water_level)
+                                 int32_t *inout_coarse_q12_4, int32_t *inout_water_level)
 {
-	int16_t sea_lvl = *inout_water_level;
-	if (*inout_coarse_q12_4 < (((int32_t)sea_lvl + 28) << 4))
+	int32_t sea_lvl = *inout_water_level;
+	if (*inout_coarse_q12_4 < ((sea_lvl + 28) << 4))
 		return;
 
 	uint32_t lake_w_q16 = chaff_wavelength_weight_q16(480 << 16, step_q16);
@@ -2368,45 +2541,48 @@ nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, i
 	if (dx < -480 || dx > 480 || dy < -420 || dy > 420)
 		return;
 
-	/* Memoize 8x8-room basin cell topography (25-room neighbor scan) per (world, bx, by) */
+	/* Memoize 8x8-room basin cell topography (25-room neighbor scan) per (epoch, world, bx, by) */
 	typedef struct {
+		uint32_t epoch;
 		uint16_t world;
-		int16_t bx, by;
-		int16_t lake_water_lvl;
-		uint8_t state; /* 0 = empty, 1 = rejected, 2 = active */
+		int32_t  bx, by;
+		int32_t  lake_water_lvl;
+		uint8_t  state; /* 0 = empty, 1 = rejected, 2 = active */
 	} nd_lake_cell_memo_t;
 	static _CHAFF_TLS nd_lake_cell_memo_t s_lake_memo[256];
-	uint32_t l_idx = (((uint32_t)(uint16_t)bx * 0x9E3779B1u) ^
-	                  ((uint32_t)(uint16_t)by * 0x85EBCA77u) ^
+	uint32_t epoch = nd_field_get_planet_epoch();
+	uint32_t l_idx = (((uint32_t)bx * 0x9E3779B1u) ^
+	                  ((uint32_t)by * 0x85EBCA77u) ^
 	                  (uint32_t)world) & 255u;
 	nd_lake_cell_memo_t *lm = &s_lake_memo[l_idx];
-	if (lm->state == 0 || lm->world != world || lm->bx != (int16_t)bx || lm->by != (int16_t)by) {
+	if (lm->state == 0 || lm->epoch != epoch || lm->world != world || lm->bx != bx || lm->by != by) {
+		lm->epoch = epoch;
 		lm->world = world;
-		lm->bx = (int16_t)bx;
-		lm->by = (int16_t)by;
+		lm->bx = bx;
+		lm->by = by;
 		lm->state = 1;
 
-		int16_t crx = (int16_t)noise_fdiv(cx - (ND_FIELD_ROOM_W / 2), ND_FIELD_ROOM_W);
-		int16_t cry = (int16_t)noise_fdiv((ND_FIELD_ROOM_H / 2) - cy, ND_FIELD_ROOM_H);
+		int32_t crx = noise_fdiv(cx - (ND_FIELD_ROOM_W / 2), ND_FIELD_ROOM_W);
+		int32_t cry = noise_fdiv((ND_FIELD_ROOM_H / 2) - cy, ND_FIELD_ROOM_H);
 
-		int32_t abs_cry = abs((int32_t)cry);
+		int32_t abs_cry = abs((int32_t)(int16_t)cry);
 		int32_t eq_cry = (abs_cry <= 16384) ? abs_cry : (32768 - abs_cry);
 		int arid_reject = (eq_cry >= 2400 && eq_cry <= 9600 && abs(eq_cry - 5800) < 2800 && (h_cell & 31u) != 0);
 		if (!arid_reject) {
-			int16_t center_hyp = nd_field_room_hyp_coarse(world, crx, cry);
+			int32_t center_hyp = nd_field_room_hyp_coarse(world, crx, cry);
 			if (center_hyp >= sea_lvl + 36 && center_hyp <= sea_lvl + 480) {
-				int16_t min_neigh = center_hyp;
-				int16_t max_neigh = center_hyp;
+				int32_t min_neigh = center_hyp;
+				int32_t max_neigh = center_hyp;
 				for (int dy_r = -2; dy_r <= 2; dy_r++) {
 					for (int dx_r = -2; dx_r <= 2; dx_r++) {
 						if (dx_r == 0 && dy_r == 0) continue;
-						int16_t nh = nd_field_room_hyp_coarse(world, (int16_t)(crx + dx_r), (int16_t)(cry + dy_r));
+						int32_t nh = nd_field_room_hyp_coarse(world, crx + dx_r, cry + dy_r);
 						if (nh < min_neigh) min_neigh = nh;
 						if (nh > max_neigh) max_neigh = nh;
 					}
 				}
 				if (min_neigh >= sea_lvl + 30 && (max_neigh - min_neigh) <= 18) {
-					lm->lake_water_lvl = (int16_t)(min_neigh - 2);
+					lm->lake_water_lvl = min_neigh - 2;
 					lm->state = 2;
 				}
 			}
@@ -2415,7 +2591,7 @@ nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, i
 	if (lm->state != 2)
 		return;
 
-	int16_t lake_water_lvl = lm->lake_water_lvl;
+	int32_t lake_water_lvl = lm->lake_water_lvl;
 
 	int32_t rx_rot = dx;
 	int32_t ry_rot = dy;
@@ -2445,7 +2621,7 @@ nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, i
 	uint32_t t_q16 = (uint32_t)(65536 - eff_r2_q16);
 	uint32_t bowl_q16 = noise_wfade5(t_q16, 16);
 
-	int32_t bed_elev_q12_4 = ((int32_t)lake_water_lvl - 14) << 4;
+	int32_t bed_elev_q12_4 = (lake_water_lvl - 14) << 4;
 	int32_t orig_c = *inout_coarse_q12_4;
 	if (orig_c > bed_elev_q12_4) {
 		uint32_t u_q16 = noise_wfade5(bowl_q16, 16);
@@ -2453,14 +2629,14 @@ nd_field_eval_mountain_lake_step(uint16_t world, int32_t step_q16, int32_t wx, i
 			u_q16 = (uint32_t)(((uint64_t)u_q16 * lake_w_q16) >> 16);
 		int32_t carved_c = orig_c - (int32_t)(((int64_t)(orig_c - bed_elev_q12_4) * u_q16) >> 16);
 		*inout_coarse_q12_4 = carved_c;
-		if (carved_c <= (((int32_t)lake_water_lvl + 2) << 4))
+		if (carved_c <= ((lake_water_lvl + 2) << 4))
 			*inout_water_level = lake_water_lvl;
 	}
 }
 
 static inline void
 nd_field_eval_mountain_lake(uint16_t world, int32_t wx, int32_t wy,
-                            int32_t *inout_coarse_q12_4, int16_t *inout_water_level)
+                            int32_t *inout_coarse_q12_4, int32_t *inout_water_level)
 {
 	nd_field_eval_mountain_lake_step(world, 0, wx, wy, inout_coarse_q12_4, inout_water_level);
 }
@@ -2477,7 +2653,7 @@ nd_field_eval_mountain_lake(uint16_t world, int32_t wx, int32_t wy,
  *     and alpine valleys (rain >= 155, rug_q8 > 40) that feed into regional tributaries. */
 static inline void
 nd_field_eval_river_ex(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
-                       int32_t *inout_coarse_q12_4, int16_t *inout_water_level,
+                       int32_t *inout_coarse_q12_4, int32_t *inout_water_level,
                        uint8_t *out_river_carve_q4, uint16_t *out_fine_damp_q8,
                        int32_t *inout_rug_q8)
 {
@@ -2485,7 +2661,7 @@ nd_field_eval_river_ex(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
 	*out_river_carve_q4 = 0;
 	*out_fine_damp_q8 = 0;
 
-	int16_t base_sea_lvl = nd_field_water_level(world);
+	int32_t base_sea_lvl = nd_field_water_level(world);
 	if (*inout_water_level > base_sea_lvl)
 		return; /* Preserve self-contained highland lake basins */
 
@@ -2747,7 +2923,7 @@ nd_field_eval_river_ex(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
 		}
 
 		if (valley_floor_q4 < w_river_q4) {
-			int16_t riv_wl = (int16_t)((w_river_q4 + 8) >> 4);
+			int32_t riv_wl = (w_river_q4 + 8) >> 4;
 			if (riv_wl > *inout_water_level)
 				*inout_water_level = riv_wl;
 		}
@@ -2758,7 +2934,7 @@ nd_field_eval_river_ex(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
 
 static inline void
 nd_field_eval_river(uint16_t world, int32_t wx, int32_t wy, uint32_t rain,
-                    int32_t *inout_coarse_q12_4, int16_t *inout_water_level,
+                    int32_t *inout_coarse_q12_4, int32_t *inout_water_level,
                     uint8_t *out_river_carve_q4, uint16_t *out_fine_damp_q8)
 {
 	nd_field_eval_river_ex(world, wx, wy, rain, inout_coarse_q12_4, inout_water_level,
@@ -2877,18 +3053,18 @@ nd_field_sample_at_azimuth_step(uint16_t world, uint8_t lod, int32_t step_q16,
 	 *    Prevailing planetary surface wind blows from (-0.741, +0.671) towards (+0.741, -0.671).
 	 *    We interpolate coarse hypsometry 3 rooms upwind (rx_q16 - 3, ry_q16 + 3) so rain shadows
 	 *    transition smoothly without 160x128 room-grid steps. */
-	int16_t up_hyp = (int16_t)(nd_field_interp_coarse_step_q12_4(world, step_q16, rx_q16 - (3 << 16), ry_q16 + (3 << 16)) >> 4);
-	int16_t cur_hyp = (int16_t)(coarse_q12_4 >> 4);
-	int16_t sea_lvl = s.water_level;
+	int32_t up_hyp = nd_field_interp_coarse_step_q12_4(world, step_q16, rx_q16 - (3 << 16), ry_q16 + (3 << 16)) >> 4;
+	int32_t cur_hyp = coarse_q12_4 >> 4;
+	int32_t sea_lvl = s.water_level;
 	if (up_hyp > sea_lvl + 140 && cur_hyp < up_hyp - 25) {
 		/* Rain Shadow: Downwind in the lee of high mountains, descending dry air suppresses precipitation */
-		int32_t shadow_depth = (int32_t)(up_hyp - (sea_lvl + 140));
+		int32_t shadow_depth = up_hyp - (sea_lvl + 140);
 		if (shadow_depth > 180) shadow_depth = 180;
 		int32_t rain_shadow = (shadow_depth * 64) / 180;
 		rn_val -= rain_shadow;
 	} else if (cur_hyp > up_hyp + 35 && cur_hyp > sea_lvl + 80) {
 		/* Orographic Lift: Windward rising slopes condense moisture and enhance rainfall */
-		int32_t lift_height = (int32_t)(cur_hyp - up_hyp);
+		int32_t lift_height = cur_hyp - up_hyp;
 		if (lift_height > 160) lift_height = 160;
 		int32_t oro_lift = (lift_height * 48) / 160;
 		rn_val += oro_lift;
@@ -3038,18 +3214,18 @@ nd_field_sample_at_azimuth_step(uint16_t world, uint8_t lod, int32_t step_q16,
 		if (fine_q12_4 < -max_fine_q12_4) fine_q12_4 = -max_fine_q12_4;
 	}
 
-	s.coarse_elev = (int16_t)(coarse_q12_4 >> 4);
-	s.fine_elev = (int16_t)(fine_q12_4 >> 4);
+	s.coarse_elev = coarse_q12_4 >> 4;
+	s.fine_elev = fine_q12_4 >> 4;
 
 	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
-	if (total_q12_4 > (32000 << 4)) total_q12_4 = (32000 << 4);
-	if (total_q12_4 < -(32000 << 4)) total_q12_4 = -(32000 << 4);
-	s.elevation = (int16_t)(total_q12_4 >> 4);
-	s.elevation_q12_4 = (lod == 0) ? ((int32_t)s.elevation << 4) : total_q12_4;
+	if (total_q12_4 > (500000 << 4)) total_q12_4 = (500000 << 4);
+	if (total_q12_4 < -(500000 << 4)) total_q12_4 = -(500000 << 4);
+	s.elevation = total_q12_4 >> 4;
+	s.elevation_q12_4 = (lod == 0) ? (s.elevation << 4) : total_q12_4;
 
 	if (s.elevation < s.water_level) {
 		s.is_water = 1;
-		s.depth = (int16_t)(s.water_level - s.elevation);
+		s.depth = s.water_level - s.elevation;
 	} else {
 		s.is_water = 0;
 		s.depth = 0;
@@ -3185,6 +3361,7 @@ nd_field_lat_base_params(int16_t pos_y, int32_t *out_base, int32_t *out_tm_amp)
 }
 
 typedef struct {
+	uint32_t planet_epoch;
 	uint16_t world;
 	uint8_t  lod;
 	uint16_t sun_azimuth;
@@ -3192,7 +3369,7 @@ typedef struct {
 	int32_t  wy;
 	int32_t  rw, rh;
 	int32_t  half_rw, half_rh;
-	int16_t  base_wl;
+	int32_t  base_wl;
 	int32_t  ry_q16;
 	int16_t  room_y;
 	int16_t  room_y_next;
@@ -3244,6 +3421,7 @@ static inline void
 nd_field_row_ctx_init(nd_field_row_ctx_t *ctx, uint16_t world, uint8_t lod,
                       int32_t step_q16, int32_t wy, uint16_t sun_azimuth)
 {
+	ctx->planet_epoch = nd_field_get_planet_epoch();
 	ctx->world = world;
 	ctx->lod = lod;
 	ctx->sun_azimuth = sun_azimuth;
@@ -3359,15 +3537,15 @@ nd_field_row_climate_and_river(nd_field_row_ctx_t *ctx, int32_t wx, int16_t room
 	}
 	rn_val += ctx->bor_wet;
 
-	int16_t up_hyp = (int16_t)(up_q12_4 >> 4);
-	int16_t cur_hyp = (int16_t)(*coarse_q12_4 >> 4);
-	int16_t sea_lvl = s->water_level;
+	int32_t up_hyp = up_q12_4 >> 4;
+	int32_t cur_hyp = *coarse_q12_4 >> 4;
+	int32_t sea_lvl = s->water_level;
 	if (up_hyp > sea_lvl + 140 && cur_hyp < up_hyp - 25) {
-		int32_t shadow_depth = (int32_t)(up_hyp - (sea_lvl + 140));
+		int32_t shadow_depth = up_hyp - (sea_lvl + 140);
 		if (shadow_depth > 180) shadow_depth = 180;
 		rn_val -= (shadow_depth * 64) / 180;
 	} else if (cur_hyp > up_hyp + 35 && cur_hyp > sea_lvl + 80) {
-		int32_t lift_height = (int32_t)(cur_hyp - up_hyp);
+		int32_t lift_height = cur_hyp - up_hyp;
 		if (lift_height > 160) lift_height = 160;
 		rn_val += (lift_height * 48) / 160;
 	}
@@ -3516,18 +3694,18 @@ nd_field_row_finalize_sample(const nd_field_row_ctx_t *ctx, int32_t wx, int32_t 
 		if (fine_q12_4 < -max_fine_q12_4) fine_q12_4 = -max_fine_q12_4;
 	}
 
-	s->coarse_elev = (int16_t)(coarse_q12_4 >> 4);
-	s->fine_elev = (int16_t)(fine_q12_4 >> 4);
+	s->coarse_elev = coarse_q12_4 >> 4;
+	s->fine_elev = fine_q12_4 >> 4;
 
 	int32_t total_q12_4 = coarse_q12_4 + fine_q12_4;
-	if (total_q12_4 > (32000 << 4)) total_q12_4 = (32000 << 4);
-	if (total_q12_4 < -(32000 << 4)) total_q12_4 = -(32000 << 4);
-	s->elevation = (int16_t)(total_q12_4 >> 4);
-	s->elevation_q12_4 = (ctx->lod == 0) ? ((int32_t)s->elevation << 4) : total_q12_4;
+	if (total_q12_4 > (500000 << 4)) total_q12_4 = (500000 << 4);
+	if (total_q12_4 < -(500000 << 4)) total_q12_4 = -(500000 << 4);
+	s->elevation = total_q12_4 >> 4;
+	s->elevation_q12_4 = (ctx->lod == 0) ? (s->elevation << 4) : total_q12_4;
 
 	if (s->elevation < s->water_level) {
 		s->is_water = 1;
-		s->depth = (int16_t)(s->water_level - s->elevation);
+		s->depth = s->water_level - s->elevation;
 	} else {
 		s->is_water = 0;
 		s->depth = 0;
@@ -3582,21 +3760,21 @@ nd_field_row_sample(nd_field_row_ctx_t *ctx, int32_t wx)
 		int16_t rx_next = (int16_t)(room_x + 1);
 		int16_t up_rx = (int16_t)(room_x - 3);
 		if (ctx->coarse_direct) {
-			ctx->c00 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, room_x, ctx->room_y) << 4;
-			ctx->u00 = (int32_t)nd_field_room_hyp_coarse_step(world, step_q16, up_rx, ctx->up_ry) << 4;
+			ctx->c00 = nd_field_room_hyp_coarse_step(world, step_q16, room_x, ctx->room_y) << 4;
+			ctx->u00 = nd_field_room_hyp_coarse_step(world, step_q16, up_rx, ctx->up_ry) << 4;
 		} else {
-			int16_t cq[4], uq[4];
+			int32_t cq[4], uq[4];
 			nd_field_room_hyp_coarse_quad(world, room_x, ctx->room_y, cq);
-			ctx->c00 = (int32_t)cq[0] << 4;
-			ctx->c10 = (int32_t)cq[1] << 4;
-			ctx->c01 = (int32_t)cq[2] << 4;
-			ctx->c11 = (int32_t)cq[3] << 4;
+			ctx->c00 = cq[0] << 4;
+			ctx->c10 = cq[1] << 4;
+			ctx->c01 = cq[2] << 4;
+			ctx->c11 = cq[3] << 4;
 
 			nd_field_room_hyp_coarse_quad(world, up_rx, ctx->up_ry, uq);
-			ctx->u00 = (int32_t)uq[0] << 4;
-			ctx->u10 = (int32_t)uq[1] << 4;
-			ctx->u01 = (int32_t)uq[2] << 4;
-			ctx->u11 = (int32_t)uq[3] << 4;
+			ctx->u00 = uq[0] << 4;
+			ctx->u10 = uq[1] << 4;
+			ctx->u01 = uq[2] << 4;
+			ctx->u11 = uq[3] << 4;
 		}
 		if (!ctx->macro_snap) {
 			nd_field_room_macro_memo(world, room_x, ctx->room_y, &ctx->m_cl00, &ctx->m_tm00);
@@ -3696,18 +3874,19 @@ nd_field_row_sample_4x(nd_field_row_ctx_t *ctx, const int32_t wx[4], nd_field_sa
 	int32_t signed_dot[4];
 
 	if (ctx->coarse_direct) {
-		int16_t up_rx[4] = {
+		int32_t rx4[4] = { room_x[0], room_x[1], room_x[2], room_x[3] };
+		int32_t up_rx[4] = {
 			(int16_t)(room_x[0] - 3), (int16_t)(room_x[1] - 3),
 			(int16_t)(room_x[2] - 3), (int16_t)(room_x[3] - 3)
 		};
-		int16_t ry4[4] = { ctx->room_y, ctx->room_y, ctx->room_y, ctx->room_y };
-		int16_t up_ry4[4] = { ctx->up_ry, ctx->up_ry, ctx->up_ry, ctx->up_ry };
-		int16_t c_hyp[4], u_hyp[4];
-		nd_field_room_hyp_coarse_4x(world, step_q16, room_x, ry4, c_hyp);
+		int32_t ry4[4] = { ctx->room_y, ctx->room_y, ctx->room_y, ctx->room_y };
+		int32_t up_ry4[4] = { ctx->up_ry, ctx->up_ry, ctx->up_ry, ctx->up_ry };
+		int32_t c_hyp[4], u_hyp[4];
+		nd_field_room_hyp_coarse_4x(world, step_q16, rx4, ry4, c_hyp);
 		nd_field_room_hyp_coarse_4x(world, step_q16, up_rx, up_ry4, u_hyp);
 		for (int i = 0; i < 4; i++) {
-			coarse_q12_4[i] = (int32_t)c_hyp[i] << 4;
-			up_q12_4[i] = (int32_t)u_hyp[i] << 4;
+			coarse_q12_4[i] = c_hyp[i] << 4;
+			up_q12_4[i] = u_hyp[i] << 4;
 			if (!ctx->rx_valid || ctx->last_rx != room_x[i]) {
 				ctx->last_rx = room_x[i];
 				ctx->rx_valid = 1;
@@ -3728,18 +3907,18 @@ nd_field_row_sample_4x(nd_field_row_ctx_t *ctx, const int32_t wx[4], nd_field_sa
 				ctx->rx_valid = 1;
 				int16_t rx_next = (int16_t)(room_x[i] + 1);
 				int16_t up_rx = (int16_t)(room_x[i] - 3);
-				int16_t cq[4], uq[4];
+				int32_t cq[4], uq[4];
 				nd_field_room_hyp_coarse_quad(world, room_x[i], ctx->room_y, cq);
-				ctx->c00 = (int32_t)cq[0] << 4;
-				ctx->c10 = (int32_t)cq[1] << 4;
-				ctx->c01 = (int32_t)cq[2] << 4;
-				ctx->c11 = (int32_t)cq[3] << 4;
+				ctx->c00 = cq[0] << 4;
+				ctx->c10 = cq[1] << 4;
+				ctx->c01 = cq[2] << 4;
+				ctx->c11 = cq[3] << 4;
 
 				nd_field_room_hyp_coarse_quad(world, up_rx, ctx->up_ry, uq);
-				ctx->u00 = (int32_t)uq[0] << 4;
-				ctx->u10 = (int32_t)uq[1] << 4;
-				ctx->u01 = (int32_t)uq[2] << 4;
-				ctx->u11 = (int32_t)uq[3] << 4;
+				ctx->u00 = uq[0] << 4;
+				ctx->u10 = uq[1] << 4;
+				ctx->u01 = uq[2] << 4;
+				ctx->u11 = uq[3] << 4;
 
 				if (!ctx->macro_snap) {
 					nd_field_room_macro_memo(world, room_x[i], ctx->room_y, &ctx->m_cl00, &ctx->m_tm00);
@@ -3822,10 +4001,12 @@ nd_field_sample_4x(uint16_t world, int32_t step_q16, const int32_t wx[4], int32_
 {
 	static _CHAFF_TLS nd_field_row_ctx_t s_row4_ctx;
 	static _CHAFF_TLS int s_row4_valid = 0;
+	uint32_t planet_epoch = nd_field_get_planet_epoch();
 	uint16_t sun_azimuth = nd_field_get_sun_azimuth();
 	int32_t rw = nd_field_get_room_w();
 	int32_t rh = nd_field_get_room_h();
 	if (!s_row4_valid ||
+	    s_row4_ctx.planet_epoch != planet_epoch ||
 	    s_row4_ctx.world != world ||
 	    s_row4_ctx.step_q16 != step_q16 ||
 	    s_row4_ctx.wy != wy ||
@@ -3885,10 +4066,10 @@ nd_field_sample_corolla_wind(uint16_t world, int32_t wx, int32_t wy,
 	int16_t rx = (int16_t)(rx_q16 >> 16);
 	int16_t ry = (int16_t)(ry_q16 >> 16);
 
-	int16_t h_e = nd_field_room_hyp_coarse(world, (int16_t)(rx + 1), ry);
-	int16_t h_w = nd_field_room_hyp_coarse(world, (int16_t)(rx - 1), ry);
-	int16_t h_n = nd_field_room_hyp_coarse(world, rx, (int16_t)(ry + 1));
-	int16_t h_s = nd_field_room_hyp_coarse(world, rx, (int16_t)(ry - 1));
+	int32_t h_e = nd_field_room_hyp_coarse(world, (int32_t)rx + 1, ry);
+	int32_t h_w = nd_field_room_hyp_coarse(world, (int32_t)rx - 1, ry);
+	int32_t h_n = nd_field_room_hyp_coarse(world, rx, (int32_t)ry + 1);
+	int32_t h_s = nd_field_room_hyp_coarse(world, rx, (int32_t)ry - 1);
 	double grad_u = (double)(h_e - h_w) * 0.01;
 	double grad_v = (double)(h_n - h_s) * 0.01;
 
@@ -3912,11 +4093,11 @@ nd_field_sample_corolla_climate(uint16_t world, int32_t wx, int32_t wy,
 	int16_t rx = (int16_t)(rx_q16 >> 16);
 	int16_t ry = (int16_t)(ry_q16 >> 16);
 
-	int16_t h_c = nd_field_room_hyp_coarse(world, rx, ry);
-	int16_t h_e = nd_field_room_hyp_coarse(world, (int16_t)(rx + 1), ry);
-	int16_t h_w = nd_field_room_hyp_coarse(world, (int16_t)(rx - 1), ry);
-	int16_t h_n = nd_field_room_hyp_coarse(world, rx, (int16_t)(ry + 1));
-	int16_t h_s = nd_field_room_hyp_coarse(world, rx, (int16_t)(ry - 1));
+	int32_t h_c = nd_field_room_hyp_coarse(world, rx, ry);
+	int32_t h_e = nd_field_room_hyp_coarse(world, (int32_t)rx + 1, ry);
+	int32_t h_w = nd_field_room_hyp_coarse(world, (int32_t)rx - 1, ry);
+	int32_t h_n = nd_field_room_hyp_coarse(world, rx, (int32_t)ry + 1);
+	int32_t h_s = nd_field_room_hyp_coarse(world, rx, (int32_t)ry - 1);
 	double grad_u = (double)(h_e - h_w) * 0.01;
 	double grad_v = (double)(h_n - h_s) * 0.01;
 
@@ -4016,7 +4197,7 @@ nd_field_fill(nd_field_chunk_t *chunk)
 				: (chunk->ox + (int32_t)c * step_world);
 			nd_field_sample_t s = nd_field_row_sample(&ctx, wx);
 			size_t idx = row_off + c;
-			chunk->height[idx] = s.elevation;
+			chunk->height[idx] = nd_field_elevation_to_block(s.elevation_q12_4);
 			if (chunk->bio)   chunk->bio[idx] = s.bio;
 			if (chunk->bio2)  chunk->bio2[idx] = s.bio2;
 			if (chunk->blend) chunk->blend[idx] = s.blend;

@@ -2,6 +2,8 @@
 
 Status snapshot after landing canonical Earth-like tectonic orogeny (`ND_FIELD_OROGENY_SALT`) and altitude-coupled alpine crag relief in [`external/nd-world/include/nd/field.h`](external/nd-world/include/nd/field.h) and [`external/nd-world/include/nd/field_glsl.h`](external/nd-world/include/nd/field_glsl.h).
 
+> **Execution Roadmap:** See [`docs/PHOTOREAL_TERRAIN_ROADMAP.md`](docs/PHOTOREAL_TERRAIN_ROADMAP.md) for the active 9-phase plan (Phases 0–8) grounding all landforms in 1:1 physical metric scale (`45.0 wu/m`, lamb = `40 cm`) and scalable planet geometry (`planet_bits = 16..23`).
+
 ---
 
 ## Core Diagnosis

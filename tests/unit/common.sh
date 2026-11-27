@@ -140,6 +140,7 @@ ND_UX_INCLUDES="\
 	-I$REPO_ROOT/external/libchaff/include \
 	-I$REPO_ROOT/external/nd-world/include \
 	-I$REPO_ROOT/external/nd-plant/include \
+	-I$REPO_ROOT/external/nd-mob/include \
 	-I$REPO_ROOT/mods/common/ux \
 	-I$REPO_ROOT/mods/nd/ux \
 	-I$REPO_ROOT/mods/nd/seven"
