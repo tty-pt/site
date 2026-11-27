@@ -151,7 +151,7 @@ typedef struct {
 _Static_assert(sizeof(gl_mesh3d_inst_t) == 128, "gl_mesh3d_inst_t must be 128 bytes");
 
 /* WebGL2 std140 Frame-Global Uniform Buffer (binding 0, shared by 8 scene programs).
- * Exact 16-byte vec4 alignment: 18 * 16 = 288 bytes, zero wasted padding. */
+ * Exact 16-byte vec4 alignment: 20 * 16 = 320 bytes (exact 5 cache lines), zero wasted padding. */
 typedef struct {
 	float uMVP[16];              /*   0 (64 B): mat4 uMVP */
 	float uTreeShadowVP[16];     /*  64 (64 B): mat4 uTreeShadowVP */
@@ -173,9 +173,11 @@ typedef struct {
 	float uCamDist;              /* 264 ( 4 B): float uCamDist */
 	float uTerrFastDist;         /* 268 ( 4 B): float uTerrFastDist */
 	float uPlanetMetric[4];      /* 272 (16 B): vec4 uPlanetMetric (wu_per_m, max_elev_wu, snowline_wu, cloud_lcl_wu) */
+	float uTerrHoriz0[4];        /* 288 (16 B): vec4 uTerrHoriz0 (near cx, cy, half_wu, base_z_wu; half_wu<=0 disables) */
+	float uTerrHoriz1[4];        /* 304 (16 B): vec4 uTerrHoriz1 (far  cx, cy, half_wu, base_z_wu; half_wu<=0 disables) */
 } nd_frame_ubo_t;
 
-_Static_assert(sizeof(nd_frame_ubo_t) == 288, "nd_frame_ubo_t must match std140 layout (288 bytes)");
+_Static_assert(sizeof(nd_frame_ubo_t) == 320, "nd_frame_ubo_t must match std140 layout (320 bytes)");
 
 /* 64-byte (4 x vec4, exact 1 cache line) per-chunk terrain instance descriptor (attribs 1..4, divisor 1) */
 typedef struct {
@@ -222,6 +224,7 @@ typedef struct {
 	GLint uWorldId;
 	GLint uSeaOffsetQ12_4;
 	GLint uTreeShadowTex;
+	GLint uTerrHorizonMap;
 	GLint uTerrDetailTex;
 	GLint uTerrNormTex;
 	GLint uNoise2DTex;
@@ -245,6 +248,7 @@ typedef struct {
 	GLint uBodyRot;
 	GLint uTorusRadii;
 	GLint uCloudShadowMap;
+	GLint uTerrHorizonMap;
 	GLint uLambWakeHead;
 	GLint uLambWakeXYT0;
 	GLint uLambWakeXYT1;
@@ -269,6 +273,7 @@ typedef struct {
 	GLint uAtlasNormTex;
 	GLint uSeaLevel;
 	GLint uCloudShadowMap;
+	GLint uTerrHorizonMap;
 	GLint uPass;
 	GLint uCamAngles;
 	GLint uHiZTex;
@@ -328,6 +333,7 @@ typedef struct {
 	GLuint pending_prog;
 	GLint uSeaLevel;
 	GLint uCloudShadowMap;
+	GLint uTerrHorizonMap;
 	GLint uShadowPass;
 	GLint uBranchletTex;
 	GLint uBranchletNorm;
@@ -351,7 +357,7 @@ typedef struct {
 } gl_mesh3d_shadow_pipe_t;
 
 #define MAX_GRASS_CHUNKS 32
-#define MAX_GRASS_VBO_CACHE 32
+#define MAX_GRASS_VBO_CACHE 128
 #define MAX_GRASS_TUFTS_PER_CHUNK (68 * 68)
 
 /* 40-byte compact per-instance grass tuft descriptor (pre-culled on CPU per chunk) */
@@ -388,6 +394,7 @@ typedef struct {
 	GLint uTorusRadii;
 	GLint uSeaLevel;
 	GLint uCloudShadowMap;
+	GLint uTerrHorizonMap;
 	GLint uTreeShadowTex;
 } gl_grass_pipe_t;
 
@@ -665,6 +672,13 @@ typedef struct {
 	float csm_rendered_time;
 	float csm_rendered_wet;
 
+	/* Phase 1: World-Scale 2-Cascade Terrain Horizon Shadow & Sky-AO Atlas (256x128 RGBA16F) */
+	GLuint terr_horizon_tex;
+	bool terr_horizon_failed;
+	bool terr_horizon_valid;
+	bool terr_horizon_near_reseed;
+	nd_seven_horizon_ring_t terr_horizon_rings[ND_TERR_HORIZ_RINGS];
+
 	/* Clustered Lighting Buffers & Textures */
 	GLuint cluster_light_tex;
 	GLuint cluster_list_tex;
@@ -794,6 +808,9 @@ typedef struct {
 	gl_grass_vbo_slot_t      grass_cache[MAX_GRASS_VBO_CACHE];
 	gl_grass_chunk_t         grass_q[MAX_GRASS_CHUNKS];
 	uint32_t                 grass_q_count;
+	uint32_t                 grass_builds_this_frame;
+	int32_t                  last_grass_l0_n;
+	bool                     grass_preset_changed;
 	GLuint atlas_tex;
 	GLuint atlas_norm_tex;
 	uint32_t atlas_ver;
@@ -955,6 +972,9 @@ void gl_bind_tree_shadow_read(GLint uTex);
 void gl_render_cloud_shadow_map(void);
 void gl_render_cloud_weather_rings(void);
 void gl_bind_csm(GLint loc_tex);
+void gl_update_terr_horizon_map(float tx, float ty,
+                                const float E[3], const float S[3], const float N[3]);
+void gl_bind_terr_horizon(GLint loc_tex, int unit);
 void gl_reset_billboard_frame_state(void);
 bool gl_eval_synoptic_is_clear_sky_cpu(float wx, float wy, float anim_time,
                                        float sea_wet, float fw,

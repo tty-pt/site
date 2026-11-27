@@ -11,7 +11,7 @@ Authoritative engineering plan for transforming NeverDark's procedural terrain f
 | Phase | Title | Status | Gate / Notes |
 |-------|-------|--------|--------------|
 | **Phase 0** | Metric Scale (`45 wu/m`), `nd_planet_scale_t`, `int32_t` Elevations & Chunk-Relative `RGBA16F` | **COMPLETE** | Bit-exact at `b = 16` (`worldgen_golden.txt` 1280 rows), Everest `398,250 wu` fp16 err `<= 0.25 wu` (`< 5.6 mm`), `b = 16..23` verified |
-| **Phase 1** | World-Scale Horizon Shadow Maps & Mountain Shadow Relief | Planned | Long-range topographic cast shadows across kilometers |
+| **Phase 1** | World-Scale Horizon Shadow Maps & Mountain Shadow Relief | **COMPLETE** | 2-cascade `256×128` `GL_RGBA16F` horizon shadow + 8-azimuth sky-AO atlas (`uTerrHorizonMap`, `NdFrameUBO` `320 B`), coupled across all 5 scene pipelines; Everest fp16 `< 2.5 m`, 0 steady-state GL uploads |
 | **Phase 2** | Geological Province Synthesis & Metric Hypsometry (10 Landform Archetypes) | Planned | Flat plains + dramatic escarpments + 1,800 m alpine cordilleras at `b = 16` |
 | **Phase 3** | Erosion-Sculpted Mountains & Coupled Mountain-to-Sea Hydrology | Planned | Ridge-to-valley drainage, alluvial aprons, cirques, braided deltas |
 | **Phase 4** | Climate-Coupled Altitude Zonation, Orographic Rain Shadows & Volumetric Cloud Ceiling | Planned | Metric timberline/snowline, windward/leeward contrast, summits piercing clouds |
@@ -142,9 +142,13 @@ Terrain must stop averaging every coordinate into one stationary noise spectrum.
   4. Replace hardcoded `8388608.0` world-height divisors in `nd_seven_gl_shaders.c` and `nd_seven_gl_occ.c` with active `uWorldDim` / `nd_planet_scale_t`.
   5. Unit tests verifying `b = 16..23` scaling math, `int32_t` headroom up to `400,000 wu`, periodic continuity at `b = 18/20`, and `< 0.5 wu` (`< 1.1 cm`) fp16 reconstruction accuracy at Everest altitude (`398,000 wu`).
 
-### Phase 1 — World-Scale Horizon Shadow Maps & Mountain Shadow Relief
+### Phase 1 — World-Scale Horizon Shadow Maps & Mountain Shadow Relief *(Complete)*
 - **Objective:** Mountains cast crisp, accurate topographic shadows across kilometers of valley floors, foothills, and neighboring ridges at all sun elevations.
-- **Approach:** Build a coarse directional horizon-angle / cascading terrain shadow map (e.g., 8-azimuth horizon map or sun-ray heightfield march on the coarse `libareole` ring / GPU depth cascade covering `10–40 km`), separate from the tight local tree shadow map. Couple with sky-hemisphere ambient occlusion so shadowed mountain faces glow cool atmospheric blue against warm sunlit ridges.
+- **Deliverables:**
+  1. Pure-C 2-cascade horizon shadow + 8-azimuth sky-hemisphere AO kernels (`nd_seven_horizon_ring_t`, `nd_seven_gl_horizon_windows`, `nd_seven_gl_horizon_sample_field`, `nd_seven_gl_horizon_compute_sky_vis`, `nd_seven_gl_horizon_sweep_sun`, `nd_seven_gl_horizon_pack_rgba`, `nd_seven_gl_horizon_eval_cpu`) in `mods/nd/seven/nd_seven_gl_math.c` & `nd_seven_gl.h`, with Far-to-Near border seeding and 8-texel world snapping.
+  2. Single `256 × 128` `GL_RGBA16F` atlas (`uTerrHorizonMap`: left tile Near Cascade, right tile Far Cascade) allocated once and dirty-gated via `glTexSubImage2D` in `mods/nd/seven/nd_seven_gl_occ.c` (0 steady-state GL uploads/allocations; `NdFrameUBO` widened to `320 B` with `uTerrHoriz0`/`uTerrHoriz1`).
+  3. Full fragment-shader coupling (`s_glsl_terr_horizon_fn`, 1-tap Near fast path, Near→Far crossfade, orbital fade, Rayleigh alpine blue `shadowCool`, `skyHemAO`, flat-plain invariance) across terrain (all 7 variants), water, mesh3d (alpha + opaque), grass, and billboards (`mods/nd/seven/nd_seven_gl_shaders.c`, `nd_seven_gl.c`, `nd_seven_gl_billboard.c`).
+  4. Unit tests in `tests/unit/test_seven_render.c` verifying cascade scaling/snapping, flat-plain invariance, `1,800 m` ridge shadows across 6 cardinal+diagonal azimuths, Far-to-Near border seeding, 45° alpine bowl SVF, Everest `398,250 wu` `RGBA16F` packing (`< 2.5 m` error), and real `nd_field` alpine shadow relief.
 
 ### Phase 2 — Geological Province Synthesis & Metric Hypsometry (10 Landform Archetypes)
 - **Objective:** Replace the uniform smooth noise blend with sharp regional geological personalities and true metric relief (up to `1,800 m` / `81,000 wu` at `b = 16`, scaling via `nd_planet_scale_t`).

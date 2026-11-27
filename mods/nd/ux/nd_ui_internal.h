@@ -53,6 +53,7 @@ int on_win_drag_up(bud_event *ev);
 int on_stage_orbit_down(bud_event *ev);
 int on_stage_orbit_wheel(bud_event *ev);
 int on_stage_orbit_dblclick(bud_event *ev);
+int on_stage_contextmenu(bud_event *ev);
 int on_win_minimize(bud_event *ev);
 int on_win_restore(bud_event *ev);
 int on_win_reset(bud_event *ev);

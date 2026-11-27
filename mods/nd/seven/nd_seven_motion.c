@@ -8,8 +8,11 @@
 #include <string.h>
 
 #define SCALE 2
-#define SPEED 72.0f          /* units/second */
+#define SPEED_STROLL 40.0f    /* units/second (Alt) */
+#define SPEED_TROT   78.0f    /* units/second (default) */
+#define SPEED_CANTER 128.0f   /* units/second (Shift sprint) */
 #define PENDING_S 2.0f        /* wait this long for the server to confirm a move */
+#define MOT_PI_F 3.14159265358979323846f
 
 __attribute__((weak)) int nd_seven_is_universe_owner(const nd_client_state_t *st)
 {
@@ -22,17 +25,67 @@ enum { HELD_U = 1, HELD_D = 2, HELD_L = 4, HELD_R = 8 };
 static int16_t s_pos[4];       /* absolute (x, y, z, world) of the origin tile */
 static int s_have;
 static int s_lx, s_ly;         /* lamb feet, in origin tile units (may leave 0..TILE) */
+static float s_lxf, s_lyf;
 static int s_dir = DIR_DOWN;
 static int s_held;
 static int s_last;             /* most recently pressed held direction bit */
 static int s_shift_held;
+static int s_alt_held;
+static int s_orbit_l_held;
+static int s_orbit_r_held;
+static int s_mouse_run;
 static int s_walking;
 static int s_pending_key;      /* move key sent, waiting for the new map */
 static float s_pending_t;
 static float s_teleport_pending_t; /* suppress stale pre-teleport map frames */
-static float s_acc;
 static uint32_t s_anim;
 static float s_anim_sec;
+
+/* Continuous Zelda/MMO lamb animation state */
+static float s_lamb_yaw_rad = 0.0f;   /* 0 = +S (South), PI = -S (North), +PI/2 = -E (West), -PI/2 = +E (East) */
+static float s_lamb_turn_rate = 0.0f; /* smoothed rad/s for head-lead & corner banking */
+static float s_speed_norm = 0.0f;     /* 0 = idle, ~0.36 = stroll, ~0.65 = trot, 1.0 = canter */
+static float s_gait_phase = 0.0f;     /* distance-locked gait cycle (rad) */
+static float s_idle_sec = 0.0f;       /* seconds stationary on dry land */
+static float s_hop_z = 0.0f;          /* hop height above ground (meters) */
+static float s_hop_vel = 0.0f;        /* vertical velocity (m/s) */
+static float s_land_squash = 0.0f;    /* 0..1 landing squash pulse */
+static float s_interact_t = 0.0f;     /* 0..1 interact head-nudge pulse */
+static float s_slope_pitch = 0.0f;    /* smoothed terrain forward pitch (rad) */
+static float s_slope_roll = 0.0f;     /* smoothed terrain lateral roll (rad) */
+static int   s_lamb_in_water = 0;
+
+static float mot_wrap_pi(float a)
+{
+	while (a > MOT_PI_F)  a -= 2.0f * MOT_PI_F;
+	while (a < -MOT_PI_F) a += 2.0f * MOT_PI_F;
+	return a;
+}
+
+static float mot_clampf(float v, float lo, float hi)
+{
+	return (v < lo) ? lo : ((v > hi) ? hi : v);
+}
+
+static float dir_to_yaw_rad(int dir)
+{
+	switch (dir) {
+	case DIR_UP:    return MOT_PI_F;
+	case DIR_LEFT:  return 0.5f * MOT_PI_F;
+	case DIR_RIGHT: return -0.5f * MOT_PI_F;
+	case DIR_DOWN:
+	default:        return 0.0f;
+	}
+}
+
+static int yaw_rad_to_dir(float yaw)
+{
+	float fx = -sinf(yaw);
+	float fy = cosf(yaw);
+	if (fabsf(fx) >= fabsf(fy))
+		return (fx >= 0.0f) ? DIR_RIGHT : DIR_LEFT;
+	return (fy >= 0.0f) ? DIR_DOWN : DIR_UP;
+}
 
 static nd_grass_wake_step_t s_wake_ring[ND_SEVEN_WAKE_MAX];
 static int s_wake_head = 0;
@@ -84,11 +137,74 @@ uint32_t nd_seven_get_anim(void) { return s_anim; }
 float nd_seven_get_anim_time(void) { return s_anim_sec; }
 void nd_seven_step_anim(uint32_t delta) { s_anim += delta; s_anim_sec += (float)delta * (1.0f / 60.0f); }
 
+float nd_seven_get_lamb_yaw_rad(void) { return s_lamb_yaw_rad; }
+float nd_seven_get_hop_z(void) { return s_hop_z; }
+
+void nd_seven_trigger_hop(void)
+{
+	if (s_hop_z <= 0.02f && s_hop_vel <= 0.05f) {
+		s_hop_vel = 2.65f; /* ~0.37m peak height, ~0.56s snappy Zelda hop */
+		s_idle_sec = 0.0f;
+	}
+}
+
+void nd_seven_trigger_interact(void)
+{
+	s_interact_t = 1.0f;
+	s_idle_sec = 0.0f;
+}
+
+void nd_seven_set_mouse_run(int active)
+{
+	s_mouse_run = active ? 1 : 0;
+}
+
+void nd_seven_set_lamb_in_water(int in_water)
+{
+	s_lamb_in_water = in_water ? 1 : 0;
+}
+
+void nd_seven_fill_lamb_anim(float terr_gx, float terr_gy, mob_anim_params_t *out)
+{
+	if (!out)
+		return;
+	float cy = cosf(s_lamb_yaw_rad);
+	float sy = sinf(s_lamb_yaw_rad);
+	/* Lamb local +Y (nose) in (E, S) is (-sin(yaw), cos(yaw)); local +X (right) is (cos(yaw), sin(yaw)) */
+	float slope_fwd = terr_gx * (-sy) + terr_gy * cy;
+	float slope_lat = terr_gx * cy + terr_gy * sy;
+	float tgt_pitch = mot_clampf(atanf(slope_fwd) * 0.65f, -0.38f, 0.38f);
+	float tgt_roll  = mot_clampf(atanf(slope_lat) * 0.55f, -0.30f, 0.30f);
+	if (s_lamb_in_water) {
+		tgt_pitch = 0.0f;
+		tgt_roll = 0.0f;
+	}
+	s_slope_pitch += (tgt_pitch - s_slope_pitch) * 0.25f;
+	s_slope_roll  += (tgt_roll  - s_slope_roll)  * 0.25f;
+
+	out->anim_sec    = s_anim_sec;
+	out->gait_phase  = s_gait_phase;
+	out->speed_norm  = s_speed_norm;
+	out->turn_rate   = s_lamb_turn_rate;
+	out->hop_z       = s_hop_z;
+	out->hop_vel     = s_hop_vel;
+	out->land_squash = s_land_squash;
+	out->slope_pitch = s_slope_pitch;
+	out->slope_roll  = s_slope_roll;
+	out->idle_sec    = s_idle_sec;
+	out->interact_t  = s_interact_t;
+	out->in_water    = s_lamb_in_water;
+}
+
 void nd_seven_reset_input(void)
 {
 	s_held = 0;
 	s_last = 0;
 	s_shift_held = 0;
+	s_alt_held = 0;
+	s_orbit_l_held = 0;
+	s_orbit_r_held = 0;
+	s_mouse_run = 0;
 	s_walking = 0;
 	s_pending_key = 0;
 	s_pending_t = 0;
@@ -99,11 +215,14 @@ static void recentre(int drop_keys)
 {
 	s_lx = NDW_CENTER_X;
 	s_ly = NDW_CENTER_Y;
+	s_lxf = (float)s_lx;
+	s_lyf = (float)s_ly;
 	s_pending_key = 0;
 	s_pending_t = 0;
 	if (drop_keys) {
 		s_held = 0;
 		s_last = 0;
+		s_mouse_run = 0;
 		s_walking = 0;
 	}
 }
@@ -153,49 +272,63 @@ void nd_seven_sync_origin(const nd_client_state_t *st)
 			if (dj == -1) { /* Stepping North into new tile */
 				if (s_pending_key == 'k' || s_ly <= NDW_FOOT_H) {
 					s_ly -= dj * NDW_TILE_H; /* +128 */
+					s_lyf -= (float)(dj * NDW_TILE_H);
 				} else {
 					/* Entered from South doorway threshold */
 					s_lx = NDW_CENTER_X;
 					s_ly = NDW_TILE_H - NDW_FOOT_H - 4;
+					s_lxf = (float)s_lx;
+					s_lyf = (float)s_ly;
 					s_dir = DIR_UP;
+					s_lamb_yaw_rad = dir_to_yaw_rad(s_dir);
 				}
 			} else if (dj == 1) { /* Stepping South into new tile */
 				if (s_pending_key == 'j' || s_ly >= NDW_TILE_H - NDW_FOOT_H) {
 					s_ly -= dj * NDW_TILE_H; /* -128 */
+					s_lyf -= (float)(dj * NDW_TILE_H);
 				} else {
 					/* Entered from North doorway threshold */
 					s_lx = NDW_CENTER_X;
 					s_ly = NDW_FOOT_H + 4;
+					s_lxf = (float)s_lx;
+					s_lyf = (float)s_ly;
 					s_dir = DIR_DOWN;
+					s_lamb_yaw_rad = dir_to_yaw_rad(s_dir);
 				}
 			}
 
 			if (dx == 1) { /* Stepping East into new tile */
 				if (s_pending_key == 'l' || s_lx >= NDW_TILE_W - NDW_FOOT_HW) {
 					s_lx -= dx * NDW_TILE_W; /* -160 */
+					s_lxf -= (float)(dx * NDW_TILE_W);
 				} else {
 					/* Entered from West doorway threshold */
 					s_lx = NDW_FOOT_HW + 4;
-					if (!dj) s_ly = NDW_CENTER_Y;
+					s_lxf = (float)s_lx;
+					if (!dj) { s_ly = NDW_CENTER_Y; s_lyf = (float)s_ly; }
 					s_dir = DIR_RIGHT;
+					s_lamb_yaw_rad = dir_to_yaw_rad(s_dir);
 				}
 			} else if (dx == -1) { /* Stepping West into new tile */
 				if (s_pending_key == 'h' || s_lx <= NDW_FOOT_HW) {
 					s_lx -= dx * NDW_TILE_W; /* +160 */
+					s_lxf -= (float)(dx * NDW_TILE_W);
 				} else {
 					/* Entered from East doorway threshold */
 					s_lx = NDW_TILE_W - NDW_FOOT_HW - 4;
-					if (!dj) s_ly = NDW_CENTER_Y;
+					s_lxf = (float)s_lx;
+					if (!dj) { s_ly = NDW_CENTER_Y; s_lyf = (float)s_ly; }
 					s_dir = DIR_LEFT;
+					s_lamb_yaw_rad = dir_to_yaw_rad(s_dir);
 				}
 			}
 
 			/* In-tile clamping: must strictly lie within [0, TILE-1] so ndw_fdiv is always 0 */
-			if (s_lx < 0) s_lx = 0;
-			else if (s_lx >= NDW_TILE_W) s_lx = NDW_TILE_W - 1;
+			if (s_lx < 0) { s_lx = 0; s_lxf = 0.0f; }
+			else if (s_lx >= NDW_TILE_W) { s_lx = NDW_TILE_W - 1; s_lxf = (float)s_lx; }
 
-			if (s_ly < 0) s_ly = 0;
-			else if (s_ly >= NDW_TILE_H) s_ly = NDW_TILE_H - 1;
+			if (s_ly < 0) { s_ly = 0; s_lyf = 0.0f; }
+			else if (s_ly >= NDW_TILE_H) { s_ly = NDW_TILE_H - 1; s_lyf = (float)s_ly; }
 
 			s_pending_key = 0;
 			s_pending_t = 0;
@@ -731,6 +864,18 @@ void nd_seven_forget(void)
 	nd_spatial_resolver_invalidate();
 	nd_seven_reset_input();
 	nd_seven_clear_wake();
+	s_lamb_yaw_rad = 0.0f;
+	s_lamb_turn_rate = 0.0f;
+	s_speed_norm = 0.0f;
+	s_gait_phase = 0.0f;
+	s_idle_sec = 0.0f;
+	s_hop_z = 0.0f;
+	s_hop_vel = 0.0f;
+	s_land_squash = 0.0f;
+	s_interact_t = 0.0f;
+	s_slope_pitch = 0.0f;
+	s_slope_roll = 0.0f;
+	s_lamb_in_water = 0;
 	s_have = 0;
 	recentre(1);
 }
@@ -787,6 +932,8 @@ void nd_seven_set_lamb(int fx, int fy)
 {
 	s_lx = fx;
 	s_ly = fy;
+	s_lxf = (float)fx;
+	s_lyf = (float)fy;
 }
 
 void nd_seven_lamb_world(const nd_client_state_t *st, int *fx, int *fy)
@@ -886,10 +1033,13 @@ int nd_seven_god_teleport_step(const nd_client_state_t *st, const char *key,
 	}
 	s_lx = NDW_CENTER_X;
 	s_ly = NDW_CENTER_Y;
+	s_lxf = (float)s_lx;
+	s_lyf = (float)s_ly;
 	if (dx < 0) s_dir = DIR_LEFT;
 	else if (dx > 0) s_dir = DIR_RIGHT;
 	else if (dy > 0) s_dir = DIR_UP;
 	else if (dy < 0) s_dir = DIR_DOWN;
+	s_lamb_yaw_rad = dir_to_yaw_rad(s_dir);
 
 	s_pending_key = 0;
 	s_pending_t = 0;
@@ -914,6 +1064,18 @@ int nd_seven_key(const char *key, int down)
 		return 0;
 	if (!strcmp(key, "Shift") || !strcmp(key, "ShiftLeft") || !strcmp(key, "ShiftRight")) {
 		s_shift_held = down ? 1 : 0;
+		return 1;
+	}
+	if (!strcmp(key, "Alt") || !strcmp(key, "AltLeft") || !strcmp(key, "AltRight")) {
+		s_alt_held = down ? 1 : 0;
+		return 1;
+	}
+	if (!strcmp(key, "q") || !strcmp(key, "Q")) {
+		s_orbit_l_held = down ? 1 : 0;
+		return 1;
+	}
+	if (!strcmp(key, "e") || !strcmp(key, "E")) {
+		s_orbit_r_held = down ? 1 : 0;
 		return 1;
 	}
 	if (!strcmp(key, "k") || !strcmp(key, "K") || !strcmp(key, "ArrowUp") || !strcmp(key, "w") || !strcmp(key, "W")) bit = HELD_U;
@@ -1090,6 +1252,8 @@ static void unstuck_lamb(const nd_client_state_t *st)
 			if (!is_motion_blocked(st, tx, ty)) {
 				s_lx = tx;
 				s_ly = ty;
+				s_lxf = (float)s_lx;
+				s_lyf = (float)s_ly;
 				return;
 			}
 		}
@@ -1097,6 +1261,8 @@ static void unstuck_lamb(const nd_client_state_t *st)
 	if (!is_motion_blocked(st, cx, cy)) {
 		s_lx = cx;
 		s_ly = cy;
+		s_lxf = (float)s_lx;
+		s_lyf = (float)s_ly;
 		return;
 	}
 	static const int dirs[8][2] = {
@@ -1112,27 +1278,55 @@ static void unstuck_lamb(const nd_client_state_t *st)
 			    !is_motion_blocked(st, tx, ty)) {
 				s_lx = tx;
 				s_ly = ty;
+				s_lxf = (float)s_lx;
+				s_lyf = (float)s_ly;
 				return;
 			}
 		}
 	}
 }
 
-static void move_axis(const nd_client_state_t *st, int dx, int dy)
+static void move_slide_substep(const nd_client_state_t *st, float sx, float sy)
 {
-	int nx = s_lx + dx, ny = s_ly + dy;
+	float cand_x = s_lxf + sx;
+	float cand_y = s_lyf + sy;
+	int nx = (int)lroundf(cand_x);
+	int ny = (int)lroundf(cand_y);
+
 	if (!is_motion_blocked(st, nx, ny)) {
+		s_lxf = cand_x;
+		s_lyf = cand_y;
 		s_lx = nx;
 		s_ly = ny;
 		return;
 	}
 	if (is_motion_blocked(st, s_lx, s_ly)) {
 		unstuck_lamb(st);
-		nx = s_lx + dx;
-		ny = s_ly + dy;
+		cand_x = s_lxf + sx;
+		cand_y = s_lyf + sy;
+		nx = (int)lroundf(cand_x);
+		ny = (int)lroundf(cand_y);
 		if (!is_motion_blocked(st, nx, ny)) {
+			s_lxf = cand_x;
+			s_lyf = cand_y;
 			s_lx = nx;
 			s_ly = ny;
+			return;
+		}
+	}
+	/* Wall-sliding: attempt independent X and Y axes when diagonal is blocked */
+	if (fabsf(sx) > 1e-4f) {
+		int tx = (int)lroundf(s_lxf + sx);
+		if (!is_motion_blocked(st, tx, s_ly)) {
+			s_lxf += sx;
+			s_lx = tx;
+		}
+	}
+	if (fabsf(sy) > 1e-4f) {
+		int ty = (int)lroundf(s_lyf + sy);
+		if (!is_motion_blocked(st, s_lx, ty)) {
+			s_lyf += sy;
+			s_ly = ty;
 		}
 	}
 }
@@ -1144,7 +1338,7 @@ int nd_seven_collision(const nd_client_state_t *st, int x, int y)
 
 int nd_seven_tick(const nd_client_state_t *st, float dt)
 {
-	int key = 0, dx = 0, dy = 0, steps;
+	int key = 0;
 
 	s_anim++;
 	nd_seven_sync_origin(st);
@@ -1157,7 +1351,15 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 	 * so frame-rate changes from 15fps chunk baking to 60/120fps steady state never speed up wind/water) */
 	float anim_dt = (dt > 0.033f) ? 0.033f : ((dt > 0.0f) ? dt : (1.0f / 60.0f));
 	s_anim_sec += anim_dt * 1.4f;
+
+	/* Smooth held Q/E camera orbit */
+	{
+		int orbit_dir = (s_orbit_l_held ? 1 : 0) - (s_orbit_r_held ? 1 : 0);
+		if (orbit_dir != 0 && dt > 0.0f)
+			nd_seven_orbit_cam((float)orbit_dir * 115.0f * dt, 0.0f);
+	}
 	nd_seven_step_cam(dt > 0.0f ? dt : 0.016f);
+
 	if (raw_dt > 0.0f) {
 		float drs_x = (float)((int64_t)s_pos[0] * NDW_TILE_W + s_lx);
 		float drs_y = (float)((int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly);
@@ -1179,32 +1381,120 @@ int nd_seven_tick(const nd_client_state_t *st, float dt)
 		}
 	}
 
-	{
-		int b = (s_last && (s_held & s_last)) ? s_last : (s_held & -s_held);
-		if (b == HELD_L) { dx = -1; s_dir = DIR_LEFT; }
-		else if (b == HELD_R) { dx = 1; s_dir = DIR_RIGHT; }
-		else if (b == HELD_U) { dy = -1; s_dir = DIR_UP; }
-		else if (b == HELD_D) { dy = 1; s_dir = DIR_DOWN; }
+	/* Step hop arc, landing squash & interact head-nudge every frame */
+	if (dt > 0.0f) {
+		if (s_hop_z > 0.0f || s_hop_vel > 0.0f) {
+			s_hop_z += s_hop_vel * dt;
+			s_hop_vel -= 9.5f * dt;
+			if (s_hop_z <= 0.0f) {
+				s_hop_z = 0.0f;
+				s_hop_vel = 0.0f;
+				s_land_squash = 1.0f;
+			}
+		}
+		if (s_land_squash > 0.0f) {
+			s_land_squash -= dt * 4.5f;
+			if (s_land_squash < 0.0f)
+				s_land_squash = 0.0f;
+		}
+		if (s_interact_t > 0.0f) {
+			s_interact_t -= dt * 2.6f;
+			if (s_interact_t < 0.0f)
+				s_interact_t = 0.0f;
+		}
 	}
 
+	/* Camera-relative movement input (WASD + Arrows + HJKL + LMB/RMB MMO run) */
+	float in_fwd = (((s_held & HELD_U) || s_mouse_run) ? 1.0f : 0.0f) - ((s_held & HELD_D) ? 1.0f : 0.0f);
+	float in_right = ((s_held & HELD_R) ? 1.0f : 0.0f) - ((s_held & HELD_L) ? 1.0f : 0.0f);
+	float in_len = hypotf(in_fwd, in_right);
+	int has_input = (in_len > 0.01f);
+
 	s_walking = 0;
-	if (!(dx || dy)) {
-		s_acc = 0;
+	if (!has_input) {
+		float decay = (dt > 0.0f) ? expf(-12.0f * dt) : 0.0f;
+		s_speed_norm *= decay;
+		if (s_speed_norm < 0.005f) s_speed_norm = 0.0f;
+		s_lamb_turn_rate *= decay;
+		if (fabsf(s_lamb_turn_rate) < 0.005f) s_lamb_turn_rate = 0.0f;
+		if (dt > 0.0f && s_hop_z <= 0.01f && !s_lamb_in_water)
+			s_idle_sec += dt;
 		return 0;
 	}
-	s_acc += dt * SPEED;
-	steps = (int)s_acc;
-	s_acc -= (float)steps;
-	while (steps-- > 0) {
-		int ox = s_lx, oy = s_ly;
-		move_axis(st, dx, dy);
-		if (ox != s_lx || oy != s_ly)
-			s_walking = 1;
+
+	if (in_len > 1.0f) {
+		in_fwd /= in_len;
+		in_right /= in_len;
 	}
+
+	/* Map screen axes into tangent (E, S) plane using live camera yaw */
+	float cam_yaw_rad = nd_seven_get_yaw_deg() * (MOT_PI_F / 180.0f);
+	float sin_cy = sinf(cam_yaw_rad);
+	float cos_cy = cosf(cam_yaw_rad);
+	float wx_dir = in_fwd * (-sin_cy) + in_right * cos_cy;
+	float wy_dir = in_fwd * (-cos_cy) + in_right * (-sin_cy);
+	float wlen = hypotf(wx_dir, wy_dir);
+	if (wlen > 1e-5f) {
+		wx_dir /= wlen;
+		wy_dir /= wlen;
+	}
+
+	float zoom = nd_seven_get_zoom();
+	float speed = SPEED_TROT;
+	float target_speed_norm = 0.65f;
+	if (s_shift_held && (zoom >= 0.85f || !nd_seven_is_universe_owner(st))) {
+		speed = SPEED_CANTER;
+		target_speed_norm = 1.0f;
+	} else if (s_alt_held) {
+		speed = SPEED_STROLL;
+		target_speed_norm = 0.36f;
+	}
+
+	/* Smooth 360-degree facing + instant nearest-cardinal s_dir for UI/minimap/tests */
+	float want_yaw = atan2f(-wx_dir, wy_dir);
+	float dyaw = mot_wrap_pi(want_yaw - s_lamb_yaw_rad);
+	float turn_alpha = (dt > 0.0f) ? (1.0f - expf(-15.0f * dt)) : 1.0f;
+	s_lamb_yaw_rad = mot_wrap_pi(s_lamb_yaw_rad + dyaw * turn_alpha);
+	float tgt_turn_rate = mot_clampf(dyaw * 4.0f, -4.0f, 4.0f);
+	s_lamb_turn_rate += (tgt_turn_rate - s_lamb_turn_rate) * turn_alpha;
+	s_dir = yaw_rad_to_dir(want_yaw);
+	s_idle_sec = 0.0f;
+
+	/* Sub-stepped diagonal + wall-sliding movement */
+	float start_lxf = s_lxf;
+	float start_lyf = s_lyf;
+	float move_x = wx_dir * speed * dt;
+	float move_y = wy_dir * speed * dt;
+	float max_axis = fmaxf(fabsf(move_x), fabsf(move_y));
+	int n_sub = (int)ceilf(max_axis / 1.5f);
+	if (n_sub < 1)
+		n_sub = 1;
+	float sx = move_x / (float)n_sub;
+	float sy = move_y / (float)n_sub;
+	for (int i = 0; i < n_sub; i++)
+		move_slide_substep(st, sx, sy);
+
+	float moved = hypotf(s_lxf - start_lxf, s_lyf - start_lyf);
+	if (moved > 0.001f)
+		s_walking = 1;
+
+	/* Distance-locked gait cycle (zero foot skating) */
+	{
+		float sp_alpha = (dt > 0.0f) ? (1.0f - expf(-12.0f * dt)) : 1.0f;
+		float desired_sn = s_walking ? target_speed_norm : 0.0f;
+		s_speed_norm += (desired_sn - s_speed_norm) * sp_alpha;
+		if (s_walking) {
+			float stride_wu = (target_speed_norm > 0.80f) ? 38.0f : 30.0f;
+			s_gait_phase = fmodf(s_gait_phase + moved * ((2.0f * MOT_PI_F) / stride_wu), 2.0f * MOT_PI_F);
+		}
+	}
+
 	if (s_walking) {
 		float wwx = (float)((int64_t)s_pos[0] * NDW_TILE_W + s_lx);
 		float wwy = (float)((int64_t)(-s_pos[1]) * NDW_TILE_H + s_ly);
-		nd_seven_record_wake_step(wwx, wwy, (float)dx * SPEED, (float)dy * SPEED, s_anim_sec);
+		nd_seven_record_wake_step(wwx, wwy, wx_dir * speed, wy_dir * speed, s_anim_sec);
+		if (fabsf(in_right) > 0.10f)
+			nd_seven_cam_auto_follow(s_lamb_yaw_rad, fabsf(in_right) * (0.55f + 0.45f * target_speed_norm), dt);
 	}
 
 	if (!s_pending_key) {

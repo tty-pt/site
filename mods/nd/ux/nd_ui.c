@@ -285,24 +285,23 @@ int on_key_down(bud_event *e)
 			nd_ui_seven_stage_redraw();
 			bud_app_set_state();
 			return 1;
-		} else if (strcmp(key, "q") == 0 || strcmp(key, "Q") == 0) {
-			nd_seven_orbit_cam(12.0f, 0.0f);
-			return 1;
-		} else if (strcmp(key, "e") == 0 || strcmp(key, "E") == 0) {
-			nd_seven_orbit_cam(-12.0f, 0.0f);
-			return 1;
 		} else if (strcmp(key, "r") == 0 || strcmp(key, "R") == 0 || strcmp(key, "Home") == 0) {
 			nd_seven_reset_cam();
-			nd_seven_set_zoom(1.0f);
+			nd_seven_zoom_to(ND_SEVEN_ZELDA_ZOOM);
 			bud_app_set_state();
 			return 1;
-		}
-		if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
+		} else if (strcmp(key, "c") == 0 || strcmp(key, "C") == 0) {
+			nd_seven_cam_recenter_behind(nd_seven_get_lamb_yaw_rad());
+			return 1;
+		} else if (strcmp(key, "f") == 0 || strcmp(key, "F") == 0) {
 			char act[64];
-			if (nd_seven_action_execute(&client_state, act, sizeof(act)) > 0) {
+			if (nd_seven_action_execute(&client_state, act, sizeof(act)) > 0)
 				ws_send(act, strlen(act));
-				return 1;
-			}
+			nd_seven_trigger_interact();
+			return 1;
+		} else if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
+			nd_seven_trigger_hop();
+			return 1;
 		}
 		{
 			char tp_cmd[64];
@@ -379,7 +378,8 @@ void nd_ui_seven_stage_redraw(void)
 	float pitch_deg = nd_seven_clamp_cam_pitch(world, (float)wx, (float)wy, wz,
 	                                           eff_cam_dist, yaw_deg, eff_pitch);
 
-	lam_cam_set_3d((float)wx, (float)wy, wz, eff_cam_dist, pitch_deg, yaw_deg, ND_SEVEN_CAM_FOV);
+	float cam_tz = wz + nd_seven_cam_target_z_lift(eff_cam_dist);
+	lam_cam_set_3d((float)wx, (float)wy, cam_tz, eff_cam_dist, pitch_deg, yaw_deg, ND_SEVEN_CAM_FOV);
 	nd_seven_render((uint32_t)g_stage_w, (uint32_t)g_stage_h, &client_state);
 	lam_cam_set_2d();
 

@@ -589,6 +589,20 @@ const nd_mesh3d_slice_t *nd_seven_mesh3d_slice(uint8_t mesh_id)
 	return &s_mesh3d_slices[mesh_id];
 }
 
+uint32_t nd_seven_mesh3d_update_lamb_pose(const mob_anim_params_t *params,
+                                          uint32_t *out_first_vert,
+                                          const nd_mesh3d_vert_t **out_verts)
+{
+	nd_seven_mesh3d_init();
+	const nd_mesh3d_slice_t *sl = &s_mesh3d_slices[ND_MESH3D_LAMB_ID];
+	if (sl->vert_count == 0u || sl->first_vert + sl->vert_count > s_mesh3d_vert_count)
+		return 0u;
+	uint32_t n = nd_m3d_update_lamb_pose(params, &s_mesh3d_verts[sl->first_vert], sl->vert_count);
+	if (out_first_vert) *out_first_vert = sl->first_vert;
+	if (out_verts)      *out_verts      = &s_mesh3d_verts[sl->first_vert];
+	return n;
+}
+
 uint8_t nd_seven_plant_mesh3d_id(uint8_t plant_id)
 {
 	if (!ND_PLANT_UNPACK_PRESENT(plant_id))

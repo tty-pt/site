@@ -176,20 +176,36 @@ int nd_seven_pos_in_map(const int16_t pos[4], const nd_map_data_t *map)
 	return (col >= 0 && col < (int)map->width && row >= 0 && row < (int)map->height);
 }
 
-static float s_camera_zoom = 1.0f;
+static float s_camera_zoom = ND_SEVEN_ZELDA_ZOOM;
+static float s_zoom_target = ND_SEVEN_ZELDA_ZOOM;
+
+static float clamp_zoom_range(float zoom)
+{
+	if (zoom < ND_SEVEN_ZOOM_MIN) return ND_SEVEN_ZOOM_MIN;
+	if (zoom > ND_SEVEN_ZOOM_MAX) return ND_SEVEN_ZOOM_MAX;
+	return zoom;
+}
 
 void nd_seven_set_zoom(float zoom)
 {
-	if (zoom < ND_SEVEN_ZOOM_MIN) zoom = ND_SEVEN_ZOOM_MIN;
-	if (zoom > ND_SEVEN_ZOOM_MAX) zoom = ND_SEVEN_ZOOM_MAX;
-	if (s_camera_zoom != zoom) {
-		s_camera_zoom = zoom;
-	}
+	zoom = clamp_zoom_range(zoom);
+	s_camera_zoom = zoom;
+	s_zoom_target = zoom;
+}
+
+void nd_seven_zoom_to(float zoom)
+{
+	s_zoom_target = clamp_zoom_range(zoom);
 }
 
 float nd_seven_get_zoom(void)
 {
 	return s_camera_zoom;
+}
+
+float nd_seven_get_zoom_target(void)
+{
+	return s_zoom_target;
 }
 
 void nd_seven_zoom_in(void)
@@ -204,9 +220,10 @@ void nd_seven_zoom_out(void)
 
 static float s_cam_yaw_target = 0.0f;
 static float s_cam_yaw_cur = 0.0f;
-static float s_cam_pitch_target = 55.0f;
-static float s_cam_pitch_cur = 55.0f;
+static float s_cam_pitch_target = ND_SEVEN_ZELDA_PITCH;
+static float s_cam_pitch_cur = ND_SEVEN_ZELDA_PITCH;
 static int   s_cam_pitch_user_override = 0;
+static float s_cam_manual_hold_sec = 0.0f;
 
 static float wrap_deg_180(float deg)
 {
@@ -232,6 +249,7 @@ void nd_seven_set_cam_angles(float yaw_deg, float pitch_deg)
 	s_cam_pitch_target = pitch_deg;
 	s_cam_pitch_cur = pitch_deg;
 	s_cam_pitch_user_override = 1;
+	s_cam_manual_hold_sec = 2.4f;
 }
 
 void nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg)
@@ -240,13 +258,51 @@ void nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg)
 	s_cam_pitch_target = clamp_pitch_range(s_cam_pitch_target + dpitch_deg);
 	if (fabsf(dpitch_deg) > 0.01f)
 		s_cam_pitch_user_override = 1;
+	if (fabsf(dyaw_deg) > 1e-4f || fabsf(dpitch_deg) > 1e-4f)
+		s_cam_manual_hold_sec = 2.4f;
 }
 
 void nd_seven_reset_cam(void)
 {
 	s_cam_yaw_target = 0.0f;
-	s_cam_pitch_target = 55.0f;
+	s_cam_pitch_target = ND_SEVEN_ZELDA_PITCH;
 	s_cam_pitch_user_override = 0;
+	s_cam_manual_hold_sec = 0.0f;
+}
+
+void nd_seven_cam_recenter_behind(float lamb_yaw_rad)
+{
+	const float rad2deg = 180.0f / 3.14159265358979323846f;
+	s_cam_yaw_target = wrap_deg_180(180.0f - lamb_yaw_rad * rad2deg);
+	s_cam_manual_hold_sec = 0.0f;
+}
+
+void nd_seven_cam_auto_follow(float lamb_yaw_rad, float strength, float dt)
+{
+	if (s_cam_manual_hold_sec > 0.0f || strength <= 0.0f || dt <= 0.0f)
+		return;
+	if (s_camera_zoom < 0.85f)
+		return;
+	const float rad2deg = 180.0f / 3.14159265358979323846f;
+	float desired_yaw = wrap_deg_180(180.0f - lamb_yaw_rad * rad2deg);
+	float err = wrap_deg_180(desired_yaw - s_cam_yaw_target);
+	/* Keep camera steady when walking straight toward the lens so player can admire the lamb's face */
+	if (fabsf(err) > 135.0f)
+		return;
+	float rate = 1.0f - expf(-1.35f * strength * dt);
+	if (rate < 0.0f) rate = 0.0f;
+	if (rate > 1.0f) rate = 1.0f;
+	s_cam_yaw_target = wrap_deg_180(s_cam_yaw_target + err * rate);
+}
+
+float nd_seven_cam_target_z_lift(float eff_cam_dist)
+{
+	if (eff_cam_dist >= 420.0f)
+		return 0.0f;
+	if (eff_cam_dist <= 220.0f)
+		return 13.5f;
+	float u = (420.0f - eff_cam_dist) / (420.0f - 220.0f);
+	return 13.5f * (u * u * (3.0f - 2.0f * u));
 }
 
 float nd_seven_get_yaw_deg(void)
@@ -267,7 +323,19 @@ int nd_seven_has_pitch_override(void)
 float nd_seven_eval_effective_pitch(float base_pitch_deg, float eff_cam_dist)
 {
 	float p = clamp_pitch_range(base_pitch_deg);
-	if (s_cam_pitch_user_override || eff_cam_dist >= 280.0f)
+	if (s_cam_pitch_user_override)
+		return p;
+	/* Far-zoom diorama lift: when zoomed out beyond gameplay range (eff_cam_dist > 420,
+	 * i.e. zoom < 0.67x), glide smoothly from 35 deg Zelda framing up to 55 deg diorama
+	 * overview so regional maps and orbital views look down cleanly onto the landscape. */
+	if (eff_cam_dist > 420.0f && p < ND_SEVEN_DIORAMA_PITCH) {
+		float u = (eff_cam_dist - 420.0f) / (1400.0f - 420.0f);
+		if (u < 0.0f) u = 0.0f;
+		if (u > 1.0f) u = 1.0f;
+		float t = u * u * (3.0f - 2.0f * u);
+		return clamp_pitch_range(p + (ND_SEVEN_DIORAMA_PITCH - p) * t);
+	}
+	if (eff_cam_dist >= 280.0f)
 		return p;
 	/* Close-zoom horizon tilt: zoom > 1.0 (eff_cam_dist < 280) glides smoothly
 	 * from 55 deg diorama toward 36 deg low-horizon view unless user overrode pitch. */
@@ -283,6 +351,12 @@ void nd_seven_step_cam(float dt)
 {
 	if (dt <= 0.0f)
 		return;
+	if (s_cam_manual_hold_sec > 0.0f) {
+		s_cam_manual_hold_sec -= dt;
+		if (s_cam_manual_hold_sec < 0.0f)
+			s_cam_manual_hold_sec = 0.0f;
+	}
+
 	float alpha = 1.0f - expf(-16.0f * dt);
 	if (alpha < 0.0f) alpha = 0.0f;
 	if (alpha > 1.0f) alpha = 1.0f;
@@ -298,6 +372,18 @@ void nd_seven_step_cam(float dt)
 		s_cam_pitch_cur = s_cam_pitch_target;
 	else
 		s_cam_pitch_cur = clamp_pitch_range(s_cam_pitch_cur + dpitch * alpha);
+
+	if (s_camera_zoom != s_zoom_target) {
+		float z_tol = 1e-4f * (s_zoom_target > 1.0f ? s_zoom_target : 1.0f);
+		if (fabsf(s_camera_zoom - s_zoom_target) <= z_tol) {
+			s_camera_zoom = s_zoom_target;
+		} else {
+			float z_alpha = 1.0f - expf(-14.0f * dt);
+			float log_cur = logf(fmaxf(ND_SEVEN_ZOOM_MIN, s_camera_zoom));
+			float log_tgt = logf(fmaxf(ND_SEVEN_ZOOM_MIN, s_zoom_target));
+			s_camera_zoom = clamp_zoom_range(expf(log_cur + (log_tgt - log_cur) * z_alpha));
+		}
+	}
 }
 
 float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,

@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include "nd/bcp.h"
 #include <nd/seven-world.h>
+#include <nd/mob_anim.h>
 
 enum { DIR_DOWN, DIR_UP, DIR_LEFT, DIR_RIGHT };
 
@@ -17,6 +18,15 @@ int nd_seven_get_walking(void);
 uint32_t nd_seven_get_anim(void);
 float nd_seven_get_anim_time(void);
 void nd_seven_step_anim(uint32_t delta);
+
+/* Continuous Zelda/MMO lamb orientation, hop, interact & procedural pose state */
+float nd_seven_get_lamb_yaw_rad(void);
+float nd_seven_get_hop_z(void);
+void  nd_seven_trigger_hop(void);
+void  nd_seven_trigger_interact(void);
+void  nd_seven_set_mouse_run(int active);
+void  nd_seven_set_lamb_in_water(int in_water);
+void  nd_seven_fill_lamb_anim(float terr_gx, float terr_gy, mob_anim_params_t *out);
 
 /* Lamb placement & inspection */
 void nd_seven_lamb(int *fx, int *fy, int *dir, int *walking);

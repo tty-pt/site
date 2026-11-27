@@ -2582,3 +2582,579 @@ bool nd_seven_gl_compute_reproj_mat(const float cur_mvp[16], const double cur_or
 	}
 	return true;
 }
+
+/* =========================================================================
+ * Phase 1: World-Scale 2-Cascade Terrain Horizon Shadow & Sky-AO Map
+ * ========================================================================= */
+
+bool nd_seven_gl_horizon_windows(float dist, float tx, float ty,
+                                 float out_cx[ND_TERR_HORIZ_RINGS],
+                                 float out_cy[ND_TERR_HORIZ_RINGS],
+                                 float out_half[ND_TERR_HORIZ_RINGS])
+{
+	if (!out_cx || !out_cy || !out_half || dist > 260000.0f)
+		return false;
+	/* Fixed world-scale cascade radii decoupled from camera zoom (0 rebuilds on zoom/pan).
+	 * Near = +/-49,152 wu (~17.2 m/texel), Far = +/-393,216 wu (~137.6 m/texel, covers all the way to orbital fade). */
+	static const float k_halves[ND_TERR_HORIZ_RINGS] = { 49152.0f, 393216.0f };
+	for (int r = 0; r < ND_TERR_HORIZ_RINGS; r++) {
+		float h = k_halves[r];
+		float texel = (2.0f * h) / (float)(ND_TERR_HORIZ_RES - 1);
+		float snap = 8.0f * texel;
+		out_half[r] = h;
+		out_cx[r] = floorf(tx / snap + 0.5f) * snap;
+		out_cy[r] = floorf(ty / snap + 0.5f) * snap;
+	}
+	return true;
+}
+
+static void horiz_sample_row_span(float *dst_row, int ix0, int ix1,
+                                  float x0, float texel_wu, int32_t ry,
+                                  uint16_t world_id, int32_t step_q16,
+                                  float sea_level)
+{
+	const float inv_rw = 1.0f / (float)ND_FIELD_ROOM_W;
+	int32_t ry4[4] = { ry, ry, ry, ry };
+	for (int ix = ix0; ix < ix1; ix += 4) {
+		int32_t rx4[4], h4[4];
+		int count = ix1 - ix;
+		if (count > 4) count = 4;
+		for (int k = 0; k < 4; k++) {
+			int idx = (k < count) ? (ix + k) : (ix + count - 1);
+			float wx = x0 + (float)idx * texel_wu;
+			rx4[k] = (int32_t)floorf((wx - 80.0f) * inv_rw + 0.5f);
+		}
+		nd_field_room_hyp_coarse_4x(world_id, step_q16, rx4, ry4, h4);
+		for (int k = 0; k < count; k++) {
+			float h = (float)h4[k];
+			if (sea_level > -900.0f && h < sea_level)
+				h = sea_level;
+			dst_row[ix + k] = h;
+		}
+	}
+}
+
+void nd_seven_gl_horizon_sample_field(nd_seven_horizon_ring_t *ring,
+                                      uint16_t world_id,
+                                      float sea_level,
+                                      float cx, float cy, float half_wu)
+{
+	if (!ring || half_wu <= 0.0f)
+		return;
+	const int N = ND_TERR_HORIZ_RES;
+	nd_planet_scale_t ps = nd_field_get_planet_scale();
+	uint32_t epoch = nd_field_get_planet_epoch();
+	float texel_wu = (2.0f * half_wu) / (float)(N - 1);
+	int32_t step_q16 = 0;
+	if (texel_wu >= 2048.0f) {
+		double sq = (double)texel_wu * 65536.0;
+		if (sq > 2000000000.0) sq = 2000000000.0;
+		step_q16 = (int32_t)sq;
+	}
+	float x0 = cx - half_wu;
+	float y0 = cy - half_wu;
+	const float inv_rh = 1.0f / (float)ND_FIELD_ROOM_H;
+
+	/* Incremental scroll-strip reuse: when walking across an integer-texel snap boundary with
+	 * unchanged world/epoch/radius/sea_level, shift existing height samples and only evaluate
+	 * newly uncovered border strips (1,024 texels vs 16,384 on an 8-texel walk snap). */
+	bool did_scroll = false;
+	if (ring->height_valid &&
+	    ring->world_id == world_id &&
+	    ring->planet_epoch == epoch &&
+	    ring->half_wu == half_wu &&
+	    ring->sea_level == sea_level) {
+		float dx_tex = (cx - ring->cx) / texel_wu;
+		float dy_tex = (cy - ring->cy) / texel_wu;
+		int sx = (int)floorf(dx_tex + 0.5f);
+		int sy = (int)floorf(dy_tex + 0.5f);
+		if (fabsf(dx_tex - (float)sx) < 1e-3f &&
+		    fabsf(dy_tex - (float)sy) < 1e-3f &&
+		    sx > -N && sx < N && sy > -N && sy < N) {
+			did_scroll = true;
+			if (sx != 0 || sy != 0) {
+				int keep_x0 = (sx < 0) ? -sx : 0;
+				int keep_x1 = (sx > 0) ? (N - sx) : N;
+				int keep_y0 = (sy < 0) ? -sy : 0;
+				int keep_y1 = (sy > 0) ? (N - sy) : N;
+				int keep_w = keep_x1 - keep_x0;
+				float *H = ring->height_wu;
+				if (keep_w > 0 && keep_y1 > keep_y0) {
+					if (sy >= 0) {
+						for (int iy = keep_y0; iy < keep_y1; iy++) {
+							memmove(&H[iy * N + keep_x0],
+							        &H[(iy + sy) * N + (keep_x0 + sx)],
+							        (size_t)keep_w * sizeof(float));
+						}
+					} else {
+						for (int iy = keep_y1 - 1; iy >= keep_y0; iy--) {
+							memmove(&H[iy * N + keep_x0],
+							        &H[(iy + sy) * N + (keep_x0 + sx)],
+							        (size_t)keep_w * sizeof(float));
+						}
+					}
+				}
+				for (int iy = 0; iy < keep_y0; iy++) {
+					float wy = y0 + (float)iy * texel_wu;
+					int32_t ry = (int32_t)floorf((64.0f - wy) * inv_rh + 0.5f);
+					horiz_sample_row_span(H + iy * N, 0, N, x0, texel_wu, ry, world_id, step_q16, sea_level);
+				}
+				for (int iy = keep_y1; iy < N; iy++) {
+					float wy = y0 + (float)iy * texel_wu;
+					int32_t ry = (int32_t)floorf((64.0f - wy) * inv_rh + 0.5f);
+					horiz_sample_row_span(H + iy * N, 0, N, x0, texel_wu, ry, world_id, step_q16, sea_level);
+				}
+				if (keep_x0 > 0 || keep_x1 < N) {
+					for (int iy = keep_y0; iy < keep_y1; iy++) {
+						float wy = y0 + (float)iy * texel_wu;
+						int32_t ry = (int32_t)floorf((64.0f - wy) * inv_rh + 0.5f);
+						if (keep_x0 > 0)
+							horiz_sample_row_span(H + iy * N, 0, keep_x0, x0, texel_wu, ry, world_id, step_q16, sea_level);
+						if (keep_x1 < N)
+							horiz_sample_row_span(H + iy * N, keep_x1, N, x0, texel_wu, ry, world_id, step_q16, sea_level);
+					}
+				}
+			}
+		}
+	}
+
+	if (!did_scroll) {
+		for (int iy = 0; iy < N; iy++) {
+			float wy = y0 + (float)iy * texel_wu;
+			int32_t ry = (int32_t)floorf((64.0f - wy) * inv_rh + 0.5f);
+			horiz_sample_row_span(ring->height_wu + iy * N, 0, N, x0, texel_wu, ry, world_id, step_q16, sea_level);
+		}
+	}
+
+	float h_min = 1e30f;
+	float h_max = -1e30f;
+	for (int i = 0; i < N * N; i++) {
+		float h = ring->height_wu[i];
+		if (h < h_min) h_min = h;
+		if (h > h_max) h_max = h;
+	}
+
+	ring->cx = cx;
+	ring->cy = cy;
+	ring->half_wu = half_wu;
+	ring->base_z_wu = floorf(0.5f * (h_min + h_max) + 0.5f);
+	ring->wu_per_meter = (ps.wu_per_meter > 1.0f) ? ps.wu_per_meter : ND_FIELD_WU_PER_METER;
+	ring->sea_level = sea_level;
+	ring->world_id = world_id;
+	ring->planet_epoch = epoch;
+	ring->height_valid = 1u;
+	ring->valid = 0u;
+}
+
+void nd_seven_gl_horizon_compute_sky_vis(nd_seven_horizon_ring_t *ring)
+{
+	if (!ring || !ring->height_valid || ring->half_wu <= 0.0f)
+		return;
+	const int N = ND_TERR_HORIZ_RES;
+	const float texel_wu = (2.0f * ring->half_wu) / (float)(N - 1);
+	static const int k_dx[8] = {  1,  1,  0, -1, -1, -1,  0,  1 };
+	static const int k_dy[8] = {  0,  1,  1,  1,  0, -1, -1, -1 };
+	static const float k_dscale[8] = {
+		1.0f, 1.41421356f, 1.0f, 1.41421356f,
+		1.0f, 1.41421356f, 1.0f, 1.41421356f
+	};
+	static const int k_rad[6] = { 1, 2, 4, 8, 16, 32 };
+
+	float inv_dist[8][6];
+	int step_off[8];
+	for (int d = 0; d < 8; d++) {
+		step_off[d] = k_dy[d] * N + k_dx[d];
+		for (int s = 0; s < 6; s++)
+			inv_dist[d][s] = 1.0f / ((float)k_rad[s] * k_dscale[d] * texel_wu);
+	}
+
+	/* Evaluate low-frequency sky-hemisphere visibility on a 65x65 subgrid (even coordinates +
+	 * outer edge N-1) with a branchless unrolled interior loop, then bilinearly upsample to 128x128. */
+	const float *H = ring->height_wu;
+	float *SVF = ring->sky_vis;
+	const int G = (N / 2) + 1; /* 65 sample coordinates: 0, 2, ..., 126, 127 */
+
+	for (int gy = 0; gy < G; gy++) {
+		int iy = (gy < G - 1) ? (gy * 2) : (N - 1);
+		bool y_inner = (iy >= 32 && iy <= N - 33);
+		int row_off = iy * N;
+		for (int gx = 0; gx < G; gx++) {
+			int ix = (gx < G - 1) ? (gx * 2) : (N - 1);
+			int cidx = row_off + ix;
+			float hc = H[cidx];
+			float sum = 0.0f;
+			if (y_inner && ix >= 32 && ix <= N - 33) {
+				for (int d = 0; d < 8; d++) {
+					int st = step_off[d];
+					const float *id = inv_dist[d];
+					float m = 0.0f;
+					float t0 = (H[cidx + st     ] - hc) * id[0]; if (t0 > m) m = t0;
+					float t1 = (H[cidx + st *  2] - hc) * id[1]; if (t1 > m) m = t1;
+					float t2 = (H[cidx + st *  4] - hc) * id[2]; if (t2 > m) m = t2;
+					float t3 = (H[cidx + st *  8] - hc) * id[3]; if (t3 > m) m = t3;
+					float t4 = (H[cidx + st * 16] - hc) * id[4]; if (t4 > m) m = t4;
+					float t5 = (H[cidx + st * 32] - hc) * id[5]; if (t5 > m) m = t5;
+					sum += 1.0f / (1.0f + m * m);
+				}
+			} else {
+				for (int d = 0; d < 8; d++) {
+					float m = 0.0f;
+					int dx = k_dx[d];
+					int dy = k_dy[d];
+					const float *id = inv_dist[d];
+					for (int s = 0; s < 6; s++) {
+						int r = k_rad[s];
+						int nx = ix + dx * r;
+						int ny = iy + dy * r;
+						if (nx < 0 || nx >= N || ny < 0 || ny >= N)
+							break;
+						float t = (H[ny * N + nx] - hc) * id[s];
+						if (t > m) m = t;
+					}
+					sum += 1.0f / (1.0f + m * m);
+				}
+			}
+			float svf = sum * 0.125f;
+			if (svf < 0.25f) svf = 0.25f;
+			else if (svf > 1.0f) svf = 1.0f;
+			SVF[cidx] = svf;
+		}
+		/* Horizontal interpolation on odd columns of this computed row */
+		for (int ix = 1; ix < N - 1; ix += 2)
+			SVF[row_off + ix] = 0.5f * (SVF[row_off + ix - 1] + SVF[row_off + ix + 1]);
+	}
+
+	/* Vertical interpolation on odd rows (1, 3, ..., N-3) */
+	for (int iy = 1; iy < N - 1; iy += 2) {
+		float *dst = SVF + iy * N;
+		const float *r0 = SVF + (iy - 1) * N;
+		const float *r1 = SVF + (iy + 1) * N;
+		for (int ix = 0; ix < N; ix++)
+			dst[ix] = 0.5f * (r0[ix] + r1[ix]);
+	}
+}
+
+static bool horiz_sample_ring_zocc(const nd_seven_horizon_ring_t *ring,
+                                   float wx, float wy,
+                                   float *out_z_occ, float *out_dist)
+{
+	if (!ring || !ring->valid || ring->half_wu <= 0.0f)
+		return false;
+	const int N = ND_TERR_HORIZ_RES;
+	float u = (wx - (ring->cx - ring->half_wu)) / (2.0f * ring->half_wu);
+	float v = (wy - (ring->cy - ring->half_wu)) / (2.0f * ring->half_wu);
+	if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f)
+		return false;
+	float fx = u * (float)(N - 1);
+	float fy = v * (float)(N - 1);
+	int ix0 = (int)floorf(fx);
+	int iy0 = (int)floorf(fy);
+	if (ix0 < 0) ix0 = 0; else if (ix0 >= N - 1) ix0 = N - 2;
+	if (iy0 < 0) iy0 = 0; else if (iy0 >= N - 1) iy0 = N - 2;
+	float tx = fx - (float)ix0;
+	float ty = fy - (float)iy0;
+	int i00 = iy0 * N + ix0;
+	int i10 = i00 + 1;
+	int i01 = i00 + N;
+	int i11 = i01 + 1;
+	float z0 = ring->z_occ_wu[i00] + (ring->z_occ_wu[i10] - ring->z_occ_wu[i00]) * tx;
+	float z1 = ring->z_occ_wu[i01] + (ring->z_occ_wu[i11] - ring->z_occ_wu[i01]) * tx;
+	float d0 = ring->caster_dist[i00] + (ring->caster_dist[i10] - ring->caster_dist[i00]) * tx;
+	float d1 = ring->caster_dist[i01] + (ring->caster_dist[i11] - ring->caster_dist[i01]) * tx;
+	*out_z_occ = z0 + (z1 - z0) * ty;
+	*out_dist  = d0 + (d1 - d0) * ty;
+	return true;
+}
+
+void nd_seven_gl_horizon_sweep_sun(nd_seven_horizon_ring_t *ring,
+                                   const float sun_local[3],
+                                   const nd_seven_horizon_ring_t *far_seed)
+{
+	if (!ring || !ring->height_valid || !sun_local || ring->half_wu <= 0.0f)
+		return;
+	const int N = ND_TERR_HORIZ_RES;
+	const float *H = ring->height_wu;
+	float *Z = ring->z_occ_wu;
+	float *D = ring->caster_dist;
+
+	float lx = sun_local[0];
+	float ly = sun_local[1];
+	float lz = sun_local[2];
+	ring->sun_local[0] = lx;
+	ring->sun_local[1] = ly;
+	ring->sun_local[2] = lz;
+
+	float h_len = sqrtf(lx * lx + ly * ly);
+	if (lz <= -0.10f || h_len < 1e-4f) {
+		for (int i = 0; i < N * N; i++) {
+			Z[i] = H[i] - 1000.0f;
+			D[i] = 0.0f;
+		}
+		ring->valid = 1u;
+		return;
+	}
+
+	float eff_lz = (lz > 0.06f) ? lz : 0.06f;
+	float ux = lx / h_len;
+	float uy = ly / h_len;
+	float tan_sun = eff_lz / h_len;
+	float texel_wu = (2.0f * ring->half_wu) / (float)(N - 1);
+	float x0 = ring->cx - ring->half_wu;
+	float y0 = ring->cy - ring->half_wu;
+	bool has_seed = (far_seed && far_seed->valid && far_seed->half_wu > 0.0f);
+
+	if (fabsf(ux) >= fabsf(uy)) {
+		int step_x = (ux >= 0.0f) ? -1 : 1;
+		int ix_start = (ux >= 0.0f) ? (N - 1) : 0;
+		float slope_y = uy / fabsf(ux);
+		float ds_wu = texel_wu * sqrtf(1.0f + slope_y * slope_y);
+		float drop_wu = ds_wu * tan_sun;
+
+		/* Seed sunward X border */
+		float wx_b = x0 + (float)ix_start * texel_wu;
+		for (int iy = 0; iy < N; iy++) {
+			int cur = iy * N + ix_start;
+			float wy_b = y0 + (float)iy * texel_wu;
+			float fz = 0.0f, fd = 0.0f;
+			if (has_seed && horiz_sample_ring_zocc(far_seed, wx_b, wy_b, &fz, &fd)) {
+				Z[cur] = fz;
+				D[cur] = fd;
+			} else {
+				Z[cur] = H[cur] - drop_wu;
+				D[cur] = 0.0f;
+			}
+		}
+
+		/* Propagate down-sun across X columns */
+		for (int step = 1; step < N; step++) {
+			int ix = ix_start + step * step_x;
+			int ix_up = ix - step_x;
+			float wx_up = x0 + (float)ix_up * texel_wu;
+			for (int iy = 0; iy < N; iy++) {
+				int cur = iy * N + ix;
+				float fy_up = (float)iy + slope_y;
+				if (fy_up < 0.0f || fy_up > (float)(N - 1)) {
+					float wy_up = y0 + fy_up * texel_wu;
+					float fz = 0.0f, fd = 0.0f;
+					if (has_seed && horiz_sample_ring_zocc(far_seed, wx_up, wy_up, &fz, &fd)) {
+						Z[cur] = fz - drop_wu;
+						D[cur] = fd + ds_wu;
+					} else {
+						Z[cur] = H[cur] - drop_wu;
+						D[cur] = 0.0f;
+					}
+					continue;
+				}
+				int iy0 = (int)floorf(fy_up);
+				float frac = fy_up - (float)iy0;
+				int iy1 = (iy0 + 1 < N) ? (iy0 + 1) : (N - 1);
+				int i0 = iy0 * N + ix_up;
+				int i1 = iy1 * N + ix_up;
+				float h_up = H[i0] + (H[i1] - H[i0]) * frac;
+				float o_up = Z[i0] + (Z[i1] - Z[i0]) * frac;
+				float d_up = D[i0] + (D[i1] - D[i0]) * frac;
+				if (h_up >= o_up) {
+					Z[cur] = h_up - drop_wu;
+					D[cur] = ds_wu;
+				} else {
+					Z[cur] = o_up - drop_wu;
+					D[cur] = d_up + ds_wu;
+				}
+			}
+		}
+	} else {
+		int step_y = (uy >= 0.0f) ? -1 : 1;
+		int iy_start = (uy >= 0.0f) ? (N - 1) : 0;
+		float slope_x = ux / fabsf(uy);
+		float ds_wu = texel_wu * sqrtf(1.0f + slope_x * slope_x);
+		float drop_wu = ds_wu * tan_sun;
+
+		/* Seed sunward Y border */
+		float wy_b = y0 + (float)iy_start * texel_wu;
+		for (int ix = 0; ix < N; ix++) {
+			int cur = iy_start * N + ix;
+			float wx_b = x0 + (float)ix * texel_wu;
+			float fz = 0.0f, fd = 0.0f;
+			if (has_seed && horiz_sample_ring_zocc(far_seed, wx_b, wy_b, &fz, &fd)) {
+				Z[cur] = fz;
+				D[cur] = fd;
+			} else {
+				Z[cur] = H[cur] - drop_wu;
+				D[cur] = 0.0f;
+			}
+		}
+
+		/* Propagate down-sun across Y rows */
+		for (int step = 1; step < N; step++) {
+			int iy = iy_start + step * step_y;
+			int iy_up = iy - step_y;
+			float wy_up = y0 + (float)iy_up * texel_wu;
+			for (int ix = 0; ix < N; ix++) {
+				int cur = iy * N + ix;
+				float fx_up = (float)ix + slope_x;
+				if (fx_up < 0.0f || fx_up > (float)(N - 1)) {
+					float wx_up = x0 + fx_up * texel_wu;
+					float fz = 0.0f, fd = 0.0f;
+					if (has_seed && horiz_sample_ring_zocc(far_seed, wx_up, wy_up, &fz, &fd)) {
+						Z[cur] = fz - drop_wu;
+						D[cur] = fd + ds_wu;
+					} else {
+						Z[cur] = H[cur] - drop_wu;
+						D[cur] = 0.0f;
+					}
+					continue;
+				}
+				int ix0 = (int)floorf(fx_up);
+				float frac = fx_up - (float)ix0;
+				int ix1 = (ix0 + 1 < N) ? (ix0 + 1) : (N - 1);
+				int i0 = iy_up * N + ix0;
+				int i1 = iy_up * N + ix1;
+				float h_up = H[i0] + (H[i1] - H[i0]) * frac;
+				float o_up = Z[i0] + (Z[i1] - Z[i0]) * frac;
+				float d_up = D[i0] + (D[i1] - D[i0]) * frac;
+				if (h_up >= o_up) {
+					Z[cur] = h_up - drop_wu;
+					D[cur] = ds_wu;
+				} else {
+					Z[cur] = o_up - drop_wu;
+					D[cur] = d_up + ds_wu;
+				}
+			}
+		}
+	}
+
+	ring->valid = 1u;
+}
+
+void nd_seven_gl_horizon_pack_rgba(const nd_seven_horizon_ring_t *ring,
+                                   const float sun_local[3],
+                                   float *out_rgba)
+{
+	if (!ring || !out_rgba)
+		return;
+	const int N = ND_TERR_HORIZ_RES;
+	float wpm = (ring->wu_per_meter > 1.0f) ? ring->wu_per_meter : ND_FIELD_WU_PER_METER;
+	float inv_wpm = 1.0f / wpm;
+	float texel_m = ((2.0f * ring->half_wu) / (float)(N - 1)) * inv_wpm;
+	float h_len = sun_local ? sqrtf(sun_local[0] * sun_local[0] + sun_local[1] * sun_local[1]) : 1.0f;
+	float eff_lz = (sun_local && sun_local[2] > 0.06f) ? sun_local[2] : 0.06f;
+	float tan_sun = (h_len > 1e-4f) ? (eff_lz / h_len) : 10.0f;
+	float tan_c = (tan_sun < 2.0f) ? tan_sun : 2.0f;
+	float bias_m = fmaxf(0.25f, fminf(40.0f, texel_m * 0.04f * tan_c));
+	float min_pen_m = texel_m * 0.14f + 0.35f;
+
+	for (int i = 0; i < N * N; i++) {
+		float z_rel_m = (ring->z_occ_wu[i] - ring->base_z_wu) * inv_wpm;
+		float svf = ring->sky_vis[i];
+		if (svf < 0.25f) svf = 0.25f;
+		else if (svf > 1.0f) svf = 1.0f;
+		float dist_m = ring->caster_dist[i] * inv_wpm;
+		float pen_m = fmaxf(min_pen_m, dist_m * 0.011f + texel_m * 0.08f);
+		if (pen_m > 400.0f) pen_m = 400.0f;
+		out_rgba[i * 4 + 0] = z_rel_m;
+		out_rgba[i * 4 + 1] = svf;
+		out_rgba[i * 4 + 2] = pen_m;
+		out_rgba[i * 4 + 3] = bias_m;
+	}
+}
+
+static bool horiz_eval_ring_cpu(const nd_seven_horizon_ring_t *ring,
+                                const float sun_local[3],
+                                float wx, float wy, float wz,
+                                float *out_vis, float *out_sky, float *out_box)
+{
+	if (!ring || !ring->valid || ring->half_wu <= 0.0f)
+		return false;
+	const int N = ND_TERR_HORIZ_RES;
+	float rx = (wx - ring->cx) / ring->half_wu;
+	float ry = (wy - ring->cy) / ring->half_wu;
+	float box = fmaxf(fabsf(rx), fabsf(ry));
+	if (box >= 1.0f)
+		return false;
+	float fx = (rx * 0.5f + 0.5f) * (float)(N - 1);
+	float fy = (ry * 0.5f + 0.5f) * (float)(N - 1);
+	int ix0 = (int)floorf(fx);
+	int iy0 = (int)floorf(fy);
+	if (ix0 < 0) ix0 = 0; else if (ix0 >= N - 1) ix0 = N - 2;
+	if (iy0 < 0) iy0 = 0; else if (iy0 >= N - 1) iy0 = N - 2;
+	float tx = fx - (float)ix0;
+	float ty = fy - (float)iy0;
+	int i00 = iy0 * N + ix0;
+	int i10 = i00 + 1;
+	int i01 = i00 + N;
+	int i11 = i01 + 1;
+
+	float wpm = (ring->wu_per_meter > 1.0f) ? ring->wu_per_meter : ND_FIELD_WU_PER_METER;
+	float inv_wpm = 1.0f / wpm;
+	float texel_m = ((2.0f * ring->half_wu) / (float)(N - 1)) * inv_wpm;
+	float h_len = sun_local ? sqrtf(sun_local[0] * sun_local[0] + sun_local[1] * sun_local[1]) : 1.0f;
+	float eff_lz = (sun_local && sun_local[2] > 0.06f) ? sun_local[2] : 0.06f;
+	float tan_sun = (h_len > 1e-4f) ? (eff_lz / h_len) : 10.0f;
+	float tan_c = (tan_sun < 2.0f) ? tan_sun : 2.0f;
+	float bias_m = fmaxf(0.25f, fminf(40.0f, texel_m * 0.04f * tan_c));
+	float min_pen_m = texel_m * 0.14f + 0.35f;
+
+	float z0 = ring->z_occ_wu[i00] + (ring->z_occ_wu[i10] - ring->z_occ_wu[i00]) * tx;
+	float z1 = ring->z_occ_wu[i01] + (ring->z_occ_wu[i11] - ring->z_occ_wu[i01]) * tx;
+	float z_occ_wu = z0 + (z1 - z0) * ty;
+
+	float s0 = ring->sky_vis[i00] + (ring->sky_vis[i10] - ring->sky_vis[i00]) * tx;
+	float s1 = ring->sky_vis[i01] + (ring->sky_vis[i11] - ring->sky_vis[i01]) * tx;
+	float svf = s0 + (s1 - s0) * ty;
+
+	float d0 = ring->caster_dist[i00] + (ring->caster_dist[i10] - ring->caster_dist[i00]) * tx;
+	float d1 = ring->caster_dist[i01] + (ring->caster_dist[i11] - ring->caster_dist[i01]) * tx;
+	float dist_m = (d0 + (d1 - d0) * ty) * inv_wpm;
+	float pen_m = fmaxf(min_pen_m, dist_m * 0.011f + texel_m * 0.08f);
+	if (pen_m > 400.0f) pen_m = 400.0f;
+
+	float depth_m = (z_occ_wu - wz) * inv_wpm;
+	float t = (depth_m - bias_m) / fmaxf(0.05f, pen_m);
+	if (t < 0.0f) t = 0.0f;
+	else if (t > 1.0f) t = 1.0f;
+	float vis = 1.0f - (t * t * (3.0f - 2.0f * t));
+
+	*out_vis = vis;
+	*out_sky = svf;
+	*out_box = box;
+	return true;
+}
+
+void nd_seven_gl_horizon_eval_cpu(const nd_seven_horizon_ring_t *near_ring,
+                                  const nd_seven_horizon_ring_t *far_ring,
+                                  const float sun_local[3],
+                                  float wx, float wy, float wz,
+                                  float *out_shadow_vis,
+                                  float *out_sky_vis)
+{
+	float vis = 1.0f;
+	float sky = 1.0f;
+	float v0 = 1.0f, s0 = 1.0f, b0 = 2.0f;
+	float v1 = 1.0f, s1 = 1.0f, b1 = 2.0f;
+	bool ok0 = horiz_eval_ring_cpu(near_ring, sun_local, wx, wy, wz, &v0, &s0, &b0);
+	bool ok1 = horiz_eval_ring_cpu(far_ring, sun_local, wx, wy, wz, &v1, &s1, &b1);
+
+	if (ok1) {
+		float ffade = gl_smoothstep01(0.98f, 0.86f, b1);
+		v1 = 1.0f + (v1 - 1.0f) * ffade;
+		s1 = 1.0f + (s1 - 1.0f) * ffade;
+	}
+	if (ok0 && b0 <= 0.80f) {
+		vis = v0;
+		sky = s0;
+	} else if (ok0 && ok1) {
+		float w = gl_smoothstep01(0.80f, 0.96f, b0);
+		vis = v0 + (v1 - v0) * w;
+		sky = s0 + (s1 - s0) * w;
+	} else if (ok0) {
+		float ffade = gl_smoothstep01(0.98f, 0.80f, b0);
+		vis = 1.0f + (v0 - 1.0f) * ffade;
+		sky = 1.0f + (s0 - 1.0f) * ffade;
+	} else if (ok1) {
+		vis = v1;
+		sky = s1;
+	}
+	if (out_shadow_vis) *out_shadow_vis = vis;
+	if (out_sky_vis) *out_sky_vis = sky;
+}
+

@@ -38,7 +38,8 @@ bud_node *mount_seven_stage(void)
 			        class="absolute inset-0 w-full h-full block select-none bg-neutral-950"
 			        onMouseDownSelf={on_stage_orbit_down}
 			        onWheelSelf={on_stage_orbit_wheel}
-			        onDblClickSelf={on_stage_orbit_dblclick} />
+			        onDblClickSelf={on_stage_orbit_dblclick}
+			        onContextMenuSelf={on_stage_contextmenu} />
 			<div id="seven-shader-status"
 			     data-bud-key="seven-shader-status"
 			     class={g_seven_shaders_ready_ui

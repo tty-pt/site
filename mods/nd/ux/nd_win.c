@@ -43,6 +43,9 @@ static int s_drag_start_y = 0;
 static int s_drag_start_w = 0;
 static int s_drag_start_h = 0;
 static int s_orbit_dragging = 0;
+static int s_orbit_start_mx = 0;
+static int s_orbit_start_my = 0;
+static int s_orbit_moved = 0;
 static int s_orbit_last_mx = 0;
 static int s_orbit_last_my = 0;
 
@@ -106,6 +109,8 @@ void nd_win_sync_target(const nd_client_state_t *st)
 void nd_win_cancel_orbit(void)
 {
 	s_orbit_dragging = 0;
+	s_orbit_moved = 0;
+	nd_seven_set_mouse_run(0);
 }
 
 int nd_win_get_popper_top_px(void)
@@ -466,10 +471,20 @@ int on_stage_orbit_down(bud_event *ev)
 	if (!nd_ui_seven_active(&client_state))
 		return 0;
 	int cx = 0, cy = 0, vw = 0, vh = 0;
-	parse_mouse_coords(ev, &cx, &cy, &vw, &vh, NULL, NULL, NULL, NULL);
+	int rx = -1, ry = -1, rw = 0, rh = 0, btn = 0, btns = 1;
+	const char *s = ev ? (const char *)ev->user : NULL;
+	if (s && *s) {
+		sscanf(s, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+		       &cx, &cy, &vw, &vh, &rx, &ry, &rw, &rh, &btn, &btns);
+		(void)vw; (void)vh; (void)rx; (void)ry; (void)rw; (void)rh;
+	}
 	s_orbit_dragging = 1;
+	s_orbit_start_mx = cx;
+	s_orbit_start_my = cy;
+	s_orbit_moved = (btn == 2 || btn == 1) ? 1 : 0;
 	s_orbit_last_mx = cx;
 	s_orbit_last_my = cy;
+	nd_seven_set_mouse_run((btns & 3) == 3 ? 1 : 0);
 	return 0;
 }
 
@@ -488,9 +503,9 @@ int on_stage_orbit_wheel(bud_event *ev)
 	float delta_px = (float)dy * scale;
 	if (delta_px > 600.0f) delta_px = 600.0f;
 	if (delta_px < -600.0f) delta_px = -600.0f;
-	float cur_zoom = nd_seven_get_zoom();
+	float cur_zoom = nd_seven_get_zoom_target();
 	float next_zoom = cur_zoom * expf(-delta_px * 0.0012f);
-	nd_seven_set_zoom(next_zoom);
+	nd_seven_zoom_to(next_zoom);
 	return 1;
 }
 
@@ -500,6 +515,15 @@ int on_stage_orbit_dblclick(bud_event *ev)
 	if (!nd_ui_seven_active(&client_state))
 		return 0;
 	nd_seven_reset_cam();
+	nd_seven_zoom_to(ND_SEVEN_ZELDA_ZOOM);
+	return 1;
+}
+
+int on_stage_contextmenu(bud_event *ev)
+{
+	(void)ev;
+	if (!nd_ui_seven_active(&client_state))
+		return 0;
 	return 1;
 }
 
@@ -516,7 +540,18 @@ int on_win_drag_move(bud_event *ev)
 			(void)rx; (void)ry; (void)rw; (void)rh; (void)btn;
 		}
 		if (btns == 0) {
-			s_orbit_dragging = 0;
+			nd_win_cancel_orbit();
+			return 0;
+		}
+		nd_seven_set_mouse_run((btns & 3) == 3 ? 1 : 0);
+		if (!s_orbit_moved) {
+			int ddx = cx - s_orbit_start_mx;
+			int ddy = cy - s_orbit_start_my;
+			if (ddx * ddx + ddy * ddy <= 16)
+				return 0;
+			s_orbit_moved = 1;
+			s_orbit_last_mx = cx;
+			s_orbit_last_my = cy;
 			return 0;
 		}
 		int mdx = cx - s_orbit_last_mx;
@@ -606,9 +641,19 @@ int on_win_drag_move(bud_event *ev)
 
 int on_win_drag_up(bud_event *ev)
 {
-	(void)ev;
-	if (s_orbit_dragging)
-		s_orbit_dragging = 0;
+	if (s_orbit_dragging) {
+		int cx = 0, cy = 0, vw = 0, vh = 0, rx = -1, ry = -1, rw = 0, rh = 0, btn = 0, btns = 0;
+		const char *s = ev ? (const char *)ev->user : NULL;
+		if (s && *s) {
+			sscanf(s, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+			       &cx, &cy, &vw, &vh, &rx, &ry, &rw, &rh, &btn, &btns);
+			(void)cx; (void)cy; (void)vw; (void)vh;
+			(void)rx; (void)ry; (void)rw; (void)rh; (void)btn;
+		}
+		nd_seven_set_mouse_run((btns & 3) == 3 ? 1 : 0);
+		if (btns == 0)
+			nd_win_cancel_orbit();
+	}
 	if (s_drag_win < 0 && !s_drag_mode) return 0;
 	s_drag_win = -1;
 	s_drag_mode = 0;

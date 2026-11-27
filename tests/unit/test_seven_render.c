@@ -3972,7 +3972,8 @@ int main(void)
 			float eye_rel_13d[3];
 			double ref_orig_13d[3];
 			nd_seven_gl_compute_mvp_rel_ex(1280, 720, (float)lwx_cur, (float)lwy_cur, lwz_cur,
-			                               ND_SEVEN_CAM_DIST / 0.02f, 0.0f, ND_SEVEN_DIORAMA_PITCH,
+			                               ND_SEVEN_CAM_DIST / 0.02f, 0.0f,
+			                               nd_seven_eval_effective_pitch(nd_seven_get_pitch_deg(), ND_SEVEN_CAM_DIST / 0.02f),
 			                               ND_SEVEN_CAM_FOV, p1, NULL, ref_orig_13d, eye_rel_13d, NULL);
 			corolla_surface_t surf_13d = corolla_torus((double)p1->major_r, (double)p1->minor_r);
 			corolla_pose_t pose_13d = {0};
@@ -4513,7 +4514,7 @@ int main(void)
 					for (size_t zi = 0; zi < sizeof(test_zooms) / sizeof(test_zooms[0]); zi++) {
 						nd_seven_set_zoom(test_zooms[zi]);
 						size_t act_cnt = 0;
-						for (int wave = 0; wave < 16; wave++) {
+						for (int wave = 0; wave < 48; wave++) {
 							nd_seven_render(fb, 640, 480, &st);
 							act_cnt = ar_system_get_active_count(cs);
 							bool any_deferred = false;
@@ -4627,11 +4628,11 @@ int main(void)
 				nd_seven_reset_cam();
 				nd_seven_step_cam(1.0f);
 				assert(fabsf(nd_seven_get_yaw_deg()) < 1e-3f);
-				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_DIORAMA_PITCH) < 1e-2f);
-				nd_seven_set_cam_angles(90.0f, 35.0f);
+				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_ZELDA_PITCH) < 1e-2f);
+				nd_seven_set_cam_angles(90.0f, 50.0f);
 				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
 				assert(fabsf(nd_seven_get_yaw_deg() - 90.0f) < 1.0f);
-				assert(fabsf(nd_seven_get_pitch_deg() - 35.0f) < 1.0f);
+				assert(fabsf(nd_seven_get_pitch_deg() - 50.0f) < 1.0f);
 				nd_seven_reset_cam();
 				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
 				assert(fabsf(nd_seven_get_yaw_deg()) < 1.0f);
@@ -4645,9 +4646,9 @@ int main(void)
 				assert(fabsf(nd_seven_eval_effective_pitch(55.0f, 95.0f) - 55.0f) < 1e-4f);
 				nd_seven_reset_cam();
 				assert(nd_seven_has_pitch_override() == 0);
-				assert(fabsf(nd_seven_get_pitch_deg() - 55.0f) < 5.0f);
+				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_ZELDA_PITCH) < 12.0f);
 				for (int s = 0; s < 30; s++) nd_seven_step_cam(0.05f);
-				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_DIORAMA_PITCH) < 1e-2f);
+				assert(fabsf(nd_seven_get_pitch_deg() - ND_SEVEN_ZELDA_PITCH) < 1e-2f);
 
 				float low_p = nd_seven_clamp_cam_pitch(0, 1600.0f, 1280.0f, 10.0f, 400.0f, 0.0f, 1.0f);
 				float hi_p  = nd_seven_clamp_cam_pitch(0, 1600.0f, 1280.0f, 10.0f, 400.0f, 0.0f, 89.5f);
@@ -5044,6 +5045,69 @@ int main(void)
 					assert(strstr(fs_m3d, "microAO *= clamp(0.74 + 0.46 * grShade") != NULL);
 					assert(strstr(fs_m3d, "microAO = clamp(0.74 + 0.46 * grShade") == NULL);
 					assert(strstr(fs_m3d, "clamp(cavityAO * contactAO * microAO, 0.38, 1.14)") != NULL);
+
+					/* Procedural 3D lamb template invariants: metric scale, opaque wool class,
+					 * distant 2D sprite impostor fallback, exact grounding, and creature/glow shaders */
+					{
+						const nd_mesh3d_slice_t *lsl = nd_seven_mesh3d_slice(ND_MESH3D_LAMB_ID);
+						assert(lsl != NULL && lsl->vert_count >= 400u && lsl->idx_count >= 2000u);
+						assert(lsl->mesh_w_wu >= 24.0f && lsl->mesh_w_wu <= 40.0f);
+						assert(lsl->mesh_h_wu >= 18.0f && lsl->mesh_h_wu <= 28.0f);
+						assert(lsl->anchor_y == 0u);
+						assert(nd_seven_mesh3d_is_opaque(ND_MESH3D_LAMB_ID) == true);
+
+						memset(&b, 0, sizeof(b));
+						b.mesh_id = ND_MESH3D_LAMB_ID;
+						b.u0 = 0.0f; b.u1 = 0.0625f; b.v0 = 0.0f; b.v1 = 0.0625f;
+						assert(!nd_seven_gl_billboard_is_mesh3d_only(&b));
+
+						b.x = 120.0f; b.y = -40.0f; b.z = 24.0f;
+						b.anchor_y = 16.0f; b.style = ND_BB_STYLE_GLOW;
+						nd_seven_gl_eval_mesh3d_anchor(&b, anchor);
+						assert(fabsf(anchor[0] - 120.0f) < 1e-5f);
+						assert(fabsf(anchor[1] - (-40.0f)) < 1e-5f && "3D lamb must stand at exact b->y with zero north shift");
+						assert(fabsf(anchor[2] - 24.0f) < 1e-5f);
+
+						assert(strstr(fs_m3d, "isCreature") != NULL);
+						assert(strstr(fs_m3d, "isCreatureSkin") != NULL);
+						assert(strstr(fs_m3d, "isCreatureWool") != NULL);
+						assert(strstr(fs_m3d, "isCreatureGloss") != NULL);
+						assert(strstr(fs_m3d, "isLambGlow") != NULL);
+						assert(strstr(fs_m3d, "vWorldPos.xy * 0.65") == NULL);
+						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreature") != NULL);
+						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreatureWool") != NULL);
+						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isCreatureGloss") != NULL);
+						assert(strstr(nd_seven_gl_fs_mesh3d_opaque(), "isLambGlow") != NULL);
+
+						/* Live procedural skeletal pose update must deform the lamb slice in place */
+						{
+							mob_anim_params_t p_idle;
+							memset(&p_idle, 0, sizeof(p_idle));
+							uint32_t voff = 0u;
+							const nd_mesh3d_vert_t *lv = NULL;
+							uint32_t vcnt_l = nd_seven_mesh3d_update_lamb_pose(&p_idle, &voff, &lv);
+							assert(lv != NULL && vcnt_l == lsl->vert_count && voff == lsl->first_vert);
+							float idle_z[16];
+							for (int k = 0; k < 16; k++)
+								idle_z[k] = lv[(uint32_t)((k * 47) % (int)vcnt_l)].pos[2];
+
+							mob_anim_params_t p_trot = p_idle;
+							p_trot.speed_norm = 0.75f;
+							p_trot.gait_phase = 1.57f;
+							p_trot.hop_z = 0.30f;
+							const nd_mesh3d_vert_t *lv2 = NULL;
+							uint32_t vcnt_l2 = nd_seven_mesh3d_update_lamb_pose(&p_trot, &voff, &lv2);
+							assert(lv2 == lv && vcnt_l2 == lsl->vert_count);
+							float max_dz = 0.0f;
+							for (int k = 0; k < 16; k++) {
+								float dz = fabsf(lv2[(uint32_t)((k * 47) % (int)vcnt_l)].pos[2] - idle_z[k]);
+								if (dz > max_dz) max_dz = dz;
+							}
+							assert(max_dz > 8.0f && "Live trotting+hopping lamb pose must lift and animate vertices");
+							/* Restore idle pose cleanly */
+							(void)nd_seven_mesh3d_update_lamb_pose(&p_idle, &voff, &lv);
+						}
+					}
 				}
 
 				/* Realism Sequence Passes 0-4: RGBA unpack, pad0 biome packing, fallen logs,
@@ -6254,6 +6318,406 @@ int main(void)
 
 		printf("PASS: Alpine horizon seam sealing (cracks=%d, worst_gap=%.0f wu), zero rifts (spawn=%d, peak=%d) & smooth zoom pitch clamp (max_dp=%.2f deg) verified\n",
 		       total_cracks, worst_gap, rift_misses, peak_misses, max_dp);
+	}
+
+	/* Phase 1 (Photorealistic Terrain Roadmap): World-Scale 2-Cascade Terrain Horizon Shadow & Sky-Hemisphere AO */
+	{
+		/* 1. Shader contracts across all 5 scene pipelines + macro terrain:
+		 *    Terrain & Water evaluate per-fragment; Grass, Billboards & Mesh3D hoist horizon lookup to VS. */
+		const char *fs_t   = nd_seven_gl_fs_terrain();
+		const char *fs_tm  = nd_seven_gl_fs_terrain_macro();
+		const char *fs_w   = nd_seven_gl_fs_water();
+		const char *vs_b   = nd_seven_gl_vs_billboard();
+		const char *fs_b   = nd_seven_gl_fs_billboard();
+		const char *vs_m   = nd_seven_gl_vs_mesh3d();
+		const char *fs_m   = nd_seven_gl_fs_mesh3d();
+		const char *fs_mo  = nd_seven_gl_fs_mesh3d_opaque();
+		const char *vs_g   = nd_seven_gl_vs_grass();
+		const char *fs_g   = nd_seven_gl_fs_grass();
+		assert(fs_t && fs_tm && fs_w && vs_b && fs_b && vs_m && fs_m && fs_mo && vs_g && fs_g);
+		const char *frag_horiz[3] = { fs_t, fs_tm, fs_w };
+		for (int i = 0; i < 3; i++) {
+			assert(strstr(frag_horiz[i], "uTerrHoriz0") != NULL);
+			assert(strstr(frag_horiz[i], "uTerrHoriz1") != NULL);
+			assert(strstr(frag_horiz[i], "uTerrHorizonMap") != NULL);
+			assert(strstr(frag_horiz[i], "nd_eval_terr_horizon") != NULL);
+		}
+		const char *vs_horiz[3] = { vs_b, vs_m, vs_g };
+		for (int i = 0; i < 3; i++) {
+			assert(strstr(vs_horiz[i], "uTerrHorizonMap") != NULL);
+			assert(strstr(vs_horiz[i], "nd_eval_terr_horizon_vs") != NULL);
+			assert(strstr(vs_horiz[i], "out vec2 vTerrHoriz;") != NULL);
+		}
+		const char *fs_vs_consumers[4] = { fs_b, fs_m, fs_mo, fs_g };
+		for (int i = 0; i < 4; i++) {
+			assert(strstr(fs_vs_consumers[i], "in vec2 vTerrHoriz;") != NULL);
+			assert(strstr(fs_vs_consumers[i], "uTerrHorizonMap") == NULL);
+			assert(strstr(fs_vs_consumers[i], "terrShadowVis") != NULL);
+			assert(strstr(fs_vs_consumers[i], "skyHemAO") != NULL);
+		}
+		assert(strstr(fs_t, "skyHemAO") != NULL && strstr(fs_t, "terrShadowVis") != NULL);
+
+		/* 2. Zoom-independent cascade radii & 8-texel world snapping invariance */
+		float cx[ND_TERR_HORIZ_RINGS], cy[ND_TERR_HORIZ_RINGS], hw[ND_TERR_HORIZ_RINGS];
+		assert(nd_seven_gl_horizon_windows(500.0f, 1000.0f, -2000.0f, cx, cy, hw));
+		assert(fabsf(hw[0] - 49152.0f) < 1e-3f && fabsf(hw[1] - 393216.0f) < 1e-3f);
+		float cx_j[ND_TERR_HORIZ_RINGS], cy_j[ND_TERR_HORIZ_RINGS], hw_j[ND_TERR_HORIZ_RINGS];
+		assert(nd_seven_gl_horizon_windows(500.0f, 1050.0f, -1960.0f, cx_j, cy_j, hw_j));
+		assert(fabsf(cx[0] - cx_j[0]) < 1e-3f && fabsf(cy[0] - cy_j[0]) < 1e-3f);
+		assert(fabsf(cx[1] - cx_j[1]) < 1e-3f && fabsf(cy[1] - cy_j[1]) < 1e-3f);
+
+		/* Zooming from 500 -> 200,000 wu must NOT shift radii or centers (0 zoom rebuilds) */
+		const float zoom_dists[3] = { 10000.0f, 60000.0f, 200000.0f };
+		for (int zi = 0; zi < 3; zi++) {
+			assert(nd_seven_gl_horizon_windows(zoom_dists[zi], 1000.0f, -2000.0f, cx_j, cy_j, hw_j));
+			assert(fabsf(hw_j[0] - hw[0]) < 1e-3f && fabsf(hw_j[1] - hw[1]) < 1e-3f);
+			assert(fabsf(cx_j[0] - cx[0]) < 1e-3f && fabsf(cy_j[0] - cy[0]) < 1e-3f);
+			assert(fabsf(cx_j[1] - cx[1]) < 1e-3f && fabsf(cy_j[1] - cy[1]) < 1e-3f);
+		}
+		assert(!nd_seven_gl_horizon_windows(270000.0f, 0.0f, 0.0f, cx, cy, hw));
+
+		nd_seven_horizon_ring_t *near_r = (nd_seven_horizon_ring_t *)calloc(1, sizeof(*near_r));
+		nd_seven_horizon_ring_t *far_r  = (nd_seven_horizon_ring_t *)calloc(1, sizeof(*far_r));
+		float *rgba = (float *)malloc((size_t)(ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RES * 4) * sizeof(float));
+		assert(near_r && far_r && rgba);
+		const int N = ND_TERR_HORIZ_RES;
+
+		/* 3. Flat plain invariance: vis == 1.0, sky_vis == 1.0 */
+		near_r->cx = 0.0f; near_r->cy = 0.0f; near_r->half_wu = 32768.0f;
+		near_r->base_z_wu = 500.0f; near_r->wu_per_meter = 45.0f; near_r->height_valid = 1u;
+		for (int i = 0; i < N * N; i++) near_r->height_wu[i] = 500.0f;
+		nd_seven_gl_horizon_compute_sky_vis(near_r);
+		for (int i = 0; i < N * N; i++) assert(fabsf(near_r->sky_vis[i] - 1.0f) < 1e-5f);
+		float sun_low[3] = { cosf(0.2618f), 0.0f, sinf(0.2618f) }; /* 15 deg */
+		nd_seven_gl_horizon_sweep_sun(near_r, sun_low, NULL);
+		float vis = 0.0f, sky = 0.0f;
+		nd_seven_gl_horizon_eval_cpu(near_r, NULL, sun_low, 0.0f, 0.0f, 500.0f, &vis, &sky);
+		assert(vis > 0.999f && sky > 0.999f);
+
+		/* 4. Synthetic 1,800 m (81,000 wu) mountain ridge across cardinal & diagonal sun azimuths */
+		const float ridge_h = 81000.0f;
+		const float elev_rad = 20.0f * (3.14159265358979323846f / 180.0f);
+		const float shad_len = ridge_h / tanf(elev_rad); /* ~222,545 wu */
+		const float az_deg[6] = { 0.0f, 180.0f, 90.0f, 270.0f, 45.0f, 22.5f };
+		far_r->cx = 0.0f; far_r->cy = 0.0f; far_r->half_wu = 262144.0f;
+		far_r->base_z_wu = 0.5f * ridge_h; far_r->wu_per_meter = 45.0f; far_r->height_valid = 1u;
+		float ftex = (2.0f * far_r->half_wu) / (float)(N - 1);
+		for (int iy = 0; iy < N; iy++) {
+			float wy = -far_r->half_wu + (float)iy * ftex;
+			for (int ix = 0; ix < N; ix++) {
+				float wx = -far_r->half_wu + (float)ix * ftex;
+				float d = sqrtf(wx * wx + wy * wy);
+				/* Broad 2-texel plateau summit so bilinear diagonal sweep sees full ridge height */
+				far_r->height_wu[iy * N + ix] = (d <= ftex * 2.2f) ? ridge_h : 0.0f;
+			}
+		}
+		nd_seven_gl_horizon_compute_sky_vis(far_r);
+		assert(far_r->sky_vis[64 * N + 64] > 0.999f); /* summit sees full hemisphere */
+		for (int a = 0; a < 6; a++) {
+			float ar = az_deg[a] * (3.14159265358979323846f / 180.0f);
+			float ux = cosf(ar), uy = sinf(ar);
+			float sun_a[3] = { ux * cosf(elev_rad), uy * cosf(elev_rad), sinf(elev_rad) };
+			nd_seven_gl_horizon_sweep_sun(far_r, sun_a, NULL);
+
+			/* Down-sun in shadow (0.35 * L) */
+			float v_in = 1.0f, s_in = 1.0f;
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_a,
+			                             -ux * (0.35f * shad_len), -uy * (0.35f * shad_len), 0.0f,
+			                             &v_in, &s_in);
+			assert(v_in < 0.05f);
+
+			/* Down-sun beyond shadow tip (1.10 * L, clamped inside 0.85 * half) */
+			float v_out = 0.0f, s_out = 1.0f;
+			float d_up = 0.35f * shad_len;
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_a,
+			                             ux * d_up, uy * d_up, 0.0f,
+			                             &v_out, &s_out);
+			assert(v_out > 0.99f); /* up-sun side is sunlit */
+
+			/* Summit itself is sunlit */
+			float v_top = 0.0f;
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_a, 0.0f, 0.0f, ridge_h, &v_top, NULL);
+			assert(v_top > 0.99f);
+		}
+		/* Beyond shadow tip along +X with steeper 45 deg sun (L = 81,000 wu) */
+		{
+			float sun_45[3] = { 0.70710678f, 0.0f, 0.70710678f };
+			nd_seven_gl_horizon_sweep_sun(far_r, sun_45, NULL);
+			float v_mid = 1.0f, v_far = 0.0f;
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_45, -40000.0f, 0.0f, 0.0f, &v_mid, NULL);
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_45, -110000.0f, 0.0f, 0.0f, &v_far, NULL);
+			assert(v_mid < 0.05f && v_far > 0.95f);
+		}
+		/* Night sun disables cast shadow while preserving sky_vis */
+		{
+			float sun_night[3] = { 0.0f, 0.0f, -1.0f };
+			nd_seven_gl_horizon_sweep_sun(far_r, sun_night, NULL);
+			float v_n = 0.0f, s_n = 1.0f;
+			nd_seven_gl_horizon_eval_cpu(NULL, far_r, sun_night, -ftex * 4.0f, 0.0f, 0.0f, &v_n, &s_n);
+			assert(v_n > 0.99f && s_n < 0.95f);
+		}
+
+		/* 5. 2-Cascade Far-to-Near border seeding: distant 4,000 m range OUTSIDE Near Cascade shadows flat Near interior */
+		{
+			far_r->cx = 0.0f; far_r->cy = 0.0f; far_r->half_wu = 262144.0f;
+			far_r->base_z_wu = 90000.0f; far_r->wu_per_meter = 45.0f; far_r->height_valid = 1u;
+			for (int iy = 0; iy < N; iy++) {
+				for (int ix = 0; ix < N; ix++) {
+					float wx = -far_r->half_wu + (float)ix * ftex;
+					far_r->height_wu[iy * N + ix] = (wx >= 55000.0f && wx <= 75000.0f) ? 180000.0f : 0.0f;
+				}
+			}
+			nd_seven_gl_horizon_compute_sky_vis(far_r);
+
+			near_r->cx = 0.0f; near_r->cy = 0.0f; near_r->half_wu = 32768.0f;
+			near_r->base_z_wu = 0.0f; near_r->wu_per_meter = 45.0f; near_r->height_valid = 1u;
+			for (int i = 0; i < N * N; i++) near_r->height_wu[i] = 0.0f;
+			nd_seven_gl_horizon_compute_sky_vis(near_r);
+
+			float sun_25[3] = { cosf(0.43633f), 0.0f, sinf(0.43633f) }; /* +X, 25 deg */
+			nd_seven_gl_horizon_sweep_sun(far_r, sun_25, NULL);
+			nd_seven_gl_horizon_sweep_sun(near_r, sun_25, far_r);
+
+			float v_center = 1.0f, s_center = 0.0f;
+			nd_seven_gl_horizon_eval_cpu(near_r, far_r, sun_25, 0.0f, 0.0f, 0.0f, &v_center, &s_center);
+			assert(v_center < 0.05f);
+			/* Crossfade boundary (box0 = 0.78, 0.85, 0.92, 0.98) remains smooth and shadowed */
+			for (int k = 0; k < 4; k++) {
+				float bx = (0.78f + 0.066f * (float)k) * near_r->half_wu;
+				float vb = 1.0f, sb = 0.0f;
+				nd_seven_gl_horizon_eval_cpu(near_r, far_r, sun_25, -bx, 0.0f, 0.0f, &vb, &sb);
+				assert(isfinite(vb) && isfinite(sb) && vb < 0.05f);
+			}
+		}
+
+		/* 6. 8-Azimuth Sky-Hemisphere AO in a 45-degree conical alpine bowl (analytic cos^2(45 deg) = 0.50) */
+		{
+			near_r->cx = 0.0f; near_r->cy = 0.0f; near_r->half_wu = 32768.0f;
+			near_r->wu_per_meter = 45.0f; near_r->height_valid = 1u;
+			float ntex = (2.0f * near_r->half_wu) / (float)(N - 1);
+			for (int iy = 0; iy < N; iy++) {
+				for (int ix = 0; ix < N; ix++) {
+					float dx = (float)(ix - 64);
+					float dy = (float)(iy - 64);
+					float r = sqrtf(dx * dx + dy * dy);
+					near_r->height_wu[iy * N + ix] = (r <= 36.0f) ? (r * ntex) : (36.0f * ntex);
+				}
+			}
+			nd_seven_gl_horizon_compute_sky_vis(near_r);
+			float svf_bowl = near_r->sky_vis[64 * N + 64];
+			assert(svf_bowl >= 0.42f && svf_bowl <= 0.58f);
+		}
+
+		/* 7. Everest-scale RGBA16F packing & precision (398,250 wu = 8,850 m, zero fp16 overflow, < 2.5 m error) */
+		{
+			const float everest_wu = 398250.0f;
+			far_r->cx = 0.0f; far_r->cy = 0.0f; far_r->half_wu = 524288.0f;
+			far_r->base_z_wu = 0.5f * everest_wu; far_r->wu_per_meter = 45.0f; far_r->height_valid = 1u;
+			for (int iy = 0; iy < N; iy++) {
+				for (int ix = 0; ix < N; ix++) {
+					float dx = (float)(ix - 64);
+					float dy = (float)(iy - 64);
+					float r = sqrtf(dx * dx + dy * dy);
+					far_r->height_wu[iy * N + ix] = (r < 24.0f) ? everest_wu * (1.0f - r / 24.0f) : 0.0f;
+				}
+			}
+			nd_seven_gl_horizon_compute_sky_vis(far_r);
+			float sun_ev[3] = { cosf(0.35f), sinf(0.20f) * cosf(0.35f), sinf(0.35f) };
+			nd_seven_gl_horizon_sweep_sun(far_r, sun_ev, NULL);
+			nd_seven_gl_horizon_pack_rgba(far_r, sun_ev, rgba);
+			float max_abs_r = 0.0f;
+			float worst_fp16_err = 0.0f;
+			for (int i = 0; i < N * N; i++) {
+				float r_m = rgba[i * 4 + 0];
+				float g_s = rgba[i * 4 + 1];
+				float b_p = rgba[i * 4 + 2];
+				float a_b = rgba[i * 4 + 3];
+				assert(isfinite(r_m) && isfinite(g_s) && isfinite(b_p) && isfinite(a_b));
+				if (fabsf(r_m) > max_abs_r) max_abs_r = fabsf(r_m);
+				assert(fabsf(r_m) < 12000.0f);
+				assert(g_s >= 0.25f && g_s <= 1.0f);
+				assert(b_p >= 0.35f && b_p <= 400.0f);
+				assert(a_b >= 0.25f && a_b <= 40.0f);
+				/* IEEE-754 binary16 worst-case quantization step (10-bit significand) */
+				if (fabsf(r_m) > 1.0f) {
+					int exp2_v = (int)floorf(log2f(fabsf(r_m)));
+					float half_ulp = 0.5f * ldexpf(1.0f, exp2_v - 10);
+					if (half_ulp > worst_fp16_err) worst_fp16_err = half_ulp;
+				}
+			}
+			assert(worst_fp16_err <= 2.5f);
+		}
+
+		/* 8. Real nd_field world sampling & relief shading on world_id = 0 alpine massif (-16000, -148000) */
+		{
+			float sea = (float)nd_field_water_level(0);
+			nd_seven_gl_horizon_sample_field(far_r,  0, sea, -16000.0f, -148000.0f, 262144.0f);
+			nd_seven_gl_horizon_compute_sky_vis(far_r);
+			nd_seven_gl_horizon_sample_field(near_r, 0, sea, -16000.0f, -148000.0f, 32768.0f);
+			nd_seven_gl_horizon_compute_sky_vis(near_r);
+
+			float sun_alp[3] = { cosf(0.12f), 0.10f, sinf(0.12f) }; /* ~6.9 deg alpine golden hour */
+			nd_seven_gl_horizon_sweep_sun(far_r, sun_alp, NULL);
+			nd_seven_gl_horizon_sweep_sun(near_r, sun_alp, far_r);
+
+			int shadowed_cells = 0;
+			float min_svf = 1.0f;
+			float max_h = -1e30f;
+			int max_idx = 0;
+			for (int i = 0; i < N * N; i++) {
+				if (near_r->sky_vis[i] < min_svf) min_svf = near_r->sky_vis[i];
+				if (near_r->height_wu[i] > max_h) { max_h = near_r->height_wu[i]; max_idx = i; }
+			}
+			float ntex = (2.0f * near_r->half_wu) / (float)(N - 1);
+			for (int iy = 16; iy < N - 16; iy += 4) {
+				for (int ix = 16; ix < N - 16; ix += 4) {
+					float wx = (near_r->cx - near_r->half_wu) + (float)ix * ntex;
+					float wy = (near_r->cy - near_r->half_wu) + (float)iy * ntex;
+					float wz = near_r->height_wu[iy * N + ix];
+					float v = 1.0f, s = 1.0f;
+					nd_seven_gl_horizon_eval_cpu(near_r, far_r, sun_alp, wx, wy, wz, &v, &s);
+					assert(isfinite(v) && isfinite(s) && v >= 0.0f && v <= 1.0f && s >= 0.25f && s <= 1.0f);
+					if (v < 0.75f) shadowed_cells++;
+				}
+			}
+			float peak_x = (near_r->cx - near_r->half_wu) + (float)(max_idx % N) * ntex;
+			float peak_y = (near_r->cy - near_r->half_wu) + (float)(max_idx / N) * ntex;
+			float v_peak = 0.0f;
+			nd_seven_gl_horizon_eval_cpu(near_r, far_r, sun_alp, peak_x, peak_y, max_h, &v_peak, NULL);
+			assert(shadowed_cells > 0);
+			assert(min_svf < 0.995f);
+			assert(v_peak > 0.95f);
+
+			/* 9. Incremental scroll-strip exact parity (+8, -8 texel diagonal walk snap) */
+			{
+				nd_seven_horizon_ring_t *ref_r = (nd_seven_horizon_ring_t *)calloc(1, sizeof(*ref_r));
+				assert(ref_r != NULL);
+				float h_rad = 49152.0f;
+				float t_wu = (2.0f * h_rad) / (float)(N - 1);
+				float cx0 = -16000.0f, cy0 = -148000.0f;
+				float cx1 = cx0 + 8.0f * t_wu;
+				float cy1 = cy0 - 8.0f * t_wu;
+				/* Prime near_r at (cx0, cy0), then scroll diagonally to (cx1, cy1) */
+				nd_seven_gl_horizon_sample_field(near_r, 0, sea, cx0, cy0, h_rad);
+				nd_seven_gl_horizon_sample_field(near_r, 0, sea, cx1, cy1, h_rad);
+				/* Cold-sample ref_r directly at (cx1, cy1) */
+				nd_seven_gl_horizon_sample_field(ref_r,  0, sea, cx1, cy1, h_rad);
+				for (int i = 0; i < N * N; i++) {
+					assert(fabsf(near_r->height_wu[i] - ref_r->height_wu[i]) < 1e-3f);
+				}
+				assert(fabsf(near_r->base_z_wu - ref_r->base_z_wu) < 1e-3f);
+				free(ref_r);
+			}
+
+			printf("PASS: Phase 1 World-Scale 2-Cascade Terrain Horizon Shadows & Sky-AO verified (alpine shadowed=%d, min_svf=%.3f, peak_vis=%.2f, scroll_parity_ok, everest_fp16_ok)\n",
+			       shadowed_cells, min_svf, v_peak);
+		}
+
+		free(rgba);
+		free(far_r);
+		free(near_r);
+	}
+
+	/* Zelda / MMORPG controls: camera-relative WASD & HJKL, diagonal speed normalization,
+	 * hop arc physics, recenter behind lamb, damped zoom & over-the-shoulder lift */
+	{
+		nd_seven_reset_input();
+		nd_seven_reset_cam();
+		nd_seven_set_zoom(ND_SEVEN_ZELDA_ZOOM);
+		nd_seven_step_cam(1.0f);
+		set_map(12, 12, 10, 0x1B, 0, 0, 0, 0);
+		nd_seven_tick(&st, 0.0f);
+
+		/* 1. Camera-relative W & K at yaw = 0 (North: -Y), +90 (West: -X), 180 (South: +Y) */
+		static const struct { float yaw; const char *key; int sgn_x; int sgn_y; } cases[6] = {
+			{   0.0f, "w",  0, -1 },
+			{   0.0f, "k",  0, -1 },
+			{  90.0f, "w", -1,  0 },
+			{  90.0f, "k", -1,  0 },
+			{ 180.0f, "w",  0, +1 },
+			{ 180.0f, "k",  0, +1 }
+		};
+		for (int ci = 0; ci < 6; ci++) {
+			nd_seven_reset_input();
+			nd_seven_set_cam_angles(cases[ci].yaw, ND_SEVEN_ZELDA_PITCH);
+			nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+			int x0 = 0, y0 = 0, x1 = 0, y1 = 0, d = 0, wk = 0;
+			nd_seven_lamb(&x0, &y0, &d, &wk);
+			nd_seven_key(cases[ci].key, 1);
+			for (int s = 0; s < 12; s++) (void)nd_seven_tick(&st, 1.0f / 60.0f);
+			nd_seven_key(cases[ci].key, 0);
+			nd_seven_lamb(&x1, &y1, &d, &wk);
+			int dx = x1 - x0, dy = y1 - y0;
+			if (cases[ci].sgn_x != 0) {
+				assert(dx * cases[ci].sgn_x > 8);
+				assert(abs(dy) <= 1);
+			} else {
+				assert(dy * cases[ci].sgn_y > 8);
+				assert(abs(dx) <= 1);
+			}
+		}
+
+		/* 2. Diagonal speed normalization (W+D distance must match cardinal W within 10%) */
+		nd_seven_reset_input();
+		nd_seven_set_cam_angles(0.0f, ND_SEVEN_ZELDA_PITCH);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_key("w", 1);
+		for (int s = 0; s < 15; s++) (void)nd_seven_tick(&st, 1.0f / 60.0f);
+		nd_seven_key("w", 0);
+		int cx1 = nd_seven_get_lx() - NDW_CENTER_X;
+		int cy1 = nd_seven_get_ly() - NDW_CENTER_Y;
+		float card_dist = hypotf((float)cx1, (float)cy1);
+
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_key("w", 1);
+		nd_seven_key("d", 1);
+		for (int s = 0; s < 15; s++) (void)nd_seven_tick(&st, 1.0f / 60.0f);
+		nd_seven_key("w", 0);
+		nd_seven_key("d", 0);
+		int dx1 = nd_seven_get_lx() - NDW_CENTER_X;
+		int dy1 = nd_seven_get_ly() - NDW_CENTER_Y;
+		float diag_dist = hypotf((float)dx1, (float)dy1);
+		assert(card_dist > 12.0f && diag_dist > 12.0f);
+		assert(dx1 > 6 && dy1 < -6);
+		assert(fabsf(diag_dist - card_dist) / card_dist < 0.12f);
+
+		/* 3. Hop arc rises > 0.25m and lands back to exact 0.0m */
+		nd_seven_reset_input();
+		nd_seven_trigger_hop();
+		float peak_hop = 0.0f;
+		for (int s = 0; s < 60; s++) {
+			(void)nd_seven_tick(&st, 1.0f / 60.0f);
+			float hz = nd_seven_get_hop_z();
+			if (hz > peak_hop) peak_hop = hz;
+		}
+		assert(peak_hop > 0.25f && peak_hop < 0.70f);
+		assert(nd_seven_get_hop_z() < 1e-4f);
+
+		/* 4. Zelda recenter behind lamb aligns camera yaw directly behind lamb facing */
+		nd_seven_set_cam_angles(0.0f, ND_SEVEN_ZELDA_PITCH);
+		nd_seven_set_lamb(NDW_CENTER_X, NDW_CENTER_Y);
+		nd_seven_key("d", 1);
+		for (int s = 0; s < 18; s++) (void)nd_seven_tick(&st, 1.0f / 60.0f);
+		nd_seven_key("d", 0);
+		/* Lamb faced East (+X) -> lamb_yaw_rad ~= -PI/2 -> camera behind lamb = -90 deg */
+		nd_seven_cam_recenter_behind(nd_seven_get_lamb_yaw_rad());
+		for (int s = 0; s < 35; s++) nd_seven_step_cam(0.05f);
+		assert(fabsf(nd_seven_get_yaw_deg() - (-90.0f)) < 3.0f);
+
+		/* 5. Smooth damped zoom_to & over-the-shoulder look-at vertical lift */
+		nd_seven_set_zoom(1.0f);
+		nd_seven_zoom_to(2.0f);
+		nd_seven_step_cam(0.016f);
+		assert(nd_seven_get_zoom() > 1.01f && nd_seven_get_zoom() < 1.99f);
+		for (int s = 0; s < 40; s++) nd_seven_step_cam(0.05f);
+		assert(fabsf(nd_seven_get_zoom() - 2.0f) < 0.02f);
+		assert(nd_seven_cam_target_z_lift(160.0f) > 12.0f);
+		assert(nd_seven_cam_target_z_lift(500.0f) == 0.0f);
+
+		nd_seven_reset_input();
+		nd_seven_reset_cam();
+		printf("PASS: Zelda/MMO camera-relative WASD+HJKL, diagonal norm (%.1f vs %.1f), hop arc (%.2fm), recenter & damped zoom verified\n",
+		       diag_dist, card_dist, peak_hop);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");

@@ -446,7 +446,33 @@ typedef struct {
 	float             water_level;
 	bool              use_analytical_bounds;
 	bool              has_tube_occ;
+	bool              is_identity_pose;
 } seven_bounds_3d_ctx_t;
+
+#define SEVEN_ELEV_BOUNDS_CACHE_SIZE 2048u
+typedef struct {
+	int32_t  ox;
+	int32_t  oy;
+	int32_t  w;
+	int32_t  h;
+	uint32_t planet_epoch;
+	float    z_in_min;
+	float    z_in_max;
+	float    az0;
+	float    az1;
+	float    water_level;
+	float    r_major;
+	float    r_minor;
+	double   abs_min[3];
+	double   abs_max[3];
+	double   abs_center[3];
+	float    span_w;
+	float    span_h;
+	uint16_t world;
+	uint8_t  valid;          /* bit 0: az0/az1 valid; bit 1: identity-pose AABB/center/span valid */
+	uint8_t  use_analytical;
+} seven_elev_bounds_entry_t; /* 2048 entries, L2-resident */
+static seven_elev_bounds_entry_t s_elev_bounds_cache[SEVEN_ELEV_BOUNDS_CACHE_SIZE];
 
 static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float w, float h,
                                      float z_min, float z_max,
@@ -455,13 +481,75 @@ static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float
                                      float *out_span_w, float *out_span_h)
 {
 	const seven_bounds_3d_ctx_t *ctx = (const seven_bounds_3d_ctx_t *)bounds_ctx;
+	int32_t iox = (int32_t)floorf(ox);
+	int32_t ioy = (int32_t)floorf(oy);
+	int32_t iw  = (int32_t)ceilf(w);
+	int32_t ih  = (int32_t)ceilf(h);
+	uint32_t epoch = nd_field_get_planet_epoch();
+	uint32_t hkey = ((uint32_t)iox * 2654435761u) ^
+	                ((uint32_t)ioy * 2246822519u) ^
+	                ((uint32_t)iw  * 3266489917u) ^
+	                ((uint32_t)ih  * 668265263u)  ^
+	                ((uint32_t)ctx->world * 374761393u);
+	hkey ^= hkey >> 16;
+	seven_elev_bounds_entry_t *ent = &s_elev_bounds_cache[hkey & (SEVEN_ELEV_BOUNDS_CACHE_SIZE - 1u)];
+	bool key_match = ((ent->valid & 1u) != 0u &&
+	                  ent->ox == iox && ent->oy == ioy &&
+	                  ent->w == iw && ent->h == ih &&
+	                  ent->world == ctx->world &&
+	                  ent->planet_epoch == epoch);
+	bool int_rect = ((float)iox == ox && (float)ioy == oy && (float)iw == w && (float)ih == h);
+	uint8_t want_ana = ctx->use_analytical_bounds ? 1u : 0u;
+	float rmaj_f = (float)ctx->surf.r_major;
+	float rmin_f = (float)ctx->surf.r_minor;
+
+	/* Fast path: identity-pose primary planet AABB/center/span hit -> 9 subtractions, zero trig */
+	if (ctx->is_identity_pose && int_rect && key_match &&
+	    (ent->valid & 2u) != 0u &&
+	    ent->use_analytical == want_ana &&
+	    ent->z_in_min == z_min && ent->z_in_max == z_max &&
+	    ent->water_level == ctx->water_level &&
+	    ent->r_major == rmaj_f && ent->r_minor == rmin_f) {
+		if (out_min) {
+			out_min[0] = (float)(ent->abs_min[0] - ctx->ref_origin[0]);
+			out_min[1] = (float)(ent->abs_min[1] - ctx->ref_origin[1]);
+			out_min[2] = (float)(ent->abs_min[2] - ctx->ref_origin[2]);
+		}
+		if (out_max) {
+			out_max[0] = (float)(ent->abs_max[0] - ctx->ref_origin[0]);
+			out_max[1] = (float)(ent->abs_max[1] - ctx->ref_origin[1]);
+			out_max[2] = (float)(ent->abs_max[2] - ctx->ref_origin[2]);
+		}
+		if (out_center) {
+			out_center[0] = (float)(ent->abs_center[0] - ctx->ref_origin[0]);
+			out_center[1] = (float)(ent->abs_center[1] - ctx->ref_origin[1]);
+			out_center[2] = (float)(ent->abs_center[2] - ctx->ref_origin[2]);
+		}
+		if (out_span_w) *out_span_w = ent->span_w;
+		if (out_span_h) *out_span_h = ent->span_h;
+		return;
+	}
+
 	float z0 = z_min, z1 = z_max;
 	if (ctx->use_analytical_bounds) {
-		float az0 = z0, az1 = z1;
-		nd_field_elevation_bounds(ctx->world,
-		                          (int32_t)floorf(ox), (int32_t)floorf(oy),
-		                          (int32_t)ceilf(w), (int32_t)ceilf(h),
-		                          &az0, &az1);
+		float az0, az1;
+		if (key_match) {
+			az0 = ent->az0;
+			az1 = ent->az1;
+		} else {
+			az0 = -2150.0f;
+			az1 = ND_FIELD_GLOBAL_MAX_Z;
+			nd_field_elevation_bounds(ctx->world, iox, ioy, iw, ih, &az0, &az1);
+			ent->ox = iox;
+			ent->oy = ioy;
+			ent->w = iw;
+			ent->h = ih;
+			ent->planet_epoch = epoch;
+			ent->az0 = az0;
+			ent->az1 = az1;
+			ent->world = ctx->world;
+			ent->valid = 1u;
+		}
 		if (az0 > z0) z0 = az0;
 		if (az1 < z1) z1 = az1;
 	}
@@ -475,6 +563,64 @@ static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float
 	double du = (double)w / (double)ND_SEVEN_WORLD_DIM_W;
 	double v0 = ((double)oy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
 	double dv = (double)h / (double)ND_SEVEN_WORLD_DIM_H;
+
+	double R_maj = ctx->surf.r_major;
+	double r_min = ctx->surf.r_minor;
+	double theta_mid = COROLLA_TWO_PI * (v0 + 0.5 * dv - 0.5);
+	double r_ring = R_maj + r_min * cos(theta_mid);
+	float span_w_f = (float)(COROLLA_TWO_PI * r_ring * fabs(du));
+	float span_h_f = (float)(COROLLA_TWO_PI * r_min * fabs(dv));
+
+	if (ctx->is_identity_pose && int_rect) {
+		double abs_min[3], abs_max[3];
+		corolla_patch_aabb(&ctx->surf, &ctx->pose, NULL, u0, v0, du, dv,
+		                   (double)z0, (double)z1, abs_min, abs_max);
+		double u_mid = u0 + 0.5 * du;
+		double v_mid = v0 + 0.5 * dv;
+		double h_mid = 0.5 * ((double)z0 + (double)z1);
+		corolla_frame_t fr = {0};
+		corolla_eval_frame(&ctx->surf, u_mid, v_mid, h_mid, &fr);
+
+		ent->ox = iox;
+		ent->oy = ioy;
+		ent->w = iw;
+		ent->h = ih;
+		ent->planet_epoch = epoch;
+		ent->world = ctx->world;
+		ent->z_in_min = z_min;
+		ent->z_in_max = z_max;
+		ent->water_level = ctx->water_level;
+		ent->r_major = rmaj_f;
+		ent->r_minor = rmin_f;
+		ent->use_analytical = want_ana;
+		for (int k = 0; k < 3; k++) {
+			ent->abs_min[k] = abs_min[k];
+			ent->abs_max[k] = abs_max[k];
+			ent->abs_center[k] = fr.pos[k];
+		}
+		ent->span_w = span_w_f;
+		ent->span_h = span_h_f;
+		ent->valid = (uint8_t)((ctx->use_analytical_bounds ? 1u : (ent->valid & 1u)) | 2u);
+
+		if (out_min) {
+			out_min[0] = (float)(abs_min[0] - ctx->ref_origin[0]);
+			out_min[1] = (float)(abs_min[1] - ctx->ref_origin[1]);
+			out_min[2] = (float)(abs_min[2] - ctx->ref_origin[2]);
+		}
+		if (out_max) {
+			out_max[0] = (float)(abs_max[0] - ctx->ref_origin[0]);
+			out_max[1] = (float)(abs_max[1] - ctx->ref_origin[1]);
+			out_max[2] = (float)(abs_max[2] - ctx->ref_origin[2]);
+		}
+		if (out_center) {
+			out_center[0] = (float)(fr.pos[0] - ctx->ref_origin[0]);
+			out_center[1] = (float)(fr.pos[1] - ctx->ref_origin[1]);
+			out_center[2] = (float)(fr.pos[2] - ctx->ref_origin[2]);
+		}
+		if (out_span_w) *out_span_w = span_w_f;
+		if (out_span_h) *out_span_h = span_h_f;
+		return;
+	}
 
 	double bmin[3], bmax[3];
 	corolla_patch_aabb(&ctx->surf, &ctx->pose, ctx->ref_origin, u0, v0, du, dv,
@@ -501,12 +647,8 @@ static void seven_torus_bounds_3d_cb(void *bounds_ctx, float ox, float oy, float
 		out_center[1] = (float)(p_world[1] - ctx->ref_origin[1]);
 		out_center[2] = (float)(p_world[2] - ctx->ref_origin[2]);
 	}
-	double R_maj = ctx->surf.r_major;
-	double r_min = ctx->surf.r_minor;
-	double theta_mid = COROLLA_TWO_PI * (v0 + 0.5 * dv - 0.5);
-	double r_ring = R_maj + r_min * cos(theta_mid);
-	if (out_span_w) *out_span_w = (float)(COROLLA_TWO_PI * r_ring * fabs(du));
-	if (out_span_h) *out_span_h = (float)(COROLLA_TWO_PI * r_min * fabs(dv));
+	if (out_span_w) *out_span_w = span_w_f;
+	if (out_span_h) *out_span_h = span_h_f;
 }
 
 static void seven_torus_point_3d_cb(void *bounds_ctx, float wx, float wy, float wz,
@@ -849,12 +991,15 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 
 	float dist = (eff_cam_dist > 1.0f) ? eff_cam_dist : ND_SEVEN_CAM_DIST;
 	float lwz_est = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
+	float cam_z_lift = nd_seven_cam_target_z_lift(dist);
+	float cam_tz_est = lwz_est + cam_z_lift;
 	float yaw_deg = nd_seven_get_yaw_deg();
 	int16_t lamb_wl_pre = 0;
 	bool has_pre_water = seven_has_water_at(world, (int32_t)lwx, (int32_t)lwy, &lamb_wl_pre);
 	float target_z = (has_pre_water && (float)lamb_wl_pre > lwz_est) ? (float)lamb_wl_pre : lwz_est;
+	float eff_pitch = nd_seven_eval_effective_pitch(nd_seven_get_pitch_deg(), dist);
 	float pitch_deg = nd_seven_clamp_cam_pitch(world, (float)lwx, (float)lwy, target_z,
-	                                           dist, yaw_deg, nd_seven_get_pitch_deg());
+	                                           dist, yaw_deg, eff_pitch);
 	float yaw_rad = yaw_deg * (3.14159265358979323846f / 180.0f);
 	float cos_y = cosf(yaw_rad);
 	float sin_y = sinf(yaw_rad);
@@ -872,7 +1017,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	if (torus_sx < 0.05f) torus_sx = 0.05f;
 	if (torus_sy < 0.05f) torus_sy = 0.05f;
 	float flat_mvp[16];
-	nd_seven_gl_compute_flat_mvp_ex((uint32_t)w, (uint32_t)h, 0.0f, 0.0f, lwz_est,
+	nd_seven_gl_compute_flat_mvp_ex((uint32_t)w, (uint32_t)h, 0.0f, 0.0f, cam_tz_est,
 	                                dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV, flat_mvp);
 	for (int r = 0; r < 4; r++) {
 		flat_mvp[0 + r] *= torus_sx;
@@ -884,7 +1029,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	/* Compute camera-origin-relative 3D curved-torus camera MVP (matches nd_seven_gl_begin_frame_ex bit-for-bit) */
 	float mvp_3d[16], eye_rel[3], eye_abs[3];
 	double ref_origin[3];
-	nd_seven_gl_compute_mvp_rel_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz_est,
+	nd_seven_gl_compute_mvp_rel_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, cam_tz_est,
 	                               dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV,
 	                               pdef, mvp_3d, ref_origin, eye_rel, eye_abs);
 
@@ -931,6 +1076,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	primary_bctx.world = world;
 	primary_bctx.water_level = (float)nd_field_water_level(world);
 	primary_bctx.use_analytical_bounds = true;
+	primary_bctx.is_identity_pose = true;
 	if ((double)pdef->major_r > (double)pdef->minor_r + 2500.0 && (double)pdef->minor_r > 2500.0) {
 		double u_cam = (double)lwx / (double)ND_SEVEN_WORLD_DIM_W;
 		double v_cam = ((double)lwy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
@@ -956,7 +1102,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	bool instant_jump = (s_visible_leaf_count == 0 || s_last_pop_world != world ||
 	                     s_last_pop_dist <= 1.0f ||
 	                     dist > s_last_pop_dist * 2.5f || dist < s_last_pop_dist * 0.4f);
-	uint32_t max_pops_query = instant_jump ? 0u : 20u;
+	uint32_t max_pops_query = instant_jump ? 0u : 8u;
 	s_last_pop_world = world;
 	s_last_pop_dist = dist;
 
@@ -1001,6 +1147,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	/* Re-evaluate focal elevation on the newly active View 0 leaves */
 	float lwz = nd_seven_ground_elevation_f((int32_t)lwx, (int32_t)lwy);
 	float lamb_light_z = nd_seven_lamb_elevation_f(st, (int32_t)lwx, (int32_t)lwy);
+	float hop_wu = nd_seven_get_hop_z() * 45.0f;
 
 	s_cam_focal_x = (float)lwx;
 	s_cam_focal_y = (float)lwy;
@@ -1008,9 +1155,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_cam_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
 
 	/* Begin 3D WebGL frame in pure C */
-	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z,
+	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z + hop_wu,
 	                           nd_seven_is_universe_owner(st) ? 1.0f : 0.0f);
-	nd_seven_gl_begin_frame_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz,
+	nd_seven_gl_begin_frame_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz + cam_z_lift,
 	                           dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV,
 	                           anim_t, pdef);
 
@@ -1025,6 +1172,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                : (float)lamb_wl;
 		float eff_wl = fmaxf((float)lamb_wl, live_wl);
 		bool lamb_in_water = has_loc_water && (lwz < eff_wl + 0.65f);
+		nd_seven_set_lamb_in_water(lamb_in_water ? 1 : 0);
 		/* Always lock focal_sea_level to the Lamb's actual local water table (or base sea level on dry land)
 		 * so coarse terrain chunks containing distant perched mountain lakes never override billboard uSeaLevel. */
 		nd_seven_gl_set_focal_water(lamb_in_water ? eff_wl : (float)base_wl);
@@ -1646,7 +1794,7 @@ static inline void seven_sample_node_elev_slope(const ar_node_t *node, int32_t w
 #define BLOCK_BB_CACHE_SLOTS 4096u
 #define BLOCK_BB_ARENA_CAP   262144u
 #define BLOCK_BB_MAX_PER_BLK 192u
-#define BLOCK_BB_STAGING_SLOTS 64u
+#define BLOCK_BB_STAGING_SLOTS 128u
 
 typedef struct {
 	int32_t       bx0, by0;
@@ -1672,6 +1820,7 @@ static lam_billboard_gpu_t   s_block_bb_arena[BLOCK_BB_ARENA_CAP];
 static lam_billboard_gpu_t   s_block_bb_staging[BLOCK_BB_STAGING_SLOTS][BLOCK_BB_MAX_PER_BLK];
 static uint16_t              s_block_bb_staging_cnt[BLOCK_BB_STAGING_SLOTS];
 static float                 s_block_bb_staging_max_dim[BLOCK_BB_STAGING_SLOTS];
+static block_bb_cache_slot_t *s_block_bb_staging_owner[BLOCK_BB_STAGING_SLOTS];
 static uint32_t              s_block_bb_staging_cursor = 0;
 static uint64_t              s_block_bb_arena_cursor = 1;
 
@@ -2853,7 +3002,8 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					dst_bb->style = lamb_glows ? ND_BB_STYLE_GLOW : ND_BB_STYLE_STANDARD;
 					dst_bb->shadow_rx = lamb_glows ? 0 : 8;
 					dst_bb->shadow_ry = lamb_glows ? 0 : 4;
-					dst_bb->pad0 = s_prev_lamb_in_water ? 0x80u : 0;
+					dst_bb->pad0 = (uint8_t)((s_prev_lamb_in_water ? 0x80u : 0u) |
+					                         ((uint8_t)nd_seven_get_dir() & 3u));
 					dst_bb->mesh_id = ND_MESH3D_LAMB_ID;
 				} else {
 					dst_bb->tint_rgba = tint_b;
@@ -4159,8 +4309,8 @@ seven_emit_particles_and_sort_batch(seven_frame_ctx_t *ctx)
 
 		for (uint32_t i = 0; i < all_gpu_count; i++) {
 			const lam_billboard_gpu_t *bb = &s_all_gpu_batch[i];
-			bool is_other = (bb->style == ND_BB_STYLE_GLOW) || (bb->style == ND_BB_STYLE_PARTICLE);
-			if (!is_other && bb->mesh_id > 0 && bb->mesh_id < ND_SEVEN_MESH3D_TOTAL) {
+			bool is_particle = (bb->style == ND_BB_STYLE_PARTICLE);
+			if (!is_particle && bb->mesh_id > 0 && bb->mesh_id < ND_SEVEN_MESH3D_TOTAL) {
 				if (nd_seven_gl_billboard_is_mesh3d_only(bb))
 					continue;
 				bool is_grass = (bb->style == ND_BB_STYLE_GRASS);
@@ -4293,6 +4443,10 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 
 		uint32_t cur_atlas_ver = atlas_rgba_version();
 		uint32_t cur_forget_seq = nd_seven_get_forget_seq();
+		static uint32_t s_last_scenery_forget_seq = 0u;
+		bool cold_scenery = (s_frame_dispatch_count <= 1u || cur_forget_seq != s_last_scenery_forget_seq);
+		s_last_scenery_forget_seq = cur_forget_seq;
+		uint32_t max_sync_blocks = cold_scenery ? 256u : 16u;
 		uint32_t sync_block_builds = 0;
 
 		for (size_t m = 0; m < s_visible_leaf_count; m++) {
@@ -4404,36 +4558,39 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 							    (((uint32_t)world & 3u) << 8)) & (BLOCK_BB_CACHE_SLOTS - 1u));
 						block_bb_cache_slot_t *slot = &s_block_bb_cache[slot_idx];
 						if (atomic_load_explicit(&slot->async_task.state, memory_order_acquire) == (uint8_t)STL_WQ_DONE) {
-							if (slot->bx0 == bx0 && slot->by0 == by0 &&
-							    slot->bw == blk_w && slot->bh == blk_h &&
-							    slot->world == (int16_t)world && slot->rz == base_rz &&
-							    slot->node_ox == node->ox && slot->node_oy == node->oy &&
-							    slot->staging_idx < BLOCK_BB_STAGING_SLOTS) {
-								uint16_t scnt = s_block_bb_staging_cnt[slot->staging_idx];
-								uint32_t cur_off = (uint32_t)(s_block_bb_arena_cursor & (BLOCK_BB_ARENA_CAP - 1u));
-								if (cur_off + BLOCK_BB_MAX_PER_BLK > BLOCK_BB_ARENA_CAP) {
-									s_block_bb_arena_cursor += (uint64_t)(BLOCK_BB_ARENA_CAP - cur_off);
-									cur_off = 0;
+							if (slot->staging_idx < BLOCK_BB_STAGING_SLOTS &&
+							    s_block_bb_staging_owner[slot->staging_idx] == slot) {
+								if (slot->bx0 == bx0 && slot->by0 == by0 &&
+								    slot->bw == blk_w && slot->bh == blk_h &&
+								    slot->world == (int16_t)world && slot->rz == base_rz &&
+								    slot->node_ox == node->ox && slot->node_oy == node->oy) {
+									uint16_t scnt = s_block_bb_staging_cnt[slot->staging_idx];
+									uint32_t cur_off = (uint32_t)(s_block_bb_arena_cursor & (BLOCK_BB_ARENA_CAP - 1u));
+									if (cur_off + BLOCK_BB_MAX_PER_BLK > BLOCK_BB_ARENA_CAP) {
+										s_block_bb_arena_cursor += (uint64_t)(BLOCK_BB_ARENA_CAP - cur_off);
+										cur_off = 0;
+									}
+									uint64_t start_seq = s_block_bb_arena_cursor;
+									if (scnt > 0) {
+										memcpy(&s_block_bb_arena[cur_off],
+										       s_block_bb_staging[slot->staging_idx],
+										       (size_t)scnt * sizeof(lam_billboard_gpu_t));
+									}
+									s_block_bb_arena_cursor += (uint64_t)scnt;
+									slot->arena_seq = start_seq + (uint64_t)scnt;
+									slot->arena_off = cur_off;
+									slot->max_dim = s_block_bb_staging_max_dim[slot->staging_idx];
+									slot->count = scnt;
+									slot->w_level = w_level;
+									slot->node_level = node->level;
+									slot->node_rev = node->rev;
+									slot->atlas_ver = cur_atlas_ver;
+									slot->forget_seq = cur_forget_seq;
+									slot->fade_start_t = (s_frame_anim_time > 0.0f && s_frame_dispatch_count > 1u)
+									                     ? s_frame_anim_time : -10.0f;
+									slot->valid = 1;
 								}
-								uint64_t start_seq = s_block_bb_arena_cursor;
-								if (scnt > 0) {
-									memcpy(&s_block_bb_arena[cur_off],
-									       s_block_bb_staging[slot->staging_idx],
-									       (size_t)scnt * sizeof(lam_billboard_gpu_t));
-								}
-								s_block_bb_arena_cursor += (uint64_t)scnt;
-								slot->arena_seq = start_seq + (uint64_t)scnt;
-								slot->arena_off = cur_off;
-								slot->max_dim = s_block_bb_staging_max_dim[slot->staging_idx];
-								slot->count = scnt;
-								slot->w_level = w_level;
-								slot->node_level = node->level;
-								slot->node_rev = node->rev;
-								slot->atlas_ver = cur_atlas_ver;
-								slot->forget_seq = cur_forget_seq;
-								slot->fade_start_t = (s_frame_anim_time > 0.0f && s_frame_dispatch_count > 1u)
-								                     ? s_frame_anim_time : -10.0f;
-								slot->valid = 1;
+								s_block_bb_staging_owner[slot->staging_idx] = NULL;
 							}
 							atomic_store_explicit(&slot->async_task.state, (uint8_t)STL_WQ_IDLE, memory_order_release);
 						}
@@ -4475,27 +4632,61 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 							continue;
 						}
 
-						if (s_seven_wq && sync_block_builds >= 1024u) {
-							uint8_t sidx = (uint8_t)(s_block_bb_staging_cursor++ & (BLOCK_BB_STAGING_SLOTS - 1u));
-							slot->bx0 = bx0;
-							slot->by0 = by0;
-							slot->bw = blk_w;
-							slot->bh = blk_h;
-							slot->node_ox = node->ox;
-							slot->node_oy = node->oy;
-							slot->node_rev = node->rev;
-							slot->atlas_ver = cur_atlas_ver;
-							slot->forget_seq = cur_forget_seq;
-							slot->world = (int16_t)world;
-							slot->rz = base_rz;
-							slot->w_level = w_level;
-							slot->node_level = node->level;
-							slot->staging_idx = sidx;
-							slot->async_node = node;
-							slot->valid = 0;
-							if (stl_wq_submit(s_seven_wq, &slot->async_task, seven_async_block_bb_worker, slot) == 0) {
-								continue;
+						if (sync_block_builds >= max_sync_blocks) {
+							if (s_seven_wq && stl_wq_thread_count(s_seven_wq) > 0u) {
+								int free_sidx = -1;
+								int done_sidx = -1;
+								for (uint32_t probe = 0; probe < BLOCK_BB_STAGING_SLOTS; probe++) {
+									uint32_t cand = (s_block_bb_staging_cursor + probe) & (BLOCK_BB_STAGING_SLOTS - 1u);
+									block_bb_cache_slot_t *own = s_block_bb_staging_owner[cand];
+									if (!own) {
+										free_sidx = (int)cand;
+										break;
+									}
+									uint8_t ost = atomic_load_explicit(&own->async_task.state, memory_order_acquire);
+									if (ost == (uint8_t)STL_WQ_IDLE) {
+										s_block_bb_staging_owner[cand] = NULL;
+										free_sidx = (int)cand;
+										break;
+									}
+									if (ost == (uint8_t)STL_WQ_DONE && done_sidx < 0)
+										done_sidx = (int)cand;
+								}
+								if (free_sidx < 0 && done_sidx >= 0) {
+									block_bb_cache_slot_t *own = s_block_bb_staging_owner[done_sidx];
+									if (own)
+										atomic_store_explicit(&own->async_task.state, (uint8_t)STL_WQ_IDLE, memory_order_release);
+									s_block_bb_staging_owner[done_sidx] = NULL;
+									free_sidx = done_sidx;
+								}
+								if (free_sidx >= 0) {
+									uint8_t sidx = (uint8_t)free_sidx;
+									s_block_bb_staging_cursor = (uint32_t)(free_sidx + 1);
+									slot->bx0 = bx0;
+									slot->by0 = by0;
+									slot->bw = blk_w;
+									slot->bh = blk_h;
+									slot->node_ox = node->ox;
+									slot->node_oy = node->oy;
+									slot->node_rev = node->rev;
+									slot->atlas_ver = cur_atlas_ver;
+									slot->forget_seq = cur_forget_seq;
+									slot->world = (int16_t)world;
+									slot->rz = base_rz;
+									slot->w_level = w_level;
+									slot->node_level = node->level;
+									slot->staging_idx = sidx;
+									slot->async_node = node;
+									slot->valid = 0;
+									s_block_bb_staging_owner[sidx] = slot;
+									if (stl_wq_submit(s_seven_wq, &slot->async_task, seven_async_block_bb_worker, slot) == 0) {
+										continue;
+									}
+									s_block_bb_staging_owner[sidx] = NULL;
+								}
 							}
+							if (!cold_scenery)
+								continue;
 						}
 						sync_block_builds++;
 

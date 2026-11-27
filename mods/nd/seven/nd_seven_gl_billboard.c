@@ -439,6 +439,12 @@ void nd_seven_gl_eval_billboard_quad(const lam_billboard_gpu_t *b,
 
 float s_shadow_sun_dir[3] = { 0.0f, 0.0f, 0.0f };
 
+static inline float mesh3d_shadow_north_shift(const lam_billboard_gpu_t *b)
+{
+	return (b->mesh_id > 0 && b->mesh_id != ND_MESH3D_LAMB_ID && b->anchor_y > 0.0f)
+	       ? (b->anchor_y * 0.5f) : 0.0f;
+}
+
 static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
                                                   const billboard_basis_t *basis,
                                                   nd_seven_gl_bb_vert_t out_verts[6])
@@ -446,7 +452,7 @@ static void eval_billboard_shadow_quad_from_basis(const lam_billboard_gpu_t *b,
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float north_shift = mesh3d_shadow_north_shift(b);
 	float base_pos[3] = {
 		basis->base_pos[0] - S[0] * north_shift,
 		basis->base_pos[1] - S[1] * north_shift,
@@ -561,7 +567,7 @@ static bool eval_billboard_lamb_shadow_quad_from_basis(const lam_billboard_gpu_t
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float north_shift = mesh3d_shadow_north_shift(b);
 	float base_pos[3] = {
 		basis->base_pos[0] - S[0] * north_shift,
 		basis->base_pos[1] - S[1] * north_shift,
@@ -777,7 +783,7 @@ static inline void pack_bb_shadow_quad_instance(const lam_billboard_gpu_t *b,
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float north_shift = mesh3d_shadow_north_shift(b);
 	float base_pos[3] = {
 		basis->base_pos[0] - S[0] * north_shift,
 		basis->base_pos[1] - S[1] * north_shift,
@@ -876,7 +882,7 @@ static inline bool pack_bb_lamb_shadow_quad_instance(const lam_billboard_gpu_t *
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
-	float north_shift = (b->mesh_id > 0 && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	float north_shift = mesh3d_shadow_north_shift(b);
 	float base_pos[3] = {
 		basis->base_pos[0] - S[0] * north_shift,
 		basis->base_pos[1] - S[1] * north_shift,
@@ -1139,6 +1145,9 @@ bool nd_seven_gl_billboard_is_mesh3d_only(const lam_billboard_gpu_t *b)
 {
 	if (!b || b->mesh_id == 0)
 		return false;
+	/* Procedural 3D lamb has a valid 2D atlas sprite for distant zoom impostor fallback */
+	if (b->mesh_id == ND_MESH3D_LAMB_ID)
+		return false;
 	if (b->mesh_id >= ND_MESH3D_UNDERSTORY_BASE && b->mesh_id < ND_SEVEN_MESH3D_TOTAL)
 		return true;
 	if (b->v0 == b->v1)
@@ -1153,9 +1162,11 @@ void nd_seven_gl_eval_mesh3d_anchor(const lam_billboard_gpu_t *b,
 {
 	/* Center 3D trunks/rocks at (b->x, b->y - anchor_y * 0.5f) along North (-S);
 	 * 3D mesh vertices are rooted at local z = 0 on basis->base_pos (at b->z), so
-	 * param[2] must stay at b->z to keep the 3D shadow map, cutaway, and water line aligned. */
+	 * param[2] must stay at b->z to keep the 3D shadow map, cutaway, and water line aligned.
+	 * Procedural creatures (ND_MESH3D_LAMB_ID) are centered on their exact world position. */
 	bool is_grass = (b->style == ND_BB_STYLE_GRASS);
-	float north_shift = (!is_grass && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
+	bool is_lamb  = (b->mesh_id == ND_MESH3D_LAMB_ID);
+	float north_shift = (!is_grass && !is_lamb && b->anchor_y > 0.0f) ? (b->anchor_y * 0.5f) : 0.0f;
 	out_grid_pos[0] = b->x;
 	out_grid_pos[1] = b->y - north_shift;
 	out_grid_pos[2] = b->z;
@@ -1186,6 +1197,9 @@ unsigned nd_seven_gl_unpack_pad0_biome(uint8_t pad0, bool *out_has_biome)
 	return (unsigned)(bio_slot - 1u);
 }
 
+static float s_frame_lamb_gx = 0.0f;
+static float s_frame_lamb_gy = 0.0f;
+
 static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         const billboard_basis_t *basis,
                                         const nd_mesh3d_slice_t *sl,
@@ -1195,19 +1209,32 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
                                         gl_mesh3d_inst_t *out_inst)
 {
 	nd_seven_gl_mesh3d_inst_t *out = &out_inst->base;
-	float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
-	float ref_h = (sl && sl->mesh_h_wu > 0.1f) ? sl->mesh_h_wu : ((sl && sl->sprite_h > 0.1f) ? (float)sl->sprite_h : 12.0f);
-	float scale_xy = fmaxf(0.15f, b->width / ref_w);
-	float scale_z  = fmaxf(0.15f, b->height / ref_h);
+	bool is_lamb = (b->mesh_id == ND_MESH3D_LAMB_ID);
+	float scale_xy = 1.0f;
+	float scale_z  = 1.0f;
+	float yaw_norm = 0.0f;
+	float flip = 1.0f;
 
-	/* Deterministic full 360-deg 3D yaw rotation and horizontal mirror from u0 > u1 */
-	uint32_t h = (uint32_t)(b->x * 73.0f) * 0x9E3779B1u ^ (uint32_t)(b->y * 131.0f) * 0x85EBCA77u ^
-	             ((uint32_t)b->mesh_id * 0xC2B2AE3Du);
-	h ^= h >> 16;
-	h *= 0x7FEB352Du;
-	h ^= h >> 15;
-	float yaw_norm = ((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f;
-	float flip = (b->u0 > b->u1) ? -1.0f : 1.0f;
+	if (is_lamb) {
+		/* Lamb vertices are authored 1:1 in metric world units (1m = 45wu).
+		 * Continuous 360-deg facing from nd_seven_get_lamb_yaw_rad() in [-pi, pi].
+		 * Shader maps yaw = (yaw01 - 0.5) * 2pi with +Y_local -> (-sin(yaw)*E + cos(yaw)*S). */
+		yaw_norm = nd_seven_get_lamb_yaw_rad() * (1.0f / TWO_PI_F);
+	} else {
+		float ref_w = (sl && sl->mesh_w_wu > 0.1f) ? sl->mesh_w_wu : ((sl && sl->sprite_w > 0.1f) ? (float)sl->sprite_w : 12.0f);
+		float ref_h = (sl && sl->mesh_h_wu > 0.1f) ? sl->mesh_h_wu : ((sl && sl->sprite_h > 0.1f) ? (float)sl->sprite_h : 12.0f);
+		scale_xy = fmaxf(0.15f, b->width / ref_w);
+		scale_z  = fmaxf(0.15f, b->height / ref_h);
+
+		/* Deterministic full 360-deg 3D yaw rotation and horizontal mirror from u0 > u1 */
+		uint32_t h = (uint32_t)(b->x * 73.0f) * 0x9E3779B1u ^ (uint32_t)(b->y * 131.0f) * 0x85EBCA77u ^
+		             ((uint32_t)b->mesh_id * 0xC2B2AE3Du);
+		h ^= h >> 16;
+		h *= 0x7FEB352Du;
+		h ^= h >> 15;
+		yaw_norm = ((float)(h & 0xFFFFu) * (1.0f / 65535.0f)) - 0.5f;
+		flip = (b->u0 > b->u1) ? -1.0f : 1.0f;
+	}
 	const float *E = basis->E;
 	const float *S = basis->S;
 	const float *N = basis->N;
@@ -1243,7 +1270,7 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 
 	float rgba[4];
 	nd_seven_gl_unpack_rgba_u32(b->tint_rgba, rgba);
-	float sheen = (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u) ? (basis->grass_rustle * 0.14f) : 0.0f;
+	float sheen = (!is_lamb && (b->style == ND_BB_STYLE_GRASS || (b->pad0 & 0x03u) == 1u)) ? (basis->grass_rustle * 0.14f) : 0.0f;
 	out->tint[0] = fminf(1.0f, rgba[0] + sheen);
 	out->tint[1] = fminf(1.0f, rgba[1] + sheen * 1.1f);
 	out->tint[2] = fminf(1.0f, rgba[2] + sheen * 0.5f);
@@ -1262,7 +1289,7 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 	float d2_c = dx_c * dx_c + dy_c * dy_c;
 	bool want_slope_norm = (b->style == ND_BB_STYLE_GRASS || b->style == ND_BB_STYLE_FLORA) &&
 	                       (d2_c < 650.0f * 650.0f);
-	bool need_terr_plane = want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
+	bool need_terr_plane = is_lamb || want_lamb_shadow || want_slope_norm || (want_shadow && !s_gl.tree_shadow_ready);
 	if (need_terr_plane && nd_seven_get_chunk_sys()) {
 		static struct {
 			int32_t  qx, qy, qz;
@@ -1322,6 +1349,10 @@ static inline void pack_mesh3d_instance(const lam_billboard_gpu_t *b,
 			s_terr_cache[set][dst_w].curv = curv;
 		}
 	}
+	if (is_lamb) {
+		s_frame_lamb_gx = gx;
+		s_frame_lamb_gy = gy;
+	}
 	float sh_flags = (want_shadow ? 1.0f : 0.0f) + (want_lamb_shadow ? 2.0f : 0.0f);
 	float yaw01 = fminf(0.999f, fmaxf(0.001f, yaw_norm + 0.5f));
 	out->terr[0] = gx;
@@ -1354,6 +1385,7 @@ static void gl_bind_mesh3d_pipe_uniforms(const gl_mesh3d_pipe_t *pipe,
 	(void)space_t;
 	glUseProgram(pipe->prog);
 	gl_bind_csm(pipe->uCloudShadowMap);
+	gl_bind_terr_horizon(pipe->uTerrHorizonMap, 10);
 	if (s_gl.fol_atlas_tex && pipe->uBranchletTex >= 0) {
 		if (bind_textures) {
 			glActiveTexture(GL_TEXTURE0 + 3);
@@ -1468,6 +1500,21 @@ static void flush_mesh3d_staging(uint32_t mesh3d_n, float bb_sea_level, float sp
 	gl_end_terrain_pass();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_inst_vbo);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, running * sizeof(gl_mesh3d_inst_t), s_mesh3d_sorted);
+
+	if (s_mesh3d_counts[ND_MESH3D_LAMB_ID] > 0) {
+		mob_anim_params_t lamb_ap;
+		nd_seven_fill_lamb_anim(s_frame_lamb_gx, s_frame_lamb_gy, &lamb_ap);
+		uint32_t lamb_first_vert = 0;
+		const nd_mesh3d_vert_t *lamb_verts = NULL;
+		uint32_t lamb_vcount = nd_seven_mesh3d_update_lamb_pose(&lamb_ap, &lamb_first_vert, &lamb_verts);
+		if (lamb_vcount > 0 && lamb_verts) {
+			glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
+			glBufferSubData(GL_ARRAY_BUFFER,
+			                (size_t)lamb_first_vert * sizeof(nd_mesh3d_vert_t),
+			                (size_t)lamb_vcount * sizeof(nd_mesh3d_vert_t),
+			                lamb_verts);
+		}
+	}
 
 	/* Pass A: True 3D directional depth shadow map pass into ping-pong 1024x1024 FBO using
 	 * dedicated depth-only shadow pipelines (opaque zero-discard + alpha-cutout foliage).
@@ -1861,6 +1908,7 @@ static void gl_submit_staged_billboards(const uint32_t *atlas_rgba, bool final_s
 			glActiveTexture(GL_TEXTURE0);
 		}
 		gl_bind_csm(s_gl.bb_pipe.uCloudShadowMap);
+		gl_bind_terr_horizon(s_gl.bb_pipe.uTerrHorizonMap, 9);
 		gl_bind_tree_shadow_read(s_gl.bb_pipe.uTreeShadowTex);
 		glUniform1f(s_gl.bb_pipe.uSeaLevel, bb_sea_level);
 
@@ -1988,7 +2036,9 @@ void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
 		bool is_understory = (batch[i].mesh_id >= ND_MESH3D_UNDERSTORY_BASE &&
 		                      batch[i].mesh_id < ND_MESH3D_TOTAL);
 		bool is_mesh3d_only = nd_seven_gl_billboard_is_mesh3d_only(&batch[i]);
-		bool is_other = (batch[i].style == ND_BB_STYLE_GLOW) || (batch[i].style == ND_BB_STYLE_PARTICLE);
+		bool is_particle = (batch[i].style == ND_BB_STYLE_PARTICLE);
+		bool is_glow = (batch[i].style == ND_BB_STYLE_GLOW);
+		bool is_other = is_glow || is_particle;
 		bool is_tall_tree = (!is_grass && !is_other &&
 		                     (batch[i].height >= 90.0f ||
 		                      (is_understory && batch[i].height >= 64.0f)) &&
@@ -1999,7 +2049,7 @@ void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
 		float lod_mesh_keep = 1.0f;
 		const nd_mesh3d_slice_t *m3d_slice = NULL;
 
-		if (!is_other && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
+		if (!is_particle && batch[i].mesh_id > 0 && batch[i].mesh_id < ND_SEVEN_MESH3D_TOTAL && s_gl.mesh3d_pipe.prog != 0) {
 			float dx_m = batch[i].x - s_gl.cur_tx;
 			float dy_m = batch[i].y - s_gl.cur_ty;
 			float d2_m = s_gl.cur_dist * s_gl.cur_dist + 0.35f * (dx_m * dx_m + dy_m * dy_m);
@@ -2051,15 +2101,19 @@ void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
 				want_shadow = emit_shadows && (batch[i].width >= 8.0f && batch[i].height >= 8.0f);
 		}
 		if (want_shadow && emit_lamb_shadows) {
-			float north_shift = (batch[i].mesh_id > 0 && batch[i].anchor_y > 0.0f) ? (batch[i].anchor_y * 0.5f) : 0.0f;
+			float north_shift = mesh3d_shadow_north_shift(&batch[i]);
 			float dx_l = batch[i].x - s_lamb_shadow_light[0];
 			float dy_l = (batch[i].y - north_shift) - s_lamb_shadow_light[1];
 			float d2_l = dx_l * dx_l + dy_l * dy_l;
 			want_lamb_shadow = (d2_l >= 4.0f && d2_l <= 290.0f * 290.0f);
 		}
-		uint32_t need_core   = (is_other || (is_mesh3d && !emit_impostor_crossfade)) ? 0u : (is_crossed_tree ? 2u : 1u);
+		bool use_other_quad = is_particle || (is_glow && !is_mesh3d);
+		bool crossfade_to_other = is_mesh3d && emit_impostor_crossfade && is_glow;
+		uint32_t need_core   = (use_other_quad || (is_mesh3d && (!emit_impostor_crossfade || crossfade_to_other)))
+		                       ? 0u : (is_crossed_tree ? 2u : 1u);
 		uint32_t need_mesh3d = is_mesh3d ? 1u : 0u;
-		uint32_t need_other  = (is_other ? 1u : 0u) +
+		uint32_t need_other  = (use_other_quad ? 1u : 0u) +
+		                       (crossfade_to_other ? 1u : 0u) +
 		                       ((!is_mesh3d && want_shadow) ? 1u : 0u) +
 		                       ((!is_mesh3d && want_lamb_shadow) ? 1u : 0u);
 
@@ -2080,7 +2134,7 @@ void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
 					s_bb_frame_other_n++;
 			}
 		}
-		if (is_other) {
+		if (use_other_quad) {
 			pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_other_instances[s_bb_frame_other_n++]);
 		} else if (is_mesh3d) {
 			if (want_shadow) s_bb_frame_mesh3d_sun_sh = true;
@@ -2092,15 +2146,19 @@ void nd_seven_gl_queue_billboards(const lam_billboard_gpu_t *batch,
 				s_mesh3d_staging[s_bb_frame_mesh3d_n].base.tint[3] *= lod_mesh_keep;
 			s_bb_frame_mesh3d_n++;
 			if (emit_impostor_crossfade) {
-				pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, &s_bb_instances[s_bb_frame_core_n]);
+				nd_seven_gl_bb_inst_t *cf = crossfade_to_other
+					? &s_bb_other_instances[s_bb_frame_other_n++]
+					: &s_bb_instances[s_bb_frame_core_n++];
+				pack_bb_quad_instance(&batch[i], &basis, cos_y, sin_y, cos_p, sin_p, cf);
 				int k31 = (int)roundf(lod_mesh_keep * 31.0f);
 				if (k31 < 1) k31 = 1;
 				if (k31 > 30) k31 = 30;
-				s_bb_instances[s_bb_frame_core_n].param[3] += (float)k31 * 32.0f;
-				s_bb_frame_core_n++;
+				cf->param[3] += (float)k31 * 32.0f;
 			}
 			bool can_sub = ((batch[i].pad0 & 0x80u) != 0) &&
-			               (batch[i].style == ND_BB_STYLE_STANDARD || batch[i].style == ND_BB_STYLE_MINERAL);
+			               (batch[i].style == ND_BB_STYLE_STANDARD ||
+			                batch[i].style == ND_BB_STYLE_MINERAL ||
+			                batch[i].style == ND_BB_STYLE_GLOW);
 			if (can_sub && bb_sea_level > -900.0f && batch[i].z < bb_sea_level + 0.15f)
 				s_gl.sprites_in_water = true;
 		} else if (is_crossed_tree) {

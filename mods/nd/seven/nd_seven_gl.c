@@ -382,7 +382,7 @@ static void init_grid_buffers(void)
 	const uint32_t *m3d_idx = nd_seven_mesh3d_indices(&m3d_icnt);
 	s_gl.mesh3d_vbo = glCreateBuffer();
 	glBindBuffer(GL_ARRAY_BUFFER, s_gl.mesh3d_vbo);
-	glBufferData(GL_ARRAY_BUFFER, m3d_verts, (GLsizei)((size_t)m3d_vcnt * sizeof(nd_mesh3d_vert_t)), GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, m3d_verts, (GLsizei)((size_t)m3d_vcnt * sizeof(nd_mesh3d_vert_t)), GL_DYNAMIC_DRAW);
 
 	s_gl.mesh3d_ibo = glCreateBuffer();
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_gl.mesh3d_ibo);
@@ -690,6 +690,16 @@ static void gl_upload_frame_ubo(void)
 	ubo.uPlanetMetric[1] = (float)pscale.max_elev_wu;
 	ubo.uPlanetMetric[2] = pscale.snowline_base_wu;
 	ubo.uPlanetMetric[3] = pscale.cloud_lcl_wu;
+	if (s_gl.terr_horizon_valid) {
+		ubo.uTerrHoriz0[0] = s_gl.terr_horizon_rings[0].cx;
+		ubo.uTerrHoriz0[1] = s_gl.terr_horizon_rings[0].cy;
+		ubo.uTerrHoriz0[2] = s_gl.terr_horizon_rings[0].half_wu;
+		ubo.uTerrHoriz0[3] = s_gl.terr_horizon_rings[0].base_z_wu;
+		ubo.uTerrHoriz1[0] = s_gl.terr_horizon_rings[1].cx;
+		ubo.uTerrHoriz1[1] = s_gl.terr_horizon_rings[1].cy;
+		ubo.uTerrHoriz1[2] = s_gl.terr_horizon_rings[1].half_wu;
+		ubo.uTerrHoriz1[3] = s_gl.terr_horizon_rings[1].base_z_wu;
+	}
 
 	glBindBuffer(GL_UNIFORM_BUFFER, s_gl.frame_ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(ubo), &ubo);
@@ -874,6 +884,7 @@ static void gl_init_mesh3d_pipe_locs(gl_mesh3d_pipe_t *pipe)
 	gl_bind_frame_ubo_prog(p);
 	pipe->uSeaLevel              = glGetUniformLocation(p, "uSeaLevel", 9);
 	pipe->uCloudShadowMap        = glGetUniformLocation(p, "uCloudShadowMap", 15);
+	pipe->uTerrHorizonMap        = glGetUniformLocation(p, "uTerrHorizonMap", 15);
 	pipe->uShadowPass            = glGetUniformLocation(p, "uShadowPass", 11);
 	pipe->uBranchletTex          = glGetUniformLocation(p, "uBranchletTex", 13);
 	pipe->uBranchletNorm         = glGetUniformLocation(p, "uBranchletNorm", 14);
@@ -884,6 +895,7 @@ static void gl_init_mesh3d_pipe_locs(gl_mesh3d_pipe_t *pipe)
 	pipe->uTreeShadowTex         = glGetUniformLocation(p, "uTreeShadowTex", 14);
 	pipe->uNoise2DTex            = glGetUniformLocation(p, "uNoise2DTex", 11);
 	glUseProgram(p);
+	if (pipe->uTerrHorizonMap >= 0) glUniform1i(pipe->uTerrHorizonMap, 10);
 	if (pipe->uNoise2DTex >= 0) glUniform1i(pipe->uNoise2DTex, 13);
 }
 
@@ -937,6 +949,7 @@ static void gl_link_terrain_pipe(gl_terrain_pipe_t *tp)
 	tp->uWorldId          = glGetUniformLocation(p, "uWorldId", 8);
 	tp->uSeaOffsetQ12_4   = glGetUniformLocation(p, "uSeaOffsetQ12_4", 15);
 	tp->uTreeShadowTex    = glGetUniformLocation(p, "uTreeShadowTex", 14);
+	tp->uTerrHorizonMap   = glGetUniformLocation(p, "uTerrHorizonMap", 15);
 	tp->uTerrDetailTex    = glGetUniformLocation(p, "uTerrDetailTex", 14);
 	tp->uTerrNormTex      = glGetUniformLocation(p, "uTerrNormTex", 12);
 	tp->uNoise2DTex       = glGetUniformLocation(p, "uNoise2DTex", 11);
@@ -949,6 +962,7 @@ static void gl_link_terrain_pipe(gl_terrain_pipe_t *tp)
 	if (tp->uSubstrateTex >= 0)   glUniform1i(tp->uSubstrateTex, 1);
 	if (tp->uRiverTex >= 0)       glUniform1i(tp->uRiverTex, 2);
 	if (tp->uCloudShadowMap >= 0) glUniform1i(tp->uCloudShadowMap, 7);
+	if (tp->uTerrHorizonMap >= 0) glUniform1i(tp->uTerrHorizonMap, 9);
 	if (tp->uTerrDetailTex >= 0)  glUniform1i(tp->uTerrDetailTex, 10);
 	if (tp->uTerrNormTex >= 0)    glUniform1i(tp->uTerrNormTex, 11);
 	if (tp->uTreeShadowTex >= 0)  glUniform1i(tp->uTreeShadowTex, 12);
@@ -1194,6 +1208,7 @@ static void gl_link_water_pipe(gl_water_pipe_t *wp)
 	wp->uBodyRot        = glGetUniformLocation(p, "uBodyRot", 8);
 	wp->uTorusRadii     = glGetUniformLocation(p, "uTorusRadii", 11);
 	wp->uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+	wp->uTerrHorizonMap = glGetUniformLocation(p, "uTerrHorizonMap", 15);
 	wp->uLambWakeHead   = glGetUniformLocation(p, "uLambWakeHead", 13);
 	wp->uLambWakeXYT0   = glGetUniformLocation(p, "uLambWakeXYT0", 13);
 	wp->uLambWakeXYT1   = glGetUniformLocation(p, "uLambWakeXYT1", 13);
@@ -1216,6 +1231,7 @@ static void gl_link_water_pipe(gl_water_pipe_t *wp)
 	if (wp->uSceneColor >= 0)     glUniform1i(wp->uSceneColor, 4);
 	if (wp->uSceneDepth >= 0)     glUniform1i(wp->uSceneDepth, 5);
 	if (wp->uCloudShadowMap >= 0) glUniform1i(wp->uCloudShadowMap, 7);
+	if (wp->uTerrHorizonMap >= 0) glUniform1i(wp->uTerrHorizonMap, 9);
 	if (wp->uNoise2DTex >= 0)     glUniform1i(wp->uNoise2DTex, 13);
 	if (wp->uNoise3DTex >= 0)     glUniform1i(wp->uNoise3DTex, 14);
 	if (wp->uWaterMode >= 0)      glUniform1i(wp->uWaterMode, 0);
@@ -1236,6 +1252,7 @@ static void gl_link_bb_pipe(gl_billboard_pipe_t *bp)
 	bp->uAtlasNormTex   = glGetUniformLocation(p, "uAtlasNormTex", 13);
 	bp->uSeaLevel       = glGetUniformLocation(p, "uSeaLevel", 9);
 	bp->uCloudShadowMap = glGetUniformLocation(p, "uCloudShadowMap", 15);
+	bp->uTerrHorizonMap = glGetUniformLocation(p, "uTerrHorizonMap", 15);
 	bp->uPass           = glGetUniformLocation(p, "uPass", 5);
 	bp->uCamAngles      = glGetUniformLocation(p, "uCamAngles", 10);
 	bp->uHiZTex         = glGetUniformLocation(p, "uHiZTex", 7);
@@ -1250,6 +1267,7 @@ static void gl_link_bb_pipe(gl_billboard_pipe_t *bp)
 	bp->aQuadUV         = glGetAttribLocation(p, "a_quad_uv", 9);
 	bp->aSpriteBounds   = glGetAttribLocation(p, "a_sprite_bounds", 15);
 	glUseProgram(p);
+	if (bp->uTerrHorizonMap >= 0) glUniform1i(bp->uTerrHorizonMap, 9);
 	if (bp->uNoise2DTex >= 0) glUniform1i(bp->uNoise2DTex, 13);
 	if (bp->uNoise3DTex >= 0) glUniform1i(bp->uNoise3DTex, 14);
 }
@@ -1293,7 +1311,10 @@ static void gl_link_grass_pipe(gl_grass_pipe_t *gp)
 	gp->uBodyRot          = glGetUniformLocation(p, "uBodyRot", 8);
 	gp->uTorusRadii       = glGetUniformLocation(p, "uTorusRadii", 11);
 	gp->uCloudShadowMap   = glGetUniformLocation(p, "uCloudShadowMap", 15);
+	gp->uTerrHorizonMap   = glGetUniformLocation(p, "uTerrHorizonMap", 15);
 	gp->uTreeShadowTex    = glGetUniformLocation(p, "uTreeShadowTex", 14);
+	glUseProgram(p);
+	if (gp->uTerrHorizonMap >= 0) glUniform1i(gp->uTerrHorizonMap, 9);
 }
 
 static void gl_link_csm_pipe(gl_csm_pipe_t *cp)
@@ -2010,6 +2031,14 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	s_gl.water_count = 0;
 	s_gl.cloud_count = 0;
 	s_gl.grass_q_count = 0;
+	s_gl.grass_builds_this_frame = 0u;
+	{
+		float det_scale = nd_seven_get_detail_scale();
+		int32_t cur_l0_n = (det_scale < 0.75f) ? 36 : ((det_scale < 0.90f) ? 44 : 54);
+		s_gl.grass_preset_changed = (s_gl.last_grass_l0_n != 0 && s_gl.last_grass_l0_n != cur_l0_n);
+		if (s_gl.grass_pipe.prog)
+			s_gl.last_grass_l0_n = cur_l0_n;
+	}
 	s_gl.sprites_in_water = false;
 	s_gl.terrain_split_water_pending = false;
 	s_gl.sky_rendered = false;
@@ -2203,10 +2232,12 @@ void nd_seven_gl_begin_frame_ex(uint32_t stage_w, uint32_t stage_h,
 	if (s_gl.pipelines_ready) {
 		gl_render_cloud_shadow_map();
 		gl_render_cloud_weather_rings();
+		gl_update_terr_horizon_map(tx, ty, E, S, N);
 		gl_prepare_tree_shadow_frame(tx, ty, tz, E, S, N);
 	} else {
 		s_gl.csm_valid = false;
 		s_gl.csm_clear_sky = false;
+		s_gl.terr_horizon_valid = false;
 		s_gl.tree_shadow_active = 0.0f;
 	}
 	gl_upload_frame_ubo();
@@ -2384,6 +2415,7 @@ void gl_flush_terrain_queue(void)
 		glBindTexture(GL_TEXTURE_2D, s_gl.terr_norm_tex);
 	}
 	gl_bind_csm(-1);
+	gl_bind_terr_horizon(-1, 9);
 	gl_bind_tree_shadow_read(-1);
 	glActiveTexture(GL_TEXTURE0);
 
@@ -2565,6 +2597,10 @@ static gl_grass_vbo_slot_t *gl_grass_get_or_build_chunk(
 			oldest_idx = i;
 		}
 	}
+
+	if (!s_gl.grass_preset_changed && s_gl.grass_builds_this_frame >= 4u)
+		return NULL;
+	s_gl.grass_builds_this_frame++;
 
 	gl_grass_vbo_slot_t *slot = &s_gl.grass_cache[(free_idx >= 0) ? free_idx : oldest_idx];
 	static gl_grass_tuft_t s_grass_build_scratch[MAX_GRASS_TUFTS_PER_CHUNK];
@@ -3267,6 +3303,7 @@ void nd_seven_gl_flush_grass(void)
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	gl_bind_csm(s_gl.grass_pipe.uCloudShadowMap);
+	gl_bind_terr_horizon(s_gl.grass_pipe.uTerrHorizonMap, 9);
 	gl_bind_tree_shadow_read(s_gl.grass_pipe.uTreeShadowTex);
 
 	glEnableVertexAttribArray(0);
@@ -3364,6 +3401,7 @@ void nd_seven_gl_flush_water(void)
 
 	glUseProgram(s_gl.water_pipe.prog);
 	gl_bind_csm(s_gl.water_pipe.uCloudShadowMap);
+	gl_bind_terr_horizon(s_gl.water_pipe.uTerrHorizonMap, 9);
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.height_array);

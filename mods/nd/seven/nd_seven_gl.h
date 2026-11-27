@@ -616,6 +616,57 @@ void     nd_seven_gl_get_perf_counters(uint32_t *out_terrain_chunks,
                                        uint32_t *out_mesh3d_count,
                                        uint32_t *out_bb_count);
 
+/* =========================================================================
+ * Phase 1: World-Scale 2-Cascade Terrain Horizon Shadow & Sky-AO Map
+ * ========================================================================= */
+#define ND_TERR_HORIZ_RES   128
+#define ND_TERR_HORIZ_RINGS 2
+
+typedef struct {
+	float cx;
+	float cy;
+	float half_wu;
+	float base_z_wu;
+	float wu_per_meter;
+	float sea_level;
+	uint16_t world_id;
+	uint8_t valid;
+	uint8_t height_valid;
+	uint32_t planet_epoch;
+	float sun_local[3];
+	float height_wu[ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RES];
+	float sky_vis[ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RES];
+	float z_occ_wu[ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RES];
+	float caster_dist[ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RES];
+} nd_seven_horizon_ring_t;
+
+bool nd_seven_gl_horizon_windows(float dist, float tx, float ty,
+                                 float out_cx[ND_TERR_HORIZ_RINGS],
+                                 float out_cy[ND_TERR_HORIZ_RINGS],
+                                 float out_half[ND_TERR_HORIZ_RINGS]);
+
+void nd_seven_gl_horizon_sample_field(nd_seven_horizon_ring_t *ring,
+                                      uint16_t world_id,
+                                      float sea_level,
+                                      float cx, float cy, float half_wu);
+
+void nd_seven_gl_horizon_compute_sky_vis(nd_seven_horizon_ring_t *ring);
+
+void nd_seven_gl_horizon_sweep_sun(nd_seven_horizon_ring_t *ring,
+                                   const float sun_local[3],
+                                   const nd_seven_horizon_ring_t *far_seed);
+
+void nd_seven_gl_horizon_pack_rgba(const nd_seven_horizon_ring_t *ring,
+                                   const float sun_local[3],
+                                   float *out_rgba);
+
+void nd_seven_gl_horizon_eval_cpu(const nd_seven_horizon_ring_t *near_ring,
+                                  const nd_seven_horizon_ring_t *far_ring,
+                                  const float sun_local[3],
+                                  float wx, float wy, float wz,
+                                  float *out_shadow_vis,
+                                  float *out_sky_vis);
+
 #ifdef __cplusplus
 }
 #endif

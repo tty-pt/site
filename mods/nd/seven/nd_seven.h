@@ -68,7 +68,9 @@ ar_system_t *nd_seven_get_chunk_sys(void);
 
 /* Camera zoom controls */
 void nd_seven_set_zoom(float zoom);
+void nd_seven_zoom_to(float zoom);
 float nd_seven_get_zoom(void);
+float nd_seven_get_zoom_target(void);
 void nd_seven_zoom_in(void);
 void nd_seven_zoom_out(void);
 
@@ -76,6 +78,9 @@ void nd_seven_zoom_out(void);
 void  nd_seven_set_cam_angles(float yaw_deg, float pitch_deg);
 void  nd_seven_orbit_cam(float dyaw_deg, float dpitch_deg);
 void  nd_seven_reset_cam(void);
+void  nd_seven_cam_recenter_behind(float lamb_yaw_rad);
+void  nd_seven_cam_auto_follow(float lamb_yaw_rad, float strength, float dt);
+float nd_seven_cam_target_z_lift(float eff_cam_dist);
 float nd_seven_get_yaw_deg(void);
 float nd_seven_get_pitch_deg(void);
 void  nd_seven_step_cam(float dt);
@@ -168,7 +173,15 @@ float nd_seven_get_drs_scale(void);
 #ifndef ND_SEVEN_ZOOM_STEP
 #define ND_SEVEN_ZOOM_STEP          1.15f    /* Exponential step factor per key press */
 #endif
+#ifndef ND_SEVEN_DIORAMA_PITCH
 #define ND_SEVEN_DIORAMA_PITCH      55.0f
+#endif
+#ifndef ND_SEVEN_ZELDA_PITCH
+#define ND_SEVEN_ZELDA_PITCH        35.0f
+#endif
+#ifndef ND_SEVEN_ZELDA_ZOOM
+#define ND_SEVEN_ZELDA_ZOOM         1.65f
+#endif
 #define ND_SEVEN_CAM_DIST           280.0f
 #define ND_SEVEN_CAM_YAW            0.0f
 #define ND_SEVEN_CAM_FOV            45.0f

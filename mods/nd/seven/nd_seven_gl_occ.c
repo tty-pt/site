@@ -544,6 +544,22 @@ int nd_seven_hiz_test_sphere(float cx, float cy, float cz, float radius)
 /* 3D 2D-Hi-Z terrain occlusion query for water queue gating (works at all 360-deg yaws & pitches):
  * Returns 1 if the chunk's curved-torus water surface AABB at sea_level is 100% occluded by
  * foreground terrain/planetary limb in s_terrain_occ. */
+typedef struct {
+	int32_t  ox;
+	int32_t  oy;
+	int32_t  span_w;
+	int32_t  span_h;
+	float    sea_level;
+	float    major_r;
+	float    minor_r;
+	uint8_t  valid;
+	double   abs_min[3];
+	double   abs_max[3];
+} water_occ_aabb_entry_t;
+
+#define WATER_OCC_AABB_CACHE_SIZE 128u
+static water_occ_aabb_entry_t s_water_occ_aabb_cache[WATER_OCC_AABB_CACHE_SIZE];
+
 int nd_seven_is_water_occluded_at(int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
                                   float sea_level, const nd_planet_def_t *pdef)
 {
@@ -554,24 +570,77 @@ int nd_seven_is_water_occluded_at(int32_t ox, int32_t oy, int32_t span_w, int32_
 	if (eff->major_r <= 1.0f || eff->minor_r <= 1.0f)
 		return 0;
 
-	corolla_surface_t surf = corolla_torus((double)eff->major_r, (double)eff->minor_r);
-	corolla_pose_t pose;
-	memset(&pose, 0, sizeof(pose));
-	for (int i = 0; i < 9; i++)
-		pose.rot[i] = (double)eff->rot[i];
-	pose.center[0] = (double)eff->center[0];
-	pose.center[1] = (double)eff->center[1];
-	pose.center[2] = (double)eff->center[2];
-
-	double u0 = (double)ox / (double)ND_SEVEN_WORLD_DIM_W;
-	double du = (double)span_w / (double)ND_SEVEN_WORLD_DIM_W;
-	double v0 = ((double)oy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
-	double dv = (double)span_h / (double)ND_SEVEN_WORLD_DIM_H;
+	bool is_ident = (eff->center[0] == 0.0f && eff->center[1] == 0.0f && eff->center[2] == 0.0f &&
+	                 eff->rot[0] == 1.0f && eff->rot[1] == 0.0f && eff->rot[2] == 0.0f &&
+	                 eff->rot[3] == 0.0f && eff->rot[4] == 1.0f && eff->rot[5] == 0.0f &&
+	                 eff->rot[6] == 0.0f && eff->rot[7] == 0.0f && eff->rot[8] == 1.0f);
 
 	double bmin[3], bmax[3];
-	/* Pad vertically by [-8..+16] wu for waves/swash so visible water is never falsely culled */
-	corolla_patch_aabb(&surf, &pose, s_terrain_occ_origin, u0, v0, du, dv,
-	                   (double)sea_level - 8.0, (double)sea_level + 16.0, bmin, bmax);
+	if (is_ident) {
+		uint32_t hkey = ((uint32_t)ox * 2654435761u) ^
+		                ((uint32_t)oy * 2246822519u) ^
+		                ((uint32_t)span_w * 3266489917u) ^
+		                ((uint32_t)span_h * 668265263u);
+		hkey ^= hkey >> 16;
+		water_occ_aabb_entry_t *ent = &s_water_occ_aabb_cache[hkey & (WATER_OCC_AABB_CACHE_SIZE - 1u)];
+		if (ent->valid &&
+		    ent->ox == ox && ent->oy == oy &&
+		    ent->span_w == span_w && ent->span_h == span_h &&
+		    ent->sea_level == sea_level &&
+		    ent->major_r == eff->major_r && ent->minor_r == eff->minor_r) {
+			bmin[0] = ent->abs_min[0] - s_terrain_occ_origin[0];
+			bmin[1] = ent->abs_min[1] - s_terrain_occ_origin[1];
+			bmin[2] = ent->abs_min[2] - s_terrain_occ_origin[2];
+			bmax[0] = ent->abs_max[0] - s_terrain_occ_origin[0];
+			bmax[1] = ent->abs_max[1] - s_terrain_occ_origin[1];
+			bmax[2] = ent->abs_max[2] - s_terrain_occ_origin[2];
+		} else {
+			corolla_surface_t surf = corolla_torus((double)eff->major_r, (double)eff->minor_r);
+			corolla_pose_t pose;
+			memset(&pose, 0, sizeof(pose));
+			pose.rot[0] = 1.0; pose.rot[4] = 1.0; pose.rot[8] = 1.0;
+			double u0 = (double)ox / (double)ND_SEVEN_WORLD_DIM_W;
+			double du = (double)span_w / (double)ND_SEVEN_WORLD_DIM_W;
+			double v0 = ((double)oy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
+			double dv = (double)span_h / (double)ND_SEVEN_WORLD_DIM_H;
+			/* Pad vertically by [-8..+16] wu for waves/swash so visible water is never falsely culled */
+			corolla_patch_aabb(&surf, &pose, NULL, u0, v0, du, dv,
+			                   (double)sea_level - 8.0, (double)sea_level + 16.0,
+			                   ent->abs_min, ent->abs_max);
+			ent->ox = ox;
+			ent->oy = oy;
+			ent->span_w = span_w;
+			ent->span_h = span_h;
+			ent->sea_level = sea_level;
+			ent->major_r = eff->major_r;
+			ent->minor_r = eff->minor_r;
+			ent->valid = 1u;
+			bmin[0] = ent->abs_min[0] - s_terrain_occ_origin[0];
+			bmin[1] = ent->abs_min[1] - s_terrain_occ_origin[1];
+			bmin[2] = ent->abs_min[2] - s_terrain_occ_origin[2];
+			bmax[0] = ent->abs_max[0] - s_terrain_occ_origin[0];
+			bmax[1] = ent->abs_max[1] - s_terrain_occ_origin[1];
+			bmax[2] = ent->abs_max[2] - s_terrain_occ_origin[2];
+		}
+	} else {
+		corolla_surface_t surf = corolla_torus((double)eff->major_r, (double)eff->minor_r);
+		corolla_pose_t pose;
+		memset(&pose, 0, sizeof(pose));
+		for (int i = 0; i < 9; i++)
+			pose.rot[i] = (double)eff->rot[i];
+		pose.center[0] = (double)eff->center[0];
+		pose.center[1] = (double)eff->center[1];
+		pose.center[2] = (double)eff->center[2];
+
+		double u0 = (double)ox / (double)ND_SEVEN_WORLD_DIM_W;
+		double du = (double)span_w / (double)ND_SEVEN_WORLD_DIM_W;
+		double v0 = ((double)oy / (double)ND_SEVEN_WORLD_DIM_H) + 0.5;
+		double dv = (double)span_h / (double)ND_SEVEN_WORLD_DIM_H;
+
+		/* Pad vertically by [-8..+16] wu for waves/swash so visible water is never falsely culled */
+		corolla_patch_aabb(&surf, &pose, s_terrain_occ_origin, u0, v0, du, dv,
+		                   (double)sea_level - 8.0, (double)sea_level + 16.0, bmin, bmax);
+	}
 
 	float bmin_f[3] = { (float)bmin[0], (float)bmin[1], (float)bmin[2] };
 	float bmax_f[3] = { (float)bmax[0], (float)bmax[1], (float)bmax[2] };
@@ -1418,6 +1487,143 @@ void gl_bind_csm(GLint loc_tex)
 	glBindTexture(GL_TEXTURE_2D, s_gl.csm_valid ? s_gl.csm_tex : 0);
 	if (loc_tex >= 0)
 		glUniform1i(loc_tex, 7);
+	glActiveTexture(GL_TEXTURE0);
+}
+
+/* Phase 1: World-scale 2-cascade terrain horizon shadow + sky-AO atlas (256x128 GL_RGBA16F).
+ * Left tile [0..127] = Near Cascade, right tile [128..255] = Far Cascade.
+ * Allocated ONCE via glTexImage2D and updated strictly via dirty-gated glTexSubImage2D (0 FFI calls in steady state). */
+static float s_horiz_pack_buf[ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RES * 4];
+
+static bool gl_ensure_terr_horizon_target(void)
+{
+	if (s_gl.terr_horizon_tex)
+		return true;
+	if (s_gl.terr_horizon_failed)
+		return false;
+	s_gl.terr_horizon_tex = glCreateTexture();
+	if (!s_gl.terr_horizon_tex) {
+		s_gl.terr_horizon_failed = true;
+		return false;
+	}
+	glActiveTexture(GL_TEXTURE0 + 9);
+	glBindTexture(GL_TEXTURE_2D, s_gl.terr_horizon_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F,
+	             ND_TERR_HORIZ_RES * ND_TERR_HORIZ_RINGS, ND_TERR_HORIZ_RES,
+	             0, GL_RGBA, GL_FLOAT, NULL);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	return true;
+}
+
+void gl_update_terr_horizon_map(float tx, float ty,
+                                const float E[3], const float S[3], const float N[3])
+{
+	float cx[ND_TERR_HORIZ_RINGS];
+	float cy[ND_TERR_HORIZ_RINGS];
+	float half[ND_TERR_HORIZ_RINGS];
+	if (!nd_seven_gl_horizon_windows(s_gl.cur_dist, tx, ty, cx, cy, half)) {
+		s_gl.terr_horizon_valid = false;
+		return;
+	}
+	if (!gl_ensure_terr_horizon_target()) {
+		s_gl.terr_horizon_valid = false;
+		return;
+	}
+
+	/* Local (East, South, Up) sun vector matching s_fs_terrain L_day */
+	float se = s_gl.cur_sun_dir[0] * E[0] + s_gl.cur_sun_dir[1] * E[1] + s_gl.cur_sun_dir[2] * E[2];
+	float ss = s_gl.cur_sun_dir[0] * S[0] + s_gl.cur_sun_dir[1] * S[1] + s_gl.cur_sun_dir[2] * S[2];
+	float sn = s_gl.cur_sun_dir[0] * N[0] + s_gl.cur_sun_dir[1] * N[1] + s_gl.cur_sun_dir[2] * N[2];
+	float sun_local[3];
+	if (sn > -0.08f) {
+		float lz = (sn > 0.12f) ? sn : 0.12f;
+		float inv_len = 1.0f / sqrtf(se * se + ss * ss + lz * lz + 1e-12f);
+		sun_local[0] = se * inv_len;
+		sun_local[1] = ss * inv_len;
+		sun_local[2] = lz * inv_len;
+	} else {
+		sun_local[0] = 0.0f;
+		sun_local[1] = 0.0f;
+		sun_local[2] = -1.0f;
+	}
+
+	uint16_t world_id = s_gl.cur_pdef.world_id;
+	uint32_t epoch = nd_field_get_planet_epoch();
+	float sea_level = s_gl.cur_base_sea_level;
+	bool was_ready = s_gl.terr_horizon_valid;
+	bool ring_updated = false;
+	bool tex_bound = false;
+
+	/* Update Far Cascade (r = 1) first so Near Cascade (r = 0) seeds its sunward border from it.
+	 * Once initialized, pace updates to at most 1 ring/frame to prevent walk/sun spikes. */
+	for (int r = ND_TERR_HORIZ_RINGS - 1; r >= 0; r--) {
+		if (was_ready && ring_updated)
+			break;
+		nd_seven_horizon_ring_t *ring = &s_gl.terr_horizon_rings[r];
+		bool need_height = (!ring->height_valid ||
+		                    ring->world_id != world_id ||
+		                    ring->planet_epoch != epoch ||
+		                    ring->sea_level != sea_level ||
+		                    ring->cx != cx[r] ||
+		                    ring->cy != cy[r] ||
+		                    ring->half_wu != half[r]);
+		if (need_height) {
+			nd_seven_gl_horizon_sample_field(ring, world_id, sea_level, cx[r], cy[r], half[r]);
+			nd_seven_gl_horizon_compute_sky_vis(ring);
+		}
+
+		bool was_night = (ring->sun_local[2] <= -0.10f);
+		bool is_night  = (sun_local[2] <= -0.10f);
+		float sdot = ring->sun_local[0] * sun_local[0]
+		           + ring->sun_local[1] * sun_local[1]
+		           + ring->sun_local[2] * sun_local[2];
+		bool need_sweep = (need_height || !ring->valid ||
+		                   (r == 0 && s_gl.terr_horizon_near_reseed) ||
+		                   (was_night != is_night) ||
+		                   (!is_night && sdot < 0.99985f));
+		if (need_sweep) {
+			const nd_seven_horizon_ring_t *far_seed =
+				(r == 0 && s_gl.terr_horizon_rings[1].valid) ? &s_gl.terr_horizon_rings[1] : NULL;
+			nd_seven_gl_horizon_sweep_sun(ring, sun_local, far_seed);
+			nd_seven_gl_horizon_pack_rgba(ring, sun_local, s_horiz_pack_buf);
+			if (!tex_bound) {
+				glActiveTexture(GL_TEXTURE0 + 9);
+				glBindTexture(GL_TEXTURE_2D, s_gl.terr_horizon_tex);
+				glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+				tex_bound = true;
+			}
+			glTexSubImage2D(GL_TEXTURE_2D, 0,
+			                r * ND_TERR_HORIZ_RES, 0,
+			                ND_TERR_HORIZ_RES, ND_TERR_HORIZ_RES,
+			                GL_RGBA, GL_FLOAT, s_horiz_pack_buf);
+			if (r == 1)
+				s_gl.terr_horizon_near_reseed = true;
+			else
+				s_gl.terr_horizon_near_reseed = false;
+			ring_updated = true;
+		}
+	}
+
+	if (tex_bound) {
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0);
+	}
+	s_gl.terr_horizon_valid = (s_gl.terr_horizon_rings[0].valid && s_gl.terr_horizon_rings[1].valid);
+}
+
+void gl_bind_terr_horizon(GLint loc_tex, int unit)
+{
+	glActiveTexture(GL_TEXTURE0 + (GLenum)unit);
+	glBindTexture(GL_TEXTURE_2D, (s_gl.terr_horizon_valid && s_gl.terr_horizon_tex)
+	                             ? s_gl.terr_horizon_tex : 0);
+	if (loc_tex >= 0)
+		glUniform1i(loc_tex, unit);
 	glActiveTexture(GL_TEXTURE0);
 }
 
