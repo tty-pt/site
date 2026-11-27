@@ -3,9 +3,12 @@
 #include <ttypt/corm.h>
 
 #include <stddef.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -18,6 +21,7 @@
 #include "../mpfd/mpfd.h"
 #include "../source/source.h"
 #include "auth-types.h"
+#include "auth-oauth-hook.h"
 #include "dict.h"
 #include "site_ui.h"
 bud_node *auth_render_login(const char *user, const char *ret, const char *error);
@@ -733,31 +737,577 @@ static int csrf_endpoint_handler(int fd, char *body)
 	return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Generic RFC 7636 + RFC 8252 OAuth2 PKCE authorization server        */
+/* ------------------------------------------------------------------ */
+
+#define OAUTH_MAX_PENDING 128u
+#define OAUTH_MAX_CODES   128u
+#define OAUTH_PENDING_TTL 300
+#define OAUTH_CODE_TTL    120
+
+typedef struct {
+	char   id[33];
+	char   client_id[64];
+	char   app_id[64];
+	char   redirect_uri[256];
+	char   code_challenge[128];
+	char   state[128];
+	time_t expires_at;
+} oauth_pending_rec_t;
+
+typedef struct {
+	char   code[65];
+	char   username[64];
+	char   client_id[64];
+	char   app_id[64];
+	char   redirect_uri[256];
+	char   code_challenge[128];
+	time_t expires_at;
+} oauth_code_rec_t;
+
+static oauth_pending_rec_t g_oauth_pending[OAUTH_MAX_PENDING];
+static oauth_code_rec_t    g_oauth_codes[OAUTH_MAX_CODES];
+
+static void
+oauth_wipe(void *p, size_t n)
+{
+	volatile unsigned char *b = (volatile unsigned char *)p;
+	while (n--)
+		*b++ = 0;
+}
+
+static int
+oauth_rand_hex(char *out, size_t nbytes)
+{
+	unsigned char buf[32];
+	int urfd;
+	ssize_t r;
+	size_t i;
+
+	if (!out || nbytes == 0 || nbytes > sizeof(buf))
+		return -1;
+	urfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+	if (urfd < 0)
+		return -1;
+	r = read(urfd, buf, nbytes);
+	close(urfd);
+	if (r != (ssize_t)nbytes) {
+		oauth_wipe(buf, sizeof(buf));
+		return -1;
+	}
+	for (i = 0; i < nbytes; i++)
+		snprintf(out + i * 2, 3, "%02x", buf[i]);
+	out[nbytes * 2] = '\0';
+	oauth_wipe(buf, sizeof(buf));
+	return 0;
+}
+
+static inline uint32_t
+oauth_rotr32(uint32_t x, unsigned n)
+{
+	return (x >> n) | (x << (32u - n));
+}
+
+static void
+oauth_sha256_compress(uint32_t st[8], const uint8_t blk[64])
+{
+	static const uint32_t k[64] = {
+		0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u,
+		0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+		0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+		0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+		0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu,
+		0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+		0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u,
+		0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+		0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+		0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+		0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u,
+		0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+		0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u,
+		0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+		0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+		0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
+	};
+	uint32_t w[64];
+	size_t i;
+
+	for (i = 0; i < 16u; i++) {
+		w[i] = ((uint32_t)blk[i * 4u + 0u] << 24) |
+		       ((uint32_t)blk[i * 4u + 1u] << 16) |
+		       ((uint32_t)blk[i * 4u + 2u] <<  8) |
+		       ((uint32_t)blk[i * 4u + 3u]);
+	}
+	for (i = 16u; i < 64u; i++) {
+		uint32_t s0 = oauth_rotr32(w[i - 15u], 7u) ^ oauth_rotr32(w[i - 15u], 18u) ^ (w[i - 15u] >> 3);
+		uint32_t s1 = oauth_rotr32(w[i -  2u], 17u) ^ oauth_rotr32(w[i -  2u], 19u) ^ (w[i -  2u] >> 10);
+		w[i] = w[i - 16u] + s0 + w[i - 7u] + s1;
+	}
+
+	uint32_t a = st[0], b = st[1], c = st[2], d = st[3];
+	uint32_t e = st[4], f = st[5], g = st[6], h = st[7];
+	for (i = 0; i < 64u; i++) {
+		uint32_t S1  = oauth_rotr32(e, 6u) ^ oauth_rotr32(e, 11u) ^ oauth_rotr32(e, 25u);
+		uint32_t ch  = (e & f) ^ ((~e) & g);
+		uint32_t t1  = h + S1 + ch + k[i] + w[i];
+		uint32_t S0  = oauth_rotr32(a, 2u) ^ oauth_rotr32(a, 13u) ^ oauth_rotr32(a, 22u);
+		uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+		uint32_t t2  = S0 + maj;
+
+		h = g; g = f; f = e; e = d + t1;
+		d = c; c = b; b = a; a = t1 + t2;
+	}
+	st[0] += a; st[1] += b; st[2] += c; st[3] += d;
+	st[4] += e; st[5] += f; st[6] += g; st[7] += h;
+	oauth_wipe(w, sizeof(w));
+}
+
+static void
+oauth_sha256(const uint8_t *data, size_t len, uint8_t out[32])
+{
+	uint32_t st[8] = {
+		0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+		0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
+	};
+	size_t off = 0, rem, i;
+	uint8_t tail[64];
+
+	while (len - off >= 64u) {
+		oauth_sha256_compress(st, data + off);
+		off += 64u;
+	}
+	memset(tail, 0, sizeof(tail));
+	rem = len - off;
+	if (rem > 0u)
+		memcpy(tail, data + off, rem);
+	tail[rem] = 0x80u;
+	if (rem >= 56u) {
+		oauth_sha256_compress(st, tail);
+		memset(tail, 0, sizeof(tail));
+	}
+	uint64_t bitlen = (uint64_t)len * 8ULL;
+	for (i = 0; i < 8u; i++)
+		tail[63u - i] = (uint8_t)((bitlen >> (i * 8u)) & 0xffu);
+	oauth_sha256_compress(st, tail);
+
+	for (i = 0; i < 8u; i++) {
+		out[i * 4u + 0u] = (uint8_t)(st[i] >> 24);
+		out[i * 4u + 1u] = (uint8_t)(st[i] >> 16);
+		out[i * 4u + 2u] = (uint8_t)(st[i] >>  8);
+		out[i * 4u + 3u] = (uint8_t)(st[i]);
+	}
+	oauth_wipe(tail, sizeof(tail));
+	oauth_wipe(st, sizeof(st));
+}
+
+static void
+oauth_b64url_32(const uint8_t in[32], char out[44])
+{
+	static const char tbl[65] =
+	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	size_t i = 0, o = 0;
+
+	while (i + 3u <= 32u) {
+		uint32_t v = ((uint32_t)in[i] << 16) |
+		             ((uint32_t)in[i + 1u] << 8) |
+		             (uint32_t)in[i + 2u];
+		out[o++] = tbl[(v >> 18) & 0x3fu];
+		out[o++] = tbl[(v >> 12) & 0x3fu];
+		out[o++] = tbl[(v >>  6) & 0x3fu];
+		out[o++] = tbl[ v        & 0x3fu];
+		i += 3u;
+	}
+	/* 32 % 3 == 2 remaining bytes */
+	{
+		uint32_t v = ((uint32_t)in[30] << 16) | ((uint32_t)in[31] << 8);
+		out[o++] = tbl[(v >> 18) & 0x3fu];
+		out[o++] = tbl[(v >> 12) & 0x3fu];
+		out[o++] = tbl[(v >>  6) & 0x3fu];
+	}
+	out[o] = '\0';
+}
+
+static int
+oauth_is_safe_token(const char *s, size_t min_len, size_t max_len)
+{
+	size_t n;
+	size_t i;
+
+	if (!s)
+		return 0;
+	n = strlen(s);
+	if (n < min_len || n > max_len)
+		return 0;
+	for (i = 0; i < n; i++) {
+		unsigned char c = (unsigned char)s[i];
+		int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		         (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+		         c == '.' || c == '~';
+		if (!ok)
+			return 0;
+	}
+	return 1;
+}
+
+/* Strictly allow RFC 8252 loopback callback URIs only:
+ *   http://127.0.0.1:<1..65535>/callback
+ *   http://[::1]:<1..65535>/callback */
+static int
+oauth_is_valid_loopback_redirect(const char *uri)
+{
+	const char *p;
+	unsigned long port = 0;
+	int digits = 0;
+
+	if (!uri)
+		return 0;
+	if (strncmp(uri, "http://127.0.0.1:", 17) == 0)
+		p = uri + 17;
+	else if (strncmp(uri, "http://[::1]:", 13) == 0)
+		p = uri + 13;
+	else
+		return 0;
+
+	while (*p >= '0' && *p <= '9') {
+		port = port * 10UL + (unsigned long)(*p - '0');
+		if (port > 65535UL)
+			return 0;
+		digits++;
+		p++;
+	}
+	if (digits == 0 || port == 0UL || port > 65535UL)
+		return 0;
+	return strcmp(p, "/callback") == 0;
+}
+
+static int
+oauth_send_json(int fd, uint16_t status, const char *json)
+{
+	axil_header_set(fd, "Content-Type", "application/json");
+	axil_header_set(fd, "Cache-Control", "no-store");
+	axil_header_set(fd, "Pragma", "no-cache");
+	axil_respond(fd, status, json);
+	return 0;
+}
+
+static int
+oauth_issue_code_redirect(int fd,
+                          const char *username,
+                          const char *client_id,
+                          const char *app_id,
+                          const char *redirect_uri,
+                          const char *code_challenge,
+                          const char *state)
+{
+	time_t now = time(NULL);
+	oauth_code_rec_t *slot = NULL;
+	oauth_code_rec_t *oldest = &g_oauth_codes[0];
+	size_t i;
+
+	for (i = 0; i < OAUTH_MAX_CODES; i++) {
+		if (g_oauth_codes[i].expires_at == 0 || g_oauth_codes[i].expires_at <= now) {
+			oauth_wipe(&g_oauth_codes[i], sizeof(g_oauth_codes[i]));
+			if (!slot)
+				slot = &g_oauth_codes[i];
+		} else if (g_oauth_codes[i].expires_at < oldest->expires_at) {
+			oldest = &g_oauth_codes[i];
+		}
+	}
+	if (!slot) {
+		slot = oldest;
+		oauth_wipe(slot, sizeof(*slot));
+	}
+
+	if (oauth_rand_hex(slot->code, 32) != 0)
+		return oauth_send_json(fd, 500, "{\"error\":\"server_error\"}");
+
+	snprintf(slot->username, sizeof(slot->username), "%s", username);
+	snprintf(slot->client_id, sizeof(slot->client_id), "%s", client_id);
+	snprintf(slot->app_id, sizeof(slot->app_id), "%s", app_id);
+	snprintf(slot->redirect_uri, sizeof(slot->redirect_uri), "%s", redirect_uri);
+	snprintf(slot->code_challenge, sizeof(slot->code_challenge), "%s", code_challenge);
+	slot->expires_at = now + OAUTH_CODE_TTL;
+
+	char loc[640];
+	int ln = snprintf(loc, sizeof(loc), "%s?code=%s&state=%s",
+	                  redirect_uri, slot->code, state);
+	if (ln <= 0 || (size_t)ln >= sizeof(loc)) {
+		oauth_wipe(slot, sizeof(*slot));
+		return oauth_send_json(fd, 500, "{\"error\":\"server_error\"}");
+	}
+	axil_header_set(fd, "Cache-Control", "no-store");
+	axil_header_set(fd, "Location", loc);
+	axil_respond(fd, 303, "");
+	return 0;
+}
+
+static int
+oauth_authorize_handler(int fd, char *body)
+{
+	char qs[1024] = { 0 };
+	char response_type[32] = { 0 };
+	char client_id[64] = { 0 };
+	char app_id[64] = { 0 };
+	char redirect_uri[256] = { 0 };
+	char code_challenge[128] = { 0 };
+	char method[16] = { 0 };
+	char state[128] = { 0 };
+	const char *user;
+
+	(void)body;
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	axil_query_parse(qs);
+	axil_query_param("response_type", response_type, sizeof(response_type));
+	axil_query_param("client_id", client_id, sizeof(client_id));
+	axil_query_param("app_id", app_id, sizeof(app_id));
+	axil_query_param("redirect_uri", redirect_uri, sizeof(redirect_uri));
+	axil_query_param("code_challenge", code_challenge, sizeof(code_challenge));
+	axil_query_param("code_challenge_method", method, sizeof(method));
+	axil_query_param("state", state, sizeof(state));
+
+	if (strcmp(response_type, "code") != 0 ||
+	    strcmp(method, "S256") != 0 ||
+	    !oauth_is_valid_loopback_redirect(redirect_uri) ||
+	    !oauth_is_safe_token(code_challenge, 43, 128) ||
+	    !oauth_is_safe_token(state, 16, 120))
+	{
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_request\"}");
+	}
+	if (client_id[0] && !oauth_is_safe_token(client_id, 1, 63))
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_request\"}");
+	if (app_id[0] && !oauth_is_safe_token(app_id, 1, 63))
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_request\"}");
+
+	user = get_request_user(fd);
+	if (user && user[0]) {
+		return oauth_issue_code_redirect(
+		        fd, user, client_id, app_id, redirect_uri,
+		        code_challenge, state);
+	}
+
+	/* Unauthenticated user: save pending authorization request and bounce
+	 * through standard /auth/login with a short same-origin return path. */
+	time_t now = time(NULL);
+	oauth_pending_rec_t *slot = NULL;
+	oauth_pending_rec_t *oldest = &g_oauth_pending[0];
+	size_t i;
+
+	for (i = 0; i < OAUTH_MAX_PENDING; i++) {
+		if (g_oauth_pending[i].expires_at == 0 ||
+		    g_oauth_pending[i].expires_at <= now)
+		{
+			oauth_wipe(&g_oauth_pending[i], sizeof(g_oauth_pending[i]));
+			if (!slot)
+				slot = &g_oauth_pending[i];
+		} else if (g_oauth_pending[i].expires_at < oldest->expires_at) {
+			oldest = &g_oauth_pending[i];
+		}
+	}
+	if (!slot) {
+		slot = oldest;
+		oauth_wipe(slot, sizeof(*slot));
+	}
+
+	if (oauth_rand_hex(slot->id, 16) != 0)
+		return oauth_send_json(fd, 500, "{\"error\":\"server_error\"}");
+
+	snprintf(slot->client_id, sizeof(slot->client_id), "%s", client_id);
+	snprintf(slot->app_id, sizeof(slot->app_id), "%s", app_id);
+	snprintf(slot->redirect_uri, sizeof(slot->redirect_uri), "%s", redirect_uri);
+	snprintf(slot->code_challenge, sizeof(slot->code_challenge), "%s", code_challenge);
+	snprintf(slot->state, sizeof(slot->state), "%s", state);
+	slot->expires_at = now + OAUTH_PENDING_TTL;
+
+	char login_loc[160];
+	snprintf(login_loc, sizeof(login_loc),
+	         "/auth/login?ret=%%2Fauth%%2Foauth%%2Fcontinue%%3Fid%%3D%s",
+	         slot->id);
+	axil_header_set(fd, "Cache-Control", "no-store");
+	axil_header_set(fd, "Location", login_loc);
+	axil_respond(fd, 303, "");
+	return 0;
+}
+
+static int
+oauth_continue_handler(int fd, char *body)
+{
+	char qs[256] = { 0 };
+	char req_id[64] = { 0 };
+	const char *user;
+	time_t now = time(NULL);
+	oauth_pending_rec_t copy;
+	int found = 0;
+	size_t i;
+
+	(void)body;
+	user = get_request_user(fd);
+	if (!user || !user[0]) {
+		axil_header_set(fd, "Location", "/auth/login");
+		axil_respond(fd, 303, "");
+		return 0;
+	}
+
+	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
+	axil_query_parse(qs);
+	axil_query_param("id", req_id, sizeof(req_id));
+	if (!oauth_is_safe_token(req_id, 32, 32))
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_request\"}");
+
+	memset(&copy, 0, sizeof(copy));
+	for (i = 0; i < OAUTH_MAX_PENDING; i++) {
+		if (g_oauth_pending[i].expires_at == 0)
+			continue;
+		if (g_oauth_pending[i].expires_at <= now) {
+			oauth_wipe(&g_oauth_pending[i], sizeof(g_oauth_pending[i]));
+			continue;
+		}
+		if (csrf_ct_compare(g_oauth_pending[i].id,
+		                    strlen(g_oauth_pending[i].id),
+		                    req_id, strlen(req_id)) == 0)
+		{
+			copy = g_oauth_pending[i];
+			oauth_wipe(&g_oauth_pending[i], sizeof(g_oauth_pending[i]));
+			found = 1;
+			break;
+		}
+	}
+	if (!found)
+		return oauth_send_json(fd, 400, "{\"error\":\"expired_request\"}");
+
+	int rc = oauth_issue_code_redirect(
+	        fd, user, copy.client_id, copy.app_id, copy.redirect_uri,
+	        copy.code_challenge, copy.state);
+	oauth_wipe(&copy, sizeof(copy));
+	return rc;
+}
+
+static int
+oauth_token_handler(int fd, char *body)
+{
+	char grant_type[64] = { 0 };
+	char code[128] = { 0 };
+	char verifier[160] = { 0 };
+	char redirect_uri[256] = { 0 };
+	char client_id[64] = { 0 };
+	char app_id[64] = { 0 };
+	oauth_code_rec_t rec;
+	time_t now = time(NULL);
+	int found = 0;
+	size_t i;
+
+	if (!body || !body[0])
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_request\"}");
+
+	axil_query_parse(body);
+	axil_query_param("grant_type", grant_type, sizeof(grant_type));
+	axil_query_param("code", code, sizeof(code));
+	axil_query_param("code_verifier", verifier, sizeof(verifier));
+	axil_query_param("redirect_uri", redirect_uri, sizeof(redirect_uri));
+	axil_query_param("client_id", client_id, sizeof(client_id));
+	axil_query_param("app_id", app_id, sizeof(app_id));
+
+	if (strcmp(grant_type, "authorization_code") != 0 ||
+	    !oauth_is_safe_token(code, 32, 127) ||
+	    !oauth_is_safe_token(verifier, 43, 128) ||
+	    !oauth_is_valid_loopback_redirect(redirect_uri))
+	{
+		oauth_wipe(verifier, sizeof(verifier));
+		oauth_wipe(code, sizeof(code));
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_request\"}");
+	}
+
+	memset(&rec, 0, sizeof(rec));
+	for (i = 0; i < OAUTH_MAX_CODES; i++) {
+		if (g_oauth_codes[i].expires_at == 0)
+			continue;
+		if (g_oauth_codes[i].expires_at <= now) {
+			oauth_wipe(&g_oauth_codes[i], sizeof(g_oauth_codes[i]));
+			continue;
+		}
+		if (csrf_ct_compare(g_oauth_codes[i].code,
+		                    strlen(g_oauth_codes[i].code),
+		                    code, strlen(code)) == 0)
+		{
+			rec = g_oauth_codes[i];
+			/* Single-use: consume immediately even if verification fails. */
+			oauth_wipe(&g_oauth_codes[i], sizeof(g_oauth_codes[i]));
+			found = 1;
+			break;
+		}
+	}
+	oauth_wipe(code, sizeof(code));
+
+	if (!found || strcmp(rec.redirect_uri, redirect_uri) != 0 ||
+	    (client_id[0] && rec.client_id[0] && strcmp(rec.client_id, client_id) != 0) ||
+	    (app_id[0] && rec.app_id[0] && strcmp(rec.app_id, app_id) != 0))
+	{
+		oauth_wipe(verifier, sizeof(verifier));
+		oauth_wipe(&rec, sizeof(rec));
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_grant\"}");
+	}
+
+	uint8_t digest[32];
+	char computed[44];
+	oauth_sha256((const uint8_t *)verifier, strlen(verifier), digest);
+	oauth_wipe(verifier, sizeof(verifier));
+	oauth_b64url_32(digest, computed);
+	oauth_wipe(digest, sizeof(digest));
+
+	if (csrf_ct_compare(computed, strlen(computed),
+	                    rec.code_challenge, strlen(rec.code_challenge)) != 0)
+	{
+		oauth_wipe(computed, sizeof(computed));
+		oauth_wipe(&rec, sizeof(rec));
+		return oauth_send_json(fd, 400, "{\"error\":\"invalid_grant\"}");
+	}
+	oauth_wipe(computed, sizeof(computed));
+
+	char minted[256] = { 0 };
+	uint64_t expires_in = 0;
+	int mrc = on_oauth_mint_token(
+	        rec.username, rec.client_id, rec.app_id,
+	        minted, sizeof(minted), &expires_in);
+	int hook_status = xy.last(NULL);
+	oauth_wipe(&rec, sizeof(rec));
+
+	if (hook_status != XY_OK) {
+		oauth_wipe(minted, sizeof(minted));
+		return oauth_send_json(fd, 501, "{\"error\":\"unsupported_grant_type\"}");
+	}
+	if (mrc != 0 || !minted[0] || !oauth_is_safe_token(minted, 1, 255)) {
+		oauth_wipe(minted, sizeof(minted));
+		return oauth_send_json(fd, 403, "{\"error\":\"access_denied\"}");
+	}
+
+	char resp[512];
+	int rn = snprintf(resp, sizeof(resp),
+	                  "{\"access_token\":\"%s\",\"token_type\":\"Bearer\",\"expires_in\":%" PRIu64 "}",
+	                  minted, expires_in);
+	oauth_wipe(minted, sizeof(minted));
+	if (rn <= 0 || (size_t)rn >= sizeof(resp)) {
+		oauth_wipe(resp, sizeof(resp));
+		return oauth_send_json(fd, 500, "{\"error\":\"server_error\"}");
+	}
+	int ret_rc = oauth_send_json(fd, 200, resp);
+	oauth_wipe(resp, sizeof(resp));
+	return ret_rc;
+}
+
 static int login_get_handler(int fd, char *body)
 {
 	char qs[512] = { 0 };
 	char ret[256] = { 0 };
 	const char *user;
-	char *p;
-	char *end;
 
 	(void)body;
 	user = get_request_user(fd);
 	axil_env_get(fd, qs, sizeof(qs), "QUERY_STRING");
-	p = strstr(qs, "ret=");
-	if (p) {
-		p += 4;
-		end = strchr(p, '&');
-		if (end) {
-			size_t n = (size_t)(end - p);
-
-			if (n >= sizeof(ret))
-				n = sizeof(ret) - 1;
-			memcpy(ret, p, n);
-			ret[n] = '\0';
-		} else {
-			strncpy(ret, p, sizeof(ret) - 1);
-		}
+	if (qs[0]) {
+		axil_query_parse(qs);
+		axil_query_param("ret", ret, sizeof(ret));
+		if (ret[0] != '/' || ret[1] == '/')
+			ret[0] = '\0';
 	}
 	{
 		site_ui_set_locale(i18n_resolve_locale(fd));
@@ -792,4 +1342,7 @@ void xy_install(void)
 	axil_register_handler("GET:/api/csrf", csrf_endpoint_handler);
 	axil_register_handler("GET:/auth/login", login_get_handler);
 	axil_register_handler("GET:/auth/register", register_get_handler);
+	axil_register_handler("GET:/auth/oauth/authorize", oauth_authorize_handler);
+	axil_register_handler("GET:/auth/oauth/continue", oauth_continue_handler);
+	axil_register_handler("POST:/auth/oauth/token", oauth_token_handler);
 }
