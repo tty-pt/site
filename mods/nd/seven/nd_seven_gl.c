@@ -648,15 +648,24 @@ static void gl_upload_frame_ubo(void)
 	ubo.uSkyColor[2] = 0.85f * (1.0f - space_t) + 0.006f * space_t;
 	ubo.uAtmoIntensity = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 8000.0f));
 
+	/* Planetary aerial perspective visibility (110k..380k wu) once uAtmoIntensity engages,
+	 * preserving close-range grass fog (cur_dist <= 1200) while preventing mid-altitude zoom
+	 * from fogging out distant 6,400-wu mountains into solid sky at 4 * cur_dist. */
+	float near_fog_start = s_gl.cur_dist * 1.5f;
+	float near_fog_end   = s_gl.cur_dist * 4.0f;
+	float far_fog_start  = fmaxf(near_fog_start, 110000.0f) * fog_scale;
+	float far_fog_end    = fmaxf(near_fog_end,   380000.0f) * fog_scale;
+	float fog_blend      = fminf(1.0f, fmaxf(0.0f, (s_gl.cur_dist - 1200.0f) / 1200.0f));
+
 	ubo.uSunDir[0] = s_gl.cur_sun_dir[0];
 	ubo.uSunDir[1] = s_gl.cur_sun_dir[1];
 	ubo.uSunDir[2] = s_gl.cur_sun_dir[2];
-	ubo.uFogStart = s_gl.cur_dist * 1.5f * fog_scale;
+	ubo.uFogStart = near_fog_start + (far_fog_start - near_fog_start) * fog_blend;
 
 	ubo.uMoonDir[0] = s_gl.cur_moon_dir[0];
 	ubo.uMoonDir[1] = s_gl.cur_moon_dir[1];
 	ubo.uMoonDir[2] = s_gl.cur_moon_dir[2];
-	ubo.uFogEnd = s_gl.cur_dist * 4.0f * fog_scale;
+	ubo.uFogEnd = near_fog_end + (far_fog_end - near_fog_end) * fog_blend;
 
 	if (s_gl.csm_valid) {
 		ubo.uCsm[0] = s_gl.csm_win.cx;
@@ -2523,7 +2532,7 @@ static gl_grass_vbo_slot_t *gl_grass_get_or_build_chunk(
 	uint16_t world, uint8_t level, uint32_t rev,
 	int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
 	int32_t grid_n, float sea_level,
-	const int16_t *height_i16, const uint32_t *color_rgba,
+	const int32_t *height_i32, const uint32_t *color_rgba,
 	uint32_t chunk_w, uint32_t chunk_h, bool *out_touched_vbo)
 {
 	if (grid_n < 1) grid_n = 1;
@@ -2555,7 +2564,7 @@ static gl_grass_vbo_slot_t *gl_grass_get_or_build_chunk(
 	static gl_grass_tuft_t s_grass_build_scratch[MAX_GRASS_TUFTS_PER_CHUNK];
 	uint32_t count = 0;
 
-	if (height_i16 && color_rgba && chunk_w > 0 && chunk_h > 0) {
+	if (height_i32 && color_rgba && chunk_w > 0 && chunk_h > 0) {
 		float max_cx = (chunk_w > 1u) ? (float)(chunk_w - 1u) : 1.0f;
 		float max_cy = (chunk_h > 1u) ? (float)(chunk_h - 1u) : 1.0f;
 		int32_t ic_max_x = (int32_t)(chunk_w - 1u);
@@ -2596,10 +2605,10 @@ static gl_grass_vbo_slot_t *gl_grass_get_or_build_chunk(
 
 				size_t row0 = (size_t)i0y * (size_t)chunk_w;
 				size_t row1 = (size_t)i1y * (size_t)chunk_w;
-				float h00 = (float)height_i16[row0 + (size_t)i0x];
-				float h10 = (float)height_i16[row0 + (size_t)i1x];
-				float h01 = (float)height_i16[row1 + (size_t)i0x];
-				float h11 = (float)height_i16[row1 + (size_t)i1x];
+				float h00 = (float)height_i32[row0 + (size_t)i0x];
+				float h10 = (float)height_i32[row0 + (size_t)i1x];
+				float h01 = (float)height_i32[row1 + (size_t)i0x];
+				float h11 = (float)height_i32[row1 + (size_t)i1x];
 				float hm0 = h00 + (h10 - h00) * fx;
 				float hm1 = h01 + (h11 - h01) * fx;
 				float wz  = (hm0 + (hm1 - hm0) * fy) * 0.0625f;
@@ -2740,7 +2749,7 @@ static gl_grass_vbo_slot_t *gl_grass_get_or_build_chunk(
 
 void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev,
                                      int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
-                                     const uint32_t *color_rgba, const int16_t *height_i16,
+                                     const uint32_t *color_rgba, const int32_t *height_i32,
                                      uint32_t chunk_w, uint32_t chunk_h,
                                      uint32_t stage_w, uint32_t stage_h,
                                      float sea_level,
@@ -2825,20 +2834,20 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 		/* Record conservative per-chunk elevation bounds and river presence once per upload
 		 * so zero-visual-diff terrain shader variants can skip dead water/swash/macro branches. */
-		if (height_i16 && chunk_w > 0 && chunk_h > 0) {
+		if (height_i32 && chunk_w > 0 && chunk_h > 0) {
 			size_t n_px = (size_t)chunk_w * (size_t)chunk_h;
-			int16_t mn = height_i16[0];
-			int16_t mx = height_i16[0];
+			int32_t mn = height_i32[0];
+			int32_t mx = height_i32[0];
 			for (size_t i = 1; i < n_px; i++) {
-				int16_t h = height_i16[i];
+				int32_t h = height_i32[i];
 				if (h < mn) mn = h;
 				if (h > mx) mx = h;
 			}
 			slot->min_h_q12_4 = mn;
 			slot->max_h_q12_4 = mx;
 		} else {
-			slot->min_h_q12_4 = -32768;
-			slot->max_h_q12_4 = 32767;
+			slot->min_h_q12_4 = -(32000 << 4);
+			slot->max_h_q12_4 =  (32000 << 4);
 		}
 		if (color_rgba && chunk_w > 0 && chunk_h > 0) {
 			size_t n_px = (size_t)chunk_w * (size_t)chunk_h;
@@ -2859,7 +2868,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 		if (chunk_w <= 128u && chunk_h <= 128u) {
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.height_array);
-			nd_seven_gl_bake_chunk_height_derived(height_i16, chunk_w, chunk_h,
+			nd_seven_gl_bake_chunk_height_derived(height_i32, chunk_w, chunk_h,
 			                                      (float)span_w, (float)span_h,
 			                                      s_chunk_bake_rgba);
 			glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, slot_idx,
@@ -2878,7 +2887,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	}
 	if ((needs_upload || needs_river_only) && slot->has_river && span_w <= 40960 &&
 	    terrain_sea_lvl > -900.0f && chunk_w <= 128u && chunk_h <= 128u) {
-		nd_seven_gl_bake_chunk_river(height_i16, color_rgba, chunk_w, chunk_h,
+		nd_seven_gl_bake_chunk_river(height_i32, color_rgba, chunk_w, chunk_h,
 		                             terrain_sea_lvl, s_chunk_bake_rgba);
 		glActiveTexture(GL_TEXTURE2);
 		glBindTexture(GL_TEXTURE_2D_ARRAY, s_gl.river_array);
@@ -2924,7 +2933,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 	if (!s_gl.csm_valid) {
 		csm_safe = (s_gl.csm_clear_sky && max_d < 180000.0f);
 	} else {
-		float max_dz = fmaxf(0.0f, 920.0f - min_z) + fminf(14000.0f, max_d * 0.045f);
+		float max_dz = fmaxf(0.0f, 2200.0f - min_z) + fminf(14000.0f, max_d * 0.045f);
 		float rx = fmaxf(fabsf((float)ox - s_gl.csm_win.cx),
 		                 fabsf((float)(ox + span_w) - s_gl.csm_win.cx)) + max_dz;
 		float ry = fmaxf(fabsf((float)oy - s_gl.csm_win.cy),
@@ -3050,13 +3059,10 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 
 	uint8_t grid_lod;
 	bool hi_dist = (slot->last_grid_lod == 2u) ? (s_gl.cur_dist >= 185000.0f) : (s_gl.cur_dist >= 200000.0f);
-	bool l2_lo   = (slot->last_grid_lod == 1u) ? (s_gl.cur_dist < 2450.0f)    : (s_gl.cur_dist < 2200.0f);
 	if (level == 0u || level >= 11u || hi_dist)
 		grid_lod = 2u; /* 48x48 HI */
-	else if (level == 1u || (level == 2u && l2_lo))
-		grid_lod = 1u; /* 24x24 LO */
 	else
-		grid_lod = 0u; /* 16x16 MACRO */
+		grid_lod = 1u; /* 24x24 LO (exact 1:2 vertex alignment with 48x48; preserves alpine ridges) */
 	slot->last_grid_lod = grid_lod;
 
 	static const float k_grid_quads_f[3] = {
@@ -3145,7 +3151,7 @@ void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev
 			bool touched_vbo = false;
 			gl_grass_vbo_slot_t *gslot = gl_grass_get_or_build_chunk(
 				world, level, rev, ox, oy, span_w, span_h,
-				grid_n, terrain_sea_lvl, height_i16, color_rgba,
+				grid_n, terrain_sea_lvl, height_i32, color_rgba,
 				chunk_w, chunk_h, &touched_vbo);
 			(void)touched_vbo;
 			if (gslot && gslot->tuft_count > 0) {

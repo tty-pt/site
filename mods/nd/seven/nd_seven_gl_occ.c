@@ -1220,7 +1220,7 @@ void gl_render_cloud_shadow_map(void)
 	float sun_px = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[0] / sun_xy_len) : -0.70710678f;
 	float sun_py = (sun_xy_len > 0.05f) ? (-s_gl.cur_sun_dir[1] / sun_xy_len) : -0.70710678f;
 	float orbit_off = fminf(14000.0f, fmaxf(0.0f, s_gl.cur_dist * 0.045f));
-	float dz_ref = fmaxf(0.0f, 920.0f - fmaxf(0.0f, s_gl.cur_tz)) + orbit_off;
+	float dz_ref = fmaxf(0.0f, 2200.0f - fmaxf(0.0f, s_gl.cur_tz)) + orbit_off;
 	float pyr_cx = s_gl.cur_tx + sun_px * dz_ref;
 	float pyr_cy = s_gl.cur_ty + sun_py * dz_ref;
 
@@ -1422,9 +1422,9 @@ void gl_bind_csm(GLint loc_tex)
 
 float nd_seven_gl_cloud_shadow_from_density(float density, float frag_z)
 {
-	const float zk = 920.0f;
-	if (frag_z >= zk + 240.0f) return 0.0f;
-	float slice_fade = gl_smoothstep01(zk + 240.0f, zk - 120.0f, frag_z);
+	const float zk = 2200.0f;
+	if (frag_z >= zk + 400.0f) return 0.0f;
+	float slice_fade = gl_smoothstep01(zk + 400.0f, zk - 200.0f, frag_z);
 	float s = gl_smoothstep01(0.05f, 0.66f, density * slice_fade);
 	return s > 0.95f ? 0.95f : s;
 }

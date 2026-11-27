@@ -198,8 +198,8 @@ int main(void)
 	       bounds_ocean_tight, bounds_mountain_hits);
 
 	/* 5. Earth-like planetary mountain distribution, slopes & calm World 0 spawn */
-	int land_cnt = 0, plains_cnt = 0, mtn_cnt = 0, alpine_cnt = 0;
-	int max_slope_dz = 0;
+	int land_cnt = 0, plains_cnt = 0, mtn_cnt = 0, alpine_cnt = 0, towering_cnt = 0;
+	int max_slope_dz = 0, max_elev = 0;
 	for (int iter = 0; iter < 4096; iter++) {
 		int16_t rx = (int16_t)(next_u32() & 0xFFFFu);
 		int16_t ry = (int16_t)(next_u32() & 0xFFFFu);
@@ -207,9 +207,11 @@ int main(void)
 		if (h <= 0)
 			continue;
 		land_cnt++;
+		if (h > max_elev) max_elev = h;
 		if (h < 100) plains_cnt++;
 		if (h >= 500) mtn_cnt++;
 		if (h >= 1000) alpine_cnt++;
+		if (h >= 3000) towering_cnt++;
 		if (h >= 300) {
 			int16_t hx = nd_field_room_hyp_coarse(0, (int16_t)(rx + 1), ry);
 			int16_t hy = nd_field_room_hyp_coarse(0, rx, (int16_t)(ry + 1));
@@ -223,9 +225,11 @@ int main(void)
 	assert(plains_cnt * 100 >= land_cnt * 35 && plains_cnt * 100 <= land_cnt * 70);
 	assert(mtn_cnt * 100 >= land_cnt * 8);
 	assert(alpine_cnt * 100 >= land_cnt * 2);
-	assert(max_slope_dz >= 80); /* >= ~26.5 deg over 160 wu room span */
+	assert(towering_cnt >= 5 && max_elev >= 3500);
+	assert(max_slope_dz >= 160); /* >= 45 deg alpine flanks over 160 wu room span */
 
-	/* World 0 spawn valley [-24..24] keeps zero tectonic mountain spires on top of spawn */
+	/* World 0 spawn valley [-24..24] keeps zero tectonic mountain spires on top of spawn,
+	 * while distant alpine ranges loom prominently (>= 10 deg) on Spawn's horizon. */
 	uint32_t w0_seed = 0x48454947u;
 	for (int ry = -24; ry <= 24; ry += 4) {
 		for (int rx = -24; rx <= 24; rx += 4) {
@@ -233,12 +237,29 @@ int main(void)
 			assert(nd_field_orogeny_wu(w0_seed, 0, rx, ry, h) == 0);
 		}
 	}
-	printf("PASS: Earth-like orogeny (land=%d plains=%.1f%% mtn>=500=%.1f%% alpine>=1000=%.1f%% max_dz=%d wu/room)\n",
-	       land_cnt,
-	       100.0 * (double)plains_cnt / (double)land_cnt,
-	       100.0 * (double)mtn_cnt / (double)land_cnt,
-	       100.0 * (double)alpine_cnt / (double)land_cnt,
-	       max_slope_dz);
+	{
+		int16_t h0 = nd_field_room_hyp_coarse(0, 0, 0);
+		double max_hor_deg = 0.0;
+		for (int dy = -128; dy <= 128; dy += 4) {
+			for (int dx = -128; dx <= 128; dx += 4) {
+				if (dx == 0 && dy == 0) continue;
+				double d = sqrt((double)dx * 160.0 * (double)dx * 160.0 +
+				                (double)dy * 128.0 * (double)dy * 128.0);
+				if (d < 400.0 || d > 25000.0) continue;
+				int16_t h = nd_field_room_hyp_coarse(0, (int16_t)dx, (int16_t)dy);
+				if (h <= h0) continue;
+				double ang = atan2((double)(h - h0), d) * 180.0 / 3.14159265358979323846;
+				if (ang > max_hor_deg) max_hor_deg = ang;
+			}
+		}
+		assert(max_hor_deg >= 10.0);
+		printf("PASS: Earth-like orogeny (land=%d plains=%.1f%% mtn>=500=%.1f%% alpine>=1000=%.1f%% peak>=3000=%d max=%d max_dz=%d spawn_horizon=%.1fdeg)\n",
+		       land_cnt,
+		       100.0 * (double)plains_cnt / (double)land_cnt,
+		       100.0 * (double)mtn_cnt / (double)land_cnt,
+		       100.0 * (double)alpine_cnt / (double)land_cnt,
+		       towering_cnt, max_elev, max_slope_dz, max_hor_deg);
+	}
 
 	printf("=== ALL ND FIELD SIMD TESTS PASSED ===\n");
 	return 0;

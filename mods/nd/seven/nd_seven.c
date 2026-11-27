@@ -128,15 +128,15 @@ static inline void seven_pack_field_sample(uint16_t world, uint8_t level,
 		int fine_rel = (int)fs.fine_elev;
 		int elev_rel = ((int)fs.elevation_q12_4 - ((int)fs.water_level << 4)) >> 4;
 		if (elev_rel < -2000) elev_rel = -2000;
-		if (elev_rel > 1854) elev_rel = 1854;
+		if (elev_rel > ND_FIELD_MAX_ELEV_WU) elev_rel = ND_FIELD_MAX_ELEV_WU;
 
-		/* Natural alpine snowline transition on mountain ranges (> 320..620 wu):
-		 * Lowlands, plains, and foothills (< 320 wu) preserve their authentic biome color in
-		 * uSubstrateTex, while mountain cordilleras and summits (> 320..620+ wu) are capped in white snow. */
+		/* Natural alpine snowline transition on mountain ranges (> 1500..2400 wu):
+		 * Lowlands, plains, and foothills (< 1500 wu) preserve their authentic biome color in
+		 * uSubstrateTex, while high cordilleras and summits (> 1500..2400+ wu) are capped in white snow. */
 		int snow_w = 0;
-		if (elev_rel > 320 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
+		if (elev_rel > 1500 && !fs.is_water && fs.bio != BIOME_PERMANENT_ICE) {
 			uint32_t c_snow = 0xFFFFFAF6u; /* Pure alpine snow RGB(246, 250, 255) */
-			snow_w = (elev_rel <= 620) ? ((elev_rel - 320) * 255 / 300) : 255;
+			snow_w = (elev_rel <= 2400) ? ((elev_rel - 1500) * 255 / 900) : 255;
 			col = macro_blend_rgb(col, c_snow, snow_w);
 		}
 
@@ -235,7 +235,7 @@ ar_system_t *nd_seven_get_chunk_sys(void)
 		cfg.sampler = seven_macro_chunk_sampler;
 		cfg.row_sampler = seven_macro_chunk_row_sampler;
 		cfg.eval_row4 = seven_macro_chunk_eval_row4;
-		cfg.max_active = 160;
+		cfg.max_active = 224;
 		cfg.pool_capacity = 768;
 		cfg.max_levels = 17;
 		cfg.default_rgba = 0xFF3C804Eu;
@@ -592,9 +592,23 @@ static bool seven_torus_cull_3d_cb(void *bounds_ctx, float ox, float oy, float w
 		}
 	}
 
-	double dot_vn = (vx * n_world[0] + vy * n_world[1] + vz * n_world[2]) / vlen;
+	/* Planetary horizon limb / back-hemisphere normal-cone test:
+	 * Anchor the sightline vector at the solid-rock datum h_base = min(z_min, -2500) rather than
+	 * h_mid so a tall mountain rising above a low-altitude camera (z_eye < h_mid) never yields a
+	 * negative normal dot product that gets misclassified as being over the curved planetary limb. */
 	double r_min = (ctx->surf.r_minor > 1.0) ? ctx->surf.r_minor : 1335000.0;
-	float limb_dip = (z_max > 0.0f) ? acosf(fminf(1.0f, (float)(r_min / (r_min + (double)z_max)))) : 0.0f;
+	double h_base = ((double)z_min < -2500.0) ? (double)z_min : -2500.0;
+	double dh_base = h_base - h_mid;
+	double bx = vx - dh_base * n_world[0];
+	double by = vy - dh_base * n_world[1];
+	double bz = vz - dh_base * n_world[2];
+	double blen = sqrt(bx * bx + by * by + bz * bz);
+	if (blen <= r_patch * 1.15)
+		return true;
+	double dot_vn = (bx * n_world[0] + by * n_world[1] + bz * n_world[2]) / blen;
+	double r_base = (r_min + h_base > 1.0) ? (r_min + h_base) : 1.0;
+	double h_above = ((double)z_max > h_base) ? ((double)z_max - h_base) : 0.0;
+	float limb_dip = (h_above > 0.0) ? acosf(fminf(1.0f, (float)(r_base / (r_base + h_above)))) : 0.0f;
 	float max_ang = alpha + limb_dip + 0.03f;
 	if (max_ang >= 1.55f)
 		return true;
@@ -675,7 +689,7 @@ int nd_seven_is_alt_planet_occluded(const float eye_3d[3], float dist,
 	return 0;
 }
 
-#define SEVEN_MAX_VISIBLE_LEAVES 160
+#define SEVEN_MAX_VISIBLE_LEAVES 224
 static const ar_node_t *s_visible_leaves[SEVEN_MAX_VISIBLE_LEAVES];
 static size_t s_visible_leaf_count = 0;
 typedef struct {
@@ -877,7 +891,7 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	float r_planet = pdef->minor_r;
 	/* Global analytical Z ceiling tightened per patch by nd_field_elevation_bounds & cached node bounds */
 	float z_min_cull = -2150.0f;
-	float z_max_cull =  2000.0f;
+	float z_max_cull =  ND_FIELD_GLOBAL_MAX_Z;
 	float cull_margin = 180.0f;
 	s_frame_sag_radius = r_planet;
 
@@ -1492,7 +1506,7 @@ static void seven_calc_obj_billboard_dims(const ndw_obj_t *o,
 }
 
 static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, int32_t wy,
-                                            int16_t default_wl, int16_t *out_elev_q, int16_t *out_wl)
+                                            int16_t default_wl, int32_t *out_elev_q, int16_t *out_wl)
 {
 	int gdim = (int)node->grid_dim;
 	int vdim = (int)node->vert_dim;
@@ -1525,7 +1539,7 @@ static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, i
 	float h0 = v00 * (1.0f - wu) + v10 * wu;
 	float h1 = v01 * (1.0f - wu) + v11 * wu;
 	float h  = h0 * (1.0f - wv) + h1 * wv;
-	*out_elev_q = (int16_t)(h >= 0.0f ? (h + 0.5f) : (h - 0.5f));
+	*out_elev_q = (int32_t)(h >= 0.0f ? (h + 0.5f) : (h - 0.5f));
 
 	int16_t local_wl = default_wl;
 	if (node->samples) {
@@ -1552,13 +1566,13 @@ static inline void seven_sample_node_smooth(const ar_node_t *node, int32_t wx, i
 }
 
 static inline void seven_sample_node_slope_at(const ar_node_t *node, int32_t wx, int32_t wy,
-                                              int16_t base_wl, int16_t elev_q,
+                                              int16_t base_wl, int32_t elev_q,
                                               const ar_node_t *const *adj_leaves, size_t adj_cnt,
-                                              int16_t *out_eq_x, int16_t *out_eq_y)
+                                              int32_t *out_eq_x, int32_t *out_eq_y)
 {
 	int16_t dummy_wl = base_wl;
-	int16_t eq_x = elev_q;
-	int16_t eq_y = elev_q;
+	int32_t eq_x = elev_q;
+	int32_t eq_y = elev_q;
 
 	if (wx + 8 < node->ox + node->w) {
 		seven_sample_node_smooth(node, wx + 8, wy, base_wl, &eq_x, &dummy_wl);
@@ -1577,12 +1591,12 @@ static inline void seven_sample_node_slope_at(const ar_node_t *node, int32_t wx,
 			seven_sample_node_smooth(nx_node, wx + 8, wy, base_wl, &eq_x, &dummy_wl);
 		} else {
 			int32_t bx = (wx - 8 >= node->ox) ? (wx - 8) : node->ox;
-			int16_t eq_bx = elev_q;
+			int32_t eq_bx = elev_q;
 			seven_sample_node_smooth(node, bx, wy, base_wl, &eq_bx, &dummy_wl);
-			int32_t ext_x = 2 * (int32_t)elev_q - (int32_t)eq_bx;
-			if (ext_x < -32768) ext_x = -32768;
-			if (ext_x >  32767) ext_x =  32767;
-			eq_x = (int16_t)ext_x;
+			int32_t ext_x = 2 * elev_q - eq_bx;
+			if (ext_x < -(32000 << 4)) ext_x = -(32000 << 4);
+			if (ext_x >  (32000 << 4)) ext_x =  (32000 << 4);
+			eq_x = ext_x;
 		}
 	}
 
@@ -1603,12 +1617,12 @@ static inline void seven_sample_node_slope_at(const ar_node_t *node, int32_t wx,
 			seven_sample_node_smooth(ny_node, wx, wy + 8, base_wl, &eq_y, &dummy_wl);
 		} else {
 			int32_t by = (wy - 8 >= node->oy) ? (wy - 8) : node->oy;
-			int16_t eq_by = elev_q;
+			int32_t eq_by = elev_q;
 			seven_sample_node_smooth(node, wx, by, base_wl, &eq_by, &dummy_wl);
-			int32_t ext_y = 2 * (int32_t)elev_q - (int32_t)eq_by;
-			if (ext_y < -32768) ext_y = -32768;
-			if (ext_y >  32767) ext_y =  32767;
-			eq_y = (int16_t)ext_y;
+			int32_t ext_y = 2 * elev_q - eq_by;
+			if (ext_y < -(32000 << 4)) ext_y = -(32000 << 4);
+			if (ext_y >  (32000 << 4)) ext_y =  (32000 << 4);
+			eq_y = ext_y;
 		}
 	}
 
@@ -1619,8 +1633,8 @@ static inline void seven_sample_node_slope_at(const ar_node_t *node, int32_t wx,
 static inline void seven_sample_node_elev_slope(const ar_node_t *node, int32_t wx, int32_t wy,
                                                 int16_t base_wl,
                                                 const ar_node_t *const *adj_leaves, size_t adj_cnt,
-                                                int16_t *out_elev_q, int16_t *out_eq_x,
-                                                int16_t *out_eq_y, int16_t *out_local_wl)
+                                                int32_t *out_elev_q, int32_t *out_eq_x,
+                                                int32_t *out_eq_y, int16_t *out_local_wl)
 {
 	seven_sample_node_smooth(node, wx, wy, base_wl, out_elev_q, out_local_wl);
 	int pos_y_grid = -ndw_fdiv(wy, NDW_TILE_H);
@@ -1706,7 +1720,8 @@ static void seven_async_block_bb_worker(void *ctx)
 					continue;
 				int32_t wx = base_wx + raw_objs[k].x;
 				int32_t wy = base_wy + raw_objs[k].y;
-				int16_t elev_q = 0, local_wl = w_level;
+				int32_t elev_q = 0;
+				int16_t local_wl = w_level;
 				seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 				int16_t wz = nd_field_elevation_to_block(elev_q);
 				if (wz <= local_wl && node->level >= 2 &&
@@ -1726,7 +1741,7 @@ static void seven_async_block_bb_worker(void *ctx)
 				bb.z = z_f;
 				seven_calc_obj_billboard_dims(&raw_objs[k], &sr_val, &bb.width, &bb.height, &bb.anchor_y);
 				if (raw_objs[k].kind == NDW_K_DECID || raw_objs[k].kind == NDW_K_TALL || raw_objs[k].kind == NDW_K_FIR) {
-					int16_t eq_x = elev_q, eq_y = elev_q;
+					int32_t eq_x = elev_q, eq_y = elev_q;
 					seven_sample_node_slope_at(node, wx, wy, w_level, elev_q, NULL, 0, &eq_x, &eq_y);
 					float dz_dx = (float)(eq_x - elev_q) * (1.0f / 128.0f);
 					float dz_dy = (float)(eq_y - elev_q) * (1.0f / 128.0f);
@@ -1841,7 +1856,8 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 				continue;
 		}
 
-		int16_t elev_q = 0, local_wl = w_level;
+		int32_t elev_q = 0;
+		int16_t local_wl = w_level;
 		seven_sample_node_smooth(node, wx, wy, w_level, &elev_q, &local_wl);
 		int16_t wz = nd_field_elevation_to_block(elev_q);
 
@@ -1859,7 +1875,7 @@ static int seven_emit_room_billboards_ex(const nd_client_state_t *st, const ar_n
 		float z_f = (float)elev_q / 16.0f;
 		bb.z = z_f;
 		if (raw_objs[k].kind == NDW_K_DECID || raw_objs[k].kind == NDW_K_TALL || raw_objs[k].kind == NDW_K_FIR) {
-			int16_t eq_x = elev_q, eq_y = elev_q;
+			int32_t eq_x = elev_q, eq_y = elev_q;
 			if (node) {
 				seven_sample_node_slope_at(node, wx, wy, w_level, elev_q, NULL, 0, &eq_x, &eq_y);
 			} else {
@@ -2641,7 +2657,7 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 						dr[n].fg = sp.objs[k].fg;
 						dr[n].wx = base_wx + sp.objs[k].x;
 						dr[n].wy = base_wy + sp.objs[k].y;
-						int16_t elev_q = nd_seven_ground_elevation_q12_4(dr[n].wx, dr[n].wy);
+						int32_t elev_q = nd_seven_ground_elevation_q12_4(dr[n].wx, dr[n].wy);
 						dr[n].wz = nd_field_elevation_to_block(elev_q);
 						dr[n].z_f = (float)elev_q / 16.0f;
 						dr[n].flip = sp.objs[k].flip;
@@ -2665,7 +2681,7 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 						dr[n].obj.big = sp.objs[k].big;
 						dr[n].wx = base_wx + sp.objs[k].x;
 						dr[n].wy = base_wy + sp.objs[k].y;
-						int16_t elev_q = nd_seven_ground_elevation_q12_4(dr[n].wx, dr[n].wy);
+						int32_t elev_q = nd_seven_ground_elevation_q12_4(dr[n].wx, dr[n].wy);
 						dr[n].wz = nd_field_elevation_to_block(elev_q);
 						dr[n].z_f = (float)elev_q / 16.0f;
 						dr[n].sprite_id = 0;
@@ -2764,9 +2780,9 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					obj_sr = sr_val;
 					seven_calc_obj_billboard_dims(&dr[a].obj, &sr_val, &bw, &bh, &bay);
 					if (dr[a].obj.kind == NDW_K_DECID || dr[a].obj.kind == NDW_K_TALL || dr[a].obj.kind == NDW_K_FIR) {
-						int16_t eq0 = nd_seven_ground_elevation_q12_4(dr[a].wx, dr[a].wy);
-						int16_t eqx = nd_seven_ground_elevation_q12_4(dr[a].wx + 8, dr[a].wy);
-						int16_t eqy = nd_seven_ground_elevation_q12_4(dr[a].wx, dr[a].wy + 8);
+						int32_t eq0 = nd_seven_ground_elevation_q12_4(dr[a].wx, dr[a].wy);
+						int32_t eqx = nd_seven_ground_elevation_q12_4(dr[a].wx + 8, dr[a].wy);
+						int32_t eqy = nd_seven_ground_elevation_q12_4(dr[a].wx, dr[a].wy + 8);
 						float dz_dx = (float)(eqx - eq0) * (1.0f / 128.0f);
 						float dz_dy = (float)(eqy - eq0) * (1.0f / 128.0f);
 						float slope_m = sqrtf(dz_dx * dz_dx + dz_dy * dz_dy);
@@ -3365,7 +3381,7 @@ flora_emit_pass(seven_frame_ctx_t *ctx, const flora_pass_desc_t *desc)
 								continue;
 							}
 
-							int16_t elev_q = 0, eq_x = 0, eq_y = 0;
+							int32_t elev_q = 0, eq_x = 0, eq_y = 0;
 							int16_t local_wl = base_wl;
 							if (s_visible_leaf_count > 0) {
 								m_node = flora_blk_find_leaf(prep.wx, prep.wy, m_node,
@@ -4446,14 +4462,12 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 								if (bsz <= min_vis_sz)
 									break;
 								if (b_frustum_state == 1) {
-									int32_t r_xg = ndw_fdiv((int32_t)cached[ci].x, NDW_TILE_W);
-									int32_t r_yg = ndw_fdiv((int32_t)cached[ci].y, NDW_TILE_H);
-									float rmin_x = (float)(r_xg * NDW_TILE_W) - 320.0f;
-									float rmax_x = (float)((r_xg + 1) * NDW_TILE_W) + 320.0f;
-									float rmin_y = (float)(r_yg * NDW_TILE_H) - 320.0f;
-									float rmax_y = (float)((r_yg + 1) * NDW_TILE_H) + 320.0f;
-									if (!seven_test_frustum_xy(rmin_x, rmin_y, rmax_x, rmax_y,
-									                           (float)lwx, (float)lwy, nz_min, nz_max))
+									float pad = 0.5f * bsz + 16.0f;
+									if (!seven_test_frustum_xy(cached[ci].x - pad, cached[ci].y - pad,
+									                           cached[ci].x + pad, cached[ci].y + pad,
+									                           (float)lwx, (float)lwy,
+									                           cached[ci].z - 16.0f,
+									                           cached[ci].z + cached[ci].height + 16.0f))
 										continue;
 								}
 								seven_stream_faded_billboard(&cached[ci], blk_fade);
@@ -4525,14 +4539,12 @@ seven_emit_homogeneous_scenery(seven_frame_ctx_t *ctx)
 								if (bsz <= min_vis_sz)
 									break;
 								if (b_frustum_state == 1) {
-									int32_t r_xg = ndw_fdiv((int32_t)arena_dst[ci].x, NDW_TILE_W);
-									int32_t r_yg = ndw_fdiv((int32_t)arena_dst[ci].y, NDW_TILE_H);
-									float rmin_x = (float)(r_xg * NDW_TILE_W) - 320.0f;
-									float rmax_x = (float)((r_xg + 1) * NDW_TILE_W) + 320.0f;
-									float rmin_y = (float)(r_yg * NDW_TILE_H) - 320.0f;
-									float rmax_y = (float)((r_yg + 1) * NDW_TILE_H) + 320.0f;
-									if (!seven_test_frustum_xy(rmin_x, rmin_y, rmax_x, rmax_y,
-									                           (float)lwx, (float)lwy, nz_min, nz_max))
+									float pad = 0.5f * bsz + 16.0f;
+									if (!seven_test_frustum_xy(arena_dst[ci].x - pad, arena_dst[ci].y - pad,
+									                           arena_dst[ci].x + pad, arena_dst[ci].y + pad,
+									                           (float)lwx, (float)lwy,
+									                           arena_dst[ci].z - 16.0f,
+									                           arena_dst[ci].z + arena_dst[ci].height + 16.0f))
 										continue;
 								}
 								seven_stream_faded_billboard(&arena_dst[ci], blk_fade);

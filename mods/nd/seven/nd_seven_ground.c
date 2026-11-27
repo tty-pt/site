@@ -318,7 +318,6 @@ float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
 		float p_rad = p * deg2rad;
 		float cos_p = cosf(p_rad);
 		float sin_p = sinf(p_rad);
-		float cam_z = tz + dist * sin_p;
 		float req_sin_p = sin_p;
 		float samples[3] = { 0.50f, 0.78f, 1.00f };
 		for (int s = 0; s < 3; s++) {
@@ -327,9 +326,10 @@ float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
 			float sy = ty + dist * cos_p * f * cos_y;
 			float gz = nd_seven_ground_elevation_f((int32_t)lroundf(sx), (int32_t)lroundf(sy));
 			float floor_z = (gz > base_wl) ? gz : base_wl;
-			float min_z = floor_z + ((s == 2) ? 14.0f : 8.0f);
-			if (cam_z < min_z) {
-				float need = (min_z - tz) / (dist * ((s == 2) ? 1.0f : fmaxf(0.35f, f)));
+			float ray_z = tz + dist * sin_p * f;
+			float min_z = floor_z + 14.0f * f;
+			if (ray_z < min_z) {
+				float need = (min_z - tz) / (dist * f);
 				if (need > req_sin_p)
 					req_sin_p = need;
 			}
@@ -600,14 +600,14 @@ uint32_t nd_seven_ground_perf_take_probes(void)
 	return n;
 }
 
-int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
+int32_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 {
 	if (s_ground_perf_enabled)
 		s_ground_perf_probes++;
 	uint16_t world = (uint16_t)nd_seven_get_world();
 	ar_system_t *cs = nd_seven_get_chunk_sys();
 	if (cs) {
-		int16_t val = 0;
+		int32_t val = 0;
 		if (ar_probe_view_val(cs, 0, world, wx, wy, &val))
 			return val;
 	}
@@ -646,7 +646,7 @@ int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy)
 	float h0 = v00 * (1.0f - wu) + v10 * wu;
 	float h1 = v01 * (1.0f - wu) + v11 * wu;
 	float h  = h0 * (1.0f - wv) + h1 * wv;
-	return (int16_t)(h >= 0.0f ? (h + 0.5f) : (h - 0.5f));
+	return (int32_t)(h >= 0.0f ? (h + 0.5f) : (h - 0.5f));
 }
 
 int16_t nd_seven_ground_elevation(int32_t wx, int32_t wy)
@@ -656,7 +656,7 @@ int16_t nd_seven_ground_elevation(int32_t wx, int32_t wy)
 
 float nd_seven_ground_elevation_f(int32_t wx, int32_t wy)
 {
-	int16_t q = nd_seven_ground_elevation_q12_4(wx, wy);
+	int32_t q = nd_seven_ground_elevation_q12_4(wx, wy);
 	return (float)q / 16.0f;
 }
 

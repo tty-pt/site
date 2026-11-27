@@ -220,7 +220,7 @@ float nd_seven_gl_eval_billboard_lighting(float qx, float qy,
 
 /* Smooth 4-Tap Hermite Height Reconstruction (CPU mirror of sampleHeightSmooth):
  * Returns unpacked elevation wz = raw_h * 0.0625f and writes analytical gradients. */
-float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
+float nd_seven_gl_sample_height_smooth(const int32_t *height_i32,
                                        uint32_t tex_w, uint32_t tex_h,
                                        float u, float v,
                                        float span_x, float span_y,
@@ -229,7 +229,7 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 /* Evaluate water vertex torus minor radius with dry-land depression:
  * Depresses water mesh vertices below terrain when the vertex and its 1-ring
  * height texel neighborhood are on dry land. */
-float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
+float nd_seven_gl_eval_water_radius(const int32_t *height_i32,
                                     uint32_t tex_w, uint32_t tex_h,
                                     float u, float v,
                                     float span_x, float span_y,
@@ -237,10 +237,10 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
                                     float *out_wz, float *out_water_depth);
 
 /* Pre-bake per-chunk RGBA16F height+derived map on CPU upload:
- * R = exact Q12.4 elevation (val * 0.0625f), G = Catmull-Rom dh/dx (world units/wu),
+ * R = exact Q28.4 elevation (val * 0.0625f), G = Catmull-Rom dh/dx (world units/wu),
  * B = Catmull-Rom dh/dy (world units/wu), A = Laplacian curvature term.
- * Pure function of height_i16 & span so adjacent chunks always agree at shared borders. */
-void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
+ * Pure function of height_i32 & span so adjacent chunks always agree at shared borders. */
+void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
                                            uint32_t tex_w, uint32_t tex_h,
                                            float span_x, float span_y,
                                            float *out_rgba);
@@ -248,7 +248,7 @@ void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
 /* Pre-bake per-chunk RGBA16F premultiplied river water-table map on CPU upload:
  * R = r_z_rel * r_w (capped safely for fp16), G = r_w (0 on dry banks -> zero water-walls),
  * B = maxC_nb (3x3 tent-weighted river carve proximity), A = 0. */
-void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
+void nd_seven_gl_bake_chunk_river(const int32_t *height_i32,
                                   const uint32_t *color_rgba,
                                   uint32_t tex_w, uint32_t tex_h,
                                   float base_sea_level,
@@ -338,7 +338,7 @@ void nd_seven_gl_begin_frame(uint32_t stage_w, uint32_t stage_h,
 
 void nd_seven_gl_flush_terrain_chunk(uint16_t world, uint8_t level, uint32_t rev,
                                      int32_t ox, int32_t oy, int32_t span_w, int32_t span_h,
-                                     const uint32_t *color_rgba, const int16_t *height_i16,
+                                     const uint32_t *color_rgba, const int32_t *height_i32,
                                      uint32_t chunk_w, uint32_t chunk_h,
                                      uint32_t stage_w, uint32_t stage_h,
                                      float sea_level,

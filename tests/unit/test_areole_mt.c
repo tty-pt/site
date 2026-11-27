@@ -200,7 +200,7 @@ static void test_areole_async_staging_determinism(stl_wq_t *wq)
 			assert((b->flags & AR_NODE_FLAG_DEFERRED) == 0);
 			assert(a->min_val == b->min_val && a->max_val == b->max_val);
 			assert(a->flags == b->flags);
-			assert(memcmp(a->values, b->values, a->vert_count * sizeof(int16_t)) == 0);
+			assert(memcmp(a->values, b->values, a->vert_count * sizeof(int32_t)) == 0);
 			assert(memcmp(a->rgba, b->rgba, a->vert_count * sizeof(uint32_t)) == 0);
 		}
 	}

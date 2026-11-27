@@ -376,7 +376,7 @@ void nd_seven_gl_compute_flat_mvp(uint32_t vp_w, uint32_t vp_h,
 }
 
 
-static inline float get_h16(const int16_t *buf, int px, int py, int w, int h)
+static inline float get_h32(const int32_t *buf, int px, int py, int w, int h)
 {
 	if (px < 0) px = 0;
 	if (px >= w) px = w - 1;
@@ -385,13 +385,13 @@ static inline float get_h16(const int16_t *buf, int px, int py, int w, int h)
 	return (float)buf[py * w + px];
 }
 
-float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
+float nd_seven_gl_sample_height_smooth(const int32_t *height_i32,
                                        uint32_t tex_w, uint32_t tex_h,
                                        float u, float v,
                                        float span_x, float span_y,
                                        float *out_grad_x, float *out_grad_y)
 {
-	if (!height_i16 || tex_w < 2 || tex_h < 2) return 0.0f;
+	if (!height_i32 || tex_w < 2 || tex_h < 2) return 0.0f;
 
 	float max_xf = (float)(tex_w - 1);
 	float max_yf = (float)(tex_h - 1);
@@ -446,7 +446,7 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 		int cy = iy + j - 1;
 		for (int i = 0; i < 4; i++) {
 			int cx = ix + i - 1;
-			float val = get_h16(height_i16, cx, cy, w, h);
+			float val = get_h32(height_i32, cx, cy, w, h);
 			row_h += val * wx[i];
 			row_dx += val * dwx[i];
 		}
@@ -460,10 +460,10 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 	float border_dist = fminf(border_x, border_y);
 	float border_blend = border_dist < 0.0f ? 0.0f : (border_dist > 1.0f ? 1.0f : border_dist);
 
-	float h00 = get_h16(height_i16, ix,     iy,     w, h);
-	float h10 = get_h16(height_i16, ix + 1, iy,     w, h);
-	float h01 = get_h16(height_i16, ix,     iy + 1, w, h);
-	float h11 = get_h16(height_i16, ix + 1, iy + 1, w, h);
+	float h00 = get_h32(height_i32, ix,     iy,     w, h);
+	float h10 = get_h32(height_i32, ix + 1, iy,     w, h);
+	float h01 = get_h32(height_i32, ix,     iy + 1, w, h);
+	float h11 = get_h32(height_i32, ix + 1, iy + 1, w, h);
 
 	float b0 = h00 + (h10 - h00) * fx;
 	float b1 = h01 + (h11 - h01) * fx;
@@ -483,14 +483,14 @@ float nd_seven_gl_sample_height_smooth(const int16_t *height_i16,
 	return raw_h * 0.0625f;
 }
 
-float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
+float nd_seven_gl_eval_water_radius(const int32_t *height_i32,
                                     uint32_t tex_w, uint32_t tex_h,
                                     float u, float v,
                                     float span_x, float span_y,
                                     float r0, float sea_level,
                                     float *out_wz, float *out_water_depth)
 {
-	float wz = nd_seven_gl_sample_height_smooth(height_i16, tex_w, tex_h, u, v, span_x, span_y, NULL, NULL);
+	float wz = nd_seven_gl_sample_height_smooth(height_i32, tex_w, tex_h, u, v, span_x, span_y, NULL, NULL);
 	float depth = sea_level - wz;
 
 	if (out_wz) *out_wz = wz;
@@ -503,7 +503,7 @@ float nd_seven_gl_eval_water_radius(const int16_t *height_i16,
 	}
 }
 
-static inline float chunk_h_extrap(const int16_t *h, int32_t x, int32_t y,
+static inline float chunk_h_extrap(const int32_t *h, int32_t x, int32_t y,
                                    int32_t w, int32_t h_dim)
 {
 	int32_t cx = (x < 0) ? 0 : ((x >= w) ? (w - 1) : x);
@@ -521,7 +521,7 @@ static inline float chunk_h_extrap(const int16_t *h, int32_t x, int32_t y,
 	return 2.0f * hc - hin;
 }
 
-void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
+void nd_seven_gl_bake_chunk_height_derived(const int32_t *height_i32,
                                            uint32_t tex_w, uint32_t tex_h,
                                            float span_x, float span_y,
                                            float *out_rgba)
@@ -529,7 +529,7 @@ void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
 	if (!out_rgba || tex_w == 0u || tex_h == 0u)
 		return;
 	size_t n = (size_t)tex_w * (size_t)tex_h;
-	if (!height_i16) {
+	if (!height_i32) {
 		memset(out_rgba, 0, n * 4u * sizeof(float));
 		return;
 	}
@@ -547,9 +547,9 @@ void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
 		int32_t y_m = y - 1;
 		int32_t y_p = y + 1;
 		bool y_interior = (y > 0 && y < ih - 1);
-		const int16_t *row_c = height_i16 + (size_t)y * (size_t)iw;
-		const int16_t *row_m = y_interior ? (row_c - iw) : NULL;
-		const int16_t *row_p = y_interior ? (row_c + iw) : NULL;
+		const int32_t *row_c = height_i32 + (size_t)y * (size_t)iw;
+		const int32_t *row_m = y_interior ? (row_c - iw) : NULL;
+		const int32_t *row_p = y_interior ? (row_c + iw) : NULL;
 		float *dst = out_rgba + (size_t)y * (size_t)iw * 4u;
 		for (int32_t x = 0; x < iw; x++) {
 			float hc = (float)row_c[x];
@@ -560,10 +560,10 @@ void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
 				hd = (float)row_m[x];
 				hu = (float)row_p[x];
 			} else {
-				hl = chunk_h_extrap(height_i16, x - 1, y, iw, ih);
-				hr = chunk_h_extrap(height_i16, x + 1, y, iw, ih);
-				hd = chunk_h_extrap(height_i16, x, y_m, iw, ih);
-				hu = chunk_h_extrap(height_i16, x, y_p, iw, ih);
+				hl = chunk_h_extrap(height_i32, x - 1, y, iw, ih);
+				hr = chunk_h_extrap(height_i32, x + 1, y, iw, ih);
+				hd = chunk_h_extrap(height_i32, x, y_m, iw, ih);
+				hu = chunk_h_extrap(height_i32, x, y_p, iw, ih);
 			}
 			dst[0] = hc * 0.0625f;
 			dst[1] = (hr - hl) * gx_scale;
@@ -574,7 +574,7 @@ void nd_seven_gl_bake_chunk_height_derived(const int16_t *height_i16,
 	}
 }
 
-void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
+void nd_seven_gl_bake_chunk_river(const int32_t *height_i32,
                                   const uint32_t *color_rgba,
                                   uint32_t tex_w, uint32_t tex_h,
                                   float base_sea_level,
@@ -583,7 +583,7 @@ void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
 	if (!out_rgba || tex_w == 0u || tex_h == 0u)
 		return;
 	size_t n = (size_t)tex_w * (size_t)tex_h;
-	if (!height_i16 || !color_rgba || base_sea_level <= -900.0f) {
+	if (!height_i32 || !color_rgba || base_sea_level <= -900.0f) {
 		memset(out_rgba, 0, n * 4u * sizeof(float));
 		return;
 	}
@@ -606,7 +606,7 @@ void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
 				if (a_u8 < 254u) {
 					float c_i = (1.0f - (float)a_u8 * (1.0f / 255.0f)) * 15.9375f;
 					if (c_i > 0.05f) {
-						float h_i = (float)height_i16[idx] * 0.0625f;
+						float h_i = (float)height_i32[idx] * 0.0625f;
 						float w_surf_i = fmaxf(base_sea_level, h_i + c_i - 3.0f);
 						sum_w = c_i;
 						sum_z_rel = c_i * (w_surf_i - base_sea_level);
@@ -617,7 +617,7 @@ void nd_seven_gl_bake_chunk_river(const int16_t *height_i16,
 				for (int32_t dy = -1; dy <= 1; dy++) {
 					int32_t ty = y + dy;
 					float wy = k_w1[dy + 1];
-					const int16_t *h_row = height_i16 + (size_t)ty * (size_t)iw;
+					const int32_t *h_row = height_i32 + (size_t)ty * (size_t)iw;
 					const uint8_t *c_row = rgba_b + (size_t)ty * (size_t)iw * 4u;
 					for (int32_t dx = -1; dx <= 1; dx++) {
 						int32_t tx = x + dx;

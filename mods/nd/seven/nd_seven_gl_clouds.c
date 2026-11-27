@@ -34,7 +34,7 @@ bool nd_seven_gl_should_queue_cloud_chunk(int32_t ox, int32_t oy,
 
 	/* Gate 2: Cloud-shell 3D frustum & planetary horizon limb test at eff_shell_z (exact midpoint of [zBase, zTopProj]) */
 	float eff_orbit_lift = fminf(16000.0f, fmaxf(0.0f, (s_gl.cur_dist - 1800.0f) * 0.065f));
-	float target_shell_z = 1620.0f + eff_orbit_lift * 0.50f;
+	float target_shell_z = 3100.0f + eff_orbit_lift * 0.50f;
 	float max_safe_z = s_gl.cur_lamb_light[2] + s_gl.cur_dist * 0.58f;
 	float eff_shell_z = fminf(target_shell_z, fmaxf(24.0f, max_safe_z));
 
@@ -669,7 +669,7 @@ void nd_seven_gl_flush_clouds(void)
 		if (cvp->uTorusEye >= 0)      glUniform3f(cvp->uTorusEye, torus_eye[0], torus_eye[1], torus_eye[2]);
 		if (cvp->uTorusRadii >= 0)    glUniform2f(cvp->uTorusRadii, major_r, minor_r);
 		if (cvp->uBodyRot >= 0)       glUniformMatrix4fv(cvp->uBodyRot, 1, GL_FALSE, body_rot);
-		if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 720.0f, 3100.0f, view_steps, light_steps);
+		if (cvp->uCloudParams >= 0)   glUniform4f(cvp->uCloudParams, 1400.0f, 4800.0f, view_steps, light_steps);
 		if (cvp->uWthNearWin >= 0)    glUniform3f(cvp->uWthNearWin, r0->cx, r0->cy, r0->valid ? r0->half : -1.0f);
 		if (cvp->uWthFarWin >= 0)     glUniform3f(cvp->uWthFarWin,  r1->cx, r1->cy, r1->valid ? r1->half : -1.0f);
 		if (cvp->uCloudWindDir >= 0)  glUniform2f(cvp->uCloudWindDir, wd_x, wd_y);

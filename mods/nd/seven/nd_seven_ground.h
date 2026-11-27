@@ -27,7 +27,7 @@ uint32_t shade_rgb(uint32_t col, int shade256);
 const ndw_warp_grid_t *nd_seven_warp_grid(const int16_t pos[4]);
 
 int16_t nd_seven_ground_elevation(int32_t wx, int32_t wy);
-int16_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy);
+int32_t nd_seven_ground_elevation_q12_4(int32_t wx, int32_t wy);
 float nd_seven_ground_elevation_f(int32_t wx, int32_t wy);
 
 /* Camera zoom controls */

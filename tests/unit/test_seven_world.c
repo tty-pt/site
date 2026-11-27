@@ -129,8 +129,8 @@ int main(void)
 		assert(water_color_at_depth(2, 128, 128, 128) != water_color_at_depth(24, 128, 128, 128));
 
 		nd_seven_ground_cache_forget();
-		int16_t e0 = nd_seven_ground_elevation_q12_4(80, 64);
-		int16_t e1 = nd_seven_ground_elevation_q12_4(80, 64);
+		int32_t e0 = nd_seven_ground_elevation_q12_4(80, 64);
+		int32_t e1 = nd_seven_ground_elevation_q12_4(80, 64);
 		assert(e0 == e1);
 		printf("PASS: water depth tiers and continuous ground elevation sampling verified\n");
 	}

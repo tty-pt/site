@@ -589,8 +589,8 @@ typedef struct {
 	int32_t span_w, span_h;
 	uint32_t tex_w, tex_h;
 	uint32_t last_touch;
-	int16_t min_h_q12_4;
-	int16_t max_h_q12_4;
+	int32_t min_h_q12_4;
+	int32_t max_h_q12_4;
 	uint8_t has_river;
 	uint8_t has_cpos;
 	uint8_t river_baked; /* 1 = river_array layer slot_idx has valid baked data */

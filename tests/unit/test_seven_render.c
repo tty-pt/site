@@ -2155,7 +2155,7 @@ int main(void)
 		assert(fabsf((proj_h / proj_w) - 1.0f) < 0.06f);
 
 		/* 3. Verify smooth height parity and dry-land water vertex depression */
-		int16_t hgrid[4] = { 320, 320, 320, 320 }; /* 320 * 0.0625 = 20.0 units elevation */
+		int32_t hgrid[4] = { 320, 320, 320, 320 }; /* 320 * 0.0625 = 20.0 units elevation */
 		float wz_out = 0.0f, depth_out = 0.0f;
 		float r_water_dry = nd_seven_gl_eval_water_radius(hgrid, 2, 2, 0.5f, 0.5f, 160.0f, 128.0f,
 		                                                  pdef->minor_r, 0.0f, &wz_out, &depth_out);
@@ -2704,8 +2704,8 @@ int main(void)
 			assert(fmodf(a0.cx, texel) == 0.0f && fmodf(a0.cy, texel) == 0.0f);
 			nd_seven_gl_csm_window(400.0f, 100000.0f + 1.2f * texel, 200000.0f, &b0);
 			assert(fabsf((b0.cx - a0.cx) - texel) < 1e-3f || fabsf((b0.cx - a0.cx) - 2.0f * texel) < 1e-3f);
-			/* density -> shadow: zero above the slice, monotone, capped at 0.95 */
-			assert(nd_seven_gl_cloud_shadow_from_density(1.0f, 1200.0f) == 0.0f);
+			/* density -> shadow: zero above the slice (zk + 400 = 2600), monotone, capped at 0.95 */
+			assert(nd_seven_gl_cloud_shadow_from_density(1.0f, 2700.0f) == 0.0f);
 			assert(nd_seven_gl_cloud_shadow_from_density(0.02f, 0.0f) == 0.0f);
 			assert(nd_seven_gl_cloud_shadow_from_density(1.0f, 0.0f) == 0.95f);
 			float ps = 0.0f;
@@ -2803,10 +2803,10 @@ int main(void)
 		 * grid lines (f = 0) must be strictly non-zero and continuous (unlike 2x2 quintic S-curve
 		 * plateauing which forced derivative = 0 on every texel line). */
 		{
-			int16_t ramp[9 * 9];
+			int32_t ramp[9 * 9];
 			for (int ry = 0; ry < 9; ry++) {
 				for (int rx = 0; rx < 9; rx++) {
-					ramp[ry * 9 + rx] = (int16_t)((rx + ry) * 32);
+					ramp[ry * 9 + rx] = (int32_t)((rx + ry) * 32);
 				}
 			}
 			/* Sample exactly on interior texel grid line u = 4/8 = 0.5, v = 4/8 = 0.5 */
@@ -3382,8 +3382,8 @@ int main(void)
 		assert(strstr(fs_w, "nd_cloud_shadow_map") != NULL);
 		assert(strstr(fs_w, "eval_planetary_cloud_shadow") == NULL); /* water is CSM-only (cur_dist <= 2000 wu) */
 		assert(strstr(fs_w, "reflCloudXY") == NULL); /* reflection reuses the column cloud density */
-		assert(strstr(fs_w, "const float zk = 920.0") != NULL);
-		assert(strstr(fs_t, "const float zk = 920.0") != NULL);
+		assert(strstr(fs_w, "const float zk = 2200.0") != NULL);
+		assert(strstr(fs_t, "const float zk = 2200.0") != NULL);
 		assert(strstr(fs_t, "zSlices") == NULL);
 		assert(strstr(fs_t, "nd_caustic_web") != NULL);
 		assert(strstr(fs_t, "chaff_sample_3d") != NULL);
@@ -3856,7 +3856,9 @@ int main(void)
 				float du = (float)lw / (float)ND_SEVEN_WORLD_DIM_W;
 				float dv = (float)lh / (float)ND_SEVEN_WORLD_DIM_H;
 				float alpha = 3.14159265f * sqrtf(du * du + dv * dv);
-				if (alpha < 1.15f && alpha + 0.10f < 1.55f && dot_vn < -sinf(alpha + 0.10f) - 1e-3f)
+				float r_min_p1 = (p1->minor_r > 1.0f) ? p1->minor_r : 1335000.0f;
+				float max_limb = acosf(fminf(1.0f, r_min_p1 / (r_min_p1 + ND_FIELD_GLOBAL_MAX_Z))) + 0.045f;
+				if (alpha < 1.15f && alpha + max_limb < 1.55f && dot_vn < -sinf(alpha + max_limb) - 1e-3f)
 					back_hemisphere_leaves++;
 			}
 			assert(back_hemisphere_leaves == 0);
@@ -3981,7 +3983,7 @@ int main(void)
 			for (uint32_t li = 0; li < mid_leaves; li++) {
 				int32_t lox = 0, loy = 0, lw = 0, lh = 0;
 				assert(nd_seven_last_visible_leaf_bounds(li, &lox, &loy, &lw, &lh) == 1);
-				float z0 = -2150.0f, z1 = 2000.0f;
+				float z0 = -2150.0f, z1 = ND_FIELD_GLOBAL_MAX_Z;
 				float az0 = z0, az1 = z1;
 				nd_field_elevation_bounds(0, lox, loy, lw, lh, &az0, &az1);
 				if (az0 > z0) z0 = az0;
@@ -4490,7 +4492,7 @@ int main(void)
 						for (uint32_t c = 0; c <= 48; c += 6) {
 							int32_t wx = ox0 + (int32_t)(((int64_t)c * NDW_TILE_W) / 48);
 							nd_field_sample_t canon = nd_field_sample(0, 3, wx, wy);
-							int16_t node_val = leaf0->values[r * 49 + c];
+							int32_t node_val = leaf0->values[r * 49 + c];
 							assert(node_val == canon.elevation_q12_4);
 						}
 					}
@@ -5317,7 +5319,7 @@ int main(void)
 	/* Phase 6B Piece 1: Pre-baked GL_RGBA16F height+derived & premultiplied river map parity tests */
 	{
 		enum { TW = 17, TH = 17 };
-		int16_t h_a[TW * TH], h_b[TW * TH];
+		int32_t h_a[TW * TH], h_b[TW * TH];
 		float out_a[TW * TH * 4], out_b[TW * TH * 4];
 		const float span_x = 160.0f, span_y = 128.0f;
 
@@ -5325,7 +5327,7 @@ int main(void)
 		for (int y = 0; y < TH; y++) {
 			for (int x = 0; x < TW; x++) {
 				/* h_wu = 10.0 + 0.25 * wx - 0.5 * wy => h_q12_4 = 160 + 40*x - 64*y */
-				h_a[y * TW + x] = (int16_t)(160 + 40 * x - 64 * y);
+				h_a[y * TW + x] = (int32_t)(160 + 40 * x - 64 * y);
 			}
 		}
 		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
@@ -5340,10 +5342,27 @@ int main(void)
 			}
 		}
 
+		/* 1b. High-altitude mountain plane (> 2048 wu int16_t ceiling): h_wu = 5000.0 + 0.25*wx */
+		for (int y = 0; y < TH; y++) {
+			for (int x = 0; x < TW; x++) {
+				h_a[y * TW + x] = (int32_t)(80000 + 40 * x);
+			}
+		}
+		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
+		for (int y = 0; y < TH; y++) {
+			for (int x = 0; x < TW; x++) {
+				const float *p = &out_a[(y * TW + x) * 4];
+				float exp_h = (float)h_a[y * TW + x] * 0.0625f;
+				assert(fabsf(p[0] - exp_h) < 1e-4f);
+				assert(fabsf(p[1] - 0.25f) < 1e-4f);
+				assert(fabsf(p[2]) < 1e-4f);
+			}
+		}
+
 		/* 2. Paraboloid curvature: h_q12_4 = 2*(x^2 + y^2) => interior lap = 8 => dst[3] = 8 * 0.16 * (t2w_x + t2w_y) */
 		for (int y = 0; y < TH; y++) {
 			for (int x = 0; x < TW; x++) {
-				h_a[y * TW + x] = (int16_t)(2 * (x * x + y * y));
+				h_a[y * TW + x] = (int32_t)(2 * (x * x + y * y));
 			}
 		}
 		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
@@ -5359,8 +5378,8 @@ int main(void)
 		 * interiors (+1000 mountain vs -1000 trench) sharing a border column MUST agree bit-exact on h_wu */
 		for (int y = 0; y < TH; y++) {
 			for (int x = 0; x < TW; x++) {
-				h_a[y * TW + x] = (x == TW - 1) ? (int16_t)(y * 3 - 24) : (int16_t)16000;
-				h_b[y * TW + x] = (x == 0)      ? (int16_t)(y * 3 - 24) : (int16_t)-16000;
+				h_a[y * TW + x] = (x == TW - 1) ? (int32_t)(y * 3 - 24) : (int32_t)16000;
+				h_b[y * TW + x] = (x == 0)      ? (int32_t)(y * 3 - 24) : (int32_t)-16000;
 			}
 		}
 		nd_seven_gl_bake_chunk_height_derived(h_a, TW, TH, span_x, span_y, out_a);
@@ -5378,7 +5397,7 @@ int main(void)
 		 *    - Border texels depend only on border data (cross-chunk river agreement) */
 		uint32_t col_a[TW * TH], col_b[TW * TH];
 		for (int i = 0; i < TW * TH; i++) {
-			h_a[i] = (int16_t)(100 * 16); /* 100.0 wu */
+			h_a[i] = (int32_t)(100 * 16); /* 100.0 wu */
 			col_a[i] = 0xFF808080u;       /* alpha=255 (dry) */
 		}
 		nd_seven_gl_bake_chunk_river(h_a, col_a, TW, TH, 0.0f, out_a);
@@ -5403,14 +5422,14 @@ int main(void)
 
 		/* Cross-chunk border river invariance */
 		for (int i = 0; i < TW * TH; i++) {
-			h_a[i] = (int16_t)(80 * 16);
-			h_b[i] = (int16_t)(20 * 16);
+			h_a[i] = (int32_t)(80 * 16);
+			h_b[i] = (int32_t)(20 * 16);
 			col_a[i] = 0xFF808080u;
 			col_b[i] = (128u << 24) | 0x00808080u; /* interior river in B, dry interior in A */
 		}
 		for (int y = 0; y < TH; y++) {
-			h_a[y * TW + (TW - 1)] = (int16_t)(50 * 16);
-			h_b[y * TW + 0]        = (int16_t)(50 * 16);
+			h_a[y * TW + (TW - 1)] = (int32_t)(50 * 16);
+			h_b[y * TW + 0]        = (int32_t)(50 * 16);
 			col_a[y * TW + (TW - 1)] = (y == 8) ? ((159u << 24) | 0x00808080u) : 0xFF808080u;
 			col_b[y * TW + 0]        = col_a[y * TW + (TW - 1)];
 		}
@@ -6025,6 +6044,175 @@ int main(void)
 		assert(strstr(fs_vol, "cirNearFade") != NULL);
 
 		printf("PASS: Cloud cohesive 3D volume (all perspectives), 2x2 Bayer + matched 4-tap filter & 2-ring weather cache verified\n");
+	}
+
+	/* === Alpine Horizon Seam Sealing & Zoom Continuity Regression === */
+	{
+		/* 1. Verify vertex shader scales skirt drop for 6,400-wu alpine relief (no 640-wu ceiling) */
+		const char *vs_terr = nd_seven_gl_vs_terrain();
+		assert(strstr(vs_terr, "3200.0") != NULL);
+		assert(strstr(vs_terr, "chunkSpan.x * 0.16") != NULL);
+
+		/* 2. Verify zero open terrain cracks across high-zoom & mid-zoom horizon views */
+		nd_client_state_t hz_st;
+		memset(&hz_st, 0, sizeof(hz_st));
+		hz_st.map_data.width = 1;
+		hz_st.map_data.height = 1;
+		nd_seven_set_detail_scale(1.0f);
+
+		const float hz_zooms[4] = { 0.05f, 0.25f, 1.0f, 2.0f };
+		int total_cracks = 0;
+		float worst_gap = 0.0f;
+		for (int zi = 0; zi < 4; zi++) {
+			float z = hz_zooms[zi];
+			float dist = ND_SEVEN_CAM_DIST / z;
+			nd_seven_set_cam_angles(-20.0f, 12.0f);
+			nd_seven_set_zoom(z);
+			for (int f = 0; f < 4; f++) {
+				nd_seven_render(NULL, 1280, 720, &hz_st);
+				nd_seven_drain_async();
+			}
+			ar_system_t *cs = nd_seven_get_chunk_sys();
+			size_t nl = ar_system_get_active_count(cs);
+			assert(nl >= 40);
+			for (size_t i = 0; i < nl; i++) {
+				const ar_node_t *a = ar_system_get_active_node(cs, i);
+				for (size_t j = i + 1; j < nl; j++) {
+					const ar_node_t *b = ar_system_get_active_node(cs, j);
+					int tx = ((a->ox + a->w == b->ox) || (b->ox + b->w == a->ox)) &&
+					         (a->oy < b->oy + b->h && b->oy < a->oy + a->h);
+					int ty = ((a->oy + a->h == b->oy) || (b->oy + b->h == a->oy)) &&
+					         (a->ox < b->ox + b->w && b->ox < a->ox + a->w);
+					if (!tx && !ty) continue;
+					int gq_a = (a->level == 0u || a->level >= 11u || dist >= 200000.0f) ? 48 : 24;
+					int gq_b = (b->level == 0u || b->level >= 11u || dist >= 200000.0f) ? 48 : 24;
+					float e0 = tx ? fmaxf((float)a->oy, (float)b->oy) : fmaxf((float)a->ox, (float)b->ox);
+					float e1 = tx ? fminf((float)(a->oy + a->h), (float)(b->oy + b->h))
+					              : fminf((float)(a->ox + a->w), (float)(b->ox + b->w));
+					float fixed_c = tx ? ((a->ox + a->w == b->ox) ? (float)b->ox : (float)a->ox)
+					                   : ((a->oy + a->h == b->oy) ? (float)b->oy : (float)a->oy);
+					for (int s = 1; s < 16; s++) {
+						float ec = e0 + (e1 - e0) * ((float)s / 16.0f);
+						float wx = tx ? fixed_c : ec;
+						float wy = tx ? ec : fixed_c;
+						const ar_node_t *ns[2] = { a, b };
+						int gqs[2] = { gq_a, gq_b };
+						float hs[2] = { 0.0f, 0.0f };
+						for (int k = 0; k < 2; k++) {
+							const ar_node_t *n = ns[k];
+							float u = fminf(1.0f, fmaxf(0.0f, (wx - (float)n->ox) / (float)n->w));
+							float v = fminf(1.0f, fmaxf(0.0f, (wy - (float)n->oy) / (float)n->h));
+							float gx = u * (float)gqs[k], gy = v * (float)gqs[k];
+							int ix = (int)gx; if (ix >= gqs[k]) ix = gqs[k] - 1;
+							int iy = (int)gy; if (iy >= gqs[k]) iy = gqs[k] - 1;
+							float fx = gx - (float)ix, fy = gy - (float)iy;
+							uint32_t stride = n->grid_dim / (uint32_t)gqs[k];
+							uint32_t vx0 = (uint32_t)ix * stride, vx1 = vx0 + stride;
+							uint32_t vy0 = (uint32_t)iy * stride, vy1 = vy0 + stride;
+							float h00 = (float)n->values[vy0 * n->vert_dim + vx0] * 0.0625f;
+							float h10 = (float)n->values[vy0 * n->vert_dim + vx1] * 0.0625f;
+							float h01 = (float)n->values[vy1 * n->vert_dim + vx0] * 0.0625f;
+							float h11 = (float)n->values[vy1 * n->vert_dim + vx1] * 0.0625f;
+							float hx0 = h00 + fx * (h10 - h00);
+							float hx1 = h01 + fx * (h11 - h01);
+							hs[k] = hx0 + fy * (hx1 - hx0);
+						}
+						float gap = fabsf(hs[0] - hs[1]);
+						float hi_h = (hs[0] >= hs[1]) ? hs[0] : hs[1];
+						float hi_span = (hs[0] >= hs[1]) ? (float)a->w : (float)b->w;
+						float skirt = fmaxf(12.0f, fminf(3200.0f, fmaxf(hi_span * 0.16f, fmaxf(0.0f, hi_h) * 0.25f)));
+						if (gap > worst_gap) worst_gap = gap;
+						if (gap > skirt) total_cracks++;
+					}
+				}
+			}
+		}
+		assert(total_cracks == 0);
+
+		/* 3. Verify smooth scroll-zoom pitch clamping (no 10+ deg discontinuity snap) */
+		float prev_p = 12.0f, max_dp = 0.0f;
+		float lz = nd_seven_ground_elevation_f(80, 64);
+		float zz = 0.50f;
+		for (int step = 0; step < 16; step++) {
+			float dist = ND_SEVEN_CAM_DIST / zz;
+			float cp = nd_seven_clamp_cam_pitch(0, 80.0f, 64.0f, lz, dist, -117.2f, 12.0f);
+			if (step > 0) {
+				float dp = fabsf(cp - prev_p);
+				if (dp > max_dp) max_dp = dp;
+			}
+			prev_p = cp;
+			zz *= 1.15f;
+		}
+		assert(max_dp < 8.0f);
+
+		/* 4. Verify zero mid-range horizon rifts and zero vanishing alpine peaks at low pitch & mid-high zoom
+		 *    (regression for seven_torus_cull_3d_cb evaluating normal-cone dot at h_mid > z_eye). */
+		int rift_misses = 0;
+		int peak_misses = 0;
+		const float low_zooms[4] = { 0.25f, 0.50f, 1.0f, 2.0f };
+		for (int zi = 0; zi < 4; zi++) {
+			/* 4a. Spawn mid-range continuity (500..20,000 wu along yaw=-20, pitch=8) */
+			hz_st.map_data.pos[0] = 0;
+			hz_st.map_data.pos[1] = 0;
+			nd_seven_set_cam_angles(-20.0f, 8.0f);
+			nd_seven_set_zoom(low_zooms[zi]);
+			for (int f = 0; f < 4; f++) {
+				nd_seven_render(NULL, 1280, 720, &hz_st);
+				nd_seven_drain_async();
+			}
+			ar_system_t *cs = nd_seven_get_chunk_sys();
+			size_t nl = ar_system_get_active_count(cs);
+			float yaw_rad = -20.0f * (3.14159265358979323846f / 180.0f);
+			float rfx = -sinf(yaw_rad), rfy = -cosf(yaw_rad);
+			for (int d = 500; d <= 20000; d += 500) {
+				float px = 80.0f + rfx * (float)d;
+				float py = 64.0f + rfy * (float)d;
+				int cov = 0;
+				for (size_t i = 0; i < nl; i++) {
+					const ar_node_t *n = ar_system_get_active_node(cs, i);
+					if (px >= (float)n->ox && px <= (float)(n->ox + n->w) &&
+					    py >= (float)n->oy && py <= (float)(n->oy + n->h)) {
+						cov = 1;
+						break;
+					}
+				}
+				if (!cov) rift_misses++;
+			}
+
+			/* 4b. Lowland vantage 24,000 wu south of the 5,451-wu peak (-16000, -148000): entire lowland
+			 *     approach AND the alpine peak (ny up to +0.93 inside the viewport) must never vanish. */
+			hz_st.map_data.pos[0] = (int16_t)(-16000 / 160);
+			hz_st.map_data.pos[1] = (int16_t)(124000 / 128);
+			nd_seven_set_cam_angles(0.0f, 6.0f);
+			nd_seven_set_zoom(low_zooms[zi]);
+			for (int f = 0; f < 4; f++) {
+				nd_seven_render(NULL, 1280, 720, &hz_st);
+				nd_seven_drain_async();
+			}
+			nl = ar_system_get_active_count(cs);
+			for (int d = 1000; d <= 24000; d += 500) {
+				float px = -15920.0f;
+				float py = -123840.0f - (float)d;
+				int cov = 0;
+				for (size_t i = 0; i < nl; i++) {
+					const ar_node_t *n = ar_system_get_active_node(cs, i);
+					if (px >= (float)n->ox && px <= (float)(n->ox + n->w) &&
+					    py >= (float)n->oy && py <= (float)(n->oy + n->h)) {
+						cov = 1;
+						break;
+					}
+				}
+				if (!cov) peak_misses++;
+			}
+		}
+		assert(rift_misses == 0);
+		assert(peak_misses == 0);
+
+		nd_seven_set_zoom(1.0f);
+		nd_seven_reset_cam();
+
+		printf("PASS: Alpine horizon seam sealing (cracks=%d, worst_gap=%.0f wu), zero rifts (spawn=%d, peak=%d) & smooth zoom pitch clamp (max_dp=%.2f deg) verified\n",
+		       total_cracks, worst_gap, rift_misses, peak_misses, max_dp);
 	}
 
 	printf("ALL SEVEN RENDER TESTS PASSED\n");
