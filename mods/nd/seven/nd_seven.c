@@ -32,6 +32,7 @@ static float s_prev_lamb_vy = 0.0f;
 static int   s_prev_lamb_dir = -1;
 static int   s_prev_lamb_walking = 0;
 static int   s_prev_lamb_in_water = 0;
+static int   s_prev_player_swimming = 0;
 
 static int seven_has_water_at(uint16_t world, int32_t wx, int32_t wy, int16_t *out_wl);
 
@@ -1166,7 +1167,11 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 	s_cam_dist = (dist > 1.0f) ? dist : ND_SEVEN_CAM_DIST;
 
 	/* Begin 3D WebGL frame in pure C */
-	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy, lamb_light_z + hop_wu,
+	float player_light_lift = 0.0f, player_swim_depth = -0.65f;
+	nd_seven_player_form_metrics(nd_seven_player_form(), NULL,
+	                             &player_light_lift, &player_swim_depth);
+	nd_seven_gl_set_lamb_light((float)lwx, (float)lwy,
+	                           lamb_light_z + hop_wu + player_light_lift,
 	                           nd_seven_is_universe_owner(st) ? 1.0f : 0.0f);
 	nd_seven_gl_begin_frame_ex((uint32_t)w, (uint32_t)h, (float)lwx, (float)lwy, lwz + cam_z_lift,
 	                           dist, yaw_deg, pitch_deg, ND_SEVEN_CAM_FOV,
@@ -1183,7 +1188,9 @@ static void seven_dispatch_macro_backdrop(int w, int h, const nd_client_state_t 
 		                : (float)lamb_wl;
 		float eff_wl = fmaxf((float)lamb_wl, live_wl);
 		bool lamb_in_water = has_loc_water && (lwz < eff_wl + 0.65f);
-		nd_seven_set_lamb_in_water(lamb_in_water ? 1 : 0);
+		bool player_swimming = has_loc_water && (lwz < eff_wl - player_swim_depth);
+		nd_seven_set_lamb_in_water(player_swimming ? 1 : 0);
+		s_prev_player_swimming = player_swimming ? 1 : 0;
 		/* Always lock focal_sea_level to the Lamb's actual local water table (or base sea level on dry land)
 		 * so coarse terrain chunks containing distant perched mountain lakes never override billboard uSeaLevel. */
 		nd_seven_gl_set_focal_water(lamb_in_water ? eff_wl : (float)base_wl);
@@ -2121,6 +2128,173 @@ nd_seven_find_entity(const nd_client_state_t *st, uint32_t ref)
 	return NULL;
 }
 
+static void
+seven_build_player_form_dna(int form, uint32_t seed,
+                            creature_dna_t *dna, creature_state_t *st_out)
+{
+	memset(st_out, 0, sizeof(*st_out));
+	st_out->age = 0.55f;
+	st_out->weight = 0.60f;
+	st_out->seed = seed;
+
+	switch (form) {
+	case 1: /* Wanderer */
+		*dna = creature_dna_human_default(0u);
+		dna->seed = seed;
+		return;
+	case 2: /* Knight: steel cuirass, helm, crimson short cape */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.80f;
+		dna->shoulder_width = 0.68f;
+		dna->chest_depth = 0.58f;
+		dna->joint_thickness = 0.56f;
+		dna->arch.biped.torso_v_taper = 0.82f;
+		dna->arch.biped.hair_style = 0u;
+		dna->arch.biped.garment_top = 2u;
+		dna->arch.biped.garment_bottom = 0u;
+		dna->arch.biped.headgear = 2u;
+		dna->arch.biped.cloak_len = 1u;
+		dna->palette[0] = 0xE2B492FFu;
+		dna->palette[1] = 0x3D2A1EFFu;
+		dna->palette[2] = 0x9AA6B4FFu;
+		dna->palette[3] = 0x8E2924FFu;
+		dna->seed = seed;
+		return;
+	case 3: /* Archmage: hooded sage, full silver beard, indigo robe & long cloak */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.74f;
+		dna->shoulder_width = 0.48f;
+		dna->arch.biped.torso_v_taper = 0.45f;
+		dna->arch.biped.hair_style = 1u;
+		dna->arch.biped.beard_style = 2u;
+		dna->arch.biped.garment_top = 0u;
+		dna->arch.biped.garment_bottom = 1u;
+		dna->arch.biped.headgear = 1u;
+		dna->arch.biped.cloak_len = 2u;
+		dna->palette[0] = 0xE6C2A6FFu;
+		dna->palette[1] = 0xD8DCE4FFu;
+		dna->palette[2] = 0x3A3F7AFFu;
+		dna->palette[3] = 0x242A54FFu;
+		dna->seed = seed;
+		st_out->age = 0.82f;
+		return;
+	case 4: /* Elf Ranger: tall slender, long golden hair, green leather vest & cape */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.82f;
+		dna->shoulder_width = 0.44f;
+		dna->hip_width = 0.42f;
+		dna->joint_thickness = 0.38f;
+		dna->arch.biped.torso_v_taper = 0.48f;
+		dna->arch.biped.hair_length = 0.88f;
+		dna->arch.biped.hair_style = 2u;
+		dna->arch.biped.garment_top = 1u;
+		dna->arch.biped.garment_bottom = 0u;
+		dna->arch.biped.headgear = 0u;
+		dna->arch.biped.cloak_len = 1u;
+		dna->palette[0] = 0xF2CEB2FFu;
+		dna->palette[1] = 0xDFB858FFu;
+		dna->palette[2] = 0x3A5E3CFFu;
+		dna->palette[3] = 0x2B442EFFu;
+		dna->seed = seed;
+		return;
+	case 5: /* Dwarf: short stocky, bronze helm, iron cuirass, full copper beard */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.34f;
+		dna->torso_length = 0.56f;
+		dna->shoulder_width = 0.78f;
+		dna->hip_width = 0.68f;
+		dna->chest_depth = 0.68f;
+		dna->head_scale = 0.58f;
+		dna->joint_thickness = 0.70f;
+		dna->arch.biped.torso_v_taper = 0.72f;
+		dna->arch.biped.leg_length = 0.36f;
+		dna->arch.biped.hair_style = 1u;
+		dna->arch.biped.beard_style = 2u;
+		dna->arch.biped.garment_top = 2u;
+		dna->arch.biped.garment_bottom = 0u;
+		dna->arch.biped.headgear = 2u;
+		dna->arch.biped.cloak_len = 0u;
+		dna->palette[0] = 0xE2AE8AFFu;
+		dna->palette[1] = 0xA8421EFFu;
+		dna->palette[2] = 0x7A7E86FFu;
+		dna->palette[3] = 0x8E6B3EFFu;
+		dna->seed = seed;
+		st_out->weight = 0.78f;
+		return;
+	case 6: /* Half-Orc: towering muscular, olive skin, leather vest, bare forearms */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.96f;
+		dna->shoulder_width = 0.82f;
+		dna->chest_depth = 0.66f;
+		dna->joint_thickness = 0.74f;
+		dna->arch.biped.torso_v_taper = 0.90f;
+		dna->arch.biped.hair_style = 0u;
+		dna->arch.biped.beard_style = 1u;
+		dna->arch.biped.garment_top = 1u;
+		dna->arch.biped.garment_bottom = 0u;
+		dna->arch.biped.headgear = 0u;
+		dna->arch.biped.cloak_len = 0u;
+		dna->palette[0] = 0x728A56FFu;
+		dna->palette[1] = 0x1E1B18FFu;
+		dna->palette[2] = 0x6A4228FFu;
+		dna->palette[3] = 0x3A322CFFu;
+		dna->seed = seed;
+		st_out->weight = 0.82f;
+		return;
+	case 7: /* Halfling: compact, hooded, russet tunic, mossy short cape */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.16f;
+		dna->head_scale = 0.60f;
+		dna->shoulder_width = 0.46f;
+		dna->arch.biped.leg_length = 0.42f;
+		dna->arch.biped.hair_style = 1u;
+		dna->arch.biped.garment_top = 0u;
+		dna->arch.biped.garment_bottom = 0u;
+		dna->arch.biped.headgear = 1u;
+		dna->arch.biped.cloak_len = 1u;
+		dna->palette[0] = 0xE8BC9AFFu;
+		dna->palette[1] = 0x6A4326FFu;
+		dna->palette[2] = 0x8F4C2EFFu;
+		dna->palette[3] = 0x3D5236FFu;
+		dna->seed = seed;
+		return;
+	case 8: /* Sovereign: crown hair, royal crimson & gold robe, long cloak */
+		*dna = creature_dna_human_default(0u);
+		dna->base_scale = 1.72f;
+		dna->shoulder_width = 0.50f;
+		dna->arch.biped.hair_style = 3u;
+		dna->arch.biped.hair_length = 0.65f;
+		dna->arch.biped.garment_top = 0u;
+		dna->arch.biped.garment_bottom = 1u;
+		dna->arch.biped.headgear = 0u;
+		dna->arch.biped.cloak_len = 2u;
+		dna->palette[0] = 0xBC845CFFu;
+		dna->palette[1] = 0x241A16FFu;
+		dna->palette[2] = 0x9B2834FFu;
+		dna->palette[3] = 0xC49B3CFFu;
+		dna->seed = seed;
+		return;
+	case 9: /* Horse */
+		*dna = creature_dna_for_species(CREATURE_SPECIES_HORSE, seed);
+		st_out->age = 0.65f;
+		return;
+	case 10: /* Owl */
+		*dna = creature_dna_for_species(CREATURE_SPECIES_OWL, seed);
+		st_out->age = 0.65f;
+		return;
+	case 11: /* Parrot */
+		*dna = creature_dna_for_species(CREATURE_SPECIES_PARROT, seed);
+		st_out->age = 0.55f;
+		return;
+	default:
+		*dna = creature_dna_lamb_default(42u);
+		st_out->age = 0.15f;
+		st_out->weight = 0.65f;
+		st_out->seed = 42u;
+		return;
+	}
+}
+
 typedef struct {
 	int32_t wx, wy;        /* world position */
 	int16_t wz;            /* ground elevation (block units) */
@@ -2909,9 +3083,12 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					nd_mob_actor_in_t *ma = &s_mob_actors[mob_actor_count++];
 					memset(ma, 0, sizeof(*ma));
 					ma->ref = (st && st->me) ? (uint64_t)st->me : 0ull;
-					if (!creature_dna_resolve_entity(me_ent ? me_ent->art : NULL,
-					                                 me_ent ? me_ent->name : NULL,
-					                                 1, me_seed, &ma->dna, &ma->state)) {
+					int pform = nd_seven_player_form();
+					if (pform > 0) {
+						seven_build_player_form_dna(pform, me_seed, &ma->dna, &ma->state);
+					} else if (!creature_dna_resolve_entity(me_ent ? me_ent->art : NULL,
+					                                        me_ent ? me_ent->name : NULL,
+					                                        1, me_seed, &ma->dna, &ma->state)) {
 						ma->dna = creature_dna_lamb_default(42u);
 						ma->state.age = 0.15f;
 						ma->state.weight = 0.65f;
@@ -2927,7 +3104,7 @@ seven_emit_near_room_billboards(seven_frame_ctx_t *ctx)
 					ma->alpha = 1.0f;
 					ma->flags = ND_MOB_ACT_LOCAL_PLAYER | ND_MOB_ACT_HAS_ANIM_PARAMS |
 					            (owner_glows ? ND_MOB_ACT_OWNER_GLOW : 0u) |
-					            (s_prev_lamb_in_water ? ND_MOB_ACT_IN_WATER : 0u);
+					            (s_prev_player_swimming ? ND_MOB_ACT_IN_WATER : 0u);
 				}
 				continue;
 			} else if (dr[a].what == D_ENTITY) {

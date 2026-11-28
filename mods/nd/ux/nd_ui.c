@@ -299,6 +299,11 @@ int on_key_down(bud_event *e)
 				ws_send(act, strlen(act));
 			nd_seven_trigger_interact();
 			return 1;
+		} else if (strcmp(key, "m") == 0 || strcmp(key, "M") == 0) {
+			nd_seven_cycle_player_form(key[0] == 'M' ? -1 : 1);
+			nd_ui_seven_stage_redraw();
+			bud_app_set_state();
+			return 1;
 		} else if (strcmp(key, " ") == 0 || strcmp(key, "Space") == 0) {
 			nd_seven_trigger_hop();
 			return 1;

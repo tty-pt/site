@@ -63,6 +63,18 @@ void nd_seven_debug(int *pending, int *pos_x, int *pos_y, int *have_room);
 int16_t nd_seven_lamb_elevation(const nd_client_state_t *st, int32_t wx, int32_t wy);
 int nd_seven_is_universe_owner(const nd_client_state_t *st);
 
+/* Local player avatar form cycle (0 = lamb default, 1..N-1 = character presets) */
+int         nd_seven_player_form(void);
+int         nd_seven_player_form_count(void);
+const char *nd_seven_player_form_name(int form);
+void        nd_seven_set_player_form(int form);
+int         nd_seven_cycle_player_form(int delta);
+void        nd_seven_player_form_metrics(int form, float *cam_lift_wu,
+                                         float *light_lift_wu, float *swim_depth_wu);
+int         nd_seven_player_is_human(void);
+void        nd_seven_set_player_human(int human);
+int         nd_seven_toggle_player_form(void);
+
 /* Unified multi-scale terrain chunk system */
 ar_system_t *nd_seven_get_chunk_sys(void);
 

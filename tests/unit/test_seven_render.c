@@ -6748,6 +6748,31 @@ int main(void)
 		assert(nd_seven_cam_target_z_lift(160.0f) > 12.0f);
 		assert(nd_seven_cam_target_z_lift(500.0f) == 0.0f);
 
+		/* 6. Local player character form cycle, wrap, names, and camera height scaling */
+		assert(nd_seven_player_form() == 0);
+		assert(nd_seven_player_is_human() == 0);
+		int form_cnt = nd_seven_player_form_count();
+		assert(form_cnt >= 10);
+		float lamb_lift = nd_seven_cam_target_z_lift(160.0f);
+		for (int fi = 1; fi < form_cnt; fi++) {
+			assert(nd_seven_cycle_player_form(1) == fi);
+			assert(nd_seven_player_form() == fi);
+			const char *nm = nd_seven_player_form_name(fi);
+			assert(nm != NULL && nm[0] != '\0');
+			float cl = 0.0f, ll = 0.0f, sd = 0.0f;
+			nd_seven_player_form_metrics(fi, &cl, &ll, &sd);
+			assert(cl >= 13.5f && cl <= 60.0f);
+			assert(fabsf(nd_seven_cam_target_z_lift(160.0f) - cl) < 0.01f);
+			assert(nd_seven_cam_target_z_lift(500.0f) == 0.0f);
+		}
+		/* Wrap forward back to Lamb (0), then backward to last form, then back to 0 */
+		assert(nd_seven_cycle_player_form(1) == 0);
+		assert(nd_seven_player_is_human() == 0);
+		assert(fabsf(nd_seven_cam_target_z_lift(160.0f) - lamb_lift) < 0.01f);
+		assert(nd_seven_cycle_player_form(-1) == form_cnt - 1);
+		nd_seven_set_player_form(0);
+		assert(nd_seven_player_form() == 0);
+
 		nd_seven_reset_input();
 		nd_seven_reset_cam();
 		printf("PASS: Zelda/MMO camera-relative WASD+HJKL, diagonal norm (%.1f vs %.1f), hop arc (%.2fm), recenter & damped zoom verified\n",

@@ -295,14 +295,99 @@ void nd_seven_cam_auto_follow(float lamb_yaw_rad, float strength, float dt)
 	s_cam_yaw_target = wrap_deg_180(s_cam_yaw_target + err * rate);
 }
 
+typedef struct {
+	const char *name;
+	float       cam_lift_wu;
+	float       light_lift_wu;
+	float       swim_depth_wu;
+	uint8_t     is_human;
+} nd_player_form_meta_t;
+
+static const nd_player_form_meta_t k_player_forms[] = {
+	/* 0 */  { "Lamb",       13.5f,  0.0f, -0.65f, 0 },
+	/* 1 */  { "Wanderer",   48.0f, 44.0f, 44.0f,  1 },
+	/* 2 */  { "Knight",     50.0f, 46.0f, 46.0f,  1 },
+	/* 3 */  { "Archmage",   48.0f, 44.0f, 44.0f,  1 },
+	/* 4 */  { "Elf Ranger", 51.0f, 47.0f, 47.0f,  1 },
+	/* 5 */  { "Dwarf",      36.0f, 32.0f, 32.0f,  1 },
+	/* 6 */  { "Half-Orc",   56.0f, 52.0f, 52.0f,  1 },
+	/* 7 */  { "Halfling",   30.0f, 26.0f, 26.0f,  1 },
+	/* 8 */  { "Sovereign",  48.0f, 44.0f, 44.0f,  1 },
+	/* 9 */  { "Horse",      42.0f, 36.0f, 36.0f,  0 },
+	/* 10 */ { "Owl",        16.0f, 10.0f,  6.0f,  0 },
+	/* 11 */ { "Parrot",     13.5f,  8.0f,  4.0f,  0 },
+};
+
+#define ND_PLAYER_FORM_COUNT ((int)(sizeof(k_player_forms) / sizeof(k_player_forms[0])))
+
+static int s_player_form = 0;
+
+static int wrap_player_form(int form)
+{
+	int n = ND_PLAYER_FORM_COUNT;
+	int r = form % n;
+	return (r < 0) ? (r + n) : r;
+}
+
+int nd_seven_player_form(void)
+{
+	return s_player_form;
+}
+
+int nd_seven_player_form_count(void)
+{
+	return ND_PLAYER_FORM_COUNT;
+}
+
+const char *nd_seven_player_form_name(int form)
+{
+	return k_player_forms[wrap_player_form(form)].name;
+}
+
+void nd_seven_set_player_form(int form)
+{
+	s_player_form = wrap_player_form(form);
+}
+
+int nd_seven_cycle_player_form(int delta)
+{
+	s_player_form = wrap_player_form(s_player_form + delta);
+	return s_player_form;
+}
+
+void nd_seven_player_form_metrics(int form, float *cam_lift_wu,
+                                  float *light_lift_wu, float *swim_depth_wu)
+{
+	const nd_player_form_meta_t *m = &k_player_forms[wrap_player_form(form)];
+	if (cam_lift_wu)   *cam_lift_wu   = m->cam_lift_wu;
+	if (light_lift_wu) *light_lift_wu = m->light_lift_wu;
+	if (swim_depth_wu) *swim_depth_wu = m->swim_depth_wu;
+}
+
+int nd_seven_player_is_human(void)
+{
+	return (int)k_player_forms[s_player_form].is_human;
+}
+
+void nd_seven_set_player_human(int human)
+{
+	s_player_form = human ? 1 : 0;
+}
+
+int nd_seven_toggle_player_form(void)
+{
+	return nd_seven_cycle_player_form(1);
+}
+
 float nd_seven_cam_target_z_lift(float eff_cam_dist)
 {
+	float max_lift = k_player_forms[s_player_form].cam_lift_wu;
 	if (eff_cam_dist >= 420.0f)
 		return 0.0f;
 	if (eff_cam_dist <= 220.0f)
-		return 13.5f;
+		return max_lift;
 	float u = (420.0f - eff_cam_dist) / (420.0f - 220.0f);
-	return 13.5f * (u * u * (3.0f - 2.0f * u));
+	return max_lift * (u * u * (3.0f - 2.0f * u));
 }
 
 float nd_seven_get_yaw_deg(void)

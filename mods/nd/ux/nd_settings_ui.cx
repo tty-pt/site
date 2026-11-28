@@ -192,6 +192,15 @@ static int on_settings_zoom_reset(bud_event *ev)
 	return 0;
 }
 
+static int on_settings_character_cycle(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	nd_seven_cycle_player_form(1);
+	nd_ui_seven_stage_redraw();
+	bud_app_set_state();
+	return 0;
+}
+
 static bud_node *make_settings_btn(const char *id, const char *label, const char *title, bud_event_handler_fn fn)
 {
 	bud_node *btn = make_btn(label, title, fn);
@@ -305,6 +314,11 @@ bud_node *render_settings_modal(const nd_client_state_t *st)
 
 	const char *req_drv = (st && st->preferred_driver[0]) ? st->preferred_driver : "tty";
 	int is_seven_drv = (strcmp(req_drv, "lamina-seven") == 0);
+	int form_idx = nd_seven_player_form();
+	int form_cnt = nd_seven_player_form_count();
+	char form_label[64];
+	snprintf(form_label, sizeof(form_label), "%s (%d/%d)",
+	         nd_seven_player_form_name(form_idx), form_idx + 1, form_cnt);
 
 	return (
 		<div id="settings-modal"
@@ -358,10 +372,13 @@ bud_node *render_settings_modal(const nd_client_state_t *st)
 					                     "settings-zoom-slider", "10", "250", zoom_num, on_settings_zoom_slider,
 					                     "settings-zoom-in", "Zoom In (+)", on_settings_zoom_in,
 					                     make_settings_btn("settings-zoom-reset", "100%", "Reset Zoom (0)", on_settings_zoom_reset))}
+					{settings_toggle_row("🎭 Character Form", "settings-character-toggle",
+					                     "Cycle 3D character form (m / Shift+M)",
+					                     form_label, on_settings_character_cycle)}
 					{settings_toggle_row("🖥️ 3D Viewport", "settings-viewport-toggle",
 					                     "Toggle between 3D Seven Viewport and Terminal",
 					                     is_seven_drv ? "🕹️ Seven 3D (On)" : "📺 Terminal (Off)", on_cycle_viewport)}
-					<div class="settings-hint">Shortcuts: , / . Detail  |  - / + / 0 Zoom</div>
+					<div class="settings-hint">Shortcuts: , / . Detail  |  - / + / 0 Zoom  |  m/M Morph</div>
 				</div>
 			</div>
 		</div>

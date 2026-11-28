@@ -69,6 +69,18 @@ float nd_seven_clamp_cam_pitch(uint16_t world, float tx, float ty, float tz,
 float nd_seven_eval_effective_pitch(float base_pitch_deg, float eff_cam_dist);
 int   nd_seven_has_pitch_override(void);
 
+/* Local player avatar form cycle (0 = lamb default, 1..N-1 = character presets) */
+int         nd_seven_player_form(void);
+int         nd_seven_player_form_count(void);
+const char *nd_seven_player_form_name(int form);
+void        nd_seven_set_player_form(int form);
+int         nd_seven_cycle_player_form(int delta);
+void        nd_seven_player_form_metrics(int form, float *cam_lift_wu,
+                                         float *light_lift_wu, float *swim_depth_wu);
+int         nd_seven_player_is_human(void);
+void        nd_seven_set_player_human(int human);
+int         nd_seven_toggle_player_form(void);
+
 /* User-adjustable billboard detail / draw distance scale (0.20f .. 2.50f, default 1.0f) */
 void nd_seven_set_detail_scale(float scale);
 float nd_seven_get_detail_scale(void);
